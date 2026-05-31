@@ -76,16 +76,31 @@ function parseDate(val) {
 async function getMovimientos() {
   const rows = await getRawRows();
 
-  // Encontrar la fila de encabezados de Movimientos
+  // DEBUG: loguear las primeras filas para ver qué trae la API
+  console.log('Total filas:', rows.length);
+  console.log('Primeras 5 filas:');
+  rows.slice(0, 5).forEach((r, i) => console.log(`  [${i}]`, JSON.stringify(r?.slice(0, 4))));
+
+  // Encontrar la fila de encabezados de Movimientos (busca en toda la planilla)
   let headerIdx = -1;
   for (let i = 0; i < rows.length; i++) {
-    if (rows[i][0] === 'Fecha' && rows[i][1] === 'Mes') {
+    const r = rows[i];
+    if (!r) continue;
+    const c0 = (r[0] || '').toString().trim();
+    const c1 = (r[1] || '').toString().trim();
+    if (c0 === 'Fecha' && c1 === 'Mes') {
       headerIdx = i;
+      console.log('Header Movimientos encontrado en fila:', i);
       break;
     }
   }
 
-  if (headerIdx === -1) throw new Error('No se encontró la sección Movimientos');
+  if (headerIdx === -1) {
+    // Loguear todas las filas que tengan algo en col 0 para debug
+    console.log('No se encontró header. Filas con col[0] no vacía:');
+    rows.forEach((r, i) => { if (r && r[0]) console.log(`  [${i}] "${r[0]}" | "${r[1]}"`); });
+    throw new Error('No se encontró la sección Movimientos');
+  }
 
   const movimientos = [];
 
