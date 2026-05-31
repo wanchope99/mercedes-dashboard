@@ -1,0 +1,7 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "node src/server.js"
+healthcheckPath = "/api/meses"
+restartPolicyType = "on_failure"
