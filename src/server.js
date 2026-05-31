@@ -150,6 +150,6 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`Mercedes Dashboard corriendo en http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Mercedes Dashboard corriendo en puerto ${PORT}`);
 });
