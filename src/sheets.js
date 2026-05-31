@@ -56,7 +56,36 @@ async function getRawRows() {
 
 function parseAmount(val) {
   if (!val || val === '' || val === '-') return 0;
-  const cleaned = String(val).replace(/[$\s.]/g, '').replace(',', '.');
+  // Valores vienen como "$847,210" o "$1,287,000" — coma es separador de miles
+  // También puede venir sin $ como "847210" o con punto decimal como USD "3,500"
+  const str = String(val).trim();
+  // Quitar $ y espacios
+  const noSign = str.replace(/[$\s]/g, '');
+  // Si tiene coma: puede ser separador de miles (ARS) o decimal (USD pequeños)
+  // Heurística: si hay más de un dígito después de la coma, es separador de miles
+  const commaIdx = noSign.lastIndexOf(',');
+  const dotIdx = noSign.lastIndexOf('.');
+  let cleaned;
+  if (commaIdx !== -1 && dotIdx === -1) {
+    // Solo coma: si hay 3 dígitos después es separador de miles
+    const afterComma = noSign.slice(commaIdx + 1);
+    if (afterComma.length === 3) {
+      cleaned = noSign.replace(/,/g, ''); // quitar separadores de miles
+    } else {
+      cleaned = noSign.replace(',', '.'); // es decimal
+    }
+  } else if (dotIdx !== -1 && commaIdx === -1) {
+    // Solo punto: separador decimal o de miles
+    const afterDot = noSign.slice(dotIdx + 1);
+    if (afterDot.length === 3) {
+      cleaned = noSign.replace(/\./g, ''); // separador de miles
+    } else {
+      cleaned = noSign; // decimal
+    }
+  } else {
+    // Ambos o ninguno: quitar todo separador de miles, mantener último como decimal
+    cleaned = noSign.replace(/[,.]/g, '');
+  }
   const num = parseFloat(cleaned);
   return isNaN(num) ? 0 : num;
 }
