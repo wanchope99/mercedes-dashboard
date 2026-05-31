@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mercedes — Dashboard Ejecutivo</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0f0f13;
+      --surface: #1a1a22;
+      --surface2: #22222e;
+      --border: #2e2e3e;
+      --text: #e8e8f0;
+      --text-muted: #7878a0;
+      --accent: #c9a84c;
+      --green: #4caf82;
+      --green-dim: rgba(76,175,130,0.15);
+      --red: #e05c5c;
+      --red-dim: rgba(224,92,92,0.15);
+      --blue: #5c8fe0;
+      --blue-dim: rgba(92,143,224,0.15);
+      --orange: #e08a5c;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 0 32px; display: flex; align-items: center; justify-content: space-between;
+      height: 64px; position: sticky; top: 0; z-index: 100;
+    }
+    .logo { display: flex; align-items: center; gap: 12px; }
+    .logo-mark { width: 36px; height: 36px; background: var(--accent); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; color: #0f0f13; }
+    .logo-text { font-weight: 600; font-size: 18px; }
+    .logo-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .header-right { display: flex; align-items: center; gap: 16px; }
+    #last-updated { font-size: 12px; color: var(--text-muted); }
+    .btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-family: inherit; transition: all 0.2s; }
+    .btn:hover { background: var(--border); }
+
+    .filters-bar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 32px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .filter-label { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+    select { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 8px; font-size: 13px; font-family: inherit; cursor: pointer; outline: none; }
+    select:focus { border-color: var(--accent); }
+
+    main { max-width: 1400px; margin: 0 auto; padding: 32px; display: flex; flex-direction: column; gap: 24px; }
+
+    /* KPI cards */
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
+    .kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 24px; position: relative; overflow: hidden; }
+    .kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+    .kpi-card.green::before { background: var(--green); }
+    .kpi-card.red::before { background: var(--red); }
+    .kpi-card.accent::before { background: var(--accent); }
+    .kpi-card.blue::before { background: var(--blue); }
+    .kpi-card.orange::before { background: var(--orange); }
+    .kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 8px; }
+    .kpi-value { font-size: 24px; font-weight: 700; line-height: 1; margin-bottom: 4px; }
+    .kpi-card.green .kpi-value { color: var(--green); }
+    .kpi-card.red .kpi-value { color: var(--red); }
+    .kpi-card.accent .kpi-value { color: var(--accent); }
+    .kpi-card.blue .kpi-value { color: var(--blue); }
+    .kpi-card.orange .kpi-value { color: var(--orange); }
+    .kpi-sub { font-size: 12px; color: var(--text-muted); }
+
+    /* Card genérica */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; }
+    .card-title { font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; }
+
+    /* Tabla resumen mensual */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: right; padding: 10px 12px; color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    th:first-child { text-align: left; }
+    td { padding: 10px 12px; border-bottom: 1px solid rgba(46,46,62,0.5); text-align: right; white-space: nowrap; }
+    td:first-child { text-align: left; font-weight: 500; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--surface2); }
+    .row-header td { background: var(--surface2); font-weight: 600; color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .row-total td { font-weight: 700; border-top: 1px solid var(--border); }
+    .row-resultado td { font-weight: 700; font-size: 15px; }
+    .val-pos { color: var(--green); }
+    .val-neg { color: var(--red); }
+    .val-accent { color: var(--accent); }
+
+    /* Charts */
+    .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .chart-container { position: relative; height: 280px; }
+
+    /* Tabla días de semana */
+    .dias-semana-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+    .dia-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; text-align: center; }
+    .dia-nombre { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+    .dia-total { font-size: 20px; font-weight: 700; color: var(--green); margin-bottom: 4px; }
+    .dia-promedio { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+    .dia-servicios { font-size: 11px; color: var(--accent); }
+    .dia-breakdown { margin-top: 10px; display: flex; flex-direction: column; gap: 3px; }
+    .dia-mp-row { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); }
+    .dia-mp-val { color: var(--text); }
+
+    /* Drawer */
+    #drawer-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; }
+    #drawer { position: fixed; right: 0; top: 0; bottom: 0; width: min(520px, 95vw); background: var(--surface); border-left: 1px solid var(--border); z-index: 201; padding: 32px; overflow-y: auto; transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+    #drawer.open { transform: translateX(0); }
+    .drawer-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+    .drawer-title { font-size: 18px; font-weight: 600; }
+    .btn-close { background: var(--surface2); border: 1px solid var(--border); color: var(--text); width: 32px; height: 32px; border-radius: 8px; cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center; }
+    .drawer-mov-list { display: flex; flex-direction: column; gap: 8px; }
+    .drawer-mov-item { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; display: grid; grid-template-columns: 1fr auto; gap: 4px; }
+    .drawer-mov-item.pendiente { border-color: var(--accent); opacity: 0.8; }
+    .drawer-mov-proveedor { font-weight: 500; font-size: 14px; }
+    .drawer-mov-cat { font-size: 12px; color: var(--text-muted); }
+    .drawer-mov-desc { font-size: 12px; color: var(--text-muted); grid-column: 1; }
+    .drawer-mov-amount { font-weight: 600; font-size: 15px; text-align: right; }
+    .drawer-mov-amount.pos { color: var(--green); }
+    .drawer-mov-amount.neg { color: var(--red); }
+    .drawer-mov-amount.pend { color: var(--accent); }
+    .drawer-mov-mp { font-size: 11px; color: var(--text-muted); text-align: right; }
+    .drawer-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+    .drawer-kpi { background: var(--surface2); border-radius: 8px; padding: 12px 16px; }
+    .drawer-kpi-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+    .drawer-kpi-val { font-size: 18px; font-weight: 700; }
+    .drawer-kpi-val.green { color: var(--green); }
+    .drawer-kpi-val.red { color: var(--red); }
+    .drawer-kpi-val.accent { color: var(--accent); }
+
+    /* Actividad diaria lista */
+    #actividad-list { display: flex; flex-direction: column; gap: 2px; max-height: 360px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+    .dia-row { display: grid; grid-template-columns: 50px 80px 1fr 110px 110px; align-items: center; padding: 8px 12px; border-radius: 8px; cursor: pointer; transition: background 0.15s; gap: 8px; }
+    .dia-row:hover { background: var(--surface2); }
+    .dia-row.servicio { background: var(--green-dim); }
+    .dia-fecha { font-size: 13px; font-weight: 600; color: var(--text-muted); }
+    .dia-diasem { font-size: 11px; color: var(--text-muted); }
+    .dia-label { font-size: 12px; color: var(--text-muted); }
+    .dia-label.has-service { color: var(--green); font-weight: 500; }
+    .dia-ingreso { text-align: right; font-size: 13px; font-weight: 600; color: var(--green); }
+    .dia-gasto { text-align: right; font-size: 13px; color: var(--red); }
+
+    .loading { display: flex; align-items: center; justify-content: center; height: 160px; color: var(--text-muted); font-size: 14px; gap: 12px; }
+    .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 900px) {
+      main { padding: 16px; }
+      .charts-row { grid-template-columns: 1fr; }
+      .dia-row { grid-template-columns: 50px 1fr 100px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-mark">M</div>
+    <div>
+      <div class="logo-text">Mercedes</div>
+      <div class="logo-sub">Dashboard Ejecutivo</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <span id="last-updated">Cargando...</span>
+    <button class="btn" onclick="refreshData()">↻ Actualizar</button>
+  </div>
+</header>
+
+<div class="filters-bar">
+  <span class="filter-label">Mes</span>
+  <select id="filter-mes" onchange="onFilterChange()">
+    <option value="">Todos</option>
+  </select>
+</div>
+
+<main>
+  <!-- KPIs -->
+  <div class="kpi-grid" id="kpi-grid">
+    <div class="loading"><div class="spinner"></div> Cargando...</div>
+  </div>
+
+  <!-- Tabla resumen tipo Excel -->
+  <div class="card">
+    <div class="card-title">Resumen del período</div>
+    <div class="table-wrap">
+      <table id="tabla-resumen">
+        <thead id="tabla-resumen-head"></thead>
+        <tbody id="tabla-resumen-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="charts-row">
+    <div class="card">
+      <div class="card-title">Ingresos vs Gastos</div>
+      <div class="chart-container"><canvas id="chart-ing-gas"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Composición de gastos</div>
+      <div class="chart-container"><canvas id="chart-gastos-comp"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Ingresos por día de la semana -->
+  <div class="card">
+    <div class="card-title">
+      Ingresos por día de la semana
+      <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">agrupado por día · clic para ver detalle</span>
+    </div>
+    <div class="dias-semana-grid" id="dias-semana-grid">
+      <div class="loading"><div class="spinner"></div></div>
+    </div>
+  </div>
+
+  <!-- Actividad diaria -->
+  <div class="card">
+    <div class="card-title">Actividad por día <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· clic para detalle</span></div>
+    <div id="actividad-list"><div class="loading"><div class="spinner"></div></div></div>
+  </div>
+</main>
+
+<!-- Drawer -->
+<div id="drawer-overlay" onclick="closeDrawer()"></div>
+<div id="drawer">
+  <div class="drawer-header">
+    <div class="drawer-title" id="drawer-title">Detalle</div>
+    <button class="btn-close" onclick="closeDrawer()">×</button>
+  </div>
+  <div class="drawer-kpis" id="drawer-kpis"></div>
+  <div class="drawer-mov-list" id="drawer-mov-list"></div>
+</div>
+
+<script>
+const state = { mes: '', resumen: [], diasData: [], diasSemana: [], charts: {} };
+
+const fmt = n => {
+  if (Math.abs(n) >= 1_000_000) return `$${(n/1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `$${(n/1_000).toFixed(0)}K`;
+  return `$${Math.round(n).toLocaleString('es-AR')}`;
+};
+const fmtFull = n => `$${Math.round(n).toLocaleString('es-AR')}`;
+const pct = n => `${n.toFixed(1)}%`;
+
+async function api(path) {
+  const res = await fetch(path);
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.error);
+  return json.data;
+}
+
+async function init() {
+  try {
+    const meses = await api('/api/meses');
+    const sel = document.getElementById('filter-mes');
+    meses.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m; opt.textContent = m;
+      sel.appendChild(opt);
+    });
+    if (meses.length > 0) {
+      sel.value = meses[meses.length - 1];
+      state.mes = meses[meses.length - 1];
+    }
+    await loadAll();
+  } catch (err) {
+    document.getElementById('kpi-grid').innerHTML = `<div style="color:var(--red);padding:20px">Error: ${err.message}</div>`;
+  }
+}
+
+async function loadAll() {
+  const qs = state.mes ? `?mes=${encodeURIComponent(state.mes)}` : '';
+  const [resumen, dias, diasSemana] = await Promise.all([
+    api(`/api/resumen${qs}`),
+    api(`/api/actividad-diaria${qs}`),
+    api(`/api/actividad-semana${qs}`),
+  ]);
+
+  state.resumen = resumen;
+  state.diasData = dias;
+  state.diasSemana = diasSemana;
+
+  renderKPIs(resumen);
+  renderTablaResumen(resumen);
+  renderCharts(resumen);
+  renderDiasSemana(diasSemana);
+  renderActividadDiaria(dias);
+  document.getElementById('last-updated').textContent = `Actualizado: ${new Date().toLocaleTimeString('es-AR')}`;
+}
+
+// ─── KPIs ─────────────────────────────────────────────────────────────────────
+function renderKPIs(resumen) {
+  const totalIngresos = resumen.reduce((s, m) => s + m.ingresos.total, 0);
+  const totalGastos = resumen.reduce((s, m) => s + m.gastos.total, 0);
+  const resultado = totalIngresos - totalGastos;
+  const mercaderia = resumen.reduce((s, m) => s + m.gastos.Mercaderia, 0);
+  const insumos = resumen.reduce((s, m) => s + m.gastos.Insumos, 0);
+  const pctMI = totalIngresos > 0 ? ((mercaderia + insumos) / totalIngresos) * 100 : 0;
+  const diasServ = state.diasSemana.reduce((s, d) => s + d.cantServicios, 0);
+  const promServ = diasServ > 0 ? totalIngresos / diasServ : 0; // solo ingresos de servicio
+
+  document.getElementById('kpi-grid').innerHTML = `
+    <div class="kpi-card green">
+      <div class="kpi-label">Total Ingresos</div>
+      <div class="kpi-value">${fmt(totalIngresos)}</div>
+      <div class="kpi-sub">${diasServ} servicio${diasServ !== 1 ? 's' : ''}</div>
+    </div>
+    <div class="kpi-card red">
+      <div class="kpi-label">Total Gastos</div>
+      <div class="kpi-value">${fmt(totalGastos)}</div>
+      <div class="kpi-sub">Comprometido</div>
+    </div>
+    <div class="kpi-card ${resultado >= 0 ? 'green' : 'red'}">
+      <div class="kpi-label">Resultado Neto</div>
+      <div class="kpi-value">${fmt(resultado)}</div>
+      <div class="kpi-sub">Ingresos − Gastos</div>
+    </div>
+    <div class="kpi-card accent">
+      <div class="kpi-label">Merc + Insumos / Ing</div>
+      <div class="kpi-value">${pct(pctMI)}</div>
+      <div class="kpi-sub">${fmt(mercaderia + insumos)} sobre ingresos</div>
+    </div>
+    <div class="kpi-card blue">
+      <div class="kpi-label">Prom. por servicio</div>
+      <div class="kpi-value">${fmt(promServ)}</div>
+      <div class="kpi-sub">Ingreso promedio</div>
+    </div>
+    <div class="kpi-card orange">
+      <div class="kpi-label">Mercadería</div>
+      <div class="kpi-value">${fmt(mercaderia)}</div>
+      <div class="kpi-sub">${totalIngresos > 0 ? pct(mercaderia/totalIngresos*100) : '—'} de ingresos</div>
+    </div>
+  `;
+}
+
+// ─── Tabla resumen tipo Excel ─────────────────────────────────────────────────
+function renderTablaResumen(resumen) {
+  const head = document.getElementById('tabla-resumen-head');
+  const body = document.getElementById('tabla-resumen-body');
+
+  if (!resumen.length) { body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:20px">Sin datos</td></tr>'; return; }
+
+  const meses = resumen.map(m => m.mes);
+
+  // Header
+  head.innerHTML = `<tr>
+    <th style="text-align:left">Concepto</th>
+    ${meses.map(m => `<th>${m}</th>`).join('')}
+    ${meses.length > 1 ? '<th>Total</th>' : ''}
+  </tr>`;
+
+  const rows = [];
+  const total = (key, sub = null) => resumen.reduce((s, m) => s + (sub ? (m[key][sub] || 0) : (m[key] || 0)), 0);
+
+  // Helper para fila
+  const row = (label, vals, cls = '', colorFn = null) => {
+    const t = vals.reduce((a, b) => a + b, 0);
+    const cells = vals.map(v => {
+      const color = colorFn ? colorFn(v) : '';
+      return `<td class="${color}">${fmt(v)}</td>`;
+    });
+    const totalCell = meses.length > 1 ? `<td class="${colorFn ? colorFn(t) : ''}" style="font-weight:600">${fmt(t)}</td>` : '';
+    return `<tr class="${cls}"><td>${label}</td>${cells.join('')}${totalCell}</tr>`;
+  };
+
+  // GASTOS
+  rows.push(`<tr class="row-header"><td colspan="${meses.length + (meses.length > 1 ? 2 : 1)}">GASTOS</td></tr>`);
+  rows.push(row('Mercadería', resumen.map(m => m.gastos.Mercaderia)));
+  rows.push(row('Insumos', resumen.map(m => m.gastos.Insumos)));
+  rows.push(row('Equipamiento', resumen.map(m => m.gastos.Equipamiento)));
+  rows.push(row('Operativos', resumen.map(m => m.gastos.Operativos)));
+  rows.push(row('Impuestos', resumen.map(m => m.gastos.Impuestos)));
+  rows.push(row('Personal', resumen.map(m => m.gastos.Personal)));
+  rows.push(row('Otros', resumen.map(m => m.gastos.Otros || 0)));
+  rows.push(row('Total Gastos', resumen.map(m => m.gastos.total), 'row-total'));
+
+  // INGRESOS
+  rows.push(`<tr class="row-header"><td colspan="${meses.length + (meses.length > 1 ? 2 : 1)}">INGRESOS</td></tr>`);
+  rows.push(row('Efectivo', resumen.map(m => m.ingresos.Efectivo || 0)));
+  rows.push(row('Mercado Pago', resumen.map(m => m.ingresos['Mercado Pago'] || 0)));
+  rows.push(row('Galicia', resumen.map(m => m.ingresos.Galicia || 0)));
+  rows.push(row('Otros', resumen.map(m => m.ingresos.Otros || 0)));
+  rows.push(row('Total Ingresos', resumen.map(m => m.ingresos.total), 'row-total'));
+
+  // RESULTADO
+  rows.push(`<tr class="row-header"><td colspan="${meses.length + (meses.length > 1 ? 2 : 1)}">RESULTADO</td></tr>`);
+  rows.push(row('Resultado Neto', resumen.map(m => m.resultadoNeto), 'row-resultado', v => v >= 0 ? 'val-pos' : 'val-neg'));
+  rows.push(`<tr><td>Merc+Ins / Ingresos</td>${resumen.map(m => `<td class="val-accent">${pct(m.pctMercInsumos)}</td>`).join('')}${meses.length > 1 ? `<td class="val-accent">${pct(resumen.reduce((s,m)=>s+m.pctMercInsumos,0)/resumen.length)}</td>` : ''}</tr>`);
+
+  body.innerHTML = rows.join('');
+}
+
+// ─── Charts ───────────────────────────────────────────────────────────────────
+const CHART_COLORS = ['#c9a84c','#4caf82','#5c8fe0','#e05c5c','#e08a5c','#a05ce0','#5ce0c9'];
+
+function destroyChart(id) {
+  if (state.charts[id]) { state.charts[id].destroy(); delete state.charts[id]; }
+}
+
+function renderCharts(resumen) {
+  const meses = resumen.map(m => m.mes);
+
+  // Chart 1: Ingresos vs Gastos por mes
+  destroyChart('ing-gas');
+  const ctx1 = document.getElementById('chart-ing-gas').getContext('2d');
+  state.charts['ing-gas'] = new Chart(ctx1, {
+    type: 'bar',
+    data: {
+      labels: meses,
+      datasets: [
+        { label: 'Ingresos', data: resumen.map(m => m.ingresos.total), backgroundColor: 'rgba(76,175,130,0.7)', borderRadius: 4 },
+        { label: 'Gastos', data: resumen.map(m => m.gastos.total), backgroundColor: 'rgba(224,92,92,0.7)', borderRadius: 4 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#7878a0' } }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmtFull(c.raw)}` } } },
+      scales: {
+        x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#7878a0' } },
+        y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#7878a0', callback: v => fmt(v) } }
+      }
+    }
+  });
+
+  // Chart 2: Composición de gastos (donut)
+  destroyChart('gastos-comp');
+  const grupos = ['Mercaderia', 'Insumos', 'Equipamiento', 'Operativos', 'Impuestos', 'Personal', 'Otros'];
+  const totGrupos = grupos.map(g => resumen.reduce((s, m) => s + (m.gastos[g] || 0), 0)).filter((v, i) => v > 0);
+  const labGrupos = grupos.filter((g, i) => resumen.reduce((s, m) => s + (m.gastos[g] || 0), 0) > 0);
+
+  const ctx2 = document.getElementById('chart-gastos-comp').getContext('2d');
+  state.charts['gastos-comp'] = new Chart(ctx2, {
+    type: 'doughnut',
+    data: {
+      labels: labGrupos,
+      datasets: [{ data: totGrupos, backgroundColor: CHART_COLORS, borderColor: 'var(--surface)', borderWidth: 2 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'right', labels: { color: '#7878a0', font: { size: 11 }, boxWidth: 12, padding: 12 } },
+        tooltip: { callbacks: { label: c => ` ${c.label}: ${fmt(c.raw)}` } }
+      }
+    }
+  });
+}
+
+// ─── Días de la semana ────────────────────────────────────────────────────────
+function renderDiasSemana(dias) {
+  const container = document.getElementById('dias-semana-grid');
+  if (!dias.length) {
+    container.innerHTML = '<div style="color:var(--text-muted);padding:20px">Sin datos de servicio</div>';
+    return;
+  }
+
+  container.innerHTML = dias.map(d => `
+    <div class="dia-card" onclick="openDrawerDia('${d.dia}')">
+      <div class="dia-nombre">${d.dia}</div>
+      <div class="dia-total">${fmt(d.totalIngresos)}</div>
+      <div class="dia-promedio">Prom: ${fmt(d.promedio)}</div>
+      <div class="dia-servicios">${d.cantServicios} servicio${d.cantServicios !== 1 ? 's' : ''}</div>
+      <div class="dia-breakdown">
+        ${d.efectivo > 0 ? `<div class="dia-mp-row"><span>Efectivo</span><span class="dia-mp-val">${fmt(d.efectivo)}</span></div>` : ''}
+        ${d.mercadoPago > 0 ? `<div class="dia-mp-row"><span>MP</span><span class="dia-mp-val">${fmt(d.mercadoPago)}</span></div>` : ''}
+        ${d.galicia > 0 ? `<div class="dia-mp-row"><span>Galicia</span><span class="dia-mp-val">${fmt(d.galicia)}</span></div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function openDrawerDia(dia) {
+  const d = state.diasSemana.find(x => x.dia === dia);
+  if (!d) return;
+
+  document.getElementById('drawer-title').textContent = `${dia} — ${d.cantServicios} servicios`;
+  document.getElementById('drawer-kpis').innerHTML = `
+    <div class="drawer-kpi"><div class="drawer-kpi-label">Total</div><div class="drawer-kpi-val green">${fmtFull(d.totalIngresos)}</div></div>
+    <div class="drawer-kpi"><div class="drawer-kpi-label">Promedio</div><div class="drawer-kpi-val accent">${fmtFull(d.promedio)}</div></div>
+    <div class="drawer-kpi"><div class="drawer-kpi-label">Efectivo</div><div class="drawer-kpi-val">${fmtFull(d.efectivo)}</div></div>
+    <div class="drawer-kpi"><div class="drawer-kpi-label">MP + Galicia</div><div class="drawer-kpi-val">${fmtFull(d.mercadoPago + d.galicia)}</div></div>
+  `;
+
+  // Mostrar las fechas agrupadas
+  const fechas = d.fechas.sort();
+  document.getElementById('drawer-mov-list').innerHTML = fechas.map(f => {
+    const [y, m, dd] = f.split('-');
+    return `<div class="drawer-mov-item"><div class="drawer-mov-proveedor">${dd}/${m}/${y}</div><div></div></div>`;
+  }).join('');
+
+  document.getElementById('drawer-overlay').style.display = 'block';
+  document.getElementById('drawer').classList.add('open');
+}
+
+// ─── Actividad diaria ─────────────────────────────────────────────────────────
+function renderActividadDiaria(dias) {
+  const container = document.getElementById('actividad-list');
+  if (!dias.length) { container.innerHTML = '<div class="loading">Sin datos</div>'; return; }
+
+  container.innerHTML = dias.map(d => `
+    <div class="dia-row ${d.servicioDelDia ? 'servicio' : ''}" onclick="openDrawerFecha('${d.fecha}')">
+      <span class="dia-fecha">${d.fechaDisplay}</span>
+      <span class="dia-diasem">${d.diaSemana}</span>
+      <span class="dia-label ${d.servicioDelDia ? 'has-service' : ''}">
+        ${d.servicioDelDia ? '★ Servicio' : d.movimientos.length + ' mov.'}
+      </span>
+      <span class="dia-ingreso">${d.ingresos > 0 ? fmt(d.ingresos) : '—'}</span>
+      <span class="dia-gasto">${d.gastosComprometidos > 0 ? fmt(d.gastosComprometidos) : '—'}</span>
+    </div>
+  `).join('');
+}
+
+function openDrawerFecha(fechaISO) {
+  const dia = state.diasData.find(d => d.fecha === fechaISO);
+  if (!dia) return;
+
+  document.getElementById('drawer-title').textContent = `${dia.diaSemana} ${dia.fechaDisplay} — ${dia.mes}`;
+  const resultado = dia.ingresos - dia.gastosPagados;
+
+  document.getElementById('drawer-kpis').innerHTML = `
+    <div class="drawer-kpi"><div class="drawer-kpi-label">Ingresos</div><div class="drawer-kpi-val green">${fmtFull(dia.ingresos)}</div></div>
+    <div class="drawer-kpi"><div class="drawer-kpi-label">Gastos pagados</div><div class="drawer-kpi-val red">${fmtFull(dia.gastosPagados)}</div></div>
+    <div class="drawer-kpi"><div class="drawer-kpi-label">Resultado</div><div class="drawer-kpi-val ${resultado >= 0 ? 'green' : 'red'}">${fmtFull(resultado)}</div></div>
+    <div class="drawer-kpi"><div class="drawer-kpi-label">Comprometido</div><div class="drawer-kpi-val accent">${fmtFull(dia.gastosComprometidos)}</div></div>
+  `;
+
+  const movs = [...dia.movimientos].sort((a, b) => {
+    const order = { Ingreso: 0, Gasto: 1, Otros: 2 };
+    return (order[a.tipo] || 2) - (order[b.tipo] || 2);
+  });
+
+  document.getElementById('drawer-mov-list').innerHTML = movs.map(m => {
+    const isIngreso = m.tipo === 'Ingreso';
+    const isPendiente = !m.pagado && m.tipo === 'Gasto';
+    const amount = isIngreso ? m.entradaARS : m.salidaARS;
+    const amountClass = isIngreso ? 'pos' : (isPendiente ? 'neg pend' : 'neg');
+    const prefix = isIngreso ? '+' : (isPendiente ? '~' : '-');
+    return `
+      <div class="drawer-mov-item ${isPendiente ? 'pendiente' : ''}">
+        <div class="drawer-mov-proveedor">${m.proveedor || '—'}</div>
+        <div class="drawer-mov-amount ${amountClass}">${prefix}${fmtFull(amount)}</div>
+        <div class="drawer-mov-cat">${m.categoria}${m.grupo !== m.categoria ? ` · ${m.grupo}` : ''}</div>
+        <div class="drawer-mov-mp">${m.medioPago}${isPendiente ? ' · Pendiente' : ''}</div>
+        ${m.descripcion ? `<div class="drawer-mov-desc">${m.descripcion}</div>` : ''}
+      </div>`;
+  }).join('');
+
+  document.getElementById('drawer-overlay').style.display = 'block';
+  document.getElementById('drawer').classList.add('open');
+}
+
+function closeDrawer() {
+  document.getElementById('drawer-overlay').style.display = 'none';
+  document.getElementById('drawer').classList.remove('open');
+}
+
+function onFilterChange() {
+  state.mes = document.getElementById('filter-mes').value;
+  loadAll();
+}
+
+async function refreshData() {
+  await fetch('/api/refresh', { method: 'POST' });
+  await loadAll();
+}
+
+init();
+</script>
+</body>
+</html>
