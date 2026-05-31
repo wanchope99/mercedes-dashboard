@@ -4,7 +4,8 @@ const NodeCache = require('node-cache');
 // Cache de 2 minutos para no martillar la API en cada request
 const cache = new NodeCache({ stdTTL: 120 });
 
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID || '19gIe8Y3PwjQ58z29hFX-n0wnX4BnI0Zd';
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+if (!SPREADSHEET_ID) throw new Error('Falta variable de entorno SPREADSHEET_ID');
 const SHEET_NAME = 'Movimientos';
 
 function getAuth() {
