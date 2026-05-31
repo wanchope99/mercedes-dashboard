@@ -29,7 +29,7 @@ async function getRawRows() {
 
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: `Movimientos!A:P`,
+    range: 'Movimientos!A:P',
   });
 
   const rows = response.data.values || [];
@@ -106,8 +106,9 @@ async function getMovimientos() {
 
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i];
-   if (!row || !row[0] || row[0] === '') continue; // fin de sección
+    if (!row || !row[0] || row[0] === '') continue; // saltear filas vacías
 
+    // Parar si llegamos a otra sección (col A tiene texto que no es fecha)
     const fecha = parseDate(row[0]);
     const mes = row[1] || '';
     const tipo = row[2] || ''; // Gasto, Ingreso, Otros
