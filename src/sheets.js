@@ -106,7 +106,7 @@ async function getMovimientos() {
 
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i];
-    if (!row || !row[0] || row[0] === '') break; // fin de sección
+   if (!row || !row[0] || row[0] === '') continue; // fin de sección
 
     const fecha = parseDate(row[0]);
     const mes = row[1] || '';
