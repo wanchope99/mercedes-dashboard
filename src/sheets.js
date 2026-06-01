@@ -33,7 +33,7 @@ function getAuth() {
 
   return new google.auth.GoogleAuth({
     credentials,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
 }
 
@@ -56,34 +56,26 @@ async function getRawRows() {
 
 function parseAmount(val) {
   if (!val || val === '' || val === '-') return 0;
-  // Valores vienen como "$847,210" o "$1,287,000" — coma es separador de miles
-  // También puede venir sin $ como "847210" o con punto decimal como USD "3,500"
   const str = String(val).trim();
-  // Quitar $ y espacios
   const noSign = str.replace(/[$\s]/g, '');
-  // Si tiene coma: puede ser separador de miles (ARS) o decimal (USD pequeños)
-  // Heurística: si hay más de un dígito después de la coma, es separador de miles
   const commaIdx = noSign.lastIndexOf(',');
   const dotIdx = noSign.lastIndexOf('.');
   let cleaned;
   if (commaIdx !== -1 && dotIdx === -1) {
-    // Solo coma: si hay 3 dígitos después es separador de miles
     const afterComma = noSign.slice(commaIdx + 1);
     if (afterComma.length === 3) {
-      cleaned = noSign.replace(/,/g, ''); // quitar separadores de miles
+      cleaned = noSign.replace(/,/g, '');
     } else {
-      cleaned = noSign.replace(',', '.'); // es decimal
+      cleaned = noSign.replace(',', '.');
     }
   } else if (dotIdx !== -1 && commaIdx === -1) {
-    // Solo punto: separador decimal o de miles
     const afterDot = noSign.slice(dotIdx + 1);
     if (afterDot.length === 3) {
-      cleaned = noSign.replace(/\./g, ''); // separador de miles
+      cleaned = noSign.replace(/\./g, '');
     } else {
-      cleaned = noSign; // decimal
+      cleaned = noSign;
     }
   } else {
-    // Ambos o ninguno: quitar todo separador de miles, mantener último como decimal
     cleaned = noSign.replace(/[,.]/g, '');
   }
   const num = parseFloat(cleaned);
@@ -180,6 +172,98 @@ async function getMovimientos() {
   return movimientos;
 }
 
+// ─── PAGOS ────────────────────────────────────────────────────────────────────
+
+/**
+ * Retorna todos los movimientos con estado "A pagar" o "Pendiente",
+ * enriquecidos con días hasta vencimiento y urgencia.
+ */
+async function getPagos() {
+  const movimientos = await getMovimientos();
+
+  const pending = movimientos.filter(m => {
+    const est = (m.estado || '').toLowerCase();
+    return est === 'a pagar' || est === 'pendiente';
+  });
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return pending.map(m => {
+    const vencDate = m.vencimiento ? parseDate(m.vencimiento) : null;
+    let diasHastaVenc = null;
+    let urgencia = 'sin-fecha';
+
+    if (vencDate) {
+      diasHastaVenc = Math.round((vencDate - today) / 86400000);
+      if (diasHastaVenc < 0) urgencia = 'vencido';
+      else if (diasHastaVenc === 0) urgencia = 'hoy';
+      else if (diasHastaVenc <= 7) urgencia = 'urgente';
+      else if (diasHastaVenc <= 15) urgencia = 'proximo';
+      else urgencia = 'ok';
+    }
+
+    return {
+      fecha: m.fecha.toISOString().split('T')[0],
+      fechaStr: m.fechaStr,
+      mes: m.mes,
+      proveedor: m.proveedor,
+      descripcion: m.descripcion,
+      categoria: m.categoria,
+      medioPago: m.medioPago,
+      salidaARS: m.salidaARS,
+      salidaUSD: m.salidaUSD,
+      vencimiento: m.vencimiento,
+      vencDate: vencDate ? vencDate.toISOString().split('T')[0] : null,
+      diasHastaVenc,
+      urgencia,
+      estado: m.estado,
+    };
+  });
+}
+
+/**
+ * Agrega una nueva fila de pago al final de la sección Movimientos.
+ * rowData: { fecha, mes, proveedor, categoria, medioPago, salidaARS, vencimiento, descripcion }
+ */
+async function appendPago(rowData) {
+  // Invalidar cache para que el próximo fetch lea datos frescos
+  cache.del('raw_rows');
+
+  const auth = getAuth();
+  const sheets = google.sheets({ version: 'v4', auth });
+
+  // Columnas: Fecha, Mes, Tipo, Estado, Vencimiento, Proveedor, Categoría,
+  //           Descripción, Medio de pago, Ent.ARS, Ent.USD, Sal.ARS, Sal.USD
+  const newRow = [
+    rowData.fecha || '',
+    rowData.mes || '',
+    'Gasto',
+    'A pagar',
+    rowData.vencimiento || '',
+    rowData.proveedor || '',
+    rowData.categoria || '',
+    rowData.descripcion || '',
+    rowData.medioPago || '',
+    '',                                           // Monto Entrada ARS
+    '',                                           // Monto entrada USD
+    rowData.salidaARS ? String(rowData.salidaARS) : '',  // Monto Salida ARS
+    '',                                           // Monto Salida USD
+  ];
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'Movimientos!A:M',
+    valueInputOption: 'USER_ENTERED',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: [newRow] },
+  });
+
+  return { ok: true };
+}
+
+// ─── Resumen mensual ──────────────────────────────────────────────────────────
+
 async function getResumenMensual(mes = null) {
   const movimientos = await getMovimientos();
   const filtered = mes ? movimientos.filter(m => m.mes === mes) : movimientos;
@@ -191,26 +275,13 @@ async function getResumenMensual(mes = null) {
     if (!meses[key]) {
       meses[key] = {
         mes: key,
-        // Gastos por grupo
         gastos: {
-          Mercaderia: 0,
-          Insumos: 0,
-          Equipamiento: 0,
-          Operativos: 0,
-          Impuestos: 0,
-          Personal: 0,
-          Otros: 0,
-          total: 0,
+          Mercaderia: 0, Insumos: 0, Equipamiento: 0,
+          Operativos: 0, Impuestos: 0, Personal: 0, Otros: 0, total: 0,
         },
-        // Ingresos por medio de pago
         ingresos: {
-          Efectivo: 0,
-          'Mercado Pago': 0,
-          Galicia: 0,
-          Otros: 0,
-          total: 0,
+          Efectivo: 0, 'Mercado Pago': 0, Galicia: 0, Otros: 0, total: 0,
         },
-        // Para charts
         gastosPorCategoria: {},
         ingresosPorMedioPago: {},
         totalGastosPagados: 0,
@@ -221,7 +292,6 @@ async function getResumenMensual(mes = null) {
     const entry = meses[key];
 
     if (m.tipo === 'Ingreso') {
-      // Agrupar medios de pago
       let mp = m.medioPago;
       if (mp.toLowerCase().includes('efectivo')) mp = 'Efectivo';
       else if (mp.toLowerCase().includes('mercado pago')) mp = 'Mercado Pago';
@@ -246,7 +316,6 @@ async function getResumenMensual(mes = null) {
     }
   }
 
-  // Calcular resultado neto y % mercadería+insumos
   return Object.values(meses).map(m => ({
     ...m,
     resultadoNeto: m.ingresos.total - m.gastos.total,
@@ -262,7 +331,6 @@ async function getActividadPorDiaSemana(mes = null) {
     ? movimientos.filter(m => m.mes === mes && m.tipo === 'Ingreso' && m.proveedor === 'Servicio')
     : movimientos.filter(m => m.tipo === 'Ingreso' && m.proveedor === 'Servicio');
 
-  // Agrupar por día de la semana
   const diasSemana = {};
   const ordenDias = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
 
@@ -275,7 +343,6 @@ async function getActividadPorDiaSemana(mes = null) {
         cantServicios: 0,
         promedio: 0,
         fechas: [],
-        // Breakdown por medio de pago
         efectivo: 0,
         mercadoPago: 0,
         galicia: 0,
@@ -290,7 +357,6 @@ async function getActividadPorDiaSemana(mes = null) {
     else if (mp.includes('mercado pago')) entry.mercadoPago += m.entradaARS;
     else if (mp.includes('galicia')) entry.galicia += m.entradaARS;
 
-    // Contar servicios únicos por fecha
     const fechaKey = m.fecha.toISOString().split('T')[0];
     if (!entry.fechas.includes(fechaKey)) {
       entry.fechas.push(fechaKey);
@@ -298,7 +364,6 @@ async function getActividadPorDiaSemana(mes = null) {
     }
   }
 
-  // Calcular promedios
   return ordenDias
     .filter(d => diasSemana[d])
     .map(d => ({
@@ -365,5 +430,6 @@ function clearCache() {
 
 module.exports = {
   getMovimientos, getResumenMensual, getActividadPorDia,
-  getActividadPorDiaSemana, getMeses, getCategorias, clearCache
+  getActividadPorDiaSemana, getMeses, getCategorias, clearCache,
+  getPagos, appendPago,
 };
