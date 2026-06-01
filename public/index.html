@@ -22,6 +22,8 @@
       --blue: #5c8fe0;
       --blue-dim: rgba(92,143,224,0.15);
       --orange: #e08a5c;
+      --orange-dim: rgba(224,138,92,0.15);
+      --purple: #a05ce0;
       --radius: 12px;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -40,11 +42,32 @@
     #last-updated { font-size: 12px; color: var(--text-muted); }
     .btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-family: inherit; transition: all 0.2s; }
     .btn:hover { background: var(--border); }
+    .btn-accent { background: var(--accent); border-color: var(--accent); color: #0f0f13; font-weight: 600; }
+    .btn-accent:hover { background: #d4b05a; }
+
+    /* ── Tab nav ── */
+    .tab-nav {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 0 32px; display: flex; align-items: center; gap: 0;
+    }
+    .tab-btn {
+      padding: 14px 20px; cursor: pointer; font-size: 13px; font-weight: 500;
+      color: var(--text-muted); border-bottom: 2px solid transparent;
+      transition: all 0.15s; background: none; border-top: none; border-left: none; border-right: none;
+      font-family: inherit; white-space: nowrap;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
 
     .filters-bar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 32px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
     .filter-label { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
     select { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 8px; font-size: 13px; font-family: inherit; cursor: pointer; outline: none; }
     select:focus { border-color: var(--accent); }
+    input[type="text"] { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 8px; font-size: 13px; font-family: inherit; outline: none; }
+    input[type="text"]:focus { border-color: var(--accent); }
+    input[type="text"]::placeholder { color: var(--text-muted); }
 
     main { max-width: 1400px; margin: 0 auto; padding: 32px; display: flex; flex-direction: column; gap: 24px; }
 
@@ -57,6 +80,7 @@
     .kpi-card.accent::before { background: var(--accent); }
     .kpi-card.blue::before { background: var(--blue); }
     .kpi-card.orange::before { background: var(--orange); }
+    .kpi-card.purple::before { background: var(--purple); }
     .kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 8px; }
     .kpi-value { font-size: 24px; font-weight: 700; line-height: 1; margin-bottom: 4px; }
     .kpi-card.green .kpi-value { color: var(--green); }
@@ -64,17 +88,20 @@
     .kpi-card.accent .kpi-value { color: var(--accent); }
     .kpi-card.blue .kpi-value { color: var(--blue); }
     .kpi-card.orange .kpi-value { color: var(--orange); }
+    .kpi-card.purple .kpi-value { color: var(--purple); }
     .kpi-sub { font-size: 12px; color: var(--text-muted); }
 
     /* Card genérica */
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; }
     .card-title { font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; }
 
-    /* Tabla resumen mensual */
+    /* Tabla */
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th { text-align: right; padding: 10px 12px; color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); white-space: nowrap; }
     th:first-child { text-align: left; }
+    th.sortable { cursor: pointer; user-select: none; }
+    th.sortable:hover { color: var(--text); }
     td { padding: 10px 12px; border-bottom: 1px solid rgba(46,46,62,0.5); text-align: right; white-space: nowrap; }
     td:first-child { text-align: left; font-weight: 500; }
     tr:last-child td { border-bottom: none; }
@@ -90,9 +117,9 @@
     .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
     .chart-container { position: relative; height: 280px; }
 
-    /* Tabla días de semana */
+    /* Días de semana */
     .dias-semana-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
-    .dia-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; text-align: center; }
+    .dia-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; text-align: center; cursor: pointer; }
     .dia-nombre { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
     .dia-total { font-size: 20px; font-weight: 700; color: var(--green); margin-bottom: 4px; }
     .dia-promedio { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
@@ -127,7 +154,7 @@
     .drawer-kpi-val.red { color: var(--red); }
     .drawer-kpi-val.accent { color: var(--accent); }
 
-    /* Actividad diaria lista */
+    /* Actividad diaria */
     #actividad-list { display: flex; flex-direction: column; gap: 2px; max-height: 360px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
     .dia-row { display: grid; grid-template-columns: 50px 80px 1fr 110px 110px; align-items: center; padding: 8px 12px; border-radius: 8px; cursor: pointer; transition: background 0.15s; gap: 8px; }
     .dia-row:hover { background: var(--surface2); }
@@ -143,10 +170,62 @@
     .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* ── PAGOS específico ── */
+    .pagos-filters { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 32px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 99px;
+      font-size: 11px; font-weight: 600; white-space: nowrap;
+    }
+    .badge-vencido { background: var(--red-dim); color: var(--red); border: 1px solid var(--red); }
+    .badge-hoy     { background: var(--orange-dim); color: var(--orange); border: 1px solid var(--orange); }
+    .badge-urgente { background: var(--orange-dim); color: var(--orange); }
+    .badge-proximo { background: rgba(201,168,76,0.15); color: var(--accent); }
+    .badge-ok      { background: var(--green-dim); color: var(--green); }
+    .badge-sin     { background: var(--surface2); color: var(--text-muted); }
+
+    .badge-mp { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 11px; background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+
+    .pagos-table-wrap { overflow-x: auto; }
+    .pagos-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .pagos-table th { text-align: left; padding: 10px 14px; color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); white-space: nowrap; background: var(--surface2); }
+    .pagos-table th.right { text-align: right; }
+    .pagos-table th.sortable { cursor: pointer; user-select: none; }
+    .pagos-table th.sortable:hover { color: var(--text); }
+    .pagos-table td { padding: 12px 14px; border-bottom: 1px solid rgba(46,46,62,0.4); vertical-align: top; }
+    .pagos-table tr:last-child td { border-bottom: none; }
+    .pagos-table tr:hover td { background: var(--surface2); }
+    .pagos-table .td-right { text-align: right; font-variant-numeric: tabular-nums; }
+    .pagos-table .td-monto { font-weight: 700; color: var(--red); font-size: 14px; }
+    .pagos-table .td-proveedor { font-weight: 600; font-size: 13px; }
+    .pagos-table .td-desc { font-size: 11px; color: var(--text-muted); margin-top: 3px; max-width: 220px; }
+    .pagos-empty { text-align: center; color: var(--text-muted); padding: 48px 24px; font-size: 14px; }
+
+    /* Modal */
+    #modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 300; align-items: center; justify-content: center; }
+    #modal-overlay.open { display: flex; }
+    #modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 32px; width: 480px; max-width: 95vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 24px 64px rgba(0,0,0,0.5); }
+    #modal h3 { font-size: 17px; font-weight: 600; margin-bottom: 24px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-group.full { grid-column: 1 / -1; }
+    .form-group label { font-size: 12px; font-weight: 500; color: var(--text-muted); }
+    .form-group input, .form-group select, .form-group textarea {
+      background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+      padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family: inherit; outline: none;
+    }
+    .form-group input[type="date"] { color-scheme: dark; }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--accent); }
+    .form-group textarea { resize: vertical; min-height: 72px; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+    #modal-status { font-size: 12px; color: var(--text-muted); padding: 8px 0; display: none; }
+
     @media (max-width: 900px) {
       main { padding: 16px; }
       .charts-row { grid-template-columns: 1fr; }
       .dia-row { grid-template-columns: 50px 1fr 100px; }
+      .form-grid { grid-template-columns: 1fr; }
+      .form-group.full { grid-column: 1; }
     }
   </style>
 </head>
@@ -166,61 +245,130 @@
   </div>
 </header>
 
-<div class="filters-bar">
-  <span class="filter-label">Mes</span>
-  <select id="filter-mes" onchange="onFilterChange()">
-    <option value="">Todos</option>
-  </select>
+<!-- Tab nav -->
+<div class="tab-nav">
+  <button class="tab-btn active" onclick="switchTab('dashboard', this)">📊 Dashboard</button>
+  <button class="tab-btn" onclick="switchTab('pagos', this)">💳 Pagos pendientes</button>
 </div>
 
-<main>
-  <!-- KPIs -->
-  <div class="kpi-grid" id="kpi-grid">
-    <div class="loading"><div class="spinner"></div> Cargando...</div>
+<!-- ═══════════════════════════════════════════════════════════ DASHBOARD TAB -->
+<div id="tab-dashboard" class="tab-panel active">
+
+  <div class="filters-bar">
+    <span class="filter-label">Mes</span>
+    <select id="filter-mes" onchange="onFilterChange()">
+      <option value="">Todos</option>
+    </select>
   </div>
 
-  <!-- Tabla resumen tipo Excel -->
-  <div class="card">
-    <div class="card-title">Resumen del período</div>
-    <div class="table-wrap">
-      <table id="tabla-resumen">
-        <thead id="tabla-resumen-head"></thead>
-        <tbody id="tabla-resumen-body"></tbody>
-      </table>
+  <main>
+    <!-- KPIs -->
+    <div class="kpi-grid" id="kpi-grid">
+      <div class="loading"><div class="spinner"></div> Cargando...</div>
     </div>
-  </div>
 
-  <!-- Charts -->
-  <div class="charts-row">
+    <!-- Tabla resumen mensual -->
     <div class="card">
-      <div class="card-title">Ingresos vs Gastos</div>
-      <div class="chart-container"><canvas id="chart-ing-gas"></canvas></div>
+      <div class="card-title">Resumen del período</div>
+      <div class="table-wrap">
+        <table id="tabla-resumen">
+          <thead id="tabla-resumen-head"></thead>
+          <tbody id="tabla-resumen-body"></tbody>
+        </table>
+      </div>
     </div>
+
+    <!-- Charts -->
+    <div class="charts-row">
+      <div class="card">
+        <div class="card-title">Ingresos vs Gastos</div>
+        <div class="chart-container"><canvas id="chart-ing-gas"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Composición de gastos</div>
+        <div class="chart-container"><canvas id="chart-gastos-comp"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Ingresos por día de la semana -->
     <div class="card">
-      <div class="card-title">Composición de gastos</div>
-      <div class="chart-container"><canvas id="chart-gastos-comp"></canvas></div>
+      <div class="card-title">
+        Ingresos por día de la semana
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">agrupado por día · clic para ver detalle</span>
+      </div>
+      <div class="dias-semana-grid" id="dias-semana-grid">
+        <div class="loading"><div class="spinner"></div></div>
+      </div>
     </div>
+
+    <!-- Actividad diaria -->
+    <div class="card">
+      <div class="card-title">Actividad por día <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· clic para detalle</span></div>
+      <div id="actividad-list"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+  </main>
+
+</div>
+<!-- ═════════════════════════════════════════════════════════════ PAGOS TAB -->
+<div id="tab-pagos" class="tab-panel">
+
+  <div class="pagos-filters">
+    <span class="filter-label">Ordenar por</span>
+    <select id="pagos-sort" onchange="loadPagos()">
+      <option value="vencimiento">Próximo vencimiento</option>
+      <option value="monto">Mayor monto</option>
+      <option value="proveedor">Proveedor A-Z</option>
+      <option value="formapago">Forma de pago</option>
+    </select>
+    <select id="pagos-filter-mp" onchange="loadPagos()">
+      <option value="">Todas las formas de pago</option>
+      <option value="Efectivo">Efectivo</option>
+      <option value="Galicia">Galicia</option>
+      <option value="Mercado Pago">Mercado Pago</option>
+      <option value="Echeq">Echeq</option>
+    </select>
+    <input type="text" id="pagos-search" placeholder="Buscar proveedor..." oninput="loadPagos()" style="width:200px" />
+    <div style="flex:1"></div>
+    <button class="btn btn-accent" onclick="openModal()">+ Nuevo pago</button>
   </div>
 
-  <!-- Ingresos por día de la semana -->
-  <div class="card">
-    <div class="card-title">
-      Ingresos por día de la semana
-      <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">agrupado por día · clic para ver detalle</span>
-    </div>
-    <div class="dias-semana-grid" id="dias-semana-grid">
+  <main style="padding-top:24px">
+
+    <!-- Summary cards -->
+    <div class="kpi-grid" id="pagos-kpis">
       <div class="loading"><div class="spinner"></div></div>
     </div>
-  </div>
 
-  <!-- Actividad diaria -->
-  <div class="card">
-    <div class="card-title">Actividad por día <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· clic para detalle</span></div>
-    <div id="actividad-list"><div class="loading"><div class="spinner"></div></div></div>
-  </div>
-</main>
+    <!-- Tabla de pagos -->
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="card-title" style="padding:20px 24px 0;margin-bottom:0">
+        Pagos pendientes
+        <span id="pagos-count" style="font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted)"></span>
+      </div>
+      <div class="pagos-table-wrap" style="margin-top:16px">
+        <table class="pagos-table">
+          <thead>
+            <tr>
+              <th class="sortable" onclick="setSortPagos('proveedor')">Proveedor</th>
+              <th>Categoría</th>
+              <th class="sortable" onclick="setSortPagos('vencimiento')">Vencimiento</th>
+              <th>Urgencia</th>
+              <th class="sortable" onclick="setSortPagos('formapago')">Forma de pago</th>
+              <th class="right sortable" onclick="setSortPagos('monto')">Monto</th>
+              <th>Notas</th>
+            </tr>
+          </thead>
+          <tbody id="pagos-tbody">
+            <tr><td colspan="7"><div class="loading"><div class="spinner"></div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
 
-<!-- Drawer -->
+  </main>
+</div>
+
+<!-- Drawer (dashboard) -->
 <div id="drawer-overlay" onclick="closeDrawer()"></div>
 <div id="drawer">
   <div class="drawer-header">
@@ -231,24 +379,97 @@
   <div class="drawer-mov-list" id="drawer-mov-list"></div>
 </div>
 
-<script>
-const state = { mes: '', resumen: [], diasData: [], diasSemana: [], charts: {} };
+<!-- Modal: nuevo pago -->
+<div id="modal-overlay" onclick="e => { if(e.target===this) closeModal(); }">
+  <div id="modal">
+    <h3>Registrar nuevo pago</h3>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Fecha *</label>
+        <input type="date" id="f-fecha">
+      </div>
+      <div class="form-group">
+        <label>Mes</label>
+        <input type="text" id="f-mes" placeholder="ej: Junio">
+      </div>
+      <div class="form-group full">
+        <label>Proveedor / Concepto *</label>
+        <input type="text" id="f-proveedor" placeholder="ej: Aurea, Culpable, Alquiler...">
+      </div>
+      <div class="form-group">
+        <label>Categoría</label>
+        <select id="f-categoria">
+          <option value="Mercaderia">Mercadería</option>
+          <option value="Alquiler">Alquiler</option>
+          <option value="Cocina">Cocina</option>
+          <option value="Mobiliario">Mobiliario</option>
+          <option value="Sala">Sala</option>
+          <option value="Frios">Fríos</option>
+          <option value="Personal">Personal</option>
+          <option value="Operativos">Operativos</option>
+          <option value="Legal / Escribano">Legal / Escribano</option>
+          <option value="Servicios">Servicios</option>
+          <option value="Fiscales">Fiscales</option>
+          <option value="Otros">Otros</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Forma de pago</label>
+        <select id="f-medio">
+          <option value="Efectivo">Efectivo</option>
+          <option value="Galicia">Galicia (transferencia)</option>
+          <option value="Mercado Pago">Mercado Pago</option>
+          <option value="Echeq">Echeq</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Monto ARS</label>
+        <input type="number" id="f-monto" placeholder="0" min="0">
+      </div>
+      <div class="form-group">
+        <label>Vencimiento</label>
+        <input type="date" id="f-vencimiento">
+      </div>
+      <div class="form-group full">
+        <label>Descripción / Notas</label>
+        <textarea id="f-descripcion" placeholder="Detalle adicional, datos bancarios, etc."></textarea>
+      </div>
+    </div>
+    <div id="modal-status"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-accent" onclick="saveNewPago()">Guardar en planilla</button>
+    </div>
+  </div>
+</div>
 
-// Siempre mostrar cifras completas
+<script>
+const state = { mes: '', resumen: [], diasData: [], diasSemana: [], charts: {}, pagosSort: 'vencimiento' };
+
 const fmt = n => `$${Math.round(n).toLocaleString('es-AR')}`;
 const fmtFull = n => `$${Math.round(n).toLocaleString('es-AR')}`;
 const pct = n => `${n.toFixed(1)}%`;
 
-async function api(path) {
-  const res = await fetch(path);
+async function api(path, opts) {
+  const res = await fetch(path, opts);
   const json = await res.json();
   if (!json.ok) throw new Error(json.error);
-  return json.data;
+  return json;
 }
 
+// ─── Tabs ─────────────────────────────────────────────────────────────────────
+function switchTab(tab, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tab-' + tab).classList.add('active');
+  if (tab === 'pagos') loadPagos();
+}
+
+// ─── Dashboard init ───────────────────────────────────────────────────────────
 async function init() {
   try {
-    const meses = await api('/api/meses');
+    const { data: meses } = await api('/api/meses');
     const sel = document.getElementById('filter-mes');
     meses.forEach(m => {
       const opt = document.createElement('option');
@@ -267,21 +488,21 @@ async function init() {
 
 async function loadAll() {
   const qs = state.mes ? `?mes=${encodeURIComponent(state.mes)}` : '';
-  const [resumen, dias, diasSemana] = await Promise.all([
+  const [r1, r2, r3] = await Promise.all([
     api(`/api/resumen${qs}`),
     api(`/api/actividad-diaria${qs}`),
     api(`/api/actividad-semana${qs}`),
   ]);
 
-  state.resumen = resumen;
-  state.diasData = dias;
-  state.diasSemana = diasSemana;
+  state.resumen = r1.data;
+  state.diasData = r2.data;
+  state.diasSemana = r3.data;
 
-  renderKPIs(resumen);
-  renderTablaResumen(resumen);
-  renderCharts(resumen);
-  renderDiasSemana(diasSemana);
-  renderActividadDiaria(dias);
+  renderKPIs(state.resumen);
+  renderTablaResumen(state.resumen);
+  renderCharts(state.resumen);
+  renderDiasSemana(state.diasSemana);
+  renderActividadDiaria(state.diasData);
   document.getElementById('last-updated').textContent = `Actualizado: ${new Date().toLocaleTimeString('es-AR')}`;
 }
 
@@ -294,7 +515,7 @@ function renderKPIs(resumen) {
   const insumos = resumen.reduce((s, m) => s + m.gastos.Insumos, 0);
   const pctMI = totalIngresos > 0 ? ((mercaderia + insumos) / totalIngresos) * 100 : 0;
   const diasServ = state.diasSemana.reduce((s, d) => s + d.cantServicios, 0);
-  const promServ = diasServ > 0 ? totalIngresos / diasServ : 0; // solo ingresos de servicio
+  const promServ = diasServ > 0 ? totalIngresos / diasServ : 0;
 
   document.getElementById('kpi-grid').innerHTML = `
     <div class="kpi-card green">
@@ -325,7 +546,7 @@ function renderKPIs(resumen) {
   `;
 }
 
-// ─── Tabla resumen tipo Excel ─────────────────────────────────────────────────
+// ─── Tabla resumen ────────────────────────────────────────────────────────────
 function renderTablaResumen(resumen) {
   const head = document.getElementById('tabla-resumen-head');
   const body = document.getElementById('tabla-resumen-body');
@@ -334,7 +555,6 @@ function renderTablaResumen(resumen) {
 
   const meses = resumen.map(m => m.mes);
 
-  // Header
   head.innerHTML = `<tr>
     <th style="text-align:left">Concepto</th>
     ${meses.map(m => `<th>${m}</th>`).join('')}
@@ -342,9 +562,6 @@ function renderTablaResumen(resumen) {
   </tr>`;
 
   const rows = [];
-  const total = (key, sub = null) => resumen.reduce((s, m) => s + (sub ? (m[key][sub] || 0) : (m[key] || 0)), 0);
-
-  // Helper para fila
   const row = (label, vals, cls = '', colorFn = null) => {
     const t = vals.reduce((a, b) => a + b, 0);
     const cells = vals.map(v => {
@@ -355,7 +572,6 @@ function renderTablaResumen(resumen) {
     return `<tr class="${cls}"><td>${label}</td>${cells.join('')}${totalCell}</tr>`;
   };
 
-  // GASTOS
   rows.push(`<tr class="row-header"><td colspan="${meses.length + (meses.length > 1 ? 2 : 1)}">GASTOS</td></tr>`);
   rows.push(row('Mercadería', resumen.map(m => m.gastos.Mercaderia)));
   rows.push(row('Insumos', resumen.map(m => m.gastos.Insumos)));
@@ -366,7 +582,6 @@ function renderTablaResumen(resumen) {
   rows.push(row('Otros', resumen.map(m => m.gastos.Otros || 0)));
   rows.push(row('Total Gastos', resumen.map(m => m.gastos.total), 'row-total'));
 
-  // INGRESOS
   rows.push(`<tr class="row-header"><td colspan="${meses.length + (meses.length > 1 ? 2 : 1)}">INGRESOS</td></tr>`);
   rows.push(row('Efectivo', resumen.map(m => m.ingresos.Efectivo || 0)));
   rows.push(row('Mercado Pago', resumen.map(m => m.ingresos['Mercado Pago'] || 0)));
@@ -374,7 +589,6 @@ function renderTablaResumen(resumen) {
   rows.push(row('Otros', resumen.map(m => m.ingresos.Otros || 0)));
   rows.push(row('Total Ingresos', resumen.map(m => m.ingresos.total), 'row-total'));
 
-  // RESULTADO
   rows.push(`<tr class="row-header"><td colspan="${meses.length + (meses.length > 1 ? 2 : 1)}">RESULTADO</td></tr>`);
   rows.push(row('Resultado Neto', resumen.map(m => m.resultadoNeto), 'row-resultado', v => v >= 0 ? 'val-pos' : 'val-neg'));
   rows.push(`<tr><td>Merc+Ins / Ingresos</td>${resumen.map(m => `<td class="val-accent">${pct(m.pctMercInsumos)}</td>`).join('')}${meses.length > 1 ? `<td class="val-accent">${pct(resumen.reduce((s,m)=>s+m.pctMercInsumos,0)/resumen.length)}</td>` : ''}</tr>`);
@@ -392,7 +606,6 @@ function destroyChart(id) {
 function renderCharts(resumen) {
   const meses = resumen.map(m => m.mes);
 
-  // Chart 1: Ingresos vs Gastos por mes
   destroyChart('ing-gas');
   const ctx1 = document.getElementById('chart-ing-gas').getContext('2d');
   state.charts['ing-gas'] = new Chart(ctx1, {
@@ -414,11 +627,10 @@ function renderCharts(resumen) {
     }
   });
 
-  // Chart 2: Composición de gastos (donut)
   destroyChart('gastos-comp');
   const grupos = ['Mercaderia', 'Insumos', 'Equipamiento', 'Operativos', 'Impuestos', 'Personal', 'Otros'];
-  const totGrupos = grupos.map(g => resumen.reduce((s, m) => s + (m.gastos[g] || 0), 0)).filter((v, i) => v > 0);
-  const labGrupos = grupos.filter((g, i) => resumen.reduce((s, m) => s + (m.gastos[g] || 0), 0) > 0);
+  const totGrupos = grupos.map(g => resumen.reduce((s, m) => s + (m.gastos[g] || 0), 0)).filter((v) => v > 0);
+  const labGrupos = grupos.filter((g) => resumen.reduce((s, m) => s + (m.gastos[g] || 0), 0) > 0);
 
   const ctx2 = document.getElementById('chart-gastos-comp').getContext('2d');
   state.charts['gastos-comp'] = new Chart(ctx2, {
@@ -444,7 +656,6 @@ function renderDiasSemana(dias) {
     container.innerHTML = '<div style="color:var(--text-muted);padding:20px">Sin datos de servicio</div>';
     return;
   }
-
   container.innerHTML = dias.map(d => `
     <div class="dia-card" onclick="openDrawerDia('${d.dia}')">
       <div class="dia-nombre">${d.dia}</div>
@@ -463,7 +674,6 @@ function renderDiasSemana(dias) {
 function openDrawerDia(dia) {
   const d = state.diasSemana.find(x => x.dia === dia);
   if (!d) return;
-
   document.getElementById('drawer-title').textContent = `${dia} — ${d.cantServicios} servicios`;
   document.getElementById('drawer-kpis').innerHTML = `
     <div class="drawer-kpi"><div class="drawer-kpi-label">Total</div><div class="drawer-kpi-val green">${fmtFull(d.totalIngresos)}</div></div>
@@ -471,14 +681,11 @@ function openDrawerDia(dia) {
     <div class="drawer-kpi"><div class="drawer-kpi-label">Efectivo</div><div class="drawer-kpi-val">${fmtFull(d.efectivo)}</div></div>
     <div class="drawer-kpi"><div class="drawer-kpi-label">MP + Galicia</div><div class="drawer-kpi-val">${fmtFull(d.mercadoPago + d.galicia)}</div></div>
   `;
-
-  // Mostrar las fechas agrupadas
   const fechas = d.fechas.sort();
   document.getElementById('drawer-mov-list').innerHTML = fechas.map(f => {
     const [y, m, dd] = f.split('-');
     return `<div class="drawer-mov-item"><div class="drawer-mov-proveedor">${dd}/${m}/${y}</div><div></div></div>`;
   }).join('');
-
   document.getElementById('drawer-overlay').style.display = 'block';
   document.getElementById('drawer').classList.add('open');
 }
@@ -487,7 +694,6 @@ function openDrawerDia(dia) {
 function renderActividadDiaria(dias) {
   const container = document.getElementById('actividad-list');
   if (!dias.length) { container.innerHTML = '<div class="loading">Sin datos</div>'; return; }
-
   container.innerHTML = dias.map(d => `
     <div class="dia-row ${d.servicioDelDia ? 'servicio' : ''}" onclick="openDrawerFecha('${d.fecha}')">
       <span class="dia-fecha">${d.fechaDisplay}</span>
@@ -504,22 +710,18 @@ function renderActividadDiaria(dias) {
 function openDrawerFecha(fechaISO) {
   const dia = state.diasData.find(d => d.fecha === fechaISO);
   if (!dia) return;
-
   document.getElementById('drawer-title').textContent = `${dia.diaSemana} ${dia.fechaDisplay} — ${dia.mes}`;
   const resultado = dia.ingresos - dia.gastosPagados;
-
   document.getElementById('drawer-kpis').innerHTML = `
     <div class="drawer-kpi"><div class="drawer-kpi-label">Ingresos</div><div class="drawer-kpi-val green">${fmtFull(dia.ingresos)}</div></div>
     <div class="drawer-kpi"><div class="drawer-kpi-label">Gastos pagados</div><div class="drawer-kpi-val red">${fmtFull(dia.gastosPagados)}</div></div>
     <div class="drawer-kpi"><div class="drawer-kpi-label">Resultado</div><div class="drawer-kpi-val ${resultado >= 0 ? 'green' : 'red'}">${fmtFull(resultado)}</div></div>
     <div class="drawer-kpi"><div class="drawer-kpi-label">Comprometido</div><div class="drawer-kpi-val accent">${fmtFull(dia.gastosComprometidos)}</div></div>
   `;
-
   const movs = [...dia.movimientos].sort((a, b) => {
     const order = { Ingreso: 0, Gasto: 1, Otros: 2 };
     return (order[a.tipo] || 2) - (order[b.tipo] || 2);
   });
-
   document.getElementById('drawer-mov-list').innerHTML = movs.map(m => {
     const isIngreso = m.tipo === 'Ingreso';
     const isPendiente = !m.pagado && m.tipo === 'Gasto';
@@ -535,7 +737,6 @@ function openDrawerFecha(fechaISO) {
         ${m.descripcion ? `<div class="drawer-mov-desc">${m.descripcion}</div>` : ''}
       </div>`;
   }).join('');
-
   document.getElementById('drawer-overlay').style.display = 'block';
   document.getElementById('drawer').classList.add('open');
 }
@@ -553,8 +754,180 @@ function onFilterChange() {
 async function refreshData() {
   await fetch('/api/refresh', { method: 'POST' });
   await loadAll();
+  if (document.getElementById('tab-pagos').classList.contains('active')) loadPagos();
 }
 
+// ─── PAGOS ────────────────────────────────────────────────────────────────────
+
+function setSortPagos(s) {
+  document.getElementById('pagos-sort').value = s;
+  loadPagos();
+}
+
+function urgenciaBadge(p) {
+  const map = {
+    'vencido':  `<span class="badge badge-vencido">Vencido ${p.diasHastaVenc !== null ? Math.abs(p.diasHastaVenc)+'d' : ''}</span>`,
+    'hoy':      `<span class="badge badge-hoy">Vence hoy</span>`,
+    'urgente':  `<span class="badge badge-urgente">${p.diasHastaVenc}d</span>`,
+    'proximo':  `<span class="badge badge-proximo">${p.diasHastaVenc}d</span>`,
+    'ok':       `<span class="badge badge-ok">${p.diasHastaVenc}d</span>`,
+    'sin-fecha':`<span class="badge badge-sin">Sin fecha</span>`,
+  };
+  return map[p.urgencia] || map['sin-fecha'];
+}
+
+async function loadPagos() {
+  const sort = document.getElementById('pagos-sort').value;
+  const mp = document.getElementById('pagos-filter-mp').value;
+  const q = document.getElementById('pagos-search').value;
+
+  let url = `/api/pagos?sort=${sort}`;
+  if (mp) url += `&medioPago=${encodeURIComponent(mp)}`;
+  if (q) url += `&q=${encodeURIComponent(q)}`;
+
+  try {
+    const { data: pagos, summary } = await api(url);
+
+    // KPI cards
+    document.getElementById('pagos-kpis').innerHTML = `
+      <div class="kpi-card red">
+        <div class="kpi-label">Total pendiente ARS</div>
+        <div class="kpi-value">${fmt(summary.totalARS)}</div>
+        <div class="kpi-sub">${summary.total} pagos</div>
+      </div>
+      <div class="kpi-card ${summary.vencidos > 0 ? 'red' : 'green'}">
+        <div class="kpi-label">Vencidos</div>
+        <div class="kpi-value">${summary.vencidos}</div>
+        <div class="kpi-sub">${summary.vencidos > 0 ? '⚠️ Atención requerida' : 'Al día ✓'}</div>
+      </div>
+      <div class="kpi-card ${summary.estaSemanaCant > 0 ? 'orange' : 'green'}">
+        <div class="kpi-label">Esta semana</div>
+        <div class="kpi-value">${summary.estaSemanaCant}</div>
+        <div class="kpi-sub">${fmt(summary.estaSemanaARS)}</div>
+      </div>
+    `;
+
+    // Count
+    document.getElementById('pagos-count').textContent = `· ${pagos.length} resultado${pagos.length !== 1 ? 's' : ''}`;
+
+    // Table
+    if (!pagos.length) {
+      document.getElementById('pagos-tbody').innerHTML =
+        `<tr><td colspan="7"><div class="pagos-empty">No hay pagos pendientes con esos filtros.</div></td></tr>`;
+      return;
+    }
+
+    document.getElementById('pagos-tbody').innerHTML = pagos.map(p => {
+      const montoStr = p.salidaARS > 0
+        ? `<span class="td-monto">${fmt(p.salidaARS)}</span>`
+        : p.salidaUSD > 0
+          ? `<span style="color:var(--purple);font-weight:700">USD ${p.salidaUSD.toLocaleString('es-AR')}</span>`
+          : '<span style="color:var(--text-muted)">—</span>';
+
+      const vencLabel = p.vencDate
+        ? new Date(p.vencDate + 'T12:00:00').toLocaleDateString('es-AR')
+        : (p.vencimiento || '—');
+
+      const desc = (p.descripcion || '').substring(0, 70) + (p.descripcion && p.descripcion.length > 70 ? '…' : '');
+
+      return `<tr>
+        <td>
+          <div class="td-proveedor">${p.proveedor || '—'}</div>
+          ${desc ? `<div class="td-desc">${desc}</div>` : ''}
+        </td>
+        <td style="color:var(--text-muted);font-size:12px">${p.categoria || '—'}</td>
+        <td style="font-size:13px;white-space:nowrap">${vencLabel}</td>
+        <td>${urgenciaBadge(p)}</td>
+        <td><span class="badge-mp">${p.medioPago || '—'}</span></td>
+        <td class="td-right">${montoStr}</td>
+        <td style="font-size:11px;color:var(--text-muted);max-width:160px">${p.descripcion && p.descripcion.length > 70 ? p.descripcion.substring(0,100)+'…' : ''}</td>
+      </tr>`;
+    }).join('');
+
+  } catch(err) {
+    document.getElementById('pagos-tbody').innerHTML =
+      `<tr><td colspan="7" style="color:var(--red);padding:20px">Error: ${err.message}</td></tr>`;
+  }
+}
+
+// ─── Modal nuevo pago ─────────────────────────────────────────────────────────
+function openModal() {
+  const today = new Date().toISOString().split('T')[0];
+  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  document.getElementById('f-fecha').value = today;
+  document.getElementById('f-mes').value = meses[new Date().getMonth()];
+  document.getElementById('f-proveedor').value = '';
+  document.getElementById('f-monto').value = '';
+  document.getElementById('f-vencimiento').value = '';
+  document.getElementById('f-descripcion').value = '';
+  document.getElementById('modal-status').style.display = 'none';
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+document.getElementById('modal-overlay').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+async function saveNewPago() {
+  const fecha = document.getElementById('f-fecha').value;
+  const mes = document.getElementById('f-mes').value;
+  const proveedor = document.getElementById('f-proveedor').value.trim();
+  const categoria = document.getElementById('f-categoria').value;
+  const medioPago = document.getElementById('f-medio').value;
+  const salidaARS = parseFloat(document.getElementById('f-monto').value) || 0;
+  const vencRaw = document.getElementById('f-vencimiento').value;
+  const descripcion = document.getElementById('f-descripcion').value.trim();
+
+  if (!fecha || !proveedor) {
+    alert('Fecha y Proveedor son obligatorios.');
+    return;
+  }
+
+  // Convertir fechas a formato DD/MM/YYYY para la planilla
+  const fmtDate = iso => {
+    if (!iso) return '';
+    const [y, m, d] = iso.split('-');
+    return `${d}/${m}/${y}`;
+  };
+
+  const statusEl = document.getElementById('modal-status');
+  statusEl.style.display = 'block';
+  statusEl.style.color = 'var(--text-muted)';
+  statusEl.textContent = '⏳ Guardando en planilla...';
+
+  try {
+    await api('/api/pagos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fecha: fmtDate(fecha),
+        mes,
+        proveedor,
+        categoria,
+        medioPago,
+        salidaARS,
+        vencimiento: fmtDate(vencRaw),
+        descripcion,
+      }),
+    });
+
+    statusEl.style.color = 'var(--green)';
+    statusEl.textContent = `✅ Pago de ${proveedor} registrado. Recargando...`;
+    setTimeout(() => {
+      closeModal();
+      loadPagos();
+    }, 1500);
+  } catch(err) {
+    statusEl.style.color = 'var(--red)';
+    statusEl.textContent = `❌ Error: ${err.message}`;
+  }
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
 init();
 </script>
 </body>
