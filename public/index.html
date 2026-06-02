@@ -4,7 +4,21 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mercedes — Dashboard Ejecutivo</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- Modal datos de proveedor -->
+<div id="prov-modal-overlay">
+  <div id="prov-modal">
+    <div class="prov-modal-header">
+      <div>
+        <div class="prov-modal-nombre" id="prov-nombre">—</div>
+        <div class="prov-modal-forma" id="prov-forma"></div>
+      </div>
+      <button class="btn-close" onclick="closeProvModal()">×</button>
+    </div>
+    <div id="prov-datos-container"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
@@ -200,6 +214,61 @@
     .pagos-table .td-proveedor { font-weight: 600; font-size: 13px; }
     .pagos-table .td-desc { font-size: 11px; color: var(--text-muted); margin-top: 3px; max-width: 220px; }
     .pagos-empty { text-align: center; color: var(--text-muted); padding: 48px 24px; font-size: 14px; }
+
+    /* ── Agrupación Galicia ── */
+    .group-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--text-muted);
+    }
+    .group-header .group-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: var(--blue-dim); color: var(--blue);
+      border: 1px solid rgba(92,143,224,0.3);
+      padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600;
+    }
+    .group-header.group-proveedores .group-badge {
+      background: rgba(201,168,76,0.15); color: var(--accent);
+      border-color: rgba(201,168,76,0.3);
+    }
+    .group-total { margin-left: auto; font-size: 12px; color: var(--text-muted); font-weight: 500; }
+
+    /* ── Proveedor clickeable ── */
+    .proveedor-link {
+      cursor: pointer; color: var(--text);
+      text-decoration: none; border-bottom: 1px dashed rgba(232,232,240,0.3);
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .proveedor-link:hover { color: var(--accent); border-bottom-color: var(--accent); }
+    .proveedor-link.has-data { border-bottom-color: rgba(201,168,76,0.5); }
+
+    /* ── Modal proveedor ── */
+    #prov-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 400; align-items: center; justify-content: center; }
+    #prov-modal-overlay.open { display: flex; }
+    #prov-modal {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+      padding: 28px; width: 460px; max-width: 95vw; max-height: 85vh; overflow-y: auto;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+    }
+    .prov-modal-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; gap: 12px; }
+    .prov-modal-nombre { font-size: 20px; font-weight: 700; }
+    .prov-modal-forma { margin-top: 4px; font-size: 13px; color: var(--text-muted); }
+    .prov-datos-block {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 10px;
+      padding: 16px; margin-bottom: 12px;
+    }
+    .prov-datos-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 8px; }
+    .prov-datos-value { font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+    .prov-copy-btn {
+      margin-top: 10px; background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); padding: 6px 12px; border-radius: 6px; cursor: pointer;
+      font-size: 12px; font-family: inherit; transition: all 0.15s;
+    }
+    .prov-copy-btn:hover { background: var(--border); }
+    .prov-copy-btn.copied { color: var(--green); border-color: var(--green); }
+    .prov-no-data { color: var(--text-muted); font-size: 13px; font-style: italic; padding: 12px 0; }
 
     /* Modal */
     #modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 300; align-items: center; justify-content: center; }
@@ -444,7 +513,7 @@
 </div>
 
 <script>
-const state = { mes: '', resumen: [], diasData: [], diasSemana: [], charts: {}, pagosSort: 'vencimiento' };
+const state = { mes: '', resumen: [], diasData: [], diasSemana: [], charts: {}, pagosSort: 'vencimiento', proveedores: {} };
 
 const fmt = n => `$${Math.round(n).toLocaleString('es-AR')}`;
 const fmtFull = n => `$${Math.round(n).toLocaleString('es-AR')}`;
@@ -776,7 +845,49 @@ function urgenciaBadge(p) {
   return map[p.urgencia] || map['sin-fecha'];
 }
 
+function buildPagosRows(pagos) {
+  if (!pagos.length) return '';
+
+  return pagos.map(p => {
+    const montoStr = p.salidaARS > 0
+      ? `<span class="td-monto">${fmt(p.salidaARS)}</span>`
+      : p.salidaUSD > 0
+        ? `<span style="color:var(--purple);font-weight:700">USD ${p.salidaUSD.toLocaleString('es-AR')}</span>`
+        : '<span style="color:var(--text-muted)">—</span>';
+
+    const vencLabel = p.vencDate
+      ? new Date(p.vencDate + 'T12:00:00').toLocaleDateString('es-AR')
+      : (p.vencimiento || '—');
+
+    const desc = (p.descripcion || '').substring(0, 60) + (p.descripcion && p.descripcion.length > 60 ? '…' : '');
+    const provKey = (p.proveedor || '').toLowerCase();
+    const hasData = !!state.proveedores[provKey];
+    const provCell = `<span class="proveedor-link ${hasData ? 'has-data' : ''}" onclick="openProvModal('${p.proveedor.replace(/'/g, "\\'")}')">${p.proveedor || '—'}</span>`;
+
+    return `<tr>
+      <td>
+        <div class="td-proveedor">${provCell}</div>
+        ${desc ? `<div class="td-desc">${desc}</div>` : ''}
+      </td>
+      <td style="color:var(--text-muted);font-size:12px">${p.categoria || '—'}</td>
+      <td style="font-size:13px;white-space:nowrap">${vencLabel}</td>
+      <td>${urgenciaBadge(p)}</td>
+      <td><span class="badge-mp">${p.medioPago || '—'}</span></td>
+      <td class="td-right">${montoStr}</td>
+      <td style="font-size:11px;color:var(--text-muted);max-width:160px">${p.descripcion && p.descripcion.length > 60 ? p.descripcion.substring(0,100)+'…' : ''}</td>
+    </tr>`;
+  }).join('');
+}
+
 async function loadPagos() {
+  // Cargar proveedores la primera vez
+  if (Object.keys(state.proveedores).length === 0) {
+    try {
+      const { data } = await api('/api/proveedores');
+      state.proveedores = data;
+    } catch(e) { /* no bloquear si falla */ }
+  }
+
   const sort = document.getElementById('pagos-sort').value;
   const mp = document.getElementById('pagos-filter-mp').value;
   const q = document.getElementById('pagos-search').value;
@@ -788,12 +899,26 @@ async function loadPagos() {
   try {
     const { data: pagos, summary } = await api(url);
 
-    // KPI cards
+    // KPI cards — agrego card de Tarjeta Galicia
+    const galiciaPagos = pagos.filter(p => (p.medioPago || '').toLowerCase().includes('galicia'));
+    const galiciaTotal = galiciaPagos.reduce((s, p) => s + p.salidaARS, 0);
+    const independientes = pagos.filter(p => !(p.medioPago || '').toLowerCase().includes('galicia'));
+
     document.getElementById('pagos-kpis').innerHTML = `
       <div class="kpi-card red">
         <div class="kpi-label">Total pendiente ARS</div>
         <div class="kpi-value">${fmt(summary.totalARS)}</div>
         <div class="kpi-sub">${summary.total} pagos</div>
+      </div>
+      <div class="kpi-card blue">
+        <div class="kpi-label">Tarjeta Galicia</div>
+        <div class="kpi-value">${fmt(galiciaTotal)}</div>
+        <div class="kpi-sub">${galiciaPagos.length} cargo${galiciaPagos.length !== 1 ? 's' : ''}</div>
+      </div>
+      <div class="kpi-card accent">
+        <div class="kpi-label">Proveedores independientes</div>
+        <div class="kpi-value">${fmt(summary.totalARS - galiciaTotal)}</div>
+        <div class="kpi-sub">${independientes.length} pago${independientes.length !== 1 ? 's' : ''}</div>
       </div>
       <div class="kpi-card ${summary.vencidos > 0 ? 'red' : 'green'}">
         <div class="kpi-label">Vencidos</div>
@@ -807,47 +932,121 @@ async function loadPagos() {
       </div>
     `;
 
-    // Count
     document.getElementById('pagos-count').textContent = `· ${pagos.length} resultado${pagos.length !== 1 ? 's' : ''}`;
 
-    // Table
     if (!pagos.length) {
       document.getElementById('pagos-tbody').innerHTML =
         `<tr><td colspan="7"><div class="pagos-empty">No hay pagos pendientes con esos filtros.</div></td></tr>`;
       return;
     }
 
-    document.getElementById('pagos-tbody').innerHTML = pagos.map(p => {
-      const montoStr = p.salidaARS > 0
-        ? `<span class="td-monto">${fmt(p.salidaARS)}</span>`
-        : p.salidaUSD > 0
-          ? `<span style="color:var(--purple);font-weight:700">USD ${p.salidaUSD.toLocaleString('es-AR')}</span>`
-          : '<span style="color:var(--text-muted)">—</span>';
+    // Construir tabla con grupos separados
+    let html = '';
 
-      const vencLabel = p.vencDate
-        ? new Date(p.vencDate + 'T12:00:00').toLocaleDateString('es-AR')
-        : (p.vencimiento || '—');
-
-      const desc = (p.descripcion || '').substring(0, 70) + (p.descripcion && p.descripcion.length > 70 ? '…' : '');
-
-      return `<tr>
-        <td>
-          <div class="td-proveedor">${p.proveedor || '—'}</div>
-          ${desc ? `<div class="td-desc">${desc}</div>` : ''}
+    if (galiciaPagos.length > 0) {
+      html += `<tr>
+        <td colspan="7" style="padding:0">
+          <div class="group-header">
+            <span class="group-badge">💳 Tarjeta Galicia</span>
+            <span>${galiciaPagos.length} cargo${galiciaPagos.length !== 1 ? 's' : ''}</span>
+            <span class="group-total">${fmt(galiciaTotal)}</span>
+          </div>
         </td>
-        <td style="color:var(--text-muted);font-size:12px">${p.categoria || '—'}</td>
-        <td style="font-size:13px;white-space:nowrap">${vencLabel}</td>
-        <td>${urgenciaBadge(p)}</td>
-        <td><span class="badge-mp">${p.medioPago || '—'}</span></td>
-        <td class="td-right">${montoStr}</td>
-        <td style="font-size:11px;color:var(--text-muted);max-width:160px">${p.descripcion && p.descripcion.length > 70 ? p.descripcion.substring(0,100)+'…' : ''}</td>
       </tr>`;
-    }).join('');
+      html += buildPagosRows(galiciaPagos);
+    }
+
+    if (independientes.length > 0) {
+      if (galiciaPagos.length > 0) {
+        // Separador visual entre grupos
+        html += `<tr>
+          <td colspan="7" style="padding:0">
+            <div class="group-header group-proveedores">
+              <span class="group-badge">🤝 Proveedores independientes</span>
+              <span>${independientes.length} pago${independientes.length !== 1 ? 's' : ''}</span>
+              <span class="group-total">${fmt(independientes.reduce((s,p)=>s+p.salidaARS,0))}</span>
+            </div>
+          </td>
+        </tr>`;
+      }
+      html += buildPagosRows(independientes);
+    }
+
+    document.getElementById('pagos-tbody').innerHTML = html;
 
   } catch(err) {
     document.getElementById('pagos-tbody').innerHTML =
       `<tr><td colspan="7" style="color:var(--red);padding:20px">Error: ${err.message}</td></tr>`;
   }
+}
+
+// ─── Modal datos de proveedor ─────────────────────────────────────────────────
+
+function openProvModal(nombreProveedor) {
+  const key = (nombreProveedor || '').toLowerCase();
+  const prov = state.proveedores[key];
+
+  document.getElementById('prov-nombre').textContent = nombreProveedor;
+
+  if (!prov) {
+    document.getElementById('prov-forma').textContent = 'Sin datos registrados en la planilla Proveedores';
+    document.getElementById('prov-datos-container').innerHTML =
+      `<div class="prov-no-data">No hay datos de pago para este proveedor. Podés agregarlos en la hoja Proveedores de la planilla.</div>`;
+  } else {
+    document.getElementById('prov-forma').textContent = prov.formaPago ? `Forma de pago: ${prov.formaPago}` : '';
+
+    let html = '';
+
+    if (prov.datosParaPagar) {
+      // Formatear los datos: separar por + o líneas para mejor legibilidad
+      const datosFormateados = prov.datosParaPagar
+        .replace(/ \+ /g, '\n')
+        .replace(/\+/g, '\n')
+        .trim();
+
+      html += `<div class="prov-datos-block">
+        <div class="prov-datos-label">Datos bancarios / de pago</div>
+        <div class="prov-datos-value" id="prov-datos-text">${escapeHtml(datosFormateados)}</div>
+        <button class="prov-copy-btn" onclick="copyProvDatos('${escapeAttr(prov.datosParaPagar)}', this)">📋 Copiar datos</button>
+      </div>`;
+    } else {
+      html += `<div class="prov-no-data">Sin datos bancarios registrados.</div>`;
+    }
+
+    if (prov.comentarios) {
+      html += `<div class="prov-datos-block">
+        <div class="prov-datos-label">Comentarios</div>
+        <div class="prov-datos-value">${escapeHtml(prov.comentarios)}</div>
+      </div>`;
+    }
+
+    document.getElementById('prov-datos-container').innerHTML = html;
+  }
+
+  document.getElementById('prov-modal-overlay').classList.add('open');
+}
+
+function closeProvModal() {
+  document.getElementById('prov-modal-overlay').classList.remove('open');
+}
+
+document.getElementById('prov-modal-overlay').addEventListener('click', function(e) {
+  if (e.target === this) closeProvModal();
+});
+
+function copyProvDatos(texto, btn) {
+  navigator.clipboard.writeText(texto).then(() => {
+    btn.textContent = '✅ Copiado';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = '📋 Copiar datos'; btn.classList.remove('copied'); }, 2000);
+  });
+}
+
+function escapeHtml(str) {
+  return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escapeAttr(str) {
+  return (str || '').replace(/'/g,"\\'").replace(/\n/g,' ');
 }
 
 // ─── Modal nuevo pago ─────────────────────────────────────────────────────────
