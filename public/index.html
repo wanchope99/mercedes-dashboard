@@ -222,7 +222,12 @@
       border-bottom: 1px solid var(--border);
       font-size: 11px; font-weight: 600; text-transform: uppercase;
       letter-spacing: 0.06em; color: var(--text-muted);
+      cursor: pointer; user-select: none; transition: background 0.15s;
     }
+    .group-header:hover { background: var(--border); }
+    .group-chevron { font-size: 10px; transition: transform 0.2s; display: inline-block; }
+    .group-header.collapsed .group-chevron { transform: rotate(-90deg); }
+    .group-rows-hidden { display: none; }
     .group-header .group-badge {
       display: inline-flex; align-items: center; gap: 5px;
       background: var(--blue-dim); color: var(--blue);
@@ -845,8 +850,18 @@ function urgenciaBadge(p) {
   return map[p.urgencia] || map['sin-fecha'];
 }
 
-function buildPagosRows(pagos) {
+function toggleGroup(groupId) {
+  const rows = document.querySelectorAll(`.grp-${groupId}`);
+  const hdr = document.getElementById(`grp-hdr-${groupId}`);
+  const chv = document.getElementById(`grp-chv-${groupId}`);
+  const isCollapsed = hdr && hdr.querySelector('.group-header').classList.contains('collapsed');
+  rows.forEach(r => r.classList.toggle('group-rows-hidden', !isCollapsed));
+  if (hdr) hdr.querySelector('.group-header').classList.toggle('collapsed', !isCollapsed);
+}
+
+function buildPagosRows(pagos, groupId) {
   if (!pagos.length) return '';
+  const cls = groupId ? `grp-${groupId}` : '';
 
   return pagos.map(p => {
     const montoStr = p.salidaARS > 0
@@ -864,7 +879,7 @@ function buildPagosRows(pagos) {
     const hasData = !!state.proveedores[provKey];
     const provCell = `<span class="proveedor-link ${hasData ? 'has-data' : ''}" onclick="openProvModal('${p.proveedor.replace(/'/g, "\\'")}')">${p.proveedor || '—'}</span>`;
 
-    return `<tr>
+    return `<tr class="${cls}">
       <td>
         <div class="td-proveedor">${provCell}</div>
         ${desc ? `<div class="td-desc">${desc}</div>` : ''}
@@ -944,24 +959,25 @@ async function loadPagos() {
     let html = '';
 
     if (galiciaPagos.length > 0) {
-      html += `<tr>
+      html += `<tr class="group-header-row" id="grp-hdr-galicia">
         <td colspan="7" style="padding:0">
-          <div class="group-header">
+          <div class="group-header" onclick="toggleGroup('galicia')">
+            <span class="group-chevron" id="grp-chv-galicia">▾</span>
             <span class="group-badge">💳 Tarjeta Galicia</span>
             <span>${galiciaPagos.length} cargo${galiciaPagos.length !== 1 ? 's' : ''}</span>
             <span class="group-total">${fmt(galiciaTotal)}</span>
           </div>
         </td>
       </tr>`;
-      html += buildPagosRows(galiciaPagos);
+      html += buildPagosRows(galiciaPagos, 'galicia');
     }
 
     if (independientes.length > 0) {
       if (galiciaPagos.length > 0) {
-        // Separador visual entre grupos
-        html += `<tr>
+        html += `<tr class="group-header-row" id="grp-hdr-indep">
           <td colspan="7" style="padding:0">
-            <div class="group-header group-proveedores">
+            <div class="group-header group-proveedores" onclick="toggleGroup('indep')">
+              <span class="group-chevron" id="grp-chv-indep">▾</span>
               <span class="group-badge">🤝 Proveedores independientes</span>
               <span>${independientes.length} pago${independientes.length !== 1 ? 's' : ''}</span>
               <span class="group-total">${fmt(independientes.reduce((s,p)=>s+p.salidaARS,0))}</span>
@@ -969,7 +985,7 @@ async function loadPagos() {
           </td>
         </tr>`;
       }
-      html += buildPagosRows(independientes);
+      html += buildPagosRows(independientes, 'indep');
     }
 
     document.getElementById('pagos-tbody').innerHTML = html;
