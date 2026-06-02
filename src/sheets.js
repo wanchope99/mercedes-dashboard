@@ -424,6 +424,44 @@ async function getCategorias() {
   return [...new Set(movimientos.filter(m => m.tipo === 'Gasto').map(m => m.categoria))].sort();
 }
 
+/**
+ * Lee la hoja "Proveedores" y devuelve un objeto indexado por nombre de proveedor (lowercase).
+ * Columnas esperadas: Proveedor | Forma de pago | Datos para pagar | Comentarios
+ */
+async function getProveedores() {
+  const cached = cache.get('proveedores');
+  if (cached) return cached;
+
+  const auth = getAuth();
+  const sheets = google.sheets({ version: 'v4', auth });
+
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'Proveedores!A:D',
+  });
+
+  const rows = response.data.values || [];
+  if (rows.length < 2) return {};
+
+  // Primera fila es header
+  const result = {};
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || !row[0]) continue;
+    const nombre = (row[0] || '').trim();
+    if (!nombre) continue;
+    result[nombre.toLowerCase()] = {
+      nombre,
+      formaPago: row[1] || '',
+      datosParaPagar: row[2] || '',
+      comentarios: row[3] || '',
+    };
+  }
+
+  cache.set('proveedores', result, 300); // cache 5 min
+  return result;
+}
+
 function clearCache() {
   cache.flushAll();
 }
@@ -431,5 +469,5 @@ function clearCache() {
 module.exports = {
   getMovimientos, getResumenMensual, getActividadPorDia,
   getActividadPorDiaSemana, getMeses, getCategorias, clearCache,
-  getPagos, appendPago,
+  getPagos, appendPago, getProveedores,
 };

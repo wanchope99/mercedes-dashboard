@@ -5,7 +5,7 @@ const path = require('path');
 const {
   getMovimientos, getResumenMensual, getActividadPorDia,
   getActividadPorDiaSemana, getMeses, getCategorias, clearCache,
-  getPagos, appendPago,
+  getPagos, appendPago, getProveedores,
 } = require('./sheets');
 
 const app = express();
@@ -136,6 +136,17 @@ app.post('/api/pagos', async (req, res) => {
     }
     await appendPago({ fecha, mes, proveedor, categoria, medioPago, salidaARS, vencimiento, descripcion });
     res.json({ ok: true, message: `Pago de ${proveedor} registrado correctamente.` });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+/**
+ * GET /api/proveedores
+ * Devuelve el mapa de proveedores con sus datos de pago.
+ * Resultado: { "culpable": { nombre, formaPago, datosParaPagar, comentarios }, ... }
+ */
+app.get('/api/proveedores', async (req, res) => {
+  try {
+    res.json({ ok: true, data: await getProveedores() });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
