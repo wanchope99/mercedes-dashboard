@@ -4,8 +4,8 @@ const cors = require('cors');
 const path = require('path');
 const {
   getMovimientos, getResumenMensual, getActividadPorDia,
-  getActividadPorDiaSemana, getMeses, getCategorias, clearCache,
-  getPagos, appendPago, getProveedores,
+  getActividadPorDiaSemana, getCajas, getMovimientosCambio,
+  getMeses, getCategorias, clearCache,
 } = require('./sheets');
 
 const app = express();
@@ -14,7 +14,18 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// ─── Endpoints existentes ─────────────────────────────────────────────────────
+// Parsear parámetros de filtro de fecha de los query params
+function parseFiltro(query) {
+  const { mes, desde, hasta } = query;
+  if (mes) return { mes };
+  if (desde && hasta) {
+    return {
+      fechaDesde: new Date(desde),
+      fechaHasta: new Date(hasta + 'T23:59:59'),
+    };
+  }
+  return {};
+}
 
 app.get('/api/meses', async (req, res) => {
   try { res.json({ ok: true, data: await getMeses() }); }
@@ -27,31 +38,39 @@ app.get('/api/categorias', async (req, res) => {
 });
 
 app.get('/api/resumen', async (req, res) => {
-  try {
-    const { mes } = req.query;
-    res.json({ ok: true, data: await getResumenMensual(mes || null) });
-  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  try { res.json({ ok: true, data: await getResumenMensual(parseFiltro(req.query)) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 app.get('/api/actividad-diaria', async (req, res) => {
-  try {
-    const { mes } = req.query;
-    res.json({ ok: true, data: await getActividadPorDia(mes || null) });
-  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  try { res.json({ ok: true, data: await getActividadPorDia(parseFiltro(req.query)) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 app.get('/api/actividad-semana', async (req, res) => {
-  try {
-    const { mes } = req.query;
-    res.json({ ok: true, data: await getActividadPorDiaSemana(mes || null) });
-  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  try { res.json({ ok: true, data: await getActividadPorDiaSemana(parseFiltro(req.query)) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get('/api/cajas', async (req, res) => {
+  try { res.json({ ok: true, data: await getCajas() }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get('/api/cambios', async (req, res) => {
+  try { res.json({ ok: true, data: await getMovimientosCambio(parseFiltro(req.query)) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 app.get('/api/movimientos', async (req, res) => {
   try {
-    const { mes, tipo, categoria, estado } = req.query;
+    const { tipo, categoria, estado } = req.query;
     let movimientos = await getMovimientos();
-    if (mes) movimientos = movimientos.filter(m => m.mes === mes);
+    // Filtrar operativos por defecto (excluir cambios y fondeos)
+    if (!req.query.todos) movimientos = movimientos.filter(m => !m.esCambio && !m.esFondeo);
+    const filtro = parseFiltro(req.query);
+    if (filtro.mes) movimientos = movimientos.filter(m => m.mes === filtro.mes);
+    if (filtro.fechaDesde) movimientos = movimientos.filter(m => m.fecha >= filtro.fechaDesde && m.fecha <= filtro.fechaHasta);
     if (tipo) movimientos = movimientos.filter(m => m.tipo === tipo);
     if (categoria) movimientos = movimientos.filter(m => m.categoria === categoria);
     if (estado) movimientos = movimientos.filter(m => m.estado.toLowerCase() === estado.toLowerCase());
@@ -65,95 +84,8 @@ app.post('/api/refresh', (req, res) => {
   res.json({ ok: true, message: 'Cache limpiado.' });
 });
 
-// ─── Endpoints de Pagos ───────────────────────────────────────────────────────
-
-/**
- * GET /api/pagos
- * Retorna todos los movimientos con estado "A pagar" / "Pendiente".
- * Query params opcionales:
- *   - sort: 'vencimiento' | 'monto' | 'proveedor' | 'formapago'  (default: vencimiento)
- *   - medioPago: filtra por forma de pago (substring, case-insensitive)
- *   - q: búsqueda libre en proveedor + descripción
- */
-app.get('/api/pagos', async (req, res) => {
-  try {
-    const { sort = 'vencimiento', medioPago, q } = req.query;
-    let pagos = await getPagos();
-
-    // Filtros
-    if (medioPago) {
-      pagos = pagos.filter(p => (p.medioPago || '').toLowerCase().includes(medioPago.toLowerCase()));
-    }
-    if (q) {
-      const term = q.toLowerCase();
-      pagos = pagos.filter(p =>
-        (p.proveedor || '').toLowerCase().includes(term) ||
-        (p.descripcion || '').toLowerCase().includes(term)
-      );
-    }
-
-    // Ordenamiento
-    pagos.sort((a, b) => {
-      if (sort === 'vencimiento') {
-        if (!a.vencDate && !b.vencDate) return 0;
-        if (!a.vencDate) return 1;
-        if (!b.vencDate) return -1;
-        return a.vencDate.localeCompare(b.vencDate);
-      }
-      if (sort === 'monto') return b.salidaARS - a.salidaARS;
-      if (sort === 'proveedor') return (a.proveedor || '').localeCompare(b.proveedor || '');
-      if (sort === 'formapago') return (a.medioPago || '').localeCompare(b.medioPago || '');
-      return 0;
-    });
-
-    // Summary para las cards
-    const today = new Date().toISOString().split('T')[0];
-    const vencidos = pagos.filter(p => p.urgencia === 'vencido').length;
-    const estaSemanaCant = pagos.filter(p => p.urgencia === 'urgente' || p.urgencia === 'hoy').length;
-    const estaSemanaARS = pagos
-      .filter(p => p.urgencia === 'urgente' || p.urgencia === 'hoy')
-      .reduce((s, p) => s + p.salidaARS, 0);
-    const totalARS = pagos.reduce((s, p) => s + p.salidaARS, 0);
-
-    res.json({
-      ok: true,
-      data: pagos,
-      summary: { total: pagos.length, totalARS, vencidos, estaSemanaCant, estaSemanaARS },
-    });
-  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
-});
-
-/**
- * POST /api/pagos
- * Agrega una nueva fila en la hoja Movimientos con estado "A pagar".
- * Body JSON: { fecha, mes, proveedor, categoria, medioPago, salidaARS, vencimiento, descripcion }
- */
-app.post('/api/pagos', async (req, res) => {
-  try {
-    const { fecha, mes, proveedor, categoria, medioPago, salidaARS, vencimiento, descripcion } = req.body;
-    if (!fecha || !proveedor) {
-      return res.status(400).json({ ok: false, error: 'fecha y proveedor son obligatorios.' });
-    }
-    await appendPago({ fecha, mes, proveedor, categoria, medioPago, salidaARS, vencimiento, descripcion });
-    res.json({ ok: true, message: `Pago de ${proveedor} registrado correctamente.` });
-  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
-});
-
-/**
- * GET /api/proveedores
- * Devuelve el mapa de proveedores con sus datos de pago.
- * Resultado: { "culpable": { nombre, formaPago, datosParaPagar, comentarios }, ... }
- */
-app.get('/api/proveedores', async (req, res) => {
-  try {
-    res.json({ ok: true, data: await getProveedores() });
-  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
-});
-
-// ─── Static y fallback ────────────────────────────────────────────────────────
-
+// Static y fallback DESPUÉS de la API
 app.use(express.static(path.join(__dirname, '../public')));
-
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
