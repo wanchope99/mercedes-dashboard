@@ -393,8 +393,17 @@
 <!-- ═══ CAJAS TAB ═══ -->
 <div id="tab-cajas" class="tab-panel">
   <main style="padding-top:24px">
+    <!-- Totales -->
+    <div class="kpi-grid" id="cajas-totales" style="margin-bottom:0"></div>
+
     <div class="card">
-      <div class="card-title">Estado de Cajas <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">saldos actuales</span></div>
+      <div class="card-title">
+        Detalle por caja
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">
+          TC: $<span id="tc-display">1.425</span> por USD ·
+          <button class="btn" style="padding:4px 10px;font-size:11px" onclick="editTC()">Cambiar TC</button>
+        </span>
+      </div>
       <div class="cajas-grid" id="cajas-grid">
         <div class="loading"><div class="spinner"></div></div>
       </div>
@@ -698,29 +707,82 @@ function renderActividadDiaria(dias) {
 }
 
 // ─── Cajas ────────────────────────────────────────────────────────────────────
+// Tipo de cambio editable (default 1425)
+state.tc = 1425;
+
+function editTC() {
+  const nuevo = prompt('Ingresá el tipo de cambio USD/ARS actual:', state.tc);
+  if (nuevo && !isNaN(nuevo)) {
+    state.tc = parseFloat(nuevo);
+    document.getElementById('tc-display').textContent = Number(state.tc).toLocaleString('es-AR');
+    loadCajas();
+  }
+}
+
 async function loadCajas() {
   try {
     const { data: cajas } = await api('/api/cajas');
     const container = document.getElementById('cajas-grid');
     if (!cajas.length) { container.innerHTML = '<div style="color:var(--text-muted)">Sin datos</div>'; return; }
+
+    // Calcular totales
+    const TC = state.tc;
+    let totalARS = 0;
+    let totalUSD = 0;
+
+    cajas.forEach(c => {
+      const saldo = c.saldoReal !== undefined && c.saldoReal !== 0 ? c.saldoReal : c.saldoCalculado;
+      if (c.moneda === 'USD') {
+        totalUSD += saldo;
+        totalARS += saldo * TC;
+      } else {
+        totalARS += saldo;
+      }
+    });
+
+    // Render totales
+    document.getElementById('cajas-totales').innerHTML = `
+      <div class="kpi-card green">
+        <div class="kpi-label">Total Cajas (ARS)</div>
+        <div class="kpi-value">${fmt(totalARS)}</div>
+        <div class="kpi-sub">USD convertidos a TC $${TC.toLocaleString('es-AR')}</div>
+      </div>
+      <div class="kpi-card blue">
+        <div class="kpi-label">Total Cajas (USD)</div>
+        <div class="kpi-value">USD ${totalUSD.toLocaleString('es-AR', { minimumFractionDigits: 0 })}</div>
+        <div class="kpi-sub">Solo cajas en dólares</div>
+      </div>
+      <div class="kpi-card accent">
+        <div class="kpi-label">Equivalente USD total</div>
+        <div class="kpi-value">USD ${Math.round(totalARS / TC).toLocaleString('es-AR')}</div>
+        <div class="kpi-sub">Todo convertido a USD</div>
+      </div>
+    `;
+
+    // Render cards individuales
     container.innerHTML = cajas.map(c => {
-      const saldo = c.saldoReal || c.saldoCalculado;
+      const saldo = c.saldoReal !== undefined && c.saldoReal !== 0 ? c.saldoReal : c.saldoCalculado;
       const isNeg = saldo < 0;
       const saldoFmt = c.moneda === 'USD'
         ? `USD ${saldo.toLocaleString('es-AR', { minimumFractionDigits: 0 })}`
         : fmt(saldo);
+      const equiv = c.moneda === 'USD'
+        ? `≈ ${fmt(saldo * TC)} ARS`
+        : `≈ USD ${Math.round(saldo / TC).toLocaleString('es-AR')}`;
       return `
         <div class="caja-card">
           <div class="caja-nombre">${c.caja}</div>
           <div class="caja-alias">${c.alias || ''}</div>
           <span class="caja-moneda">${c.moneda || 'ARS'}</span>
           <div class="caja-saldo ${isNeg ? 'neg' : ''}">${saldoFmt}</div>
+          <div class="caja-row" style="color:var(--text-muted);font-size:11px"><span>${equiv}</span></div>
           <div class="caja-row"><span>Entradas</span><span>${c.moneda === 'USD' ? 'USD ' + c.entradas : fmt(c.entradas)}</span></div>
           <div class="caja-row"><span>Salidas</span><span>${c.moneda === 'USD' ? 'USD ' + c.salidas : fmt(c.salidas)}</span></div>
           ${c.cobroPendiente ? `<div class="caja-row"><span>Pendiente cobro</span><span style="color:var(--accent)">${fmt(c.cobroPendiente)}</span></div>` : ''}
           ${c.diff !== 0 ? `<div class="caja-diff"><span>Diff real vs calc</span><span style="color:${c.diff >= 0 ? 'var(--green)' : 'var(--red)'}}">${fmt(c.diff)}</span></div>` : ''}
         </div>`;
     }).join('');
+
   } catch(err) {
     document.getElementById('cajas-grid').innerHTML = `<div style="color:var(--red)">Error: ${err.message}</div>`;
   }
