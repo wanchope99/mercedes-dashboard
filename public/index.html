@@ -241,6 +241,84 @@
       .form-grid { grid-template-columns: 1fr; }
       .form-group.full { grid-column: 1; }
     }
+
+    /* ── Login ── */
+    #login-screen {
+      display: none; position: fixed; inset: 0;
+      background: var(--bg); z-index: 1000;
+      align-items: center; justify-content: center;
+    }
+    #login-screen.active { display: flex; }
+    .login-box {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 40px; width: 360px; max-width: 95vw;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+    }
+    .login-logo { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
+    .login-logo-mark { width: 44px; height: 44px; background: var(--accent); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 20px; color: #0f0f13; }
+    .login-title { font-size: 20px; font-weight: 700; }
+    .login-sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+    .login-field { margin-bottom: 16px; }
+    .login-field label { display: block; font-size: 12px; font-weight: 500; color: var(--text-muted); margin-bottom: 6px; }
+    .login-field input { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 11px 14px; border-radius: 8px; font-size: 14px; font-family: inherit; outline: none; }
+    .login-field input:focus { border-color: var(--accent); }
+    .login-btn { width: 100%; background: var(--accent); border: none; color: #0f0f13; padding: 12px; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: inherit; cursor: pointer; margin-top: 8px; transition: background 0.2s; }
+    .login-btn:hover { background: #d4b05a; }
+    .login-error { color: var(--red); font-size: 13px; margin-top: 12px; text-align: center; min-height: 20px; }
+
+    /* ── Arqueo de Cajas ── */
+    .arqueo-wrap { max-width: 600px; margin: 0 auto; padding: 32px 24px; display: flex; flex-direction: column; gap: 20px; }
+    .arqueo-header-date { font-size: 13px; color: var(--text-muted); text-align: center; margin-bottom: 4px; }
+    .arqueo-title { font-size: 22px; font-weight: 700; text-align: center; margin-bottom: 20px; }
+
+    .arqueo-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; }
+    .arqueo-card-title { font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 20px; }
+
+    .arqueo-field { margin-bottom: 16px; }
+    .arqueo-field label { display: block; font-size: 13px; font-weight: 500; color: var(--text-muted); margin-bottom: 6px; }
+    .arqueo-field input { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 12px 14px; border-radius: 8px; font-size: 18px; font-family: inherit; outline: none; font-variant-numeric: tabular-nums; }
+    .arqueo-field input:focus { border-color: var(--accent); }
+    .arqueo-field input::placeholder { color: var(--text-muted); font-size: 14px; }
+
+    .arqueo-btn { width: 100%; padding: 14px; border-radius: 10px; font-size: 16px; font-weight: 700; font-family: inherit; cursor: pointer; border: none; transition: all 0.2s; }
+    .arqueo-btn.open { background: var(--green); color: #0f0f13; }
+    .arqueo-btn.open:hover { background: #3d9e6e; }
+    .arqueo-btn.close { background: var(--red); color: #fff; }
+    .arqueo-btn.close:hover { background: #c94f4f; }
+    .arqueo-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .caja-estado-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 14px; border-radius: 99px; font-size: 13px; font-weight: 600;
+    }
+    .caja-estado-badge.abierta { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+    .caja-estado-badge.cerrada { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+    .caja-estado-badge .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .caja-estado-badge.abierta .dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .caja-estado-badge.cerrada .dot { background: var(--text-muted); }
+
+    .arqueo-saldos-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 12px; }
+    .arqueo-saldo-item { background: var(--surface2); border-radius: 8px; padding: 12px; text-align: center; }
+    .arqueo-saldo-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+    .arqueo-saldo-val { font-size: 16px; font-weight: 700; color: var(--accent); }
+
+    .arqueo-timer { text-align: center; font-size: 28px; font-weight: 700; color: var(--green); letter-spacing: 0.05em; font-variant-numeric: tabular-nums; }
+    .arqueo-timer-label { text-align: center; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+    /* Resumen cierre */
+    .resumen-cierre { background: var(--surface2); border-radius: 10px; padding: 20px; }
+    .resumen-cierre-title { font-size: 14px; font-weight: 600; margin-bottom: 16px; color: var(--accent); }
+    .resumen-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid rgba(46,46,62,0.5); }
+    .resumen-row:last-child { border-bottom: none; }
+    .resumen-dif-pos { color: var(--green); font-weight: 600; }
+    .resumen-dif-neg { color: var(--red); font-weight: 600; }
+
+    /* Modal cierre */
+    #cierre-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 500; align-items: center; justify-content: center; }
+    #cierre-modal-overlay.open { display: flex; }
+    #cierre-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 32px; width: 440px; max-width: 95vw; box-shadow: 0 24px 64px rgba(0,0,0,0.5); }
+    #cierre-modal h3 { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+    #cierre-modal .subtitle { font-size: 13px; color: var(--text-muted); margin-bottom: 24px; }
   </style>
 </head>
 <body>
@@ -259,22 +337,48 @@
   </div>
 </div>
 
+<!-- ═══ LOGIN SCREEN ═══ -->
+<div id="login-screen" class="active">
+  <div class="login-box">
+    <div class="login-logo">
+      <div class="login-logo-mark">M</div>
+      <div>
+        <div class="login-title">Bar Mercedes</div>
+        <div class="login-sub">Gestión interna</div>
+      </div>
+    </div>
+    <div class="login-field">
+      <label>Usuario</label>
+      <input type="text" id="login-usuario" placeholder="admin / charly" autocomplete="username" />
+    </div>
+    <div class="login-field">
+      <label>Contraseña</label>
+      <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()" />
+    </div>
+    <button class="login-btn" onclick="doLogin()">Ingresar</button>
+    <div class="login-error" id="login-error"></div>
+  </div>
+</div>
+
 <header>
   <div class="logo">
     <div class="logo-mark">M</div>
     <div><div class="logo-text">Bar Mercedes</div></div>
   </div>
   <div class="header-right">
-    <span id="last-updated">Cargando...</span>
-    <button class="btn" onclick="refreshData()">↻ Actualizar</button>
+    <span id="last-updated" style="display:none"></span>
+    <span id="header-usuario" style="font-size:13px;color:var(--text-muted)"></span>
+    <button class="btn" id="btn-refresh" style="display:none" onclick="refreshData()">↻ Actualizar</button>
+    <button class="btn" onclick="doLogout()" style="font-size:12px">Salir</button>
   </div>
 </header>
 
 <!-- Tab nav -->
-<div class="tab-nav">
-  <button class="tab-btn active" onclick="switchTab('dashboard', this)">📊 Dashboard</button>
-  <button class="tab-btn" onclick="switchTab('pagos', this)">💳 Pagos pendientes</button>
-  <button class="tab-btn" onclick="switchTab('cajas', this)">🏦 Cajas</button>
+<div class="tab-nav" id="tab-nav">
+  <button class="tab-btn active" id="tab-btn-dashboard" onclick="switchTab('dashboard', this)">📊 Dashboard</button>
+  <button class="tab-btn" id="tab-btn-pagos" onclick="switchTab('pagos', this)">💳 Pagos pendientes</button>
+  <button class="tab-btn" id="tab-btn-cajas" onclick="switchTab('cajas', this)">🏦 Cajas</button>
+  <button class="tab-btn" id="tab-btn-arqueo" onclick="switchTab('arqueo', this)">🗃️ Arqueo de Caja</button>
 </div>
 
 <!-- ═══ DASHBOARD TAB ═══ -->
@@ -390,6 +494,78 @@
   </main>
 </div>
 
+<!-- ═══ ARQUEO TAB ═══ -->
+<div id="tab-arqueo" class="tab-panel">
+  <div class="arqueo-wrap">
+    <div id="arqueo-fecha-header" class="arqueo-header-date"></div>
+
+    <!-- Estado actual -->
+    <div class="arqueo-card" id="arqueo-estado-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div class="arqueo-card-title" style="margin:0">Estado de caja</div>
+        <span id="arqueo-badge" class="caja-estado-badge cerrada"><span class="dot"></span>Cerrada</span>
+      </div>
+      <div id="arqueo-timer-wrap" style="display:none">
+        <div class="arqueo-timer" id="arqueo-timer">00:00:00</div>
+        <div class="arqueo-timer-label">Tiempo de servicio</div>
+        <div class="arqueo-saldos-grid" style="margin-top:20px" id="arqueo-saldos-iniciales"></div>
+      </div>
+    </div>
+
+    <!-- Formulario apertura (visible cuando cerrada) -->
+    <div class="arqueo-card" id="arqueo-form-apertura">
+      <div class="arqueo-card-title">Saldos iniciales</div>
+      <div class="arqueo-field">
+        <label>💵 Efectivo Local</label>
+        <input type="number" id="ap-efectivo" placeholder="0" min="0" />
+      </div>
+      <div class="arqueo-field">
+        <label>📱 Mercado Pago</label>
+        <input type="number" id="ap-mp" placeholder="0" min="0" />
+      </div>
+      <div class="arqueo-field">
+        <label>🏦 Galicia</label>
+        <input type="number" id="ap-galicia" placeholder="0" min="0" />
+      </div>
+      <button class="arqueo-btn open" onclick="abrirCaja()">Abrir Caja</button>
+      <div id="arqueo-error" style="color:var(--red);font-size:13px;margin-top:12px;text-align:center"></div>
+    </div>
+
+    <!-- Botón cerrar (visible cuando abierta) -->
+    <div id="arqueo-btn-cerrar-wrap" style="display:none">
+      <button class="arqueo-btn close" onclick="openCierreModal()">Cerrar Caja</button>
+    </div>
+
+    <!-- Último resumen (post-cierre) -->
+    <div id="arqueo-ultimo-resumen" style="display:none"></div>
+  </div>
+</div>
+
+<!-- Modal cierre de caja -->
+<div id="cierre-modal-overlay">
+  <div id="cierre-modal">
+    <h3>Cierre de Caja</h3>
+    <p class="subtitle">Ingresá los saldos finales contados al cerrar el servicio.</p>
+    <div class="arqueo-field">
+      <label>💵 Efectivo Local final</label>
+      <input type="number" id="ci-efectivo" placeholder="0" min="0" />
+    </div>
+    <div class="arqueo-field">
+      <label>📱 Mercado Pago final</label>
+      <input type="number" id="ci-mp" placeholder="0" min="0" />
+    </div>
+    <div class="arqueo-field">
+      <label>🏦 Galicia final</label>
+      <input type="number" id="ci-galicia" placeholder="0" min="0" />
+    </div>
+    <div id="cierre-error" style="color:var(--red);font-size:13px;margin-bottom:12px;text-align:center"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeCierreModal()">Cancelar</button>
+      <button class="btn btn-accent" onclick="cerrarCaja()">Confirmar cierre</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ CAJAS TAB ═══ -->
 <div id="tab-cajas" class="tab-panel">
   <main style="padding-top:24px">
@@ -472,18 +648,113 @@
 const state = {
   modo: 'mes', mes: '', desde: '', hasta: '',
   resumen: [], diasData: [], diasSemana: [],
-  charts: {}, pagosSort: 'vencimiento', proveedores: {}
+  charts: {}, pagosSort: 'vencimiento', proveedores: {},
+  tc: 1425,
+  // Auth
+  token: null, rol: null, nombre: null,
+  // Arqueo
+  timerInterval: null,
 };
 
 const fmt = n => `$${Math.round(n).toLocaleString('es-AR')}`;
 const fmtFull = n => `$${Math.round(n).toLocaleString('es-AR')}`;
 const pct = n => `${n.toFixed(1)}%`;
 
-async function api(path, opts) {
-  const res = await fetch(path, opts);
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+function getToken() { return state.token || localStorage.getItem('mb_token'); }
+function getRol() { return state.rol || localStorage.getItem('mb_rol'); }
+function getNombre() { return state.nombre || localStorage.getItem('mb_nombre'); }
+
+async function api(path, opts = {}) {
+  const token = getToken();
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(path, { ...opts, headers });
+  if (res.status === 401) { doLogout(); throw new Error('Sesión expirada'); }
   const json = await res.json();
   if (!json.ok) throw new Error(json.error);
   return json;
+}
+
+async function doLogin() {
+  const usuario = document.getElementById('login-usuario').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuario, password }),
+    });
+    const json = await res.json();
+    if (!json.ok) { errEl.textContent = json.error; return; }
+
+    state.token = json.token;
+    state.rol = json.rol;
+    state.nombre = json.nombre;
+    localStorage.setItem('mb_token', json.token);
+    localStorage.setItem('mb_rol', json.rol);
+    localStorage.setItem('mb_nombre', json.nombre);
+
+    onLoginSuccess(json.rol, json.nombre);
+  } catch (err) {
+    errEl.textContent = 'Error de conexión';
+  }
+}
+
+function onLoginSuccess(rol, nombre) {
+  document.getElementById('login-screen').classList.remove('active');
+  document.getElementById('header-usuario').textContent = `👤 ${nombre}`;
+
+  if (rol === 'admin') {
+    // Mostrar todo, ocultar tab arqueo del admin si querés (lo dejamos visible igual)
+    document.getElementById('last-updated').style.display = '';
+    document.getElementById('btn-refresh').style.display = '';
+    // Todas las tabs visibles
+    ['tab-btn-dashboard','tab-btn-pagos','tab-btn-cajas','tab-btn-arqueo'].forEach(id => {
+      document.getElementById(id).style.display = '';
+    });
+    init(); // carga dashboard
+  } else {
+    // Encargado: solo tab arqueo
+    document.getElementById('tab-btn-dashboard').style.display = 'none';
+    document.getElementById('tab-btn-pagos').style.display = 'none';
+    document.getElementById('tab-btn-cajas').style.display = 'none';
+    document.getElementById('tab-btn-arqueo').style.display = '';
+    // Activar tab arqueo directamente
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('tab-arqueo').classList.add('active');
+    document.getElementById('tab-btn-arqueo').classList.add('active');
+    initArqueo();
+  }
+}
+
+function doLogout() {
+  state.token = null; state.rol = null; state.nombre = null;
+  localStorage.removeItem('mb_token');
+  localStorage.removeItem('mb_rol');
+  localStorage.removeItem('mb_nombre');
+  if (state.timerInterval) clearInterval(state.timerInterval);
+  document.getElementById('login-screen').classList.add('active');
+  document.getElementById('login-password').value = '';
+  document.getElementById('login-error').textContent = '';
+  document.getElementById('header-usuario').textContent = '';
+}
+
+// Auto-login si hay token guardado
+async function checkSavedToken() {
+  const token = getToken();
+  if (!token) { document.getElementById('login-screen').classList.add('active'); return; }
+  try {
+    state.token = token;
+    const { rol, nombre } = await api('/api/me');
+    state.rol = rol; state.nombre = nombre;
+    onLoginSuccess(rol, nombre);
+  } catch {
+    doLogout();
+  }
 }
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
@@ -494,6 +765,136 @@ function switchTab(tab, btn) {
   document.getElementById('tab-' + tab).classList.add('active');
   if (tab === 'pagos') loadPagos();
   if (tab === 'cajas') loadCajas();
+  if (tab === 'arqueo') initArqueo();
+}
+
+// ─── ARQUEO DE CAJAS ──────────────────────────────────────────────────────────
+async function initArqueo() {
+  // Fecha de hoy
+  const hoy = new Date();
+  document.getElementById('arqueo-fecha-header').textContent =
+    hoy.toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+  try {
+    const { data } = await api('/api/arqueo/estado');
+    renderEstadoArqueo(data);
+  } catch(err) {
+    document.getElementById('arqueo-error').textContent = err.message;
+  }
+}
+
+function renderEstadoArqueo(data) {
+  const badge = document.getElementById('arqueo-badge');
+  const timerWrap = document.getElementById('arqueo-timer-wrap');
+  const formApertura = document.getElementById('arqueo-form-apertura');
+  const btnCerrarWrap = document.getElementById('arqueo-btn-cerrar-wrap');
+
+  if (data.abierta) {
+    // Caja abierta
+    badge.className = 'caja-estado-badge abierta';
+    badge.innerHTML = '<span class="dot"></span>Abierta';
+    timerWrap.style.display = 'block';
+    formApertura.style.display = 'none';
+    btnCerrarWrap.style.display = 'block';
+
+    // Mostrar saldos iniciales
+    document.getElementById('arqueo-saldos-iniciales').innerHTML = `
+      <div class="arqueo-saldo-item"><div class="arqueo-saldo-label">💵 Efectivo inicial</div><div class="arqueo-saldo-val">${fmt(data.efectivoInicial)}</div></div>
+      <div class="arqueo-saldo-item"><div class="arqueo-saldo-label">📱 MP inicial</div><div class="arqueo-saldo-val">${fmt(data.mpInicial)}</div></div>
+      <div class="arqueo-saldo-item"><div class="arqueo-saldo-label">🏦 Galicia inicial</div><div class="arqueo-saldo-val">${fmt(data.galiciaInicial)}</div></div>
+    `;
+
+    // Timer
+    if (state.timerInterval) clearInterval(state.timerInterval);
+    const apertura = new Date(data.apertura);
+    function updateTimer() {
+      const diff = Date.now() - apertura.getTime();
+      const h = Math.floor(diff / 3_600_000);
+      const m = Math.floor((diff % 3_600_000) / 60_000);
+      const s = Math.floor((diff % 60_000) / 1000);
+      document.getElementById('arqueo-timer').textContent =
+        `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    }
+    updateTimer();
+    state.timerInterval = setInterval(updateTimer, 1000);
+
+  } else {
+    // Caja cerrada
+    badge.className = 'caja-estado-badge cerrada';
+    badge.innerHTML = '<span class="dot"></span>Cerrada';
+    timerWrap.style.display = 'none';
+    formApertura.style.display = 'block';
+    btnCerrarWrap.style.display = 'none';
+    if (state.timerInterval) { clearInterval(state.timerInterval); state.timerInterval = null; }
+  }
+}
+
+async function abrirCaja() {
+  const efectivo = parseFloat(document.getElementById('ap-efectivo').value) || 0;
+  const mp = parseFloat(document.getElementById('ap-mp').value) || 0;
+  const galicia = parseFloat(document.getElementById('ap-galicia').value) || 0;
+  const errEl = document.getElementById('arqueo-error');
+  errEl.textContent = '';
+  try {
+    const { data } = await api('/api/arqueo/abrir', {
+      method: 'POST',
+      body: JSON.stringify({ efectivo, mercadoPago: mp, galicia }),
+    });
+    document.getElementById('arqueo-ultimo-resumen').style.display = 'none';
+    renderEstadoArqueo(data);
+  } catch(err) {
+    errEl.textContent = err.message;
+  }
+}
+
+function openCierreModal() {
+  document.getElementById('cierre-modal-overlay').classList.add('open');
+  document.getElementById('ci-efectivo').value = '';
+  document.getElementById('ci-mp').value = '';
+  document.getElementById('ci-galicia').value = '';
+  document.getElementById('cierre-error').textContent = '';
+}
+
+function closeCierreModal() {
+  document.getElementById('cierre-modal-overlay').classList.remove('open');
+}
+
+async function cerrarCaja() {
+  const efectivo = parseFloat(document.getElementById('ci-efectivo').value) || 0;
+  const mp = parseFloat(document.getElementById('ci-mp').value) || 0;
+  const galicia = parseFloat(document.getElementById('ci-galicia').value) || 0;
+  const errEl = document.getElementById('cierre-error');
+  errEl.textContent = '';
+  try {
+    const { data } = await api('/api/arqueo/cerrar', {
+      method: 'POST',
+      body: JSON.stringify({ efectivo, mercadoPago: mp, galicia }),
+    });
+    closeCierreModal();
+    renderEstadoArqueo({ abierta: false });
+    renderResumenCierre(data);
+  } catch(err) {
+    errEl.textContent = err.message;
+  }
+}
+
+function difClass(v) { return v > 0 ? 'resumen-dif-pos' : v < 0 ? 'resumen-dif-neg' : ''; }
+function difStr(v) { return (v > 0 ? '+' : '') + fmt(v); }
+
+function renderResumenCierre(d) {
+  const el = document.getElementById('arqueo-ultimo-resumen');
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div class="arqueo-card">
+      <div class="arqueo-card-title">✅ Resumen del servicio</div>
+      <div class="resumen-cierre">
+        <div class="resumen-cierre-title">📅 ${d.fecha} · ${d.apertura} → ${d.cierre} (${d.duracion})</div>
+        <div class="resumen-row"><span>💵 Efectivo</span><span>${fmt(d.efectivoInicial)} → <strong>${fmt(d.efectivoFinal)}</strong> <span class="${difClass(d.difEfectivo)}">${difStr(d.difEfectivo)}</span></span></div>
+        <div class="resumen-row"><span>📱 Mercado Pago</span><span>${fmt(d.mpInicial)} → <strong>${fmt(d.mpFinal)}</strong> <span class="${difClass(d.difMP)}">${difStr(d.difMP)}</span></span></div>
+        <div class="resumen-row"><span>🏦 Galicia</span><span>${fmt(d.galiciaInicial)} → <strong>${fmt(d.galiciaFinal)}</strong> <span class="${difClass(d.difGalicia)}">${difStr(d.difGalicia)}</span></span></div>
+      </div>
+    </div>
+  `;
 }
 
 // ─── Filtros ──────────────────────────────────────────────────────────────────
@@ -561,6 +962,14 @@ function renderKPIs(resumen, diasSemana, esMensual) {
   const mercaderia = resumen.reduce((s, m) => s + m.gastos.Mercaderia, 0);
   const insumos = resumen.reduce((s, m) => s + m.gastos.Insumos, 0);
   const personal = resumen.reduce((s, m) => s + m.gastos.Personal, 0);
+  const operativos = resumen.reduce((s, m) => s + m.gastos.Operativos, 0);
+
+  // Operativo = gastos recurrentes del negocio en marcha
+  const gastoOperativo = mercaderia + insumos + personal + operativos;
+  // Inversión = gastos de setup / una vez
+  const gastoInversion = resumen.reduce((s, m) =>
+    s + (m.gastos.Equipamiento || 0) + (m.gastos.Impuestos || 0) + (m.gastos.Otros || 0), 0);
+
   const pctMI = totalIngresos > 0 ? ((mercaderia + insumos) / totalIngresos) * 100 : 0;
   const pctPersonal = totalIngresos > 0 ? (personal / totalIngresos) * 100 : 0;
   const diasServ = diasSemana.reduce((s, d) => s + d.cantServicios, 0);
@@ -576,7 +985,10 @@ function renderKPIs(resumen, diasSemana, esMensual) {
     <div class="kpi-card red">
       <div class="kpi-label">Total Gastos</div>
       <div class="kpi-value">${fmt(totalGastos)}</div>
-      <div class="kpi-sub">Pagados + pendientes</div>
+      <div class="kpi-sub" style="display:flex;flex-direction:column;gap:2px;margin-top:6px">
+        <span>🔄 Operativo: <strong style="color:var(--text)">${fmt(gastoOperativo)}</strong></span>
+        <span>📦 Inversión: <strong style="color:var(--text-muted)">${fmt(gastoInversion)}</strong></span>
+      </div>
     </div>
     <div class="kpi-card ${resultado >= 0 ? 'green' : 'red'}">
       <div class="kpi-label">Resultado Neto</div>
@@ -707,9 +1119,6 @@ function renderActividadDiaria(dias) {
 }
 
 // ─── Cajas ────────────────────────────────────────────────────────────────────
-// Tipo de cambio editable (default 1425)
-state.tc = 1425;
-
 function editTC() {
   const nuevo = prompt('Ingresá el tipo de cambio USD/ARS actual:', state.tc);
   if (nuevo && !isNaN(nuevo)) {
@@ -1019,7 +1428,8 @@ async function saveNewPago() {
   } catch(err) { statusEl.style.color = 'var(--red)'; statusEl.textContent = `❌ Error: ${err.message}`; }
 }
 
-init();
+// Arrancar: verificar token guardado o mostrar login
+checkSavedToken();
 </script>
 </body>
 </html>
