@@ -557,6 +557,11 @@
     <div class="arqueo-field">
       <label>🏦 Galicia final</label>
       <input type="number" id="ci-galicia" placeholder="0" min="0" />
+      <div style="margin-top:10px;padding:12px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
+        <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px">📋 Impuestos deducidos (Galicia)</label>
+        <input type="number" id="ci-impuestos-galicia" placeholder="0" min="0" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:6px;font-size:16px;font-family:inherit;outline:none;" />
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Se registrará como Gasto · Fiscales en Movimientos</div>
+      </div>
     </div>
     <div id="cierre-error" style="color:var(--red);font-size:13px;margin-bottom:12px;text-align:center"></div>
     <div class="modal-actions">
@@ -852,6 +857,7 @@ function openCierreModal() {
   document.getElementById('ci-efectivo').value = '';
   document.getElementById('ci-mp').value = '';
   document.getElementById('ci-galicia').value = '';
+  document.getElementById('ci-impuestos-galicia').value = '';
   document.getElementById('cierre-error').textContent = '';
 }
 
@@ -863,12 +869,13 @@ async function cerrarCaja() {
   const efectivo = parseFloat(document.getElementById('ci-efectivo').value) || 0;
   const mp = parseFloat(document.getElementById('ci-mp').value) || 0;
   const galicia = parseFloat(document.getElementById('ci-galicia').value) || 0;
+  const impuestosGalicia = parseFloat(document.getElementById('ci-impuestos-galicia').value) || 0;
   const errEl = document.getElementById('cierre-error');
   errEl.textContent = '';
   try {
     const { data } = await api('/api/arqueo/cerrar', {
       method: 'POST',
-      body: JSON.stringify({ efectivo, mercadoPago: mp, galicia }),
+      body: JSON.stringify({ efectivo, mercadoPago: mp, galicia, impuestosGalicia }),
     });
     closeCierreModal();
     renderEstadoArqueo({ abierta: false });
@@ -892,6 +899,7 @@ function renderResumenCierre(d) {
         <div class="resumen-row"><span>💵 Efectivo</span><span>${fmt(d.efectivoInicial)} → <strong>${fmt(d.efectivoFinal)}</strong> <span class="${difClass(d.difEfectivo)}">${difStr(d.difEfectivo)}</span></span></div>
         <div class="resumen-row"><span>📱 Mercado Pago</span><span>${fmt(d.mpInicial)} → <strong>${fmt(d.mpFinal)}</strong> <span class="${difClass(d.difMP)}">${difStr(d.difMP)}</span></span></div>
         <div class="resumen-row"><span>🏦 Galicia</span><span>${fmt(d.galiciaInicial)} → <strong>${fmt(d.galiciaFinal)}</strong> <span class="${difClass(d.difGalicia)}">${difStr(d.difGalicia)}</span></span></div>
+        ${d.impuestosGalicia > 0 ? `<div class="resumen-row"><span style="color:var(--text-muted)">📋 Impuestos Galicia</span><span style="color:var(--red)">-${fmt(d.impuestosGalicia)}</span></div>` : ''}
       </div>
     </div>
   `;
