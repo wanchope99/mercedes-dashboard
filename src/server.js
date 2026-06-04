@@ -191,6 +191,9 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   res.json({ ok: true, data: resumen });
 });
 
+// ─── Healthcheck público (para Railway) ──────────────────────────────────────
+app.get('/api/health', (req, res) => res.json({ ok: true, status: 'ok' }));
+
 // ─── Filtro de fecha ──────────────────────────────────────────────────────────
 function parseFiltro(query) {
   const { mes, desde, hasta } = query;
