@@ -1,0 +1,24 @@
+{
+  "name": "mercedes-dashboard",
+  "version": "1.0.0",
+  "description": "Dashboard de gestión para Bar Mercedes",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "googleapis": "^140.0.0",
+    "dotenv": "^16.3.1",
+    "cors": "^2.8.5",
+    "node-cache": "^5.1.2",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
