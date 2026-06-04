@@ -123,28 +123,41 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   if (!estadoCaja.abierta) {
     return res.status(400).json({ ok: false, error: 'La caja no está abierta' });
   }
-  const { efectivo, mercadoPago, galicia } = req.body;
+  const { efectivo, mercadoPago, galicia, impuestosGalicia } = req.body;
   if (efectivo === undefined || mercadoPago === undefined || galicia === undefined) {
     return res.status(400).json({ ok: false, error: 'Faltan valores de saldo final' });
   }
 
   const cierre = new Date();
+  // La fecha del servicio corresponde al día de APERTURA de caja
   const apertura = new Date(estadoCaja.apertura);
   const duracionMs = cierre - apertura;
   const horas = Math.floor(duracionMs / 3_600_000);
   const minutos = Math.floor((duracionMs % 3_600_000) / 60_000);
   const duracionStr = `${horas}h ${minutos}m`;
 
-  // Formatear fechas para el Sheet
+  // Fecha del servicio en formato dd/mm/yy (día de apertura)
+  const dd = String(apertura.getDate()).padStart(2, '0');
+  const mm = String(apertura.getMonth() + 1).padStart(2, '0');
+  const yy = String(apertura.getFullYear()).slice(-2);
+  const fechaServicio = `${dd}/${mm}/${yy}`;
+  const mesesNombres = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const mesServicio = mesesNombres[apertura.getMonth()];
+  const descripcionServicio = `Servicio ${dd}/${mm}`;
+
+  // Fechas para hoja Arqueo de Cajas (formato largo local)
   const fechaStr = apertura.toLocaleDateString('es-AR');
   const aperturaStr = apertura.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
   const cierreStr = cierre.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 
-  // Guardar en Google Sheets
+  const impuestos = Number(impuestosGalicia) || 0;
+
   try {
     const auth = getAuth();
     const sheets = google.sheets({ version: 'v4', auth });
-    const row = [
+
+    // 1. Escribir en Arqueo de Cajas
+    const rowArqueo = [
       fechaStr,
       aperturaStr,
       cierreStr,
@@ -160,8 +173,43 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
       spreadsheetId: SPREADSHEET_ID,
       range: 'Arqueo de Cajas!A:J',
       valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [row] },
+      requestBody: { values: [rowArqueo] },
     });
+
+    // 2. Escribir en Movimientos — columnas A:M
+    // A:Fecha, B:Mes, C:Tipo Movimiento, D:Estado, E:Vencimiento, F:Proveedor,
+    // G:Categoría, H:Descripción, I:Medio de Pago, J:Monto Entrada ARS,
+    // K:Monto Entrada USD, L:Monto Salida ARS, M:Monto Salida USD
+    const makeIngreso = (medioPago, montoEntrada) => [
+      fechaServicio, mesServicio, 'Ingreso', 'Pagado', '',
+      'Servicio', 'Ingreso', descripcionServicio,
+      medioPago, montoEntrada, '', '', '',
+    ];
+    // Solo se registra ingreso si el saldo final supera al inicial (delta > 0)
+    const rowsMovimientos = [];
+    const deltaEfectivo = Number(efectivo) - estadoCaja.efectivoInicial;
+    const deltaMP       = Number(mercadoPago) - estadoCaja.mpInicial;
+    const deltaGalicia  = Number(galicia) - estadoCaja.galiciaInicial;
+    if (deltaEfectivo > 0) rowsMovimientos.push(makeIngreso('Efectivo Local', deltaEfectivo));
+    if (deltaMP       > 0) rowsMovimientos.push(makeIngreso('Mercado Pago',   deltaMP));
+    if (deltaGalicia  > 0) rowsMovimientos.push(makeIngreso('Galicia',        deltaGalicia));
+    if (impuestos > 0) {
+      rowsMovimientos.push([
+        fechaServicio, mesServicio, 'Gasto', 'Pagado', '',
+        'Servicio', 'Fiscales', descripcionServicio,
+        'Galicia', '', '', impuestos, '',
+      ]);
+    }
+    if (rowsMovimientos.length > 0) {
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Movimientos!A:M',
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: rowsMovimientos },
+      });
+    }
+
+    clearCache();
   } catch (err) {
     console.error('Error guardando arqueo:', err.message);
     return res.status(500).json({ ok: false, error: 'Error al guardar en la planilla: ' + err.message });
@@ -179,7 +227,7 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
     efectivoFinal: Number(efectivo),
     mpFinal: Number(mercadoPago),
     galiciaFinal: Number(galicia),
-    // Diferencias
+    impuestosGalicia: impuestos,
     difEfectivo: Number(efectivo) - estadoCaja.efectivoInicial,
     difMP: Number(mercadoPago) - estadoCaja.mpInicial,
     difGalicia: Number(galicia) - estadoCaja.galiciaInicial,
