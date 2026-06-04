@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const jwt = require('jsonwebtoken');
 const { google } = require('googleapis');
 const {
   getMovimientos, getResumenMensual, getActividadPorDia,
@@ -15,7 +16,35 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// ─── Auth helper ──────────────────────────────────────────────────────────────
+// ─── Config ───────────────────────────────────────────────────────────────────
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+const JWT_SECRET = process.env.JWT_SECRET || 'mercedes-secret-2026';
+
+// Usuarios: credenciales desde variables de entorno
+const USUARIOS = {
+  admin: {
+    password: process.env.ADMIN_PASSWORD || 'admin123',
+    rol: 'admin',
+    nombre: 'Administrador',
+  },
+  charly: {
+    password: process.env.CHARLY_PASSWORD || 'charly123',
+    rol: 'encargado',
+    nombre: 'Charly',
+  },
+};
+
+// Estado de caja en memoria (persiste mientras el servidor esté corriendo)
+let estadoCaja = {
+  abierta: false,
+  apertura: null,         // timestamp ISO
+  encargado: null,
+  efectivoInicial: null,
+  mpInicial: null,
+  galiciaInicial: null,
+};
+
+// ─── Auth helpers ─────────────────────────────────────────────────────────────
 function getAuth() {
   const credentials = process.env.GOOGLE_CREDENTIALS_JSON
     ? JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON)
@@ -26,58 +55,189 @@ function getAuth() {
   });
 }
 
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+function authMiddleware(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return res.status(401).json({ ok: false, error: 'No autenticado' });
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ ok: false, error: 'Token inválido o expirado' });
+  }
+}
+
+function adminOnly(req, res, next) {
+  if (req.user?.rol !== 'admin') return res.status(403).json({ ok: false, error: 'Sin permisos' });
+  next();
+}
+
+// ─── Login ────────────────────────────────────────────────────────────────────
+app.post('/api/login', (req, res) => {
+  const { usuario, password } = req.body;
+  const user = USUARIOS[usuario?.toLowerCase()];
+  if (!user || user.password !== password) {
+    return res.status(401).json({ ok: false, error: 'Usuario o contraseña incorrectos' });
+  }
+  const token = jwt.sign(
+    { usuario: usuario.toLowerCase(), rol: user.rol, nombre: user.nombre },
+    JWT_SECRET,
+    { expiresIn: '24h' }
+  );
+  res.json({ ok: true, token, rol: user.rol, nombre: user.nombre });
+});
+
+// Verificar token vigente
+app.get('/api/me', authMiddleware, (req, res) => {
+  res.json({ ok: true, usuario: req.user.usuario, rol: req.user.rol, nombre: req.user.nombre });
+});
+
+// ─── Arqueo de Cajas ──────────────────────────────────────────────────────────
+
+// GET /api/arqueo/estado — estado actual de la caja
+app.get('/api/arqueo/estado', authMiddleware, (req, res) => {
+  res.json({ ok: true, data: estadoCaja });
+});
+
+// POST /api/arqueo/abrir
+app.post('/api/arqueo/abrir', authMiddleware, (req, res) => {
+  if (estadoCaja.abierta) {
+    return res.status(400).json({ ok: false, error: 'La caja ya está abierta' });
+  }
+  const { efectivo, mercadoPago, galicia } = req.body;
+  if (efectivo === undefined || mercadoPago === undefined || galicia === undefined) {
+    return res.status(400).json({ ok: false, error: 'Faltan valores de saldo inicial' });
+  }
+  estadoCaja = {
+    abierta: true,
+    apertura: new Date().toISOString(),
+    encargado: req.user.nombre,
+    efectivoInicial: Number(efectivo),
+    mpInicial: Number(mercadoPago),
+    galiciaInicial: Number(galicia),
+  };
+  res.json({ ok: true, data: estadoCaja });
+});
+
+// POST /api/arqueo/cerrar
+app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
+  if (!estadoCaja.abierta) {
+    return res.status(400).json({ ok: false, error: 'La caja no está abierta' });
+  }
+  const { efectivo, mercadoPago, galicia } = req.body;
+  if (efectivo === undefined || mercadoPago === undefined || galicia === undefined) {
+    return res.status(400).json({ ok: false, error: 'Faltan valores de saldo final' });
+  }
+
+  const cierre = new Date();
+  const apertura = new Date(estadoCaja.apertura);
+  const duracionMs = cierre - apertura;
+  const horas = Math.floor(duracionMs / 3_600_000);
+  const minutos = Math.floor((duracionMs % 3_600_000) / 60_000);
+  const duracionStr = `${horas}h ${minutos}m`;
+
+  // Formatear fechas para el Sheet
+  const fechaStr = apertura.toLocaleDateString('es-AR');
+  const aperturaStr = apertura.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+  const cierreStr = cierre.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+
+  // Guardar en Google Sheets
+  try {
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+    const row = [
+      fechaStr,
+      aperturaStr,
+      cierreStr,
+      duracionStr,
+      estadoCaja.efectivoInicial,
+      estadoCaja.mpInicial,
+      estadoCaja.galiciaInicial,
+      Number(efectivo),
+      Number(mercadoPago),
+      Number(galicia),
+    ];
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Arqueo de Cajas!A:J',
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [row] },
+    });
+  } catch (err) {
+    console.error('Error guardando arqueo:', err.message);
+    return res.status(500).json({ ok: false, error: 'Error al guardar en la planilla: ' + err.message });
+  }
+
+  const resumen = {
+    fecha: fechaStr,
+    apertura: aperturaStr,
+    cierre: cierreStr,
+    duracion: duracionStr,
+    encargado: estadoCaja.encargado,
+    efectivoInicial: estadoCaja.efectivoInicial,
+    mpInicial: estadoCaja.mpInicial,
+    galiciaInicial: estadoCaja.galiciaInicial,
+    efectivoFinal: Number(efectivo),
+    mpFinal: Number(mercadoPago),
+    galiciaFinal: Number(galicia),
+    // Diferencias
+    difEfectivo: Number(efectivo) - estadoCaja.efectivoInicial,
+    difMP: Number(mercadoPago) - estadoCaja.mpInicial,
+    difGalicia: Number(galicia) - estadoCaja.galiciaInicial,
+  };
+
+  // Resetear estado
+  estadoCaja = { abierta: false, apertura: null, encargado: null, efectivoInicial: null, mpInicial: null, galiciaInicial: null };
+
+  res.json({ ok: true, data: resumen });
+});
 
 // ─── Filtro de fecha ──────────────────────────────────────────────────────────
 function parseFiltro(query) {
   const { mes, desde, hasta } = query;
   if (mes) return { mes };
   if (desde && hasta) {
-    return {
-      fechaDesde: new Date(desde),
-      fechaHasta: new Date(hasta + 'T23:59:59'),
-    };
+    return { fechaDesde: new Date(desde), fechaHasta: new Date(hasta + 'T23:59:59') };
   }
   return {};
 }
 
-// ─── Dashboard endpoints ──────────────────────────────────────────────────────
-app.get('/api/meses', async (req, res) => {
+// ─── Dashboard endpoints (solo admin) ────────────────────────────────────────
+app.get('/api/meses', authMiddleware, adminOnly, async (req, res) => {
   try { res.json({ ok: true, data: await getMeses() }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-app.get('/api/categorias', async (req, res) => {
+app.get('/api/categorias', authMiddleware, adminOnly, async (req, res) => {
   try { res.json({ ok: true, data: await getCategorias() }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-app.get('/api/resumen', async (req, res) => {
+app.get('/api/resumen', authMiddleware, adminOnly, async (req, res) => {
   try { res.json({ ok: true, data: await getResumenMensual(parseFiltro(req.query)) }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-app.get('/api/actividad-diaria', async (req, res) => {
+app.get('/api/actividad-diaria', authMiddleware, adminOnly, async (req, res) => {
   try { res.json({ ok: true, data: await getActividadPorDia(parseFiltro(req.query)) }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-app.get('/api/actividad-semana', async (req, res) => {
+app.get('/api/actividad-semana', authMiddleware, adminOnly, async (req, res) => {
   try { res.json({ ok: true, data: await getActividadPorDiaSemana(parseFiltro(req.query)) }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-app.get('/api/cajas', async (req, res) => {
+app.get('/api/cajas', authMiddleware, adminOnly, async (req, res) => {
   try { res.json({ ok: true, data: await getCajas() }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-app.get('/api/cambios', async (req, res) => {
+app.get('/api/cambios', authMiddleware, adminOnly, async (req, res) => {
   try { res.json({ ok: true, data: await getMovimientosCambio(parseFiltro(req.query)) }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-app.get('/api/movimientos', async (req, res) => {
+app.get('/api/movimientos', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { tipo, categoria, estado } = req.query;
     let movimientos = await getMovimientos();
@@ -93,178 +253,98 @@ app.get('/api/movimientos', async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-app.post('/api/refresh', (req, res) => {
+app.post('/api/refresh', authMiddleware, adminOnly, (req, res) => {
   clearCache();
   res.json({ ok: true, message: 'Cache limpiado.' });
 });
 
-// ─── Pagos pendientes ─────────────────────────────────────────────────────────
-// Lee movimientos con estado "A pagar" o "A Pagar" y los enriquece con urgencia
-
+// ─── Pagos (solo admin) ───────────────────────────────────────────────────────
 function calcUrgencia(vencimiento) {
   if (!vencimiento) return { urgencia: 'sin-fecha', diasHastaVenc: null, vencDate: null };
-
-  // Parsear fecha en formato DD/MM/YY o DD/MM/YYYY
   const parts = vencimiento.trim().split('/');
   if (parts.length !== 3) return { urgencia: 'sin-fecha', diasHastaVenc: null, vencDate: null };
-
   let [d, m, y] = parts.map(Number);
   if (y < 100) y += 2000;
   const vencDate = new Date(y, m - 1, d);
   if (isNaN(vencDate.getTime())) return { urgencia: 'sin-fecha', diasHastaVenc: null, vencDate: null };
-
-  const hoy = new Date();
-  hoy.setHours(0, 0, 0, 0);
-  const diffMs = vencDate - hoy;
-  const dias = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-
-  let urgencia;
-  if (dias < 0) urgencia = 'vencido';
-  else if (dias === 0) urgencia = 'hoy';
-  else if (dias <= 3) urgencia = 'urgente';
-  else if (dias <= 10) urgencia = 'proximo';
-  else urgencia = 'ok';
-
-  // Formato YYYY-MM-DD para el frontend
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const dias = Math.ceil((vencDate - hoy) / (1000 * 60 * 60 * 24));
+  const urgencia = dias < 0 ? 'vencido' : dias === 0 ? 'hoy' : dias <= 3 ? 'urgente' : dias <= 10 ? 'proximo' : 'ok';
   const vencISO = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-
   return { urgencia, diasHastaVenc: dias, vencDate: vencISO };
 }
 
-app.get('/api/pagos', async (req, res) => {
+app.get('/api/pagos', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { sort = 'vencimiento', medioPago, q } = req.query;
-
     const todos = await getMovimientos();
-
-    // Filtrar: Gasto, estado A pagar (cualquier variante), excluir cambios/fondeos
-    let pagos = todos.filter(m =>
-      m.tipo === 'Gasto' &&
-      !m.pagado &&
-      !m.esCambio &&
-      !m.esFondeo
-    );
-
-    // Filtros opcionales
+    let pagos = todos.filter(m => m.tipo === 'Gasto' && !m.pagado && !m.esCambio && !m.esFondeo);
     if (medioPago) pagos = pagos.filter(p => (p.medioPago || '').toLowerCase().includes(medioPago.toLowerCase()));
     if (q) pagos = pagos.filter(p => (p.proveedor || '').toLowerCase().includes(q.toLowerCase()));
-
-    // Enriquecer con urgencia
-    pagos = pagos.map(p => ({
-      ...p,
-      fecha: p.fecha.toISOString().split('T')[0],
-      ...calcUrgencia(p.vencimiento),
-    }));
-
-    // Ordenar
-    const ordenUrgencia = { vencido: 0, hoy: 1, urgente: 2, proximo: 3, ok: 4, 'sin-fecha': 5 };
-    if (sort === 'vencimiento') {
-      pagos.sort((a, b) => {
-        if (a.urgencia !== b.urgencia) return (ordenUrgencia[a.urgencia] || 5) - (ordenUrgencia[b.urgencia] || 5);
-        if (a.diasHastaVenc !== null && b.diasHastaVenc !== null) return a.diasHastaVenc - b.diasHastaVenc;
-        return 0;
-      });
-    } else if (sort === 'monto') {
-      pagos.sort((a, b) => (b.salidaTotal || 0) - (a.salidaTotal || 0));
-    } else if (sort === 'proveedor') {
-      pagos.sort((a, b) => (a.proveedor || '').localeCompare(b.proveedor || ''));
-    } else if (sort === 'formapago') {
-      pagos.sort((a, b) => (a.medioPago || '').localeCompare(b.medioPago || ''));
-    }
-
-    // Summary
+    pagos = pagos.map(p => ({ ...p, fecha: p.fecha.toISOString().split('T')[0], ...calcUrgencia(p.vencimiento) }));
+    const ordenU = { vencido: 0, hoy: 1, urgente: 2, proximo: 3, ok: 4, 'sin-fecha': 5 };
+    if (sort === 'vencimiento') pagos.sort((a, b) => (ordenU[a.urgencia]||5) - (ordenU[b.urgencia]||5) || (a.diasHastaVenc||999) - (b.diasHastaVenc||999));
+    else if (sort === 'monto') pagos.sort((a, b) => (b.salidaTotal||0) - (a.salidaTotal||0));
+    else if (sort === 'proveedor') pagos.sort((a, b) => (a.proveedor||'').localeCompare(b.proveedor||''));
+    else if (sort === 'formapago') pagos.sort((a, b) => (a.medioPago||'').localeCompare(b.medioPago||''));
     const hoy = new Date(); hoy.setHours(0,0,0,0);
     const finSemana = new Date(hoy); finSemana.setDate(hoy.getDate() + 7);
-
     const summary = {
       total: pagos.length,
-      totalARS: pagos.reduce((s, p) => s + (p.salidaARS || 0), 0),
-      totalUSD: pagos.reduce((s, p) => s + (p.salidaUSD || 0), 0),
+      totalARS: pagos.reduce((s, p) => s + (p.salidaARS||0), 0),
+      totalUSD: pagos.reduce((s, p) => s + (p.salidaUSD||0), 0),
       vencidos: pagos.filter(p => p.urgencia === 'vencido').length,
-      estaSemanaCant: pagos.filter(p => p.vencDate && new Date(p.vencDate + 'T12:00:00') <= finSemana && p.urgencia !== 'vencido').length,
-      estaSemanaARS: pagos.filter(p => p.vencDate && new Date(p.vencDate + 'T12:00:00') <= finSemana && p.urgencia !== 'vencido').reduce((s, p) => s + (p.salidaARS || 0), 0),
+      estaSemanaCant: pagos.filter(p => p.vencDate && new Date(p.vencDate+'T12:00:00') <= finSemana && p.urgencia !== 'vencido').length,
+      estaSemanaARS: pagos.filter(p => p.vencDate && new Date(p.vencDate+'T12:00:00') <= finSemana && p.urgencia !== 'vencido').reduce((s,p) => s+(p.salidaARS||0), 0),
     };
-
     res.json({ ok: true, data: pagos, summary });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: err.message });
-  }
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-// POST /api/pagos — agrega una fila nueva en la hoja Movimientos
-app.post('/api/pagos', async (req, res) => {
+app.post('/api/pagos', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { fecha, mes, proveedor, categoria, medioPago, salidaARS, vencimiento, descripcion } = req.body;
     if (!fecha || !proveedor) return res.status(400).json({ ok: false, error: 'Fecha y proveedor son obligatorios' });
-
     const auth = getAuth();
     const sheets = google.sheets({ version: 'v4', auth });
-
-    // Fila: Fecha, Mes, Tipo, Estado, Vencimiento, Proveedor, Categoría, Descripción, Medio de pago, MEntrada ARS, MEntrada USD, MSalida ARS, MSalida USD
-    const row = [fecha, mes || '', 'Gasto', 'A pagar', vencimiento || '', proveedor, categoria || '', descripcion || '', medioPago || '', '', '', salidaARS || '', ''];
-
+    const row = [fecha, mes||'', 'Gasto', 'A pagar', vencimiento||'', proveedor, categoria||'', descripcion||'', medioPago||'', '', '', salidaARS||'', ''];
     await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID,
-      range: 'Movimientos!A:N',
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [row] },
+      spreadsheetId: SPREADSHEET_ID, range: 'Movimientos!A:N',
+      valueInputOption: 'USER_ENTERED', requestBody: { values: [row] },
     });
-
     clearCache();
     res.json({ ok: true, message: 'Pago registrado correctamente' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: err.message });
-  }
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-// ─── Proveedores ──────────────────────────────────────────────────────────────
-// Lee la hoja "Proveedores" y devuelve un objeto indexado por nombre (lowercase)
-
-app.get('/api/proveedores', async (req, res) => {
+app.get('/api/proveedores', authMiddleware, adminOnly, async (req, res) => {
   try {
     const auth = getAuth();
     const sheets = google.sheets({ version: 'v4', auth });
-
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: 'Proveedores!A:F',
-    });
-
+    const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: 'Proveedores!A:F' });
     const rows = response.data.values || [];
     if (rows.length < 2) return res.json({ ok: true, data: {} });
-
-    // Buscar header
-    let headerIdx = rows.findIndex(r => r && (r[0] || '').toString().trim().toLowerCase() === 'proveedor');
+    let headerIdx = rows.findIndex(r => r && (r[0]||'').toString().trim().toLowerCase() === 'proveedor');
     if (headerIdx === -1) headerIdx = 0;
-
-    const header = rows[headerIdx].map(h => (h || '').toString().trim().toLowerCase());
+    const header = rows[headerIdx].map(h => (h||'').toString().trim().toLowerCase());
     const idxNombre = header.indexOf('proveedor');
     const idxFormaPago = header.findIndex(h => h.includes('forma') || h.includes('pago'));
     const idxDatos = header.findIndex(h => h.includes('datos') || h.includes('banco') || h.includes('cbu') || h.includes('alias'));
     const idxComentarios = header.findIndex(h => h.includes('comentario') || h.includes('nota'));
-
     const proveedores = {};
     for (let i = headerIdx + 1; i < rows.length; i++) {
       const row = rows[i];
       if (!row || !row[idxNombre]) continue;
-      const nombre = (row[idxNombre] || '').trim();
+      const nombre = (row[idxNombre]||'').trim();
       if (!nombre) continue;
       proveedores[nombre.toLowerCase()] = {
-        nombre,
-        formaPago: idxFormaPago >= 0 ? (row[idxFormaPago] || '') : '',
-        datosParaPagar: idxDatos >= 0 ? (row[idxDatos] || '') : '',
-        comentarios: idxComentarios >= 0 ? (row[idxComentarios] || '') : '',
+        nombre, formaPago: idxFormaPago >= 0 ? (row[idxFormaPago]||'') : '',
+        datosParaPagar: idxDatos >= 0 ? (row[idxDatos]||'') : '',
+        comentarios: idxComentarios >= 0 ? (row[idxComentarios]||'') : '',
       };
     }
-
     res.json({ ok: true, data: proveedores });
-  } catch (err) {
-    console.error(err);
-    // Si la hoja no existe o hay error, devolver objeto vacío en lugar de romper
-    res.json({ ok: true, data: {} });
-  }
+  } catch (err) { res.json({ ok: true, data: {} }); }
 });
 
 // ─── Static y fallback ────────────────────────────────────────────────────────
