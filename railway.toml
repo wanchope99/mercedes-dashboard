@@ -3,5 +3,5 @@ builder = "nixpacks"
 
 [deploy]
 startCommand = "node src/server.js"
-healthcheckPath = "/api/meses"
+healthcheckPath = "/api/health"
 restartPolicyType = "on_failure"
