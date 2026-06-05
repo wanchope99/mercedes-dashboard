@@ -63,6 +63,34 @@ function grupoDeCategoria(nombre) {
   return 'otros';
 }
 
+// ─── Helpers de red ─────────────────────────────────────────────────────────────
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// fetch con reintento ante 429 (Too Many Requests) y errores 5xx transitorios.
+// Backoff exponencial respetando el header Retry-After si Fudo lo envía.
+async function fetchRetry(url, opts = {}, { tries = 4, baseDelay = 1500, label = '' } = {}) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    let res;
+    try {
+      res = await _fetch(url, opts);
+    } catch (e) {
+      lastErr = e;
+      await sleep(baseDelay * Math.pow(2, i));
+      continue;
+    }
+    if (res.status === 429 || res.status >= 500) {
+      // rate limit o error de servidor → esperar y reintentar
+      const ra = parseInt(res.headers.get('retry-after') || '', 10);
+      const wait = Number.isFinite(ra) ? ra * 1000 : baseDelay * Math.pow(2, i);
+      lastErr = new Error(`${label || 'Fudo'} (${res.status})`);
+      if (i < tries - 1) { await sleep(Math.min(wait, 15_000)); continue; }
+    }
+    return res;
+  }
+  throw lastErr || new Error(`${label || 'Fudo'}: sin respuesta tras reintentos`);
+}
+
 // ─── Auth ───────────────────────────────────────────────────────────────────────
 async function getToken() {
   if (!API_KEY || !API_SECRET) {
@@ -71,14 +99,26 @@ async function getToken() {
   const cached = cache.get('fudo_token');
   if (cached && cached.exp * 1000 > Date.now() + 60_000) return cached.token;
 
-  const res = await _fetch(AUTH_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body: JSON.stringify({ apiKey: API_KEY, apiSecret: API_SECRET }),
-  });
+  let res;
+  try {
+    res = await fetchRetry(AUTH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ apiKey: API_KEY, apiSecret: API_SECRET }),
+    }, { label: 'Auth Fudo' });
+  } catch (e) {
+    // Si la red falla pero hay token cacheado (aunque casi vencido), usarlo
+    if (cached && cached.token) return cached.token;
+    throw new Error(`Auth Fudo sin conexión: ${e.message}`);
+  }
   if (!res.ok) {
+    // Rate limit persistente: reutilizar token viejo si existe
+    if (res.status === 429 && cached && cached.token) return cached.token;
     const t = await res.text().catch(() => '');
-    throw new Error(`Auth Fudo falló (${res.status}): ${t.slice(0, 200)}`);
+    const msg = res.status === 429
+      ? 'Fudo limitó las solicitudes (429). Esperá un momento y reintentá.'
+      : `Auth Fudo falló (${res.status}): ${t.slice(0, 150)}`;
+    throw new Error(msg);
   }
   const json = await res.json();
   if (!json.token) throw new Error('Auth Fudo no devolvió token');
@@ -94,12 +134,15 @@ async function fetchAll(resource) {
   let all = [];
   while (true) {
     const url = `${API_BASE}/${resource}?page[size]=${size}&page[number]=${page}`;
-    const res = await _fetch(url, {
+    const res = await fetchRetry(url, {
       headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
-    });
+    }, { label: `Fudo ${resource}` });
     if (!res.ok) {
       const t = await res.text().catch(() => '');
-      throw new Error(`Fudo ${resource} (${res.status}): ${t.slice(0, 200)}`);
+      const msg = res.status === 429
+        ? `Fudo limitó las solicitudes al pedir ${resource} (429). Reintentá en unos minutos.`
+        : `Fudo ${resource} (${res.status}): ${t.slice(0, 150)}`;
+      throw new Error(msg);
     }
     const json = await res.json();
     const data = json.data || [];
@@ -116,14 +159,21 @@ async function loadRaw() {
   const cached = cache.get('fudo_raw');
   if (cached) return cached;
 
-  const [sales, items, products, categories, payments, paymentMethods] = await Promise.all([
-    fetchAll('sales'),
-    fetchAll('items'),
-    fetchAll('products'),
-    fetchAll('product-categories'),
-    fetchAll('payments'),
-    fetchAll('payment-methods'),
-  ]);
+  // Llamadas SECUENCIALES (con micro-pausa) para no gatillar el rate limit de Fudo.
+  let sales, items, products, categories, payments, paymentMethods;
+  try {
+    sales          = await fetchAll('sales');           await sleep(150);
+    items          = await fetchAll('items');           await sleep(150);
+    products       = await fetchAll('products');        await sleep(150);
+    categories     = await fetchAll('product-categories'); await sleep(150);
+    payments       = await fetchAll('payments');        await sleep(150);
+    paymentMethods = await fetchAll('payment-methods');
+  } catch (e) {
+    // Si Fudo limita o falla, servir el último dato bueno conocido (si existe)
+    const backup = cache.get('fudo_raw_backup');
+    if (backup) return backup;
+    throw e;
+  }
 
   // Mapas de lookup
   const catName = {};
@@ -166,6 +216,7 @@ async function loadRaw() {
 
   const raw = { sales, prod, catName, itemsBySale, paymentsBySale };
   cache.set('fudo_raw', raw);
+  cache.set('fudo_raw_backup', raw, 86_400); // respaldo 24h por si Fudo limita luego
   return raw;
 }
 
