@@ -98,24 +98,51 @@ app.get('/api/arqueo/estado', authMiddleware, (req, res) => {
   res.json({ ok: true, data: estadoCaja });
 });
 
+// GET /api/arqueo/saldos-iniciales — lee saldos esperados de la hoja Cajas
+// Efectivo Local = F8, Mercado Pago = F2
+app.get('/api/arqueo/saldos-iniciales', authMiddleware, async (req, res) => {
+  try {
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Cajas!F2:F8',
+    });
+    const vals = response.data.values || [];
+    // F2 = índice 0, F8 = índice 6
+    const mpEsperado       = parseFloat((vals[0]?.[0] || '0').toString().replace(/[^0-9.-]/g, '')) || 0;
+    const efectivoEsperado = parseFloat((vals[6]?.[0] || '0').toString().replace(/[^0-9.-]/g, '')) || 0;
+    res.json({ ok: true, data: { efectivoEsperado, mpEsperado } });
+  } catch (err) {
+    console.error('Error leyendo saldos iniciales:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // POST /api/arqueo/abrir
 app.post('/api/arqueo/abrir', authMiddleware, (req, res) => {
   if (estadoCaja.abierta) {
     return res.status(400).json({ ok: false, error: 'La caja ya está abierta' });
   }
-  const { efectivo, mercadoPago, galicia } = req.body;
-  if (efectivo === undefined || mercadoPago === undefined || galicia === undefined) {
+  // efectivo/mercadoPago = saldo REAL contado; efectivoEsperado/mpEsperado = saldo del sheet
+  const { efectivo, mercadoPago, efectivoEsperado, mpEsperado } = req.body;
+  if (efectivo === undefined || mercadoPago === undefined) {
     return res.status(400).json({ ok: false, error: 'Faltan valores de saldo inicial' });
   }
+  const diffEfectivo = Number(efectivo) - Number(efectivoEsperado || 0);
+  const diffMP       = Number(mercadoPago) - Number(mpEsperado || 0);
   estadoCaja = {
     abierta: true,
     apertura: new Date().toISOString(),
     encargado: req.user.nombre,
     efectivoInicial: Number(efectivo),
     mpInicial: Number(mercadoPago),
-    galiciaInicial: Number(galicia),
+    efectivoEsperado: Number(efectivoEsperado || 0),
+    mpEsperado: Number(mpEsperado || 0),
+    diffEfectivoInicial: diffEfectivo,
+    diffMPInicial: diffMP,
   };
-  res.json({ ok: true, data: estadoCaja });
+  res.json({ ok: true, data: estadoCaja, diffEfectivo, diffMP });
 });
 
 // POST /api/arqueo/cerrar
@@ -123,7 +150,9 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   if (!estadoCaja.abierta) {
     return res.status(400).json({ ok: false, error: 'La caja no está abierta' });
   }
-  const { efectivo, mercadoPago, galicia, impuestosGalicia } = req.body;
+  // galicia = Total Bruto; galiciaNeto = Total Neto Acreditado
+  // impuestos se calcula como Bruto - Neto
+  const { efectivo, mercadoPago, galicia, galiciaNeto } = req.body;
   if (efectivo === undefined || mercadoPago === undefined || galicia === undefined) {
     return res.status(400).json({ ok: false, error: 'Faltan valores de saldo final' });
   }
@@ -150,13 +179,20 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   const aperturaStr = apertura.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
   const cierreStr = cierre.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 
-  const impuestos = Number(impuestosGalicia) || 0;
+  // Impuestos = diferencia entre Bruto y Neto Acreditado
+  const galiciaBruto = Number(galicia) || 0;
+  const galiciaNetoVal = Number(galiciaNeto) || 0;
+  const impuestos = galiciaBruto > galiciaNetoVal ? galiciaBruto - galiciaNetoVal : 0;
 
   try {
     const auth = getAuth();
     const sheets = google.sheets({ version: 'v4', auth });
 
     // 1. Escribir en Arqueo de Cajas
+    // Columnas: A:Fecha, B:Apertura, C:Cierre, D:Duración,
+    // E:Efectivo Inicial, F:MP Inicial, G:Galicia Inicial (vacío),
+    // H:Efectivo Final, I:MP Final, J:Galicia Final,
+    // K:Diff Efectivo Local Inicial, L:Diff Mercado Pago Inicial
     const rowArqueo = [
       fechaStr,
       aperturaStr,
@@ -164,14 +200,16 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
       duracionStr,
       estadoCaja.efectivoInicial,
       estadoCaja.mpInicial,
-      estadoCaja.galiciaInicial,
+      '',                                    // Galicia inicial ya no se usa
       Number(efectivo),
       Number(mercadoPago),
-      Number(galicia),
+      galiciaBruto,
+      estadoCaja.diffEfectivoInicial || 0,   // K: Diff Efectivo Local Inicial
+      estadoCaja.diffMPInicial || 0,         // L: Diff Mercado Pago Inicial
     ];
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Arqueo de Cajas!A:J',
+      range: 'Arqueo de Cajas!A:L',
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [rowArqueo] },
     });
@@ -189,7 +227,8 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
     const rowsMovimientos = [];
     const deltaEfectivo = Number(efectivo) - estadoCaja.efectivoInicial;
     const deltaMP       = Number(mercadoPago) - estadoCaja.mpInicial;
-    const deltaGalicia  = Number(galicia) - estadoCaja.galiciaInicial;
+    // Para Galicia usamos el neto acreditado como ingreso (bruto ya descuenta impuestos)
+    const deltaGalicia  = galiciaNetoVal > 0 ? galiciaNetoVal : 0;
     if (deltaEfectivo > 0) rowsMovimientos.push(makeIngreso('Efectivo Local', deltaEfectivo));
     if (deltaMP       > 0) rowsMovimientos.push(makeIngreso('Mercado Pago',   deltaMP));
     if (deltaGalicia  > 0) rowsMovimientos.push(makeIngreso('Galicia',        deltaGalicia));
@@ -223,18 +262,17 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
     encargado: estadoCaja.encargado,
     efectivoInicial: estadoCaja.efectivoInicial,
     mpInicial: estadoCaja.mpInicial,
-    galiciaInicial: estadoCaja.galiciaInicial,
     efectivoFinal: Number(efectivo),
     mpFinal: Number(mercadoPago),
-    galiciaFinal: Number(galicia),
+    galiciaBruto,
+    galiciaNeto: galiciaNetoVal,
     impuestosGalicia: impuestos,
     difEfectivo: Number(efectivo) - estadoCaja.efectivoInicial,
     difMP: Number(mercadoPago) - estadoCaja.mpInicial,
-    difGalicia: Number(galicia) - estadoCaja.galiciaInicial,
   };
 
   // Resetear estado
-  estadoCaja = { abierta: false, apertura: null, encargado: null, efectivoInicial: null, mpInicial: null, galiciaInicial: null };
+  estadoCaja = { abierta: false, apertura: null, encargado: null, efectivoInicial: null, mpInicial: null };
 
   res.json({ ok: true, data: resumen });
 });
