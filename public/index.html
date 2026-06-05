@@ -1219,7 +1219,8 @@ async function loadCajas() {
       }
     });
 
-    // Render totales
+    // Render totales (solo admin)
+    document.getElementById('cajas-totales').style.display = getRol() === 'admin' ? '' : 'none';
     document.getElementById('cajas-totales').innerHTML = `
       <div class="kpi-card green">
         <div class="kpi-label">Total Cajas (ARS)</div>
