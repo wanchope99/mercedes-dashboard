@@ -22,7 +22,7 @@
 
     header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 32px; display: flex; align-items: center; justify-content: space-between; height: 64px; position: sticky; top: 0; z-index: 100; }
     .logo { display: flex; align-items: center; gap: 12px; }
-    .logo-mark { width: 36px; height: 36px; border-radius: 50%; overflow: hidden; }
+    .logo-mark { width: 36px; height: 36px; background: var(--accent); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; color: #0f0f13; }
     .logo-text { font-weight: 600; font-size: 18px; }
     .header-right { display: flex; align-items: center; gap: 16px; }
     #last-updated { font-size: 12px; color: var(--text-muted); }
@@ -50,7 +50,7 @@
     input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.6); cursor: pointer; }
     input[type="text"]::placeholder { color: var(--text-muted); }
     .filter-mode-btn { padding: 6px 14px; border-radius: 6px; font-size: 12px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer; font-family: inherit; transition: all 0.2s; }
-    .filter-mode-btn.active { background: var(--accent); color: #0f0f13; border-color: var(--accent); font-weight: 600; }
+    .filter-mode-btn.active { background: var(--accent); color: #f0e6d3; border-color: var(--accent); font-weight: 600; }
     #range-filters { display: none; align-items: center; gap: 8px; }
     #mes-filters { display: flex; align-items: center; gap: 8px; }
 
@@ -257,7 +257,6 @@
     .login-logo { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
     .login-logo-mark { width: 44px; height: 44px; border-radius: 50%; overflow: hidden; }
     .login-title { font-size: 20px; font-weight: 700; }
-    .login-sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
     .login-field { margin-bottom: 16px; }
     .login-field label { display: block; font-size: 12px; font-weight: 500; color: var(--text-muted); margin-bottom: 6px; }
     .login-field input { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 11px 14px; border-radius: 8px; font-size: 14px; font-family: inherit; outline: none; }
@@ -354,10 +353,9 @@
 <div id="login-screen" class="active">
   <div class="login-box">
     <div class="login-logo">
-      <img src="/logo.jpg" alt="Bar Mercedes" style="width:44px;height:44px;border-radius:50%;" />
+      <img src="/logo.jpg" alt="Bar Mercedes" style="width:44px;height:44px;border-radius:50%;object-fit:cover;" />
       <div>
         <div class="login-title">Bar Mercedes</div>
-        
       </div>
     </div>
     <div class="login-field">
@@ -375,7 +373,7 @@
 
 <header>
   <div class="logo">
-    <img src="/logo.jpg" alt="Bar Mercedes" style="width:36px;height:36px;border-radius:50%;" />
+    <img src="/logo.jpg" alt="Bar Mercedes" style="width:36px;height:36px;border-radius:50%;object-fit:cover;" />
     <div><div class="logo-text">Bar Mercedes</div></div>
   </div>
   <div class="header-right">
@@ -529,7 +527,6 @@
     <div class="arqueo-card" id="arqueo-form-apertura">
       <div class="arqueo-card-title">Saldos iniciales</div>
 
-      <!-- Efectivo Local -->
       <div class="arqueo-field">
         <label>💵 Efectivo Local</label>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
@@ -545,7 +542,6 @@
         </div>
       </div>
 
-      <!-- Mercado Pago -->
       <div class="arqueo-field">
         <label>📱 Mercado Pago</label>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
@@ -767,7 +763,7 @@ function onLoginSuccess(rol, nombre) {
     });
     init(); // carga dashboard
   } else {
-    // Encargado: solo tabs Cajas y Arqueo
+    // Encargado: tabs Cajas y Arqueo
     document.getElementById('tab-btn-dashboard').style.display = 'none';
     document.getElementById('tab-btn-pagos').style.display = 'none';
     document.getElementById('tab-btn-cajas').style.display = '';
@@ -831,14 +827,12 @@ async function initArqueo() {
     document.getElementById('arqueo-error').textContent = err.message;
   }
 
-  // Cargar saldos esperados desde la planilla (solo si la caja está cerrada)
+  // Cargar saldos esperados desde la planilla
   try {
     const { data: saldos } = await api('/api/arqueo/saldos-iniciales');
     document.getElementById('ap-efectivo-esperado').value = saldos.efectivoEsperado || '';
     document.getElementById('ap-mp-esperado').value = saldos.mpEsperado || '';
-  } catch(err) {
-    // No bloqueante — los campos quedan vacíos
-  }
+  } catch(err) { /* no bloqueante */ }
 }
 
 function renderEstadoArqueo(data) {
@@ -887,14 +881,14 @@ function renderEstadoArqueo(data) {
 }
 
 async function abrirCaja() {
-  const efectivo          = parseFloat(document.getElementById('ap-efectivo').value) || 0;
-  const mp                = parseFloat(document.getElementById('ap-mp').value) || 0;
-  const efectivoEsperado  = parseFloat(document.getElementById('ap-efectivo-esperado').value) || 0;
-  const mpEsperado        = parseFloat(document.getElementById('ap-mp-esperado').value) || 0;
+  const efectivo         = parseFloat(document.getElementById('ap-efectivo').value) || 0;
+  const mp               = parseFloat(document.getElementById('ap-mp').value) || 0;
+  const efectivoEsperado = parseFloat(document.getElementById('ap-efectivo-esperado').value) || 0;
+  const mpEsperado       = parseFloat(document.getElementById('ap-mp-esperado').value) || 0;
   const errEl = document.getElementById('arqueo-error');
   errEl.textContent = '';
 
-  // Mostrar toast si hay diferencia (no bloquea)
+  // Toast si hay diferencia vs planilla (no bloquea)
   const diffEf = efectivo - efectivoEsperado;
   const diffMp = mp - mpEsperado;
   const alertLines = [];
@@ -930,8 +924,8 @@ function closeCierreModal() {
 async function cerrarCaja() {
   const efectivo    = parseFloat(document.getElementById('ci-efectivo').value) || 0;
   const mp          = parseFloat(document.getElementById('ci-mp').value) || 0;
-  const galicia     = parseFloat(document.getElementById('ci-galicia').value) || 0;      // bruto
-  const galiciaNeto = parseFloat(document.getElementById('ci-galicia-neto').value) || 0; // neto
+  const galicia     = parseFloat(document.getElementById('ci-galicia').value) || 0;
+  const galiciaNeto = parseFloat(document.getElementById('ci-galicia-neto').value) || 0;
   const errEl = document.getElementById('cierre-error');
   errEl.textContent = '';
   try {
@@ -1128,7 +1122,7 @@ function renderTablaResumen(resumen) {
 }
 
 // ─── Charts ───────────────────────────────────────────────────────────────────
-const CHART_COLORS = ['#7a1e1e','#4caf82','#5c8fe0','#e05c5c','#e08a5c','#a05ce0','#5ce0c9'];
+const CHART_COLORS = ['#50251f','#4caf82','#5c8fe0','#e05c5c','#e08a5c','#a05ce0','#5ce0c9'];
 function destroyChart(id) { if (state.charts[id]) { state.charts[id].destroy(); delete state.charts[id]; } }
 
 function renderCharts(resumen) {
@@ -1204,13 +1198,11 @@ const CAJAS_ENCARGADO = ['efectivo local', 'mercado pago'];
 async function loadCajas() {
   try {
     let { data: cajas } = await api('/api/cajas');
-    const container = document.getElementById('cajas-grid');
-    if (!cajas.length) { container.innerHTML = '<div style="color:var(--text-muted)">Sin datos</div>'; return; }
-
-    // Encargado: solo ve Efectivo Local y Mercado Pago
     if (getRol() !== 'admin') {
       cajas = cajas.filter(c => CAJAS_ENCARGADO.includes((c.caja || '').toLowerCase()));
     }
+    const container = document.getElementById('cajas-grid');
+    if (!cajas.length) { container.innerHTML = '<div style="color:var(--text-muted)">Sin datos</div>'; return; }
 
     // Calcular totales
     const TC = state.tc;
@@ -1427,4 +1419,87 @@ async function loadPagos() {
 
     let html = '';
     if (galiciaPagos.length > 0) {
-      html += `<tr class="group-header-row" id="grp-hdr-galicia"><td colspan="7" style="padding:0"><div class="group-heade
+      html += `<tr class="group-header-row" id="grp-hdr-galicia"><td colspan="7" style="padding:0"><div class="group-header" onclick="toggleGroup('galicia')"><span class="group-chevron" id="grp-chv-galicia">▾</span><span class="group-badge">💳 Tarjeta Galicia</span><span>${galiciaPagos.length} cargo${galiciaPagos.length !== 1 ? 's' : ''}</span><span class="group-total">${fmt(galiciaTotal)}</span></div></td></tr>`;
+      html += buildPagosRows(galiciaPagos, 'galicia');
+    }
+    if (independientes.length > 0) {
+      if (galiciaPagos.length > 0) {
+        html += `<tr class="group-header-row" id="grp-hdr-indep"><td colspan="7" style="padding:0"><div class="group-header group-proveedores" onclick="toggleGroup('indep')"><span class="group-chevron" id="grp-chv-indep">▾</span><span class="group-badge">🤝 Proveedores independientes</span><span>${independientes.length} pago${independientes.length !== 1 ? 's' : ''}</span><span class="group-total">${fmt(independientes.reduce((s,p)=>s+p.salidaARS,0))}</span></div></td></tr>`;
+      }
+      html += buildPagosRows(independientes, 'indep');
+    }
+    document.getElementById('pagos-tbody').innerHTML = html;
+  } catch(err) {
+    document.getElementById('pagos-tbody').innerHTML = `<tr><td colspan="7" style="color:var(--red);padding:20px">Error: ${err.message}</td></tr>`;
+  }
+}
+
+// ─── Modal proveedor ──────────────────────────────────────────────────────────
+function openProvModal(nombreProveedor) {
+  const key = (nombreProveedor || '').toLowerCase();
+  const prov = state.proveedores[key];
+  document.getElementById('prov-nombre').textContent = nombreProveedor;
+  if (!prov) {
+    document.getElementById('prov-forma').textContent = 'Sin datos registrados';
+    document.getElementById('prov-datos-container').innerHTML = `<div class="prov-no-data">No hay datos de pago para este proveedor.</div>`;
+  } else {
+    document.getElementById('prov-forma').textContent = prov.formaPago ? `Forma de pago: ${prov.formaPago}` : '';
+    let html = '';
+    if (prov.datosParaPagar) {
+      const datosFormateados = prov.datosParaPagar.replace(/ \+ /g, '\n').replace(/\+/g, '\n').trim();
+      html += `<div class="prov-datos-block"><div class="prov-datos-label">Datos bancarios / de pago</div><div class="prov-datos-value">${escapeHtml(datosFormateados)}</div><button class="prov-copy-btn" onclick="copyProvDatos('${escapeAttr(prov.datosParaPagar)}', this)">📋 Copiar datos</button></div>`;
+    } else { html += `<div class="prov-no-data">Sin datos bancarios registrados.</div>`; }
+    if (prov.comentarios) html += `<div class="prov-datos-block"><div class="prov-datos-label">Comentarios</div><div class="prov-datos-value">${escapeHtml(prov.comentarios)}</div></div>`;
+    document.getElementById('prov-datos-container').innerHTML = html;
+  }
+  document.getElementById('prov-modal-overlay').classList.add('open');
+}
+function closeProvModal() { document.getElementById('prov-modal-overlay').classList.remove('open'); }
+document.getElementById('prov-modal-overlay').addEventListener('click', function(e) { if (e.target === this) closeProvModal(); });
+function copyProvDatos(texto, btn) {
+  navigator.clipboard.writeText(texto).then(() => { btn.textContent = '✅ Copiado'; btn.classList.add('copied'); setTimeout(() => { btn.textContent = '📋 Copiar datos'; btn.classList.remove('copied'); }, 2000); });
+}
+function escapeHtml(str) { return (str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escapeAttr(str) { return (str||'').replace(/'/g,"\\'").replace(/\n/g,' '); }
+
+// ─── Modal nuevo pago ─────────────────────────────────────────────────────────
+function openModal() {
+  const today = new Date().toISOString().split('T')[0];
+  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  document.getElementById('f-fecha').value = today;
+  document.getElementById('f-mes').value = meses[new Date().getMonth()];
+  document.getElementById('f-proveedor').value = '';
+  document.getElementById('f-monto').value = '';
+  document.getElementById('f-vencimiento').value = '';
+  document.getElementById('f-descripcion').value = '';
+  document.getElementById('modal-status').style.display = 'none';
+  document.getElementById('modal-overlay').classList.add('open');
+}
+function closeModal() { document.getElementById('modal-overlay').classList.remove('open'); }
+document.getElementById('modal-overlay').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
+
+async function saveNewPago() {
+  const fecha = document.getElementById('f-fecha').value;
+  const mes = document.getElementById('f-mes').value;
+  const proveedor = document.getElementById('f-proveedor').value.trim();
+  const categoria = document.getElementById('f-categoria').value;
+  const medioPago = document.getElementById('f-medio').value;
+  const salidaARS = parseFloat(document.getElementById('f-monto').value) || 0;
+  const vencRaw = document.getElementById('f-vencimiento').value;
+  const descripcion = document.getElementById('f-descripcion').value.trim();
+  if (!fecha || !proveedor) { alert('Fecha y Proveedor son obligatorios.'); return; }
+  const fmtDate = iso => { if (!iso) return ''; const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; };
+  const statusEl = document.getElementById('modal-status');
+  statusEl.style.display = 'block'; statusEl.style.color = 'var(--text-muted)'; statusEl.textContent = '⏳ Guardando en planilla...';
+  try {
+    await api('/api/pagos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fecha: fmtDate(fecha), mes, proveedor, categoria, medioPago, salidaARS, vencimiento: fmtDate(vencRaw), descripcion }) });
+    statusEl.style.color = 'var(--green)'; statusEl.textContent = `✅ Pago de ${proveedor} registrado. Recargando...`;
+    setTimeout(() => { closeModal(); loadPagos(); }, 1500);
+  } catch(err) { statusEl.style.color = 'var(--red)'; statusEl.textContent = `❌ Error: ${err.message}`; }
+}
+
+// Arrancar: verificar token guardado o mostrar login
+checkSavedToken();
+</script>
+</body>
+</html>
