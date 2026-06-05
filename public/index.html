@@ -515,18 +515,40 @@
     <!-- Formulario apertura (visible cuando cerrada) -->
     <div class="arqueo-card" id="arqueo-form-apertura">
       <div class="arqueo-card-title">Saldos iniciales</div>
+
+      <!-- Efectivo Local -->
       <div class="arqueo-field">
         <label>💵 Efectivo Local</label>
-        <input type="number" id="ap-efectivo" placeholder="0" min="0" />
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Saldo esperado (planilla)</div>
+            <input type="number" id="ap-efectivo-esperado" placeholder="—" readonly
+              style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);padding:12px 14px;border-radius:8px;font-size:16px;font-family:inherit;cursor:not-allowed;" />
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Saldo real contado</div>
+            <input type="number" id="ap-efectivo" placeholder="0" min="0" />
+          </div>
+        </div>
       </div>
+
+      <!-- Mercado Pago -->
       <div class="arqueo-field">
         <label>📱 Mercado Pago</label>
-        <input type="number" id="ap-mp" placeholder="0" min="0" />
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Saldo esperado (planilla)</div>
+            <input type="number" id="ap-mp-esperado" placeholder="—" readonly
+              style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);padding:12px 14px;border-radius:8px;font-size:16px;font-family:inherit;cursor:not-allowed;" />
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Saldo real contado</div>
+            <input type="number" id="ap-mp" placeholder="0" min="0" />
+          </div>
+        </div>
       </div>
-      <div class="arqueo-field">
-        <label>🏦 Galicia</label>
-        <input type="number" id="ap-galicia" placeholder="0" min="0" />
-      </div>
+
+      <div id="arqueo-diff-alert" style="display:none;background:rgba(224,138,92,0.15);border:1px solid var(--orange);border-radius:8px;padding:12px 14px;font-size:13px;color:var(--orange);margin-bottom:4px"></div>
       <button class="arqueo-btn open" onclick="abrirCaja()">Abrir Caja</button>
       <div id="arqueo-error" style="color:var(--red);font-size:13px;margin-top:12px;text-align:center"></div>
     </div>
@@ -555,12 +577,13 @@
       <input type="number" id="ci-mp" placeholder="0" min="0" />
     </div>
     <div class="arqueo-field">
-      <label>🏦 Galicia final</label>
-      <input type="number" id="ci-galicia" placeholder="0" min="0" />
+      <label>🏦 Galicia</label>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Total Bruto — monto antes de descuentos impositivos</div>
+      <input type="number" id="ci-galicia" placeholder="0" min="0" title="Ingresá el total bruto acreditado en Galicia antes de impuestos" />
       <div style="margin-top:10px;padding:12px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
-        <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px">📋 Impuestos deducidos (Galicia)</label>
-        <input type="number" id="ci-impuestos-galicia" placeholder="0" min="0" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:6px;font-size:16px;font-family:inherit;outline:none;" />
-        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Se registrará como Gasto · Fiscales en Movimientos</div>
+        <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px">Total Neto Acreditado</label>
+        <input type="number" id="ci-galicia-neto" placeholder="0" min="0" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:6px;font-size:16px;font-family:inherit;outline:none;" />
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Los impuestos (Bruto − Neto) se registrarán como Gasto · Fiscales</div>
       </div>
     </div>
     <div id="cierre-error" style="color:var(--red);font-size:13px;margin-bottom:12px;text-align:center"></div>
@@ -722,10 +745,10 @@ function onLoginSuccess(rol, nombre) {
     });
     init(); // carga dashboard
   } else {
-    // Encargado: solo tab arqueo
+    // Encargado: solo tabs Cajas y Arqueo
     document.getElementById('tab-btn-dashboard').style.display = 'none';
     document.getElementById('tab-btn-pagos').style.display = 'none';
-    document.getElementById('tab-btn-cajas').style.display = 'none';
+    document.getElementById('tab-btn-cajas').style.display = '';
     document.getElementById('tab-btn-arqueo').style.display = '';
     // Activar tab arqueo directamente
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -775,7 +798,6 @@ function switchTab(tab, btn) {
 
 // ─── ARQUEO DE CAJAS ──────────────────────────────────────────────────────────
 async function initArqueo() {
-  // Fecha de hoy
   const hoy = new Date();
   document.getElementById('arqueo-fecha-header').textContent =
     hoy.toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -785,6 +807,15 @@ async function initArqueo() {
     renderEstadoArqueo(data);
   } catch(err) {
     document.getElementById('arqueo-error').textContent = err.message;
+  }
+
+  // Cargar saldos esperados desde la planilla (solo si la caja está cerrada)
+  try {
+    const { data: saldos } = await api('/api/arqueo/saldos-iniciales');
+    document.getElementById('ap-efectivo-esperado').value = saldos.efectivoEsperado || '';
+    document.getElementById('ap-mp-esperado').value = saldos.mpEsperado || '';
+  } catch(err) {
+    // No bloqueante — los campos quedan vacíos
   }
 }
 
@@ -835,17 +866,33 @@ function renderEstadoArqueo(data) {
 }
 
 async function abrirCaja() {
-  const efectivo = parseFloat(document.getElementById('ap-efectivo').value) || 0;
-  const mp = parseFloat(document.getElementById('ap-mp').value) || 0;
-  const galicia = parseFloat(document.getElementById('ap-galicia').value) || 0;
-  const errEl = document.getElementById('arqueo-error');
+  const efectivo          = parseFloat(document.getElementById('ap-efectivo').value) || 0;
+  const mp                = parseFloat(document.getElementById('ap-mp').value) || 0;
+  const efectivoEsperado  = parseFloat(document.getElementById('ap-efectivo-esperado').value) || 0;
+  const mpEsperado        = parseFloat(document.getElementById('ap-mp-esperado').value) || 0;
+  const errEl   = document.getElementById('arqueo-error');
+  const alertEl = document.getElementById('arqueo-diff-alert');
   errEl.textContent = '';
+  alertEl.style.display = 'none';
+
+  // Mostrar alerta local si hay diferencia (no bloquea)
+  const diffEf = efectivo - efectivoEsperado;
+  const diffMp = mp - mpEsperado;
+  const alertLines = [];
+  if (diffEf !== 0) alertLines.push(`💵 Efectivo: diferencia de ${diffEf > 0 ? '+' : ''}${fmt(diffEf)} vs planilla`);
+  if (diffMp !== 0) alertLines.push(`📱 Mercado Pago: diferencia de ${diffMp > 0 ? '+' : ''}${fmt(diffMp)} vs planilla`);
+  if (alertLines.length > 0) {
+    alertEl.innerHTML = '⚠️ ' + alertLines.join('<br>');
+    alertEl.style.display = 'block';
+  }
+
   try {
     const { data } = await api('/api/arqueo/abrir', {
       method: 'POST',
-      body: JSON.stringify({ efectivo, mercadoPago: mp, galicia }),
+      body: JSON.stringify({ efectivo, mercadoPago: mp, efectivoEsperado, mpEsperado }),
     });
     document.getElementById('arqueo-ultimo-resumen').style.display = 'none';
+    alertEl.style.display = 'none';
     renderEstadoArqueo(data);
   } catch(err) {
     errEl.textContent = err.message;
@@ -857,7 +904,7 @@ function openCierreModal() {
   document.getElementById('ci-efectivo').value = '';
   document.getElementById('ci-mp').value = '';
   document.getElementById('ci-galicia').value = '';
-  document.getElementById('ci-impuestos-galicia').value = '';
+  document.getElementById('ci-galicia-neto').value = '';
   document.getElementById('cierre-error').textContent = '';
 }
 
@@ -866,16 +913,16 @@ function closeCierreModal() {
 }
 
 async function cerrarCaja() {
-  const efectivo = parseFloat(document.getElementById('ci-efectivo').value) || 0;
-  const mp = parseFloat(document.getElementById('ci-mp').value) || 0;
-  const galicia = parseFloat(document.getElementById('ci-galicia').value) || 0;
-  const impuestosGalicia = parseFloat(document.getElementById('ci-impuestos-galicia').value) || 0;
+  const efectivo    = parseFloat(document.getElementById('ci-efectivo').value) || 0;
+  const mp          = parseFloat(document.getElementById('ci-mp').value) || 0;
+  const galicia     = parseFloat(document.getElementById('ci-galicia').value) || 0;      // bruto
+  const galiciaNeto = parseFloat(document.getElementById('ci-galicia-neto').value) || 0; // neto
   const errEl = document.getElementById('cierre-error');
   errEl.textContent = '';
   try {
     const { data } = await api('/api/arqueo/cerrar', {
       method: 'POST',
-      body: JSON.stringify({ efectivo, mercadoPago: mp, galicia, impuestosGalicia }),
+      body: JSON.stringify({ efectivo, mercadoPago: mp, galicia, galiciaNeto }),
     });
     closeCierreModal();
     renderEstadoArqueo({ abierta: false });
@@ -898,7 +945,8 @@ function renderResumenCierre(d) {
         <div class="resumen-cierre-title">📅 ${d.fecha} · ${d.apertura} → ${d.cierre} (${d.duracion})</div>
         <div class="resumen-row"><span>💵 Efectivo</span><span>${fmt(d.efectivoInicial)} → <strong>${fmt(d.efectivoFinal)}</strong> <span class="${difClass(d.difEfectivo)}">${difStr(d.difEfectivo)}</span></span></div>
         <div class="resumen-row"><span>📱 Mercado Pago</span><span>${fmt(d.mpInicial)} → <strong>${fmt(d.mpFinal)}</strong> <span class="${difClass(d.difMP)}">${difStr(d.difMP)}</span></span></div>
-        <div class="resumen-row"><span>🏦 Galicia</span><span>${fmt(d.galiciaInicial)} → <strong>${fmt(d.galiciaFinal)}</strong> <span class="${difClass(d.difGalicia)}">${difStr(d.difGalicia)}</span></span></div>
+        ${d.galiciaBruto > 0 ? `<div class="resumen-row"><span>🏦 Galicia Bruto</span><span><strong>${fmt(d.galiciaBruto)}</strong></span></div>` : ''}
+        ${d.galiciaNeto > 0 ? `<div class="resumen-row"><span>🏦 Galicia Neto acreditado</span><span><strong>${fmt(d.galiciaNeto)}</strong></span></div>` : ''}
         ${d.impuestosGalicia > 0 ? `<div class="resumen-row"><span style="color:var(--text-muted)">📋 Impuestos Galicia</span><span style="color:var(--red)">-${fmt(d.impuestosGalicia)}</span></div>` : ''}
       </div>
     </div>
@@ -1136,11 +1184,18 @@ function editTC() {
   }
 }
 
+const CAJAS_ENCARGADO = ['efectivo local', 'mercado pago'];
+
 async function loadCajas() {
   try {
-    const { data: cajas } = await api('/api/cajas');
+    let { data: cajas } = await api('/api/cajas');
     const container = document.getElementById('cajas-grid');
     if (!cajas.length) { container.innerHTML = '<div style="color:var(--text-muted)">Sin datos</div>'; return; }
+
+    // Encargado: solo ve Efectivo Local y Mercado Pago
+    if (getRol() !== 'admin') {
+      cajas = cajas.filter(c => CAJAS_ENCARGADO.includes((c.caja || '').toLowerCase()));
+    }
 
     // Calcular totales
     const TC = state.tc;
