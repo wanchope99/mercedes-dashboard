@@ -9,6 +9,7 @@ const {
   getActividadPorDiaSemana, getCajas, getMovimientosCambio,
   getMeses, getCategorias, clearCache,
 } = require('./sheets');
+const { getServicios, getServicioDetalle, clearFudoCache } = require('./fudo');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -434,6 +435,36 @@ app.get('/api/proveedores', authMiddleware, adminOnly, async (req, res) => {
     }
     res.json({ ok: true, data: proveedores });
   } catch (err) { res.json({ ok: true, data: {} }); }
+});
+
+// ─── Servicios (Fudo) — solo admin ──────────────────────────────────────────────
+// Resumen de servicios por día (pax, total, comida vs bebida)
+app.get('/api/servicios', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+    const data = await getServicios({ desde, hasta });
+    res.json({ ok: true, data });
+  } catch (err) {
+    console.error('Error /api/servicios:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Detalle de un servicio (un día): productos por categoría + medios de pago
+app.get('/api/servicios/:fecha', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const data = await getServicioDetalle(req.params.fecha);
+    res.json({ ok: true, data });
+  } catch (err) {
+    console.error('Error /api/servicios/:fecha:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Refrescar caché de Fudo manualmente
+app.post('/api/servicios/refresh', authMiddleware, adminOnly, (req, res) => {
+  clearFudoCache();
+  res.json({ ok: true, message: 'Caché de Fudo limpiado.' });
 });
 
 // ─── Static y fallback ────────────────────────────────────────────────────────
