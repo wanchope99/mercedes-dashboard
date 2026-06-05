@@ -316,7 +316,7 @@ app.get('/api/actividad-semana', authMiddleware, adminOnly, async (req, res) => 
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-app.get('/api/cajas', authMiddleware, adminOnly, async (req, res) => {
+app.get('/api/cajas', authMiddleware, async (req, res) => {
   try { res.json({ ok: true, data: await getCajas() }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
