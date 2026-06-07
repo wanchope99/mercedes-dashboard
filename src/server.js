@@ -151,10 +151,17 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   if (!estadoCaja.abierta) {
     return res.status(400).json({ ok: false, error: 'La caja no está abierta' });
   }
+  // Guard contra doble cierre simultáneo
+  if (estadoCaja.cerrando) {
+    return res.status(400).json({ ok: false, error: 'El cierre ya está en proceso' });
+  }
+  estadoCaja.cerrando = true;
+
   // galicia = Total Bruto; galiciaNeto = Total Neto Acreditado
   // impuestos se calcula como Bruto - Neto
   const { efectivo, mercadoPago, galicia, galiciaNeto } = req.body;
   if (efectivo === undefined || mercadoPago === undefined || galicia === undefined) {
+    estadoCaja.cerrando = false;
     return res.status(400).json({ ok: false, error: 'Faltan valores de saldo final' });
   }
 
@@ -167,12 +174,14 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   const duracionStr = `${horas}h ${minutos}m`;
 
   // Fecha del servicio en formato dd/mm/yy (día de apertura)
-  const dd = String(apertura.getDate()).padStart(2, '0');
-  const mm = String(apertura.getMonth() + 1).padStart(2, '0');
-  const yy = String(apertura.getFullYear()).slice(-2);
+  // Convertir a hora AR (UTC-3) para que cierres después de las 21:00 no caigan en el día siguiente
+  const aperturaAR = new Date(apertura.getTime() - 3 * 60 * 60 * 1000);
+  const dd = String(aperturaAR.getUTCDate()).padStart(2, '0');
+  const mm = String(aperturaAR.getUTCMonth() + 1).padStart(2, '0');
+  const yy = String(aperturaAR.getUTCFullYear()).slice(-2);
   const fechaServicio = `${dd}/${mm}/${yy}`;
   const mesesNombres = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-  const mesServicio = mesesNombres[apertura.getMonth()];
+  const mesServicio = mesesNombres[aperturaAR.getUTCMonth()];
   const descripcionServicio = `Servicio ${dd}/${mm}`;
 
   // Fechas para hoja Arqueo de Cajas (formato largo local)
@@ -251,6 +260,7 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
 
     clearCache();
   } catch (err) {
+    estadoCaja.cerrando = false;  // liberar lock en caso de error
     console.error('Error guardando arqueo:', err.message);
     return res.status(500).json({ ok: false, error: 'Error al guardar en la planilla: ' + err.message });
   }
