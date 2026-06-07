@@ -63,6 +63,25 @@ function grupoDeCategoria(nombre) {
   return 'otros';
 }
 
+// ─── Corte por turno de servicio ────────────────────────────────────────────────
+// Bar Mercedes abre Jue/Vie/Sáb/Dom/Lun de ~19:30 a ~01:00. En Fudo el turno
+// "Bar Mercedes" agrupa las ventas de un servicio desde las 16:00 de un día hasta
+// las 16:00 del día siguiente. Por eso la madrugada (00:00–04:00) pertenece al
+// servicio del día ANTERIOR, no al del calendario.
+//
+// Implementación: convertimos el timestamp UTC a hora local (AR = UTC-3) y le
+// restamos la hora de inicio del turno (16:00). La fecha resultante es el día de
+// apertura del servicio. Como entre las 04:00 y las 19:00 no hay ventas, cualquier
+// corte en esa franja da el mismo resultado; usamos 16:00 igual que Fudo.
+const TZ_OFFSET_H = parseFloat(process.env.FUDO_TZ_OFFSET || '-3');   // Argentina UTC-3
+const TURNO_INICIO_H = parseFloat(process.env.FUDO_TURNO_INICIO_H || '16'); // turno arranca 16:00
+
+function fechaServicio(isoUtc) {
+  // Desplazamos a hora AR y restamos el inicio de turno, en un solo ajuste de ms.
+  const shifted = new Date(isoUtc).getTime() + (TZ_OFFSET_H - TURNO_INICIO_H) * 3600 * 1000;
+  return new Date(shifted).toISOString().slice(0, 10);
+}
+
 // ─── Helpers de red ─────────────────────────────────────────────────────────────
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -239,8 +258,10 @@ function montoItem(item, producto) {
 async function getServicios({ desde, hasta } = {}) {
   const { sales, prod, itemsBySale, paymentsBySale } = await loadRaw();
 
-  const dDesde = desde ? new Date(desde + 'T00:00:00Z') : null;
-  const dHasta = hasta ? new Date(hasta + 'T23:59:59Z') : null;
+  // El filtro de rango se aplica sobre la FECHA DE SERVICIO (día de apertura del
+  // turno), no sobre la fecha de calendario del cierre.
+  const dDesde = desde || null;  // 'YYYY-MM-DD'
+  const dHasta = hasta || null;  // 'YYYY-MM-DD'
 
   const dias = {};
   for (const s of sales) {
@@ -248,10 +269,9 @@ async function getServicios({ desde, hasta } = {}) {
     if (a.saleState !== 'CLOSED') continue;      // solo ventas cerradas
     const closed = a.closedAt;
     if (!closed) continue;
-    const fechaISO = closed.slice(0, 10);
-    const d = new Date(closed);
-    if (dDesde && d < dDesde) continue;
-    if (dHasta && d > dHasta) continue;
+    const fechaISO = fechaServicio(closed);      // día de servicio (corte de turno)
+    if (dDesde && fechaISO < dDesde) continue;
+    if (dHasta && fechaISO > dHasta) continue;
 
     if (!dias[fechaISO]) {
       dias[fechaISO] = {
@@ -305,7 +325,7 @@ async function getServicioDetalle(fecha) {
 
   const daySales = sales.filter(s => {
     const a = s.attributes || {};
-    return a.saleState === 'CLOSED' && a.closedAt && a.closedAt.slice(0, 10) === fecha;
+    return a.saleState === 'CLOSED' && a.closedAt && fechaServicio(a.closedAt) === fecha;
   });
 
   if (!daySales.length) {
