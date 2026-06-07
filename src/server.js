@@ -224,6 +224,18 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
       requestBody: { values: [rowArqueo] },
     });
 
+    // 1b. Actualizar Saldo Real en hoja Cajas (G2=Mercado Pago, G8=Efectivo Local)
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        valueInputOption: 'USER_ENTERED',
+        data: [
+          { range: 'Cajas!G2', values: [[Number(mercadoPago)]] },
+          { range: 'Cajas!G8', values: [[Number(efectivo)]] },
+        ],
+      },
+    });
+
     // 2. Escribir en Movimientos — columnas A:M
     // A:Fecha, B:Mes, C:Tipo Movimiento, D:Estado, E:Vencimiento, F:Proveedor,
     // G:Categoría, H:Descripción, I:Medio de Pago, J:Monto Entrada ARS,
