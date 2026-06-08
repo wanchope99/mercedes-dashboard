@@ -95,7 +95,7 @@
     .row-resultado td { font-weight: 700; font-size: 15px; }
     .val-pos { color: var(--green); }
     .val-neg { color: var(--red); }
-    .val-accent { color: var(--accent); }
+    .val-accent { color: var(--text); }
 
     /* Charts */
     .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
@@ -299,7 +299,7 @@
     .arqueo-saldos-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 12px; }
     .arqueo-saldo-item { background: var(--surface2); border-radius: 8px; padding: 12px; text-align: center; }
     .arqueo-saldo-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
-    .arqueo-saldo-val { font-size: 16px; font-weight: 700; color: var(--accent); }
+    .arqueo-saldo-val { font-size: 16px; font-weight: 700; color: var(--text); }
 
     .arqueo-timer { text-align: center; font-size: 28px; font-weight: 700; color: var(--green); letter-spacing: 0.05em; font-variant-numeric: tabular-nums; }
     .arqueo-timer-label { text-align: center; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
@@ -387,6 +387,19 @@
     .serv-pagos { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
     .serv-pago-chip { background: var(--surface2); border: 1px solid var(--border); border-radius: 99px; padding: 4px 12px; font-size: 12px; }
     .serv-pago-chip strong { color: var(--text); }
+
+    /* Modal vencidos */
+    #vencidos-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 700; align-items: center; justify-content: center; }
+    #vencidos-modal-overlay.open { display: flex; }
+    #vencidos-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; width: 640px; max-width: 95vw; max-height: 85vh; overflow-y: auto; box-shadow: 0 24px 64px rgba(0,0,0,0.5); }
+    .vencidos-modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .vencidos-modal-title { font-size: 18px; font-weight: 700; color: var(--red); }
+    .vencidos-list { display: flex; flex-direction: column; gap: 10px; }
+    .vencidos-item { background: var(--surface2); border: 1px solid var(--red); border-radius: 10px; padding: 14px 16px; display: grid; grid-template-columns: 1fr auto; gap: 4px; align-items: start; }
+    .vencidos-item-proveedor { font-weight: 600; font-size: 14px; }
+    .vencidos-item-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .vencidos-item-monto { font-weight: 700; font-size: 16px; color: var(--red); text-align: right; }
+    .vencidos-item-dias { font-size: 11px; color: var(--red); text-align: right; margin-top: 2px; }
   </style>
 </head>
 <body>
@@ -786,6 +799,17 @@
   </div>
 </div>
 
+<!-- Modal vencidos -->
+<div id="vencidos-modal-overlay">
+  <div id="vencidos-modal">
+    <div class="vencidos-modal-header">
+      <div class="vencidos-modal-title">⚠️ Pagos vencidos</div>
+      <button class="btn-close" onclick="closeVencidosModal()">×</button>
+    </div>
+    <div class="vencidos-list" id="vencidos-list"></div>
+  </div>
+</div>
+
 <script>
 const state = {
   modo: 'mes', mes: '', desde: '', hasta: '',
@@ -895,6 +919,42 @@ function doLogout() {
   document.getElementById('login-error').textContent = '';
   document.getElementById('header-usuario').textContent = '';
 }
+
+// ─── Modal vencidos ──────────────────────────────────────────────────────────
+function openVencidosModal(pagos) {
+  const list = document.getElementById('vencidos-list');
+  if (!pagos.length) {
+    list.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">Sin pagos vencidos.</div>';
+  } else {
+    list.innerHTML = pagos.map(p => {
+      const montoStr = p.salidaARS > 0
+        ? fmt(p.salidaARS)
+        : p.salidaUSD > 0 ? `USD ${p.salidaUSD.toLocaleString('es-AR')}` : '—';
+      const vencLabel = p.vencDate ? new Date(p.vencDate + 'T12:00:00').toLocaleDateString('es-AR') : (p.vencimiento || 'Sin fecha');
+      const diasStr = p.diasHastaVenc !== null ? `Venció hace ${Math.abs(p.diasHastaVenc)} día${Math.abs(p.diasHastaVenc) !== 1 ? 's' : ''}` : '';
+      return `<div class="vencidos-item">
+        <div>
+          <div class="vencidos-item-proveedor">${p.proveedor || '—'}</div>
+          <div class="vencidos-item-meta">${p.categoria || ''} · ${p.medioPago || ''} · Vencía: ${vencLabel}</div>
+          ${p.descripcion ? `<div class="vencidos-item-meta" style="margin-top:4px">${p.descripcion.substring(0,80)}${p.descripcion.length>80?'…':''}</div>` : ''}
+        </div>
+        <div>
+          <div class="vencidos-item-monto">${montoStr}</div>
+          <div class="vencidos-item-dias">${diasStr}</div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+  document.getElementById('vencidos-modal-overlay').classList.add('open');
+}
+function closeVencidosModal() {
+  document.getElementById('vencidos-modal-overlay').classList.remove('open');
+}
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('vencidos-modal-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeVencidosModal();
+  });
+});
 
 // Auto-login si hay token guardado
 async function checkSavedToken() {
@@ -1507,6 +1567,7 @@ async function loadPagos() {
 
   try {
     const { data: pagos, summary } = await api(url);
+    const vencidosPagos = pagos.filter(p => p.urgencia === 'vencido');
     const galiciaPagos = pagos.filter(p => (p.medioPago || '').toLowerCase().includes('galicia'));
     const galiciaTotal = galiciaPagos.reduce((s, p) => s + p.salidaARS, 0);
     const independientes = pagos.filter(p => !(p.medioPago || '').toLowerCase().includes('galicia'));
@@ -1515,7 +1576,7 @@ async function loadPagos() {
       <div class="kpi-card red"><div class="kpi-label">Total pendiente ARS</div><div class="kpi-value">${fmt(summary.totalARS)}</div><div class="kpi-sub">${summary.total} pagos</div></div>
       <div class="kpi-card blue"><div class="kpi-label">Tarjeta Galicia</div><div class="kpi-value">${fmt(galiciaTotal)}</div><div class="kpi-sub">${galiciaPagos.length} cargo${galiciaPagos.length !== 1 ? 's' : ''}</div></div>
       <div class="kpi-card accent"><div class="kpi-label">Proveedores independientes</div><div class="kpi-value">${fmt(summary.totalARS - galiciaTotal)}</div><div class="kpi-sub">${independientes.length} pago${independientes.length !== 1 ? 's' : ''}</div></div>
-      <div class="kpi-card ${summary.vencidos > 0 ? 'red' : 'green'}"><div class="kpi-label">Vencidos</div><div class="kpi-value">${summary.vencidos}</div><div class="kpi-sub">${summary.vencidos > 0 ? '⚠️ Atención requerida' : 'Al día ✓'}</div></div>
+      <div class="kpi-card ${summary.vencidos > 0 ? 'red' : 'green'}" ${summary.vencidos > 0 ? 'onclick="openVencidosModal(vencidosPagos)" style="cursor:pointer;transition:opacity 0.15s" onmouseenter="this.style.opacity=\'0.8\'" onmouseleave="this.style.opacity=\'1\'"' : ''}><div class="kpi-label">Vencidos</div><div class="kpi-value">${summary.vencidos}</div><div class="kpi-sub">${summary.vencidos > 0 ? '⚠️ Clic para ver' : 'Al día ✓'}</div></div>
       <div class="kpi-card ${summary.estaSemanaCant > 0 ? 'orange' : 'green'}"><div class="kpi-label">Esta semana</div><div class="kpi-value">${summary.estaSemanaCant}</div><div class="kpi-sub">${fmt(summary.estaSemanaARS)}</div></div>
     `;
 
