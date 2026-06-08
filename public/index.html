@@ -1567,7 +1567,7 @@ async function loadPagos() {
 
   try {
     const { data: pagos, summary } = await api(url);
-    const vencidosPagos = pagos.filter(p => p.urgencia === 'vencido');
+    state.vencidosPagos = pagos.filter(p => p.urgencia === 'vencido');
     const galiciaPagos = pagos.filter(p => (p.medioPago || '').toLowerCase().includes('galicia'));
     const galiciaTotal = galiciaPagos.reduce((s, p) => s + p.salidaARS, 0);
     const independientes = pagos.filter(p => !(p.medioPago || '').toLowerCase().includes('galicia'));
@@ -1576,7 +1576,7 @@ async function loadPagos() {
       <div class="kpi-card red"><div class="kpi-label">Total pendiente ARS</div><div class="kpi-value">${fmt(summary.totalARS)}</div><div class="kpi-sub">${summary.total} pagos</div></div>
       <div class="kpi-card blue"><div class="kpi-label">Tarjeta Galicia</div><div class="kpi-value">${fmt(galiciaTotal)}</div><div class="kpi-sub">${galiciaPagos.length} cargo${galiciaPagos.length !== 1 ? 's' : ''}</div></div>
       <div class="kpi-card accent"><div class="kpi-label">Proveedores independientes</div><div class="kpi-value">${fmt(summary.totalARS - galiciaTotal)}</div><div class="kpi-sub">${independientes.length} pago${independientes.length !== 1 ? 's' : ''}</div></div>
-      <div class="kpi-card ${summary.vencidos > 0 ? 'red' : 'green'}" ${summary.vencidos > 0 ? 'onclick="openVencidosModal(vencidosPagos)" style="cursor:pointer;transition:opacity 0.15s" onmouseenter="this.style.opacity=\'0.8\'" onmouseleave="this.style.opacity=\'1\'"' : ''}><div class="kpi-label">Vencidos</div><div class="kpi-value">${summary.vencidos}</div><div class="kpi-sub">${summary.vencidos > 0 ? '⚠️ Clic para ver' : 'Al día ✓'}</div></div>
+      <div class="kpi-card ${summary.vencidos > 0 ? 'red' : 'green'}" ${summary.vencidos > 0 ? 'onclick="openVencidosModal(state.vencidosPagos)" style="cursor:pointer;transition:opacity 0.15s" onmouseenter="this.style.opacity=\'0.8\'" onmouseleave="this.style.opacity=\'1\'"' : ''}><div class="kpi-label">Vencidos</div><div class="kpi-value">${summary.vencidos}</div><div class="kpi-sub">${summary.vencidos > 0 ? '⚠️ Clic para ver' : 'Al día ✓'}</div></div>
       <div class="kpi-card ${summary.estaSemanaCant > 0 ? 'orange' : 'green'}"><div class="kpi-label">Esta semana</div><div class="kpi-value">${summary.estaSemanaCant}</div><div class="kpi-sub">${fmt(summary.estaSemanaARS)}</div></div>
     `;
 
