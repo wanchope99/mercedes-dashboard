@@ -921,7 +921,15 @@ function doLogout() {
 }
 
 // ─── Modal vencidos ──────────────────────────────────────────────────────────
+function openSemanModal(pagos) {
+  document.querySelector('.vencidos-modal-title').textContent = '📅 Vencimientos esta semana';
+  _openVencidosModal(pagos);
+}
 function openVencidosModal(pagos) {
+  document.querySelector('.vencidos-modal-title').textContent = '⚠️ Pagos vencidos';
+  _openVencidosModal(pagos);
+}
+function _openVencidosModal(pagos) {
   const list = document.getElementById('vencidos-list');
   if (!pagos.length) {
     list.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">Sin pagos vencidos.</div>';
@@ -935,7 +943,7 @@ function openVencidosModal(pagos) {
       return `<div class="vencidos-item">
         <div>
           <div class="vencidos-item-proveedor">${p.proveedor || '—'}</div>
-          <div class="vencidos-item-meta">${p.categoria || ''} · ${p.medioPago || ''} · Vencía: ${vencLabel}</div>
+          <div class="vencidos-item-meta">${p.categoria || ''} · <strong style="color:var(--text)">${p.medioPago || (state.proveedores[(p.proveedor||'').toLowerCase()] && state.proveedores[(p.proveedor||'').toLowerCase()].formaPago) || '—'}</strong> · Vence: ${vencLabel}</div>
           ${p.descripcion ? `<div class="vencidos-item-meta" style="margin-top:4px">${p.descripcion.substring(0,80)}${p.descripcion.length>80?'…':''}</div>` : ''}
         </div>
         <div>
@@ -1542,12 +1550,14 @@ function buildPagosRows(pagos, groupId) {
     const provKey = (p.proveedor || '').toLowerCase();
     const hasData = !!state.proveedores[provKey];
     const provCell = `<span class="proveedor-link ${hasData ? 'has-data' : ''}" onclick="openProvModal('${(p.proveedor||'').replace(/'/g, "\\'")}')">${p.proveedor || '—'}</span>`;
+    const formaPago = p.medioPago || (state.proveedores[provKey] && state.proveedores[provKey].formaPago) || '—';
+    const formaPagoStyle = !p.medioPago && formaPago !== '—' ? 'opacity:0.7;font-style:italic' : '';
     return `<tr class="${cls}">
       <td><div class="td-proveedor">${provCell}</div>${desc ? `<div class="td-desc">${desc}</div>` : ''}</td>
       <td style="color:var(--text-muted);font-size:12px">${p.categoria || '—'}</td>
       <td style="font-size:13px;white-space:nowrap">${vencLabel}</td>
       <td>${urgenciaBadge(p)}</td>
-      <td><span class="badge-mp">${p.medioPago || '—'}</span></td>
+      <td><span class="badge-mp" style="${formaPagoStyle}">${formaPago}</span></td>
       <td class="td-right">${montoStr}</td>
       <td style="font-size:11px;color:var(--text-muted);max-width:160px">${p.descripcion && p.descripcion.length > 60 ? p.descripcion.substring(0,100)+'…' : ''}</td>
     </tr>`;
@@ -1568,6 +1578,7 @@ async function loadPagos() {
   try {
     const { data: pagos, summary } = await api(url);
     state.vencidosPagos = pagos.filter(p => p.urgencia === 'vencido');
+    state.estaSemanaPagos = pagos.filter(p => ['hoy','urgente','proximo'].includes(p.urgencia));
     const galiciaPagos = pagos.filter(p => (p.medioPago || '').toLowerCase().includes('galicia'));
     const galiciaTotal = galiciaPagos.reduce((s, p) => s + p.salidaARS, 0);
     const independientes = pagos.filter(p => !(p.medioPago || '').toLowerCase().includes('galicia'));
@@ -1577,7 +1588,7 @@ async function loadPagos() {
       <div class="kpi-card blue"><div class="kpi-label">Tarjeta Galicia</div><div class="kpi-value">${fmt(galiciaTotal)}</div><div class="kpi-sub">${galiciaPagos.length} cargo${galiciaPagos.length !== 1 ? 's' : ''}</div></div>
       <div class="kpi-card accent"><div class="kpi-label">Proveedores independientes</div><div class="kpi-value">${fmt(summary.totalARS - galiciaTotal)}</div><div class="kpi-sub">${independientes.length} pago${independientes.length !== 1 ? 's' : ''}</div></div>
       <div class="kpi-card ${summary.vencidos > 0 ? 'red' : 'green'}" ${summary.vencidos > 0 ? 'onclick="openVencidosModal(state.vencidosPagos)" style="cursor:pointer;transition:opacity 0.15s" onmouseenter="this.style.opacity=\'0.8\'" onmouseleave="this.style.opacity=\'1\'"' : ''}><div class="kpi-label">Vencidos</div><div class="kpi-value">${summary.vencidos}</div><div class="kpi-sub">${summary.vencidos > 0 ? '⚠️ Clic para ver' : 'Al día ✓'}</div></div>
-      <div class="kpi-card ${summary.estaSemanaCant > 0 ? 'orange' : 'green'}"><div class="kpi-label">Esta semana</div><div class="kpi-value">${summary.estaSemanaCant}</div><div class="kpi-sub">${fmt(summary.estaSemanaARS)}</div></div>
+      <div class="kpi-card ${summary.estaSemanaCant > 0 ? 'orange' : 'green'}" ${summary.estaSemanaCant > 0 ? 'onclick="openSemanModal(state.estaSemanaPagos)" style="cursor:pointer;transition:opacity 0.15s" onmouseenter="this.style.opacity=\'0.8\'" onmouseleave="this.style.opacity=\'1\'"' : ''}><div class="kpi-label">Esta semana</div><div class="kpi-value">${summary.estaSemanaCant}</div><div class="kpi-sub">${summary.estaSemanaCant > 0 ? fmt(summary.estaSemanaARS) + ' · Clic para ver' : fmt(summary.estaSemanaARS)}</div></div>
     `;
 
     document.getElementById('pagos-count').textContent = `· ${pagos.length} resultado${pagos.length !== 1 ? 's' : ''}`;
