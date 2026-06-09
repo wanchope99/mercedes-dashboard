@@ -1425,6 +1425,7 @@ async function loadCajas() {
     `;
 
     // Render cards individuales
+    const esAdmin = getRol() === 'admin';
     container.innerHTML = cajas.map(c => {
       const saldo = c.saldoReal !== undefined && c.saldoReal !== 0 ? c.saldoReal : c.saldoCalculado;
       const isNeg = saldo < 0;
@@ -1434,6 +1435,14 @@ async function loadCajas() {
       const equiv = c.moneda === 'USD'
         ? `≈ ${fmt(saldo * TC)} ARS`
         : `≈ USD ${Math.round(saldo / TC).toLocaleString('es-AR')}`;
+      if (!esAdmin) {
+        // Vista encargado: solo nombre y saldo
+        return `
+          <div class="caja-card">
+            <div class="caja-nombre">${c.caja}</div>
+            <div class="caja-saldo ${isNeg ? 'neg' : ''}" style="margin-top:12px;font-size:26px">${saldoFmt}</div>
+          </div>`;
+      }
       return `
         <div class="caja-card">
           <div class="caja-nombre">${c.caja}</div>
@@ -1587,7 +1596,7 @@ async function loadPagos() {
   try {
     const { data: pagos, summary } = await api(url);
     state.vencidosPagos = pagos.filter(p => p.urgencia === 'vencido');
-    state.estaSemanaPagos = pagos.filter(p => ['hoy','urgente','proximo'].includes(p.urgencia));
+    state.estaSemanaPagos = pagos.filter(p => p.diasHastaVenc !== null && p.diasHastaVenc >= 0 && p.diasHastaVenc <= 7);
     const galiciaPagos = pagos.filter(p => (p.medioPago || '').toLowerCase().includes('galicia'));
     const galiciaTotal = galiciaPagos.reduce((s, p) => s + p.salidaARS, 0);
     const independientes = pagos.filter(p => !(p.medioPago || '').toLowerCase().includes('galicia'));
