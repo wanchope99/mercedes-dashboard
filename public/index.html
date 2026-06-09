@@ -939,7 +939,16 @@ function _openVencidosModal(pagos) {
         ? fmt(p.salidaARS)
         : p.salidaUSD > 0 ? `USD ${p.salidaUSD.toLocaleString('es-AR')}` : '—';
       const vencLabel = p.vencDate ? new Date(p.vencDate + 'T12:00:00').toLocaleDateString('es-AR') : (p.vencimiento || 'Sin fecha');
-      const diasStr = p.diasHastaVenc !== null ? `Venció hace ${Math.abs(p.diasHastaVenc)} día${Math.abs(p.diasHastaVenc) !== 1 ? 's' : ''}` : '';
+      let diasStr = '';
+      if (p.diasHastaVenc !== null) {
+        if (p.urgencia === 'vencido') {
+          diasStr = `Venció hace ${Math.abs(p.diasHastaVenc)} día${Math.abs(p.diasHastaVenc) !== 1 ? 's' : ''}`;
+        } else if (p.urgencia === 'hoy') {
+          diasStr = 'Vence hoy';
+        } else {
+          diasStr = `Vence en ${p.diasHastaVenc} día${p.diasHastaVenc !== 1 ? 's' : ''}`;
+        }
+      }
       return `<div class="vencidos-item">
         <div>
           <div class="vencidos-item-proveedor">${p.proveedor || '—'}</div>
@@ -948,7 +957,7 @@ function _openVencidosModal(pagos) {
         </div>
         <div>
           <div class="vencidos-item-monto">${montoStr}</div>
-          <div class="vencidos-item-dias">${diasStr}</div>
+          <div class="vencidos-item-dias" style="color:${p.urgencia === 'vencido' ? 'var(--red)' : p.urgencia === 'hoy' || p.urgencia === 'urgente' ? 'var(--orange)' : 'var(--text-muted)'}">${diasStr}</div>
         </div>
       </div>`;
     }).join('');
