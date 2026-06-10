@@ -1778,7 +1778,7 @@ function renderServiciosKPIs(servicios) {
     <div class="kpi-card green">
       <div class="kpi-label">Facturación total</div>
       <div class="kpi-value">${fmt(total$)}</div>
-      <div class="kpi-sub">Ventas cerradas en Fudo</div>
+      <div class="kpi-sub">${(() => { const p = servicios.reduce((s, x) => s + (x.propinas || 0), 0); return p > 0 ? `+ ${fmt(p)} en propinas` : 'Ventas cerradas en Fudo'; })()}</div>
     </div>
     <div class="kpi-card accent">
       <div class="kpi-label">Ticket promedio</div>
@@ -1810,7 +1810,7 @@ function renderServiciosList(servicios) {
           <div class="serv-pax-num">${s.pax}</div>
           <div class="serv-pax-lbl">pax</div>
         </div>
-        <div class="serv-total">${fmt(s.total)}<span class="serv-ticket">${fmt(s.ticketPromedio)}/pax · ${s.ventas} venta${s.ventas !== 1 ? 's' : ''}</span></div>
+        <div class="serv-total">${fmt(s.total)}<span class="serv-ticket">${fmt(s.ticketPromedio)}/pax · ${s.ventas} venta${s.ventas !== 1 ? 's' : ''}${(s.propinas || 0) > 0 ? ` · <span style="color:var(--green)">+${fmt(s.propinas)} propina</span>` : ''}</span></div>
         <div class="serv-cb">
           <div class="serv-cb-bar">
             <div class="serv-cb-comida" style="width:${pctC}%"></div>
