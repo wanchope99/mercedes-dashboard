@@ -163,6 +163,27 @@
     .pagos-empty { text-align: center; color: var(--text-muted); padding: 48px 24px; font-size: 14px; }
     .badge-cuota { display: inline-block; background: rgba(155,89,182,0.14); color: var(--purple); border: 1px solid rgba(155,89,182,0.35); border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 700; margin-left: 6px; white-space: nowrap; vertical-align: middle; }
     .cuota-restante { font-size: 10px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; }
+    .pv-toggle { display: inline-flex; margin-left: 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; vertical-align: middle; }
+    .pv-btn { padding: 4px 12px; font-size: 11px; background: none; border: none; color: var(--text-muted); cursor: pointer; font-family: inherit; font-weight: 600; text-transform: none; letter-spacing: 0; }
+    .pv-btn.active { background: var(--accent); color: #f0e6d3; }
+    .cuota-grp-header { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--surface2); font-size: 12px; font-weight: 600; }
+    .cuota-grp-header .restante { margin-left: auto; color: var(--red); font-weight: 700; }
+    .cuota-grp-header .pagadas { color: var(--text-muted); font-weight: 400; }
+    /* Proyecciones */
+    .proy-var-row { display: flex; align-items: center; gap: 14px; padding: 10px 4px; border-bottom: 1px solid rgba(46,46,62,0.4); font-size: 13px; flex-wrap: wrap; }
+    .proy-var-row:last-child { border-bottom: none; }
+    .proy-var-nombre { font-weight: 600; min-width: 180px; }
+    .proy-var-tag { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 700; }
+    .proy-var-tag.gasto { background: rgba(224,92,92,0.15); color: var(--red); }
+    .proy-var-tag.ingreso { background: rgba(76,175,130,0.15); color: var(--green); }
+    .proy-var-meses { font-size: 11px; color: var(--text-muted); }
+    .proy-var-del { margin-left: auto; background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; }
+    .proy-var-del:hover { color: var(--red); }
+    .pv-meses { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+    .pv-mes-chk { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 5px 9px; cursor: pointer; user-select: none; }
+    .pv-mes-chk input { accent-color: var(--accent); }
+    .proy-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 12px; }
+    #proy-var-form { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
     .group-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--surface2); border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); cursor: pointer; user-select: none; transition: background 0.15s; }
     .group-header:hover { background: var(--border); }
     .group-chevron { font-size: 10px; transition: transform 0.2s; display: inline-block; }
@@ -465,6 +486,7 @@
   <button class="tab-btn" id="tab-btn-cajas" onclick="switchTab('cajas', this)">🏦 Cajas</button>
   <button class="tab-btn" id="tab-btn-arqueo" onclick="switchTab('arqueo', this)">🗃️ Arqueo de Caja</button>
   <button class="tab-btn" id="tab-btn-servicios" onclick="switchTab('servicios', this)">🍽️ Servicios</button>
+  <button class="tab-btn" id="tab-btn-proyecciones" onclick="switchTab('proyecciones', this)">📈 Proyecciones</button>
 </div>
 
 <!-- ═══ DASHBOARD TAB ═══ -->
@@ -527,6 +549,63 @@
   </main>
 </div>
 
+<!-- ═══ PROYECCIONES TAB ═══ -->
+<div id="tab-proyecciones" class="tab-panel">
+  <main>
+    <div class="kpi-grid" id="proy-kpis"><div class="loading"><div class="spinner"></div> Calculando proyección...</div></div>
+
+    <div class="card">
+      <div class="card-title">Ingresos vs gastos — real y proyección 12 meses
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· barras translúcidas = proyección</span>
+      </div>
+      <div class="chart-container" style="height:330px"><canvas id="chart-proy-main"></canvas></div>
+    </div>
+
+    <div class="charts-row">
+      <div class="card">
+        <div class="card-title">Resultado acumulado proyectado</div>
+        <div class="chart-container"><canvas id="chart-proy-acum"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Composición del gasto proyectado</div>
+        <div class="chart-container"><canvas id="chart-proy-comp"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Variables personalizadas
+        <button class="btn btn-accent" style="float:right;font-size:12px;padding:6px 12px" onclick="toggleVarForm()">➕ Agregar variable</button>
+      </div>
+      <div id="proy-var-form" style="display:none">
+        <div class="proy-form-grid">
+          <div class="form-group"><label>Nombre</label><input id="pvf-nombre" placeholder="Ej: Sueldo nuevo empleado"></div>
+          <div class="form-group"><label>Tipo</label><select id="pvf-tipo">
+            <option value="gasto">Gasto fijo mensual</option>
+            <option value="ingreso">Ingreso mensual</option>
+          </select></div>
+          <div class="form-group"><label>Monto ARS (por mes)</label><input type="number" id="pvf-monto" min="0" placeholder="0"></div>
+          <div class="form-group"><label>Frecuencia</label><select id="pvf-repite">
+            <option value="true">🔁 Se repite cada año</option>
+            <option value="false">1️⃣ Una sola vez</option>
+          </select></div>
+        </div>
+        <div class="form-group"><label>Meses en los que aplica</label><div id="pvf-meses" class="pv-meses"></div></div>
+        <div id="pvf-status" style="display:none;font-size:12px;margin:10px 0"></div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn btn-accent" onclick="saveProyVar()">Guardar variable</button>
+          <button class="btn" onclick="toggleVarForm()">Cancelar</button>
+        </div>
+      </div>
+      <div id="proy-var-list"><div style="color:var(--text-muted);font-size:13px;padding:8px 0">Sin variables. Agregá por ejemplo el sueldo de un empleado nuevo para simular su impacto.</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Supuestos de la proyección</div>
+      <div id="proy-supuestos" style="font-size:12px;color:var(--text-muted);line-height:2"></div>
+    </div>
+  </main>
+</div>
+
 <!-- ═══ PAGOS TAB ═══ -->
 <div id="tab-pagos" class="tab-panel">
   <div class="pagos-filters">
@@ -556,6 +635,10 @@
     <div class="card" style="padding:0;overflow:hidden">
       <div class="card-title" style="padding:20px 24px 0;margin-bottom:0">
         Pagos pendientes
+        <span class="pv-toggle">
+          <button class="pv-btn active" id="pv-btn-todos" onclick="setPagosVista('todos')">Todos</button>
+          <button class="pv-btn" id="pv-btn-cuotas" onclick="setPagosVista('cuotas')">📅 Cuotas</button>
+        </span>
         <span id="pagos-count" style="font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted)"></span>
       </div>
       <div class="pagos-table-wrap" style="margin-top:16px">
@@ -825,6 +908,7 @@ const state = {
   modo: 'mes', mes: '', desde: '', hasta: '',
   resumen: [], diasData: [], diasSemana: [],
   charts: {}, pagosSort: 'vencimiento', proveedores: {},
+  pagosVista: 'todos', pagosData: [], proy: null,
   tc: 1425,
   // Auth
   token: null, rol: null, nombre: null,
@@ -898,7 +982,7 @@ function onLoginSuccess(rol, nombre) {
     document.getElementById('last-updated').style.display = '';
     document.getElementById('btn-refresh').style.display = '';
     // Todas las tabs visibles
-    ['tab-btn-dashboard','tab-btn-pagos','tab-btn-cajas','tab-btn-arqueo','tab-btn-servicios'].forEach(id => {
+    ['tab-btn-dashboard','tab-btn-pagos','tab-btn-cajas','tab-btn-arqueo','tab-btn-servicios','tab-btn-proyecciones'].forEach(id => {
       document.getElementById(id).style.display = '';
     });
     init(); // carga dashboard
@@ -907,6 +991,7 @@ function onLoginSuccess(rol, nombre) {
     document.getElementById('tab-btn-dashboard').style.display = 'none';
     document.getElementById('tab-btn-pagos').style.display = 'none';
     document.getElementById('tab-btn-servicios').style.display = 'none';
+    document.getElementById('tab-btn-proyecciones').style.display = 'none';
     document.getElementById('tab-btn-cajas').style.display = '';
     document.getElementById('tab-btn-arqueo').style.display = '';
     // Activar tab arqueo directamente
@@ -1007,6 +1092,7 @@ function switchTab(tab, btn) {
   if (tab === 'cajas') loadCajas();
   if (tab === 'arqueo') initArqueo();
   if (tab === 'servicios') loadServicios();
+  if (tab === 'proyecciones') loadProyecciones();
 }
 
 // ─── ARQUEO DE CAJAS ──────────────────────────────────────────────────────────
@@ -1179,7 +1265,19 @@ async function init() {
     const { data: meses } = await api('/api/meses');
     const sel = document.getElementById('filter-mes');
     meses.forEach(m => { const o = document.createElement('option'); o.value = m; o.textContent = m; sel.appendChild(o); });
-    if (meses.length > 0) { sel.value = meses[meses.length - 1]; state.mes = meses[meses.length - 1]; }
+    // Por defecto: el mes calendario en curso. Si no existe en la planilla,
+    // el último mes pasado con movimientos (las cuotas futuras crean meses futuros).
+    if (meses.length > 0) {
+      const nombresMeses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+      const idxActual = new Date().getMonth();
+      let elegido;
+      if (meses.includes(nombresMeses[idxActual])) elegido = nombresMeses[idxActual];
+      else {
+        const pasados = meses.filter(m => nombresMeses.indexOf(m) <= idxActual);
+        elegido = pasados.length ? pasados[pasados.length - 1] : meses[0];
+      }
+      sel.value = elegido; state.mes = elegido;
+    }
 
     const hoy = new Date();
     const primerDia = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split('T')[0];
@@ -1624,6 +1722,9 @@ async function loadPagos() {
 
     document.getElementById('pagos-count').textContent = `· ${pagos.length} resultado${pagos.length !== 1 ? 's' : ''}`;
 
+    state.pagosData = pagos;
+    if (state.pagosVista === 'cuotas') { renderPagosCuotas(pagos); return; }
+
     if (!pagos.length) {
       document.getElementById('pagos-tbody').innerHTML = `<tr><td colspan="7"><div class="pagos-empty">No hay pagos pendientes con esos filtros.</div></td></tr>`;
       return;
@@ -1644,6 +1745,200 @@ async function loadPagos() {
   } catch(err) {
     document.getElementById('pagos-tbody').innerHTML = `<tr><td colspan="7" style="color:var(--red);padding:20px">Error: ${err.message}</td></tr>`;
   }
+}
+
+// ─── Vista de cuotas en Pagos ─────────────────────────────────────────────────
+function setPagosVista(vista) {
+  state.pagosVista = vista;
+  document.getElementById('pv-btn-todos').classList.toggle('active', vista === 'todos');
+  document.getElementById('pv-btn-cuotas').classList.toggle('active', vista === 'cuotas');
+  loadPagos();
+}
+
+function renderPagosCuotas(pagos) {
+  const cuotas = pagos.filter(p => p.esCuota);
+  document.getElementById('pagos-count').textContent = `· ${cuotas.length} cuota${cuotas.length !== 1 ? 's' : ''} pendiente${cuotas.length !== 1 ? 's' : ''}`;
+  if (!cuotas.length) {
+    document.getElementById('pagos-tbody').innerHTML = `<tr><td colspan="7"><div class="pagos-empty">No hay cuotas pendientes. 🎉</div></td></tr>`;
+    return;
+  }
+  // Agrupar por compra (ID Compra)
+  const grupos = {};
+  for (const c of cuotas) {
+    (grupos[c.cuotaId || 'sin-id'] = grupos[c.cuotaId || 'sin-id'] || []).push(c);
+  }
+  let html = '';
+  for (const [id, grp] of Object.entries(grupos)) {
+    grp.sort((a, b) => (a.cuotaNum || 0) - (b.cuotaNum || 0));
+    const g0 = grp[0];
+    const pagadas = g0.compraCuotasPagadas != null ? `${g0.compraCuotasPagadas}/${g0.compraCuotasTotal} pagadas` : '';
+    const descBase = (g0.descripcion || '').replace(/\s*—\s*Cuota.*$/i, '');
+    html += `<tr><td colspan="7" style="padding:0"><div class="cuota-grp-header">
+      <span>🧾 ${g0.proveedor || id}</span>
+      <span style="color:var(--text-muted);font-weight:400">${descBase}</span>
+      <span class="pagadas">${pagadas}${g0.compraTotal ? ` · total ${fmt(g0.compraTotal)}` : ''}</span>
+      <span class="restante">${g0.compraRestante ? `restan ${fmt(g0.compraRestante)}` : ''}</span>
+    </div></td></tr>`;
+    html += buildPagosRows(grp, 'cuotas-' + id.replace(/[^a-zA-Z0-9]/g, ''));
+  }
+  document.getElementById('pagos-tbody').innerHTML = html;
+}
+
+// ─── PROYECCIONES ─────────────────────────────────────────────────────────────
+const MESES_PROY = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+async function loadProyecciones() {
+  const kpis = document.getElementById('proy-kpis');
+  kpis.innerHTML = '<div class="loading"><div class="spinner"></div> Calculando proyección...</div>';
+  try {
+    const { data } = await api('/api/proyecciones');
+    state.proy = data;
+    renderProyKPIs(data);
+    renderProyCharts(data);
+    renderProyVars(data.variables || []);
+    renderProySupuestos(data.supuestos || {});
+  } catch (err) {
+    kpis.innerHTML = `<div style="color:var(--red);padding:20px">Error: ${err.message}</div>`;
+  }
+}
+
+function renderProyKPIs(data) {
+  const p = data.proyeccion || [];
+  if (!p.length) { document.getElementById('proy-kpis').innerHTML = '<div style="color:var(--text-muted);padding:20px">Sin datos suficientes para proyectar.</div>'; return; }
+  const prox = p[0];
+  const prom = p.reduce((s, x) => s + x.resultado, 0) / p.length;
+  const fin = p[p.length - 1];
+  const aguinaldos = p.reduce((s, x) => s + (x.desglose.aguinaldo || 0), 0);
+  const kpi = (label, valor, sub, color) => `
+    <div class="kpi-card ${color}">
+      <div class="kpi-label">${label}</div>
+      <div class="kpi-value">${valor}</div>
+      <div class="kpi-sub">${sub}</div>
+    </div>`;
+  document.getElementById('proy-kpis').innerHTML =
+    kpi(`Resultado proyectado · ${prox.label}`, fmt(prox.resultado), prox.resultado >= 0 ? 'Mes positivo ✓' : '⚠️ Mes negativo', prox.resultado >= 0 ? 'green' : 'red') +
+    kpi('Promedio mensual proyectado', fmt(prom), `Próximos ${p.length} meses`, prom >= 0 ? 'green' : 'red') +
+    kpi(`Acumulado a ${fin.label}`, fmt(fin.acumulado), 'Suma de resultados proyectados', fin.acumulado >= 0 ? 'blue' : 'red') +
+    kpi('Aguinaldos en el período', fmt(aguinaldos), 'Junio 50% · Diciembre 100% de la masa salarial', 'orange');
+}
+
+function renderProyCharts(data) {
+  const hist = data.historico || [], proy = data.proyeccion || [];
+  const labels = [...hist.map(h => h.label), ...proy.map(x => x.label)];
+  const nH = hist.length;
+  const colIng = i => i < nH ? 'rgba(76,175,130,0.75)' : 'rgba(76,175,130,0.30)';
+  const colGas = i => i < nH ? 'rgba(224,92,92,0.75)' : 'rgba(224,92,92,0.30)';
+  const ing = [...hist.map(h => h.ingresos), ...proy.map(x => x.ingresos)];
+  const gas = [...hist.map(h => h.gastos), ...proy.map(x => x.gastos)];
+  const resul = [...hist.map(h => h.resultado), ...proy.map(x => x.resultado)];
+  const ejes = { x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#7878a0' } }, y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#7878a0', callback: v => fmt(v) } } };
+  const leyenda = { labels: { color: '#7878a0' } };
+
+  destroyChart('proy-main');
+  state.charts['proy-main'] = new Chart(document.getElementById('chart-proy-main').getContext('2d'), {
+    data: { labels, datasets: [
+      { type: 'bar', label: 'Ingresos', data: ing, backgroundColor: labels.map((_, i) => colIng(i)), borderRadius: 4 },
+      { type: 'bar', label: 'Gastos', data: gas, backgroundColor: labels.map((_, i) => colGas(i)), borderRadius: 4 },
+      { type: 'line', label: 'Resultado', data: resul, borderColor: '#5c8fe0', backgroundColor: '#5c8fe0', tension: 0.3, pointRadius: 3, segment: { borderDash: ctx => ctx.p0DataIndex >= nH - 1 ? [6, 4] : undefined } },
+    ]},
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: leyenda, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.raw)}${c.dataIndex >= nH ? ' (proy.)' : ''}` } } }, scales: ejes }
+  });
+
+  destroyChart('proy-acum');
+  state.charts['proy-acum'] = new Chart(document.getElementById('chart-proy-acum').getContext('2d'), {
+    type: 'line',
+    data: { labels: proy.map(x => x.label), datasets: [{
+      label: 'Resultado acumulado', data: proy.map(x => x.acumulado),
+      borderColor: '#4caf82', backgroundColor: 'rgba(76,175,130,0.12)', fill: true, tension: 0.3, pointRadius: 3, borderDash: [6, 4],
+    }]},
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` Acumulado: ${fmt(c.raw)}` } } }, scales: ejes }
+  });
+
+  destroyChart('proy-comp');
+  const comp = [
+    { label: 'Mercadería + Insumos', key: 'costoVariable', color: '#e08a5c' },
+    { label: 'Personal', key: 'personal', color: '#a05ce0' },
+    { label: 'Aguinaldo', key: 'aguinaldo', color: '#e05c5c' },
+    { label: 'Alquiler', key: 'alquiler', color: '#5c8fe0' },
+    { label: 'Operativos + Impuestos', key: 'operativos', color: '#5ce0c9' },
+    { label: 'Variables personalizadas', key: 'varGastos', color: '#e0c95c' },
+  ];
+  state.charts['proy-comp'] = new Chart(document.getElementById('chart-proy-comp').getContext('2d'), {
+    type: 'bar',
+    data: { labels: proy.map(x => x.label), datasets: comp.map(c => ({
+      label: c.label, data: proy.map(x => x.desglose[c.key] || 0), backgroundColor: c.color, stack: 'g',
+    })).filter(ds => ds.data.some(v => v > 0)) },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { ...leyenda, position: 'bottom', labels: { color: '#7878a0', font: { size: 10 }, boxWidth: 10 } }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.raw)}` } } }, scales: { x: { ...ejes.x, stacked: true }, y: { ...ejes.y, stacked: true } } }
+  });
+}
+
+function renderProyVars(vars) {
+  const el = document.getElementById('proy-var-list');
+  if (!vars.length) {
+    el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0">Sin variables. Agregá por ejemplo el sueldo de un empleado nuevo para simular su impacto.</div>';
+    return;
+  }
+  el.innerHTML = vars.map(v => `
+    <div class="proy-var-row">
+      <span class="proy-var-nombre">${v.nombre}</span>
+      <span class="proy-var-tag ${v.tipo}">${v.tipo === 'ingreso' ? 'INGRESO' : 'GASTO'}</span>
+      <span style="font-weight:700;color:${v.tipo === 'ingreso' ? 'var(--green)' : 'var(--red)'}">${fmt(v.monto)}/mes</span>
+      <span class="proy-var-meses">${v.meses.join(', ')} · ${v.repite ? '🔁 cada año' : '1️⃣ una vez'}</span>
+      <button class="proy-var-del" title="Eliminar" onclick="deleteProyVar('${v.id}')">🗑</button>
+    </div>`).join('');
+}
+
+function renderProySupuestos(s) {
+  document.getElementById('proy-supuestos').innerHTML = `
+    📈 <b>Ingresos:</b> promedio por día de servicio de los últimos ${s.ventanaDias || 28} días (${fmt(s.ingresoPorDiaServicio || 0)} × ${(s.diasServicioMes || 0).toFixed(1)} días/mes = ${fmt(s.ingresoMensual || 0)}/mes).<br>
+    🛒 <b>Mercadería + Insumos:</b> ${((s.pctCostoVariable || 0) * 100).toFixed(1)}% de los ingresos (observado en la misma ventana).<br>
+    👥 <b>Personal:</b> ${fmt(s.personalMensual || 0)}/mes (último mes completo de sueldos) · Aguinaldo: Junio ${((s.aguinaldoJunioPct || 0) * 100)}% / Diciembre ${((s.aguinaldoDiciembrePct || 0) * 100)}%.<br>
+    🏠 <b>Alquiler:</b> ${fmt(s.alquilerMensual || 0)}/mes (último registrado, sin ajuste por inflación).<br>
+    ⚙️ <b>Operativos + Impuestos:</b> ${fmt(s.operativosMensual || 0)}/mes (promedio de la ventana).<br>
+    🚫 <b>Excluido:</b> equipamiento/inversión y pagos de cuotas (no son gasto recurrente).`;
+}
+
+function toggleVarForm() {
+  const f = document.getElementById('proy-var-form');
+  const abierto = f.style.display !== 'none';
+  if (!abierto && !document.getElementById('pvf-meses').children.length) {
+    document.getElementById('pvf-meses').innerHTML = MESES_PROY.map(m =>
+      `<label class="pv-mes-chk"><input type="checkbox" value="${m}">${m.slice(0, 3)}</label>`).join('');
+  }
+  if (!abierto) {
+    document.getElementById('pvf-nombre').value = '';
+    document.getElementById('pvf-monto').value = '';
+    document.getElementById('pvf-tipo').value = 'gasto';
+    document.getElementById('pvf-repite').value = 'true';
+    document.querySelectorAll('#pvf-meses input').forEach(c => c.checked = false);
+    document.getElementById('pvf-status').style.display = 'none';
+  }
+  f.style.display = abierto ? 'none' : 'block';
+}
+
+async function saveProyVar() {
+  const nombre = document.getElementById('pvf-nombre').value.trim();
+  const tipo = document.getElementById('pvf-tipo').value;
+  const monto = parseFloat(document.getElementById('pvf-monto').value) || 0;
+  const repite = document.getElementById('pvf-repite').value === 'true';
+  const meses = [...document.querySelectorAll('#pvf-meses input:checked')].map(c => c.value);
+  const st = document.getElementById('pvf-status');
+  if (!nombre || !monto) { st.style.display = 'block'; st.style.color = 'var(--red)'; st.textContent = 'Completá nombre y monto.'; return; }
+  if (!meses.length) { st.style.display = 'block'; st.style.color = 'var(--red)'; st.textContent = 'Elegí al menos un mes.'; return; }
+  st.style.display = 'block'; st.style.color = 'var(--text-muted)'; st.textContent = '⏳ Guardando...';
+  try {
+    await api('/api/proyecciones/variables', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nombre, tipo, monto, meses, repite }) });
+    st.style.color = 'var(--green)'; st.textContent = '✅ Variable guardada. Recalculando...';
+    setTimeout(() => { toggleVarForm(); loadProyecciones(); }, 800);
+  } catch (e) { st.style.color = 'var(--red)'; st.textContent = '❌ ' + e.message; }
+}
+
+async function deleteProyVar(id) {
+  if (!confirm('¿Eliminar esta variable de la proyección?')) return;
+  try {
+    await api('/api/proyecciones/variables/' + id, { method: 'DELETE' });
+    loadProyecciones();
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 // ─── Modal proveedor ──────────────────────────────────────────────────────────
