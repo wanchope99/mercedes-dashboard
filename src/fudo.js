@@ -5,20 +5,33 @@
 //   FUDO_API_KEY     -> apiKey
 //   FUDO_API_SECRET  -> apiSecret
 //
+// El token se renueva SOLO: getToken() pide uno nuevo a auth.fu.do cuando el
+// cacheado está por vencer (24 h). No hay que rotar nada en Railway salvo que
+// cambie el apiSecret.
+//
+// PERSISTENCIA: los días de servicio ya finalizados se guardan como snapshot en
+// la hoja "Fudo Historico" del spreadsheet. El histórico se sirve SIEMPRE desde
+// ahí; a Fudo solo se le piden los días posteriores al último guardado. Si la
+// API de Fudo se cae o limita, el histórico sigue disponible.
+//
 // Expone:
-//   getServicios({ desde, hasta })  -> resumen por día (pax, total, comida/bebida/otros)
+//   getServicios({ desde, hasta })  -> resumen por día (pax, total, propinas, comida/bebida)
 //   getServicioDetalle(fecha)       -> detalle de un día: productos por categoría + pagos
+//   getServicioDebug(fecha)         -> venta por venta: total vs pagos (diagnóstico)
+//   resnapshotDia(fecha)            -> rehace el snapshot guardado de un día
 //   clearFudoCache()
 
 const NodeCache = require('node-cache');
+const { google } = require('googleapis');
 
 const AUTH_URL = process.env.FUDO_AUTH_URL || 'https://auth.fu.do/api';
 const API_BASE = process.env.FUDO_API_BASE || 'https://api.fu.do/v1alpha1';
 const API_KEY = process.env.FUDO_API_KEY;
 const API_SECRET = process.env.FUDO_API_SECRET;
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+const HIST_SHEET = process.env.FUDO_HIST_SHEET || 'Fudo Historico';
 
-// Caché de datos crudos (5 min). Los productos/categorías cambian poco; las ventas
-// se refrescan seguido pero el volumen es chico, así que cacheamos todo junto.
+// Caché de datos crudos (5 min) + histórico (10 min) + token (24 h).
 const cache = new NodeCache({ stdTTL: 300 });
 
 // fetch nativo (Node 18+). Fallback a node-fetch si hiciera falta.
@@ -27,9 +40,6 @@ const _fetch = (typeof fetch !== 'undefined')
   : (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 
 // ─── Clasificación de categorías de Fudo ───────────────────────────────────────
-// Mapeo de cada categoría de productos de Fudo a un grupo de negocio.
-// "Otros" agrupa combos/menús especiales (ej. "25 de mayo") que no son
-// comida ni bebida pura y distorsionarían la proporción.
 const GRUPO_CATEGORIA = {
   // Comida
   'PARA PICAR': 'comida',
@@ -47,7 +57,6 @@ const GRUPO_CATEGORIA = {
   'Otros con Alcohol': 'bebida',
 };
 
-// Fallback heurístico para categorías nuevas que no estén en el mapa explícito.
 function grupoDeCategoria(nombre) {
   if (GRUPO_CATEGORIA[nombre]) return GRUPO_CATEGORIA[nombre];
   const n = (nombre || '').toLowerCase();
@@ -64,29 +73,25 @@ function grupoDeCategoria(nombre) {
 }
 
 // ─── Corte por turno de servicio ────────────────────────────────────────────────
-// Bar Mercedes abre Jue/Vie/Sáb/Dom/Lun de ~19:30 a ~01:00. En Fudo el turno
-// "Bar Mercedes" agrupa las ventas de un servicio desde las 16:00 de un día hasta
-// las 16:00 del día siguiente. Por eso la madrugada (00:00–04:00) pertenece al
-// servicio del día ANTERIOR, no al del calendario.
-//
-// Implementación: convertimos el timestamp UTC a hora local (AR = UTC-3) y le
-// restamos la hora de inicio del turno (16:00). La fecha resultante es el día de
-// apertura del servicio. Como entre las 04:00 y las 19:00 no hay ventas, cualquier
-// corte en esa franja da el mismo resultado; usamos 16:00 igual que Fudo.
-const TZ_OFFSET_H = parseFloat(process.env.FUDO_TZ_OFFSET || '-3');   // Argentina UTC-3
-const TURNO_INICIO_H = parseFloat(process.env.FUDO_TURNO_INICIO_H || '16'); // turno arranca 16:00
+// El turno va de 16:00 a 16:00 del día siguiente (hora AR). La madrugada
+// pertenece al servicio del día anterior.
+const TZ_OFFSET_H = parseFloat(process.env.FUDO_TZ_OFFSET || '-3');
+const TURNO_INICIO_H = parseFloat(process.env.FUDO_TURNO_INICIO_H || '16');
 
 function fechaServicio(isoUtc) {
-  // Desplazamos a hora AR y restamos el inicio de turno, en un solo ajuste de ms.
   const shifted = new Date(isoUtc).getTime() + (TZ_OFFSET_H - TURNO_INICIO_H) * 3600 * 1000;
   return new Date(shifted).toISOString().slice(0, 10);
+}
+
+// Fecha de servicio "en curso" ahora mismo. Todo día anterior a esta fecha se
+// considera FINALIZADO y es candidato a snapshot.
+function fechaServicioHoy() {
+  return fechaServicio(new Date().toISOString());
 }
 
 // ─── Helpers de red ─────────────────────────────────────────────────────────────
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// fetch con reintento ante 429 (Too Many Requests) y errores 5xx transitorios.
-// Backoff exponencial respetando el header Retry-After si Fudo lo envía.
 async function fetchRetry(url, opts = {}, { tries = 4, baseDelay = 1500, label = '' } = {}) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
@@ -99,7 +104,6 @@ async function fetchRetry(url, opts = {}, { tries = 4, baseDelay = 1500, label =
       continue;
     }
     if (res.status === 429 || res.status >= 500) {
-      // rate limit o error de servidor → esperar y reintentar
       const ra = parseInt(res.headers.get('retry-after') || '', 10);
       const wait = Number.isFinite(ra) ? ra * 1000 : baseDelay * Math.pow(2, i);
       lastErr = new Error(`${label || 'Fudo'} (${res.status})`);
@@ -110,7 +114,7 @@ async function fetchRetry(url, opts = {}, { tries = 4, baseDelay = 1500, label =
   throw lastErr || new Error(`${label || 'Fudo'}: sin respuesta tras reintentos`);
 }
 
-// ─── Auth ───────────────────────────────────────────────────────────────────────
+// ─── Auth (token auto-renovable) ────────────────────────────────────────────────
 async function getToken() {
   if (!API_KEY || !API_SECRET) {
     throw new Error('Faltan credenciales de Fudo (FUDO_API_KEY / FUDO_API_SECRET)');
@@ -126,12 +130,10 @@ async function getToken() {
       body: JSON.stringify({ apiKey: API_KEY, apiSecret: API_SECRET }),
     }, { label: 'Auth Fudo' });
   } catch (e) {
-    // Si la red falla pero hay token cacheado (aunque casi vencido), usarlo
     if (cached && cached.token) return cached.token;
     throw new Error(`Auth Fudo sin conexión: ${e.message}`);
   }
   if (!res.ok) {
-    // Rate limit persistente: reutilizar token viejo si existe
     if (res.status === 429 && cached && cached.token) return cached.token;
     const t = await res.text().catch(() => '');
     const msg = res.status === 429
@@ -168,7 +170,7 @@ async function fetchAll(resource) {
     all = all.concat(data);
     if (data.length < size) break;
     page++;
-    if (page > 50) break; // tope de seguridad
+    if (page > 50) break;
   }
   return all;
 }
@@ -178,7 +180,6 @@ async function loadRaw() {
   const cached = cache.get('fudo_raw');
   if (cached) return cached;
 
-  // Llamadas SECUENCIALES (con micro-pausa) para no gatillar el rate limit de Fudo.
   let sales, items, products, categories, payments, paymentMethods;
   try {
     sales          = await fetchAll('sales');           await sleep(150);
@@ -188,13 +189,11 @@ async function loadRaw() {
     payments       = await fetchAll('payments');        await sleep(150);
     paymentMethods = await fetchAll('payment-methods');
   } catch (e) {
-    // Si Fudo limita o falla, servir el último dato bueno conocido (si existe)
     const backup = cache.get('fudo_raw_backup');
     if (backup) return backup;
     throw e;
   }
 
-  // Mapas de lookup
   const catName = {};
   categories.forEach(c => { catName[c.id] = (c.attributes && c.attributes.name) || 'Sin categoría'; });
 
@@ -212,7 +211,6 @@ async function loadRaw() {
   const pmName = {};
   paymentMethods.forEach(m => { pmName[m.id] = (m.attributes && m.attributes.name) || 'Otro'; });
 
-  // Items agrupados por venta
   const itemsBySale = {};
   items.forEach(it => {
     const saleRel = it.relationships && it.relationships.sale && it.relationships.sale.data;
@@ -220,7 +218,6 @@ async function loadRaw() {
     (itemsBySale[saleRel.id] = itemsBySale[saleRel.id] || []).push(it);
   });
 
-  // Pagos agrupados por venta
   const paymentsBySale = {};
   payments.forEach(pay => {
     if (pay.attributes && pay.attributes.canceled) return;
@@ -235,117 +232,56 @@ async function loadRaw() {
 
   const raw = { sales, prod, catName, itemsBySale, paymentsBySale };
   cache.set('fudo_raw', raw);
-  cache.set('fudo_raw_backup', raw, 86_400); // respaldo 24h por si Fudo limita luego
+  cache.set('fudo_raw_backup', raw, 86_400);
   return raw;
 }
 
 // ─── Monto de un ítem ───────────────────────────────────────────────────────────
-// Regla acordada: se usa el precio de lista del producto × cantidad, PERO
-// respetando invitaciones/descuentos: si en esa venta el ítem quedó en $0
-// explícito (invitación), se cuenta como $0. Si el ítem trae un precio > 0
-// propio (descuento puntual), se usa ese. Si viene null, se usa el de lista.
 function montoItem(item, producto) {
   const q = (item.attributes && item.attributes.quantity) || 0;
   const ip = item.attributes ? item.attributes.price : null;
   let unit;
-  if (ip === 0) unit = 0;                       // invitación / cortesía
-  else if (typeof ip === 'number' && ip > 0) unit = ip; // precio puntual de la venta
-  else unit = producto ? producto.price : 0;    // precio de lista
+  if (ip === 0) unit = 0;
+  else if (typeof ip === 'number' && ip > 0) unit = ip;
+  else unit = producto ? producto.price : 0;
   return unit * q;
 }
 
-// ─── Resumen de servicios por día ──────────────────────────────────────────────
-async function getServicios({ desde, hasta } = {}) {
-  const { sales, prod, itemsBySale, paymentsBySale } = await loadRaw();
-
-  // El filtro de rango se aplica sobre la FECHA DE SERVICIO (día de apertura del
-  // turno), no sobre la fecha de calendario del cierre.
-  const dDesde = desde || null;  // 'YYYY-MM-DD'
-  const dHasta = hasta || null;  // 'YYYY-MM-DD'
-
-  const dias = {};
-  for (const s of sales) {
-    const a = s.attributes || {};
-    if (a.saleState !== 'CLOSED') continue;      // solo ventas cerradas
-    const closed = a.closedAt;
-    if (!closed) continue;
-    const fechaISO = fechaServicio(closed);      // día de servicio (corte de turno)
-    if (dDesde && fechaISO < dDesde) continue;
-    if (dHasta && fechaISO > dHasta) continue;
-
-    if (!dias[fechaISO]) {
-      dias[fechaISO] = {
-        fecha: fechaISO,
-        ventas: 0, pax: 0, total: 0,
-        comida: 0, bebida: 0, otros: 0,
-        mediosPago: {},
-      };
-    }
-    const dia = dias[fechaISO];
-    dia.ventas++;
-    dia.pax += a.people || 0;
-    dia.total += a.total || 0;   // facturación real de la venta (fuente de verdad)
-
-    // Desglose por categoría (estimado, precio lista × cantidad)
-    const items = itemsBySale[s.id] || [];
-    for (const it of items) {
-      if (it.attributes && it.attributes.canceled) continue;
-      const pRel = it.relationships && it.relationships.product && it.relationships.product.data;
-      const producto = pRel ? prod[pRel.id] : null;
-      const monto = montoItem(it, producto);
-      const grupo = producto ? grupoDeCategoria(producto.categoria) : 'otros';
-      dia[grupo] += monto;
-    }
-
-    // Medios de pago
-    const pays = paymentsBySale[s.id] || [];
-    for (const p of pays) {
-      dia.mediosPago[p.metodo] = (dia.mediosPago[p.metodo] || 0) + p.amount;
-    }
-  }
-
-  // Proporción comida/bebida calculada SOLO sobre comida+bebida (excluye combos),
-  // para que los menús especiales no rompan el ratio.
-  return Object.values(dias)
-    .sort((a, b) => b.fecha.localeCompare(a.fecha))
-    .map(d => {
-      const baseCB = d.comida + d.bebida;
-      return {
-        ...d,
-        ticketPromedio: d.pax > 0 ? d.total / d.pax : 0,
-        pctComida: baseCB > 0 ? (d.comida / baseCB) * 100 : 0,
-        pctBebida: baseCB > 0 ? (d.bebida / baseCB) * 100 : 0,
-      };
-    });
+// ─── Ventas computables ─────────────────────────────────────────────────────────
+// Igual que Fudo: una venta cuenta si está CERRADA y tiene total > 0.
+// Las mesas cerradas en $0 (aperturas por error) NO suman ventas ni pax.
+function ventaComputable(a) {
+  return a.saleState === 'CLOSED' && a.closedAt && (a.total || 0) > 0;
 }
 
-// ─── Detalle de un servicio (un día) ───────────────────────────────────────────
-async function getServicioDetalle(fecha) {
-  const { sales, prod, itemsBySale, paymentsBySale } = await loadRaw();
+// ─── Construcción de detalles por día (a partir de datos crudos de Fudo) ───────
+// Devuelve { 'YYYY-MM-DD': detalle } con el MISMO shape que getServicioDetalle.
+function buildDetalles(raw) {
+  const { sales, prod, itemsBySale, paymentsBySale } = raw;
+  const dias = {};
 
-  const daySales = sales.filter(s => {
+  for (const s of sales) {
     const a = s.attributes || {};
-    return a.saleState === 'CLOSED' && a.closedAt && fechaServicio(a.closedAt) === fecha;
-  });
+    if (!ventaComputable(a)) continue;
+    const fecha = fechaServicio(a.closedAt);
 
-  if (!daySales.length) {
-    return { fecha, encontrado: false };
-  }
-
-  let pax = 0, total = 0;
-  const porCategoria = {};   // categoria -> { categoria, grupo, monto, unidades, productos:{} }
-  const mediosPago = {};
-  let primera = null, ultima = null;
-
-  for (const s of daySales) {
-    const a = s.attributes || {};
-    pax += a.people || 0;
-    total += a.total || 0;
-    if (a.closedAt) {
-      if (!primera || a.createdAt < primera) primera = a.createdAt || a.closedAt;
-      if (!ultima || a.closedAt > ultima) ultima = a.closedAt;
+    if (!dias[fecha]) {
+      dias[fecha] = {
+        fecha, encontrado: true,
+        ventas: 0, pax: 0, total: 0, propinas: 0,
+        comida: 0, bebida: 0, otros: 0,
+        apertura: null, cierre: null,
+        porCategoria: {}, mediosPago: {},
+      };
     }
+    const dia = dias[fecha];
+    dia.ventas++;
+    dia.pax += a.people || 0;
+    dia.total += a.total || 0;
+    if (!dia.apertura || (a.createdAt && a.createdAt < dia.apertura)) dia.apertura = a.createdAt || a.closedAt;
+    if (!dia.cierre || a.closedAt > dia.cierre) dia.cierre = a.closedAt;
 
+    // Ítems → categorías y productos
     const items = itemsBySale[s.id] || [];
     for (const it of items) {
       if (it.attributes && it.attributes.canceled) continue;
@@ -356,59 +292,297 @@ async function getServicioDetalle(fecha) {
       const q = (it.attributes && it.attributes.quantity) || 0;
       const monto = montoItem(it, producto);
 
-      if (!porCategoria[cat]) porCategoria[cat] = { categoria: cat, grupo, monto: 0, unidades: 0, productos: {} };
-      porCategoria[cat].monto += monto;
-      porCategoria[cat].unidades += q;
-
+      dia[grupo] += monto;
+      if (!dia.porCategoria[cat]) dia.porCategoria[cat] = { categoria: cat, grupo, monto: 0, unidades: 0, productos: {} };
+      dia.porCategoria[cat].monto += monto;
+      dia.porCategoria[cat].unidades += q;
       const pname = producto ? producto.name : 'Producto';
-      if (!porCategoria[cat].productos[pname]) porCategoria[cat].productos[pname] = { nombre: pname, unidades: 0, monto: 0 };
-      porCategoria[cat].productos[pname].unidades += q;
-      porCategoria[cat].productos[pname].monto += monto;
+      if (!dia.porCategoria[cat].productos[pname]) dia.porCategoria[cat].productos[pname] = { nombre: pname, unidades: 0, monto: 0 };
+      dia.porCategoria[cat].productos[pname].unidades += q;
+      dia.porCategoria[cat].productos[pname].monto += monto;
     }
 
+    // Pagos → medios de pago + propina (lo cobrado por encima del total de la venta)
     const pays = paymentsBySale[s.id] || [];
-    for (const p of pays) mediosPago[p.metodo] = (mediosPago[p.metodo] || 0) + p.amount;
+    let pagado = 0;
+    for (const p of pays) {
+      dia.mediosPago[p.metodo] = (dia.mediosPago[p.metodo] || 0) + p.amount;
+      pagado += p.amount;
+    }
+    const propina = pagado - (a.total || 0);
+    if (propina > 0.005) dia.propinas += Math.round(propina * 100) / 100;
   }
 
-  // Aplanar categorías y ordenar productos
-  const categorias = Object.values(porCategoria)
-    .map(c => ({
-      categoria: c.categoria,
-      grupo: c.grupo,
-      monto: c.monto,
-      unidades: c.unidades,
-      productos: Object.values(c.productos).sort((a, b) => b.unidades - a.unidades),
-    }))
-    .sort((a, b) => {
-      // ordenar por grupo (comida, bebida, otros) y dentro por unidades
-      const ord = { comida: 0, bebida: 1, otros: 2 };
-      return (ord[a.grupo] - ord[b.grupo]) || (b.unidades - a.unidades);
+  // Finalizar: aplanar categorías, calcular ratios
+  const out = {};
+  for (const [fecha, d] of Object.entries(dias)) {
+    const categorias = Object.values(d.porCategoria)
+      .map(c => ({
+        categoria: c.categoria, grupo: c.grupo, monto: c.monto, unidades: c.unidades,
+        productos: Object.values(c.productos).sort((a, b) => b.unidades - a.unidades),
+      }))
+      .sort((a, b) => {
+        const ord = { comida: 0, bebida: 1, otros: 2 };
+        return (ord[a.grupo] - ord[b.grupo]) || (b.unidades - a.unidades);
+      });
+    const baseCB = d.comida + d.bebida;
+    delete d.porCategoria;
+    out[fecha] = {
+      ...d,
+      categorias,
+      ticketPromedio: d.pax > 0 ? d.total / d.pax : 0,
+      pctComida: baseCB > 0 ? (d.comida / baseCB) * 100 : 0,
+      pctBebida: baseCB > 0 ? (d.bebida / baseCB) * 100 : 0,
+    };
+  }
+  return out;
+}
+
+// Resumen liviano (para la lista de servicios) a partir de un detalle
+function resumenDeDetalle(d) {
+  return {
+    fecha: d.fecha, ventas: d.ventas, pax: d.pax, total: d.total,
+    propinas: d.propinas || 0,
+    comida: d.comida, bebida: d.bebida, otros: d.otros,
+    mediosPago: d.mediosPago || {},
+    ticketPromedio: d.ticketPromedio, pctComida: d.pctComida, pctBebida: d.pctBebida,
+  };
+}
+
+// ─── Persistencia en Google Sheets (hoja "Fudo Historico") ─────────────────────
+// Columnas: A Fecha · B Guardado El · C Ventas · D Pax · E Total · F Propinas · G JSON
+function getSheetsClient() {
+  const credentials = process.env.GOOGLE_CREDENTIALS_JSON
+    ? JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON)
+    : require('../../credentials.json');
+  const auth = new google.auth.GoogleAuth({
+    credentials,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
+  return google.sheets({ version: 'v4', auth });
+}
+
+const persistenciaActiva = () => Boolean(SPREADSHEET_ID);
+
+async function ensureHistSheet(sheetsApi) {
+  try {
+    await sheetsApi.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { requests: [{ addSheet: { properties: { title: HIST_SHEET, hidden: false } } }] },
     });
+    await sheetsApi.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${HIST_SHEET}!A1:G1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [['Fecha', 'Guardado El', 'Ventas', 'Pax', 'Total', 'Propinas', 'JSON']] },
+    });
+  } catch (e) {
+    // "already exists" → ok
+    if (!String(e.message || '').toLowerCase().includes('already exists')) throw e;
+  }
+}
 
-  const comida = categorias.filter(c => c.grupo === 'comida').reduce((s, c) => s + c.monto, 0);
-  const bebida = categorias.filter(c => c.grupo === 'bebida').reduce((s, c) => s + c.monto, 0);
-  const otros  = categorias.filter(c => c.grupo === 'otros').reduce((s, c) => s + c.monto, 0);
-  const baseCB = comida + bebida;
+// Lee todo el histórico. Devuelve { 'YYYY-MM-DD': { rowIndex, detalle } }
+async function loadHistorico() {
+  if (!persistenciaActiva()) return {};
+  const cached = cache.get('fudo_hist');
+  if (cached) return cached;
 
+  const sheetsApi = getSheetsClient();
+  let rows = [];
+  try {
+    const res = await sheetsApi.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${HIST_SHEET}!A:G`,
+    });
+    rows = res.data.values || [];
+  } catch (e) {
+    // La hoja no existe todavía: crearla y seguir con histórico vacío
+    try { await ensureHistSheet(sheetsApi); } catch (e2) { console.warn('Fudo Historico: no se pudo crear la hoja:', e2.message); }
+    rows = [];
+  }
+
+  const hist = {};
+  for (let i = 1; i < rows.length; i++) {  // i=0 es el header
+    const row = rows[i];
+    if (!row || !row[0] || !row[6]) continue;
+    try {
+      hist[row[0]] = { rowIndex: i + 1, detalle: JSON.parse(row[6]) };
+    } catch { /* JSON corrupto: ignorar esa fila */ }
+  }
+  cache.set('fudo_hist', hist, 600);
+  return hist;
+}
+
+// Guarda (append) los días nuevos finalizados. No falla la request si Sheets falla.
+async function persistDias(detalles) {
+  if (!persistenciaActiva() || !detalles.length) return;
+  try {
+    const sheetsApi = getSheetsClient();
+    await ensureHistSheet(sheetsApi);
+    const values = detalles.map(d => [
+      d.fecha, new Date().toISOString(), d.ventas, d.pax, d.total, d.propinas || 0,
+      JSON.stringify(d),
+    ]);
+    await sheetsApi.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${HIST_SHEET}!A:G`,
+      valueInputOption: 'RAW',
+      requestBody: { values },
+    });
+    cache.del('fudo_hist');
+    console.log(`Fudo Historico: guardados ${detalles.length} día(s): ${detalles.map(d => d.fecha).join(', ')}`);
+  } catch (e) {
+    console.warn('Fudo Historico: error guardando snapshot:', e.message);
+  }
+}
+
+// Rehace el snapshot de un día (pisa la fila si existe, agrega si no)
+async function resnapshotDia(fecha) {
+  if (!persistenciaActiva()) throw new Error('Persistencia desactivada (falta SPREADSHEET_ID)');
+  cache.del('fudo_raw'); // forzar datos frescos de Fudo
+  const raw = await loadRaw();
+  const detalles = buildDetalles(raw);
+  const detalle = detalles[fecha];
+  if (!detalle) throw new Error(`Fudo no tiene ventas para el día de servicio ${fecha}`);
+
+  const hist = await loadHistorico();
+  const sheetsApi = getSheetsClient();
+  await ensureHistSheet(sheetsApi);
+  const row = [fecha, new Date().toISOString(), detalle.ventas, detalle.pax, detalle.total, detalle.propinas || 0, JSON.stringify(detalle)];
+  if (hist[fecha]) {
+    await sheetsApi.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${HIST_SHEET}!A${hist[fecha].rowIndex}:G${hist[fecha].rowIndex}`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [row] },
+    });
+  } else {
+    await sheetsApi.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${HIST_SHEET}!A:G`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [row] },
+    });
+  }
+  cache.del('fudo_hist');
+  return detalle;
+}
+
+// ─── Resumen de servicios por día ──────────────────────────────────────────────
+// Histórico desde la hoja; Fudo solo para días posteriores al último snapshot.
+async function getServicios({ desde, hasta } = {}) {
+  const dDesde = desde || null;
+  const dHasta = hasta || null;
+  const hoyServ = fechaServicioHoy();
+
+  const hist = await loadHistorico();
+  const fechasHist = Object.keys(hist).sort();
+  const maxHist = fechasHist[fechasHist.length - 1] || null;
+
+  // ¿Hace falta Fudo? Solo si el rango pedido puede incluir días sin snapshot
+  // (posteriores al último guardado). Sin histórico, siempre.
+  const necesitaFudo = !maxHist || !dHasta || dHasta > maxHist;
+
+  let frescos = {};
+  if (necesitaFudo) {
+    try {
+      const raw = await loadRaw();
+      frescos = buildDetalles(raw);
+      // Snapshot de días finalizados que aún no están guardados
+      const nuevos = Object.values(frescos)
+        .filter(d => d.fecha < hoyServ && !hist[d.fecha])
+        .sort((a, b) => a.fecha.localeCompare(b.fecha));
+      if (nuevos.length) await persistDias(nuevos);
+    } catch (e) {
+      // Fudo caído/limitado: servir solo histórico si existe
+      if (!fechasHist.length) throw e;
+      console.warn('Fudo no disponible, sirviendo solo histórico:', e.message);
+    }
+  }
+
+  // Merge: el snapshot guardado MANDA para sus fechas; lo fresco cubre el resto.
+  const dias = {};
+  for (const [fecha, d] of Object.entries(frescos)) {
+    if (!hist[fecha]) dias[fecha] = d;
+  }
+  for (const [fecha, h] of Object.entries(hist)) {
+    dias[fecha] = h.detalle;
+  }
+
+  return Object.values(dias)
+    .filter(d => (!dDesde || d.fecha >= dDesde) && (!dHasta || d.fecha <= dHasta))
+    .sort((a, b) => b.fecha.localeCompare(a.fecha))
+    .map(resumenDeDetalle);
+}
+
+// ─── Detalle de un servicio (un día) ───────────────────────────────────────────
+async function getServicioDetalle(fecha) {
+  const hist = await loadHistorico();
+  if (hist[fecha]) {
+    return { ...hist[fecha].detalle, origen: 'historico' };
+  }
+
+  const raw = await loadRaw();
+  const detalles = buildDetalles(raw);
+  const detalle = detalles[fecha];
+  if (!detalle) return { fecha, encontrado: false };
+
+  // Si el día ya terminó, dejarlo guardado para no volver a depender de Fudo
+  if (fecha < fechaServicioHoy()) await persistDias([detalle]);
+  return { ...detalle, origen: 'fudo' };
+}
+
+// ─── Diagnóstico: venta por venta de un día ────────────────────────────────────
+// Compara el total de cada venta contra la suma de sus pagos para encontrar
+// diferencias (propinas, ajustes). Incluye también las ventas excluidas ($0).
+async function getServicioDebug(fecha) {
+  cache.del('fudo_raw'); // diagnóstico siempre con datos frescos
+  const raw = await loadRaw();
+  const { sales, paymentsBySale } = raw;
+
+  const ventas = [];
+  for (const s of sales) {
+    const a = s.attributes || {};
+    if (a.saleState !== 'CLOSED' || !a.closedAt) continue;
+    if (fechaServicio(a.closedAt) !== fecha) continue;
+    const pays = paymentsBySale[s.id] || [];
+    const pagado = pays.reduce((sum, p) => sum + p.amount, 0);
+    ventas.push({
+      id: s.id,
+      createdAt: a.createdAt || null,
+      closedAt: a.closedAt,
+      personas: a.people || 0,
+      total: a.total || 0,
+      pagado,
+      diferencia: Math.round((pagado - (a.total || 0)) * 100) / 100,
+      pagos: pays,
+      excluida: !ventaComputable(a),
+      motivoExclusion: !ventaComputable(a) ? 'total $0' : null,
+    });
+  }
+  ventas.sort((a, b) => (a.closedAt || '').localeCompare(b.closedAt || ''));
+
+  const computables = ventas.filter(v => !v.excluida);
   return {
     fecha,
-    encontrado: true,
-    ventas: daySales.length,
-    pax,
-    total,
-    ticketPromedio: pax > 0 ? total / pax : 0,
-    apertura: primera,
-    cierre: ultima,
-    comida, bebida, otros,
-    pctComida: baseCB > 0 ? (comida / baseCB) * 100 : 0,
-    pctBebida: baseCB > 0 ? (bebida / baseCB) * 100 : 0,
-    categorias,
-    mediosPago,
+    ventasListadas: ventas.length,
+    ventasComputables: computables.length,
+    ventasExcluidas: ventas.length - computables.length,
+    pax: computables.reduce((s, v) => s + v.personas, 0),
+    totalVentas: computables.reduce((s, v) => s + v.total, 0),
+    totalPagado: computables.reduce((s, v) => s + v.pagado, 0),
+    propinas: computables.reduce((s, v) => s + (v.diferencia > 0 ? v.diferencia : 0), 0),
+    ventas,
   };
 }
 
 function clearFudoCache() {
   cache.del('fudo_raw');
+  cache.del('fudo_hist');
 }
 
-module.exports = { getServicios, getServicioDetalle, clearFudoCache, grupoDeCategoria };
+module.exports = {
+  getServicios, getServicioDetalle, getServicioDebug, resnapshotDia,
+  clearFudoCache, grupoDeCategoria,
+};

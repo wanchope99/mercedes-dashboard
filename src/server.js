@@ -10,7 +10,7 @@ const {
   getComprasEnCuotas,
   getMeses, getCategorias, clearCache,
 } = require('./sheets');
-const { getServicios, getServicioDetalle, clearFudoCache } = require('./fudo');
+const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, clearFudoCache } = require('./fudo');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -549,6 +549,28 @@ app.get('/api/servicios/:fecha', authMiddleware, adminOnly, async (req, res) => 
 app.post('/api/servicios/refresh', authMiddleware, adminOnly, (req, res) => {
   clearFudoCache();
   res.json({ ok: true, message: 'Caché de Fudo limpiado.' });
+});
+
+// Diagnóstico: venta por venta de un día (total vs pagado, exclusiones, propinas)
+app.get('/api/servicios/debug/:fecha', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const data = await getServicioDebug(req.params.fecha);
+    res.json({ ok: true, data });
+  } catch (err) {
+    console.error('Error /api/servicios/debug:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Rehacer el snapshot guardado de un día (si se corrigió algo en Fudo a posteriori)
+app.post('/api/servicios/resnapshot/:fecha', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const data = await resnapshotDia(req.params.fecha);
+    res.json({ ok: true, message: `Snapshot de ${req.params.fecha} actualizado`, data });
+  } catch (err) {
+    console.error('Error /api/servicios/resnapshot:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // ─── Static y fallback ────────────────────────────────────────────────────────
