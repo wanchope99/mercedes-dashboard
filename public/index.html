@@ -161,6 +161,8 @@
     .pagos-table .td-proveedor { font-weight: 600; font-size: 13px; }
     .pagos-table .td-desc { font-size: 11px; color: var(--text-muted); margin-top: 3px; max-width: 220px; }
     .pagos-empty { text-align: center; color: var(--text-muted); padding: 48px 24px; font-size: 14px; }
+    .badge-cuota { display: inline-block; background: rgba(155,89,182,0.14); color: var(--purple); border: 1px solid rgba(155,89,182,0.35); border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 700; margin-left: 6px; white-space: nowrap; vertical-align: middle; }
+    .cuota-restante { font-size: 10px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; }
     .group-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--surface2); border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); cursor: pointer; user-select: none; transition: background 0.15s; }
     .group-header:hover { background: var(--border); }
     .group-chevron { font-size: 10px; transition: transform 0.2s; display: inline-block; }
@@ -787,8 +789,16 @@
           <option value="Echeq">Echeq</option>
         </select>
       </div>
-      <div class="form-group"><label>Monto ARS</label><input type="number" id="f-monto" placeholder="0" min="0"></div>
-      <div class="form-group"><label>Vencimiento</label><input type="date" id="f-vencimiento"></div>
+      <div class="form-group"><label>Monto ARS (total)</label><input type="number" id="f-monto" placeholder="0" min="0"></div>
+      <div class="form-group"><label>Vencimiento (1ª cuota si hay cuotas)</label><input type="date" id="f-vencimiento"></div>
+      <div class="form-group"><label>Cuotas</label><select id="f-cuotas">
+        <option value="1">Pago único (sin cuotas)</option>
+        <option value="2">2 cuotas</option>
+        <option value="3">3 cuotas</option>
+        <option value="6">6 cuotas</option>
+        <option value="9">9 cuotas</option>
+        <option value="12">12 cuotas</option>
+      </select></div>
       <div class="form-group full"><label>Descripción / Notas</label><textarea id="f-descripcion" placeholder="Detalle adicional, datos bancarios, etc."></textarea></div>
     </div>
     <div id="modal-status"></div>
@@ -1570,13 +1580,16 @@ function buildPagosRows(pagos, groupId) {
     const provCell = `<span class="proveedor-link ${hasData ? 'has-data' : ''}" onclick="openProvModal('${(p.proveedor||'').replace(/'/g, "\\'")}')">${p.proveedor || '—'}</span>`;
     const formaPago = p.medioPago || (state.proveedores[provKey] && state.proveedores[provKey].formaPago) || '—';
     const formaPagoStyle = !p.medioPago && formaPago !== '—' ? 'opacity:0.7;font-style:italic' : '';
+    const cuotaBadge = p.cuotaLabel ? `<span class="badge-cuota">Cuota ${p.cuotaLabel}</span>` : '';
+    const cuotaRestante = p.cuotaLabel && p.compraTotal
+      ? `<div class="cuota-restante">Restan ${fmt(p.compraRestante || 0)} de ${fmt(p.compraTotal)}</div>` : '';
     return `<tr class="${cls}">
-      <td><div class="td-proveedor">${provCell}</div>${desc ? `<div class="td-desc">${desc}</div>` : ''}</td>
+      <td><div class="td-proveedor">${provCell}${cuotaBadge}</div>${desc ? `<div class="td-desc">${desc}</div>` : ''}</td>
       <td style="color:var(--text-muted);font-size:12px">${p.categoria || '—'}</td>
       <td style="font-size:13px;white-space:nowrap">${vencLabel}</td>
       <td>${urgenciaBadge(p)}</td>
       <td><span class="badge-mp" style="${formaPagoStyle}">${formaPago}</span></td>
-      <td class="td-right">${montoStr}</td>
+      <td class="td-right">${montoStr}${cuotaRestante}</td>
       <td style="font-size:11px;color:var(--text-muted);max-width:160px">${p.descripcion && p.descripcion.length > 60 ? p.descripcion.substring(0,100)+'…' : ''}</td>
     </tr>`;
   }).join('');
@@ -1670,6 +1683,7 @@ function openModal() {
   document.getElementById('f-proveedor').value = '';
   document.getElementById('f-monto').value = '';
   document.getElementById('f-vencimiento').value = '';
+  document.getElementById('f-cuotas').value = '1';
   document.getElementById('f-descripcion').value = '';
   document.getElementById('modal-status').style.display = 'none';
   document.getElementById('modal-overlay').classList.add('open');
@@ -1685,13 +1699,16 @@ async function saveNewPago() {
   const medioPago = document.getElementById('f-medio').value;
   const salidaARS = parseFloat(document.getElementById('f-monto').value) || 0;
   const vencRaw = document.getElementById('f-vencimiento').value;
+  const cuotas = parseInt(document.getElementById('f-cuotas').value) || 1;
   const descripcion = document.getElementById('f-descripcion').value.trim();
   if (!fecha || !proveedor) { alert('Fecha y Proveedor son obligatorios.'); return; }
+  if (cuotas > 1 && !vencRaw) { alert('Para compras en cuotas indicá el vencimiento de la primera cuota.'); return; }
+  if (cuotas > 1 && !salidaARS) { alert('Para compras en cuotas indicá el monto TOTAL de la compra.'); return; }
   const fmtDate = iso => { if (!iso) return ''; const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; };
   const statusEl = document.getElementById('modal-status');
   statusEl.style.display = 'block'; statusEl.style.color = 'var(--text-muted)'; statusEl.textContent = '⏳ Guardando en planilla...';
   try {
-    await api('/api/pagos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fecha: fmtDate(fecha), mes, proveedor, categoria, medioPago, salidaARS, vencimiento: fmtDate(vencRaw), descripcion }) });
+    await api('/api/pagos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fecha: fmtDate(fecha), mes, proveedor, categoria, medioPago, salidaARS, vencimiento: fmtDate(vencRaw), descripcion, cuotas }) });
     statusEl.style.color = 'var(--green)'; statusEl.textContent = `✅ Pago de ${proveedor} registrado. Recargando...`;
     setTimeout(() => { closeModal(); loadPagos(); }, 1500);
   } catch(err) { statusEl.style.color = 'var(--red)'; statusEl.textContent = `❌ Error: ${err.message}`; }
