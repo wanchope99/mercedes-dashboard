@@ -11,6 +11,7 @@ const {
   getMeses, getCategorias, clearCache,
 } = require('./sheets');
 const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, clearFudoCache } = require('./fudo');
+const { proyectar } = require('./proyecciones');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -571,6 +572,110 @@ app.post('/api/servicios/resnapshot/:fecha', authMiddleware, adminOnly, async (r
     console.error('Error /api/servicios/resnapshot:', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+// ─── Proyecciones (solo admin) ────────────────────────────────────────────────
+// Variables personalizadas en hoja "Proyeccion Variables":
+// A ID · B Nombre · C Tipo (gasto/ingreso) · D Monto · E Meses (csv) · F Repite · G Creado
+const VAR_SHEET = 'Proyeccion Variables';
+
+async function ensureVarSheet(sheets) {
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { requests: [{ addSheet: { properties: { title: VAR_SHEET } } }] },
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID, range: `${VAR_SHEET}!A1:G1`, valueInputOption: 'RAW',
+      requestBody: { values: [['ID', 'Nombre', 'Tipo', 'Monto', 'Meses', 'Repite', 'Creado']] },
+    });
+  } catch (e) {
+    if (!String(e.message || '').toLowerCase().includes('already exists')) throw e;
+  }
+}
+
+async function leerVariables() {
+  const auth = getAuth();
+  const sheets = google.sheets({ version: 'v4', auth });
+  let rows = [];
+  try {
+    const res = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${VAR_SHEET}!A:G` });
+    rows = res.data.values || [];
+  } catch (e) {
+    await ensureVarSheet(sheets);
+    return [];
+  }
+  const vars = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r || !r[0]) continue;
+    vars.push({
+      id: r[0],
+      nombre: r[1] || 'Sin nombre',
+      tipo: (r[2] || 'gasto').toLowerCase() === 'ingreso' ? 'ingreso' : 'gasto',
+      monto: parseFloat(String(r[3] || '0').replace(/[^0-9.-]/g, '')) || 0,
+      meses: (r[4] || '').split(',').map(s => s.trim()).filter(Boolean),
+      repite: String(r[5] || '').toUpperCase() === 'TRUE',
+      creado: r[6] || '',
+      rowIndex: i + 1,
+    });
+  }
+  return vars;
+}
+
+// Proyección completa (baselines + variables + aguinaldos)
+app.get('/api/proyecciones', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const horizonte = Math.min(parseInt(req.query.meses) || 12, 24);
+    const [movimientos, resumen, variables] = await Promise.all([
+      getMovimientos(), getResumenMensual({}), leerVariables(),
+    ]);
+    const data = proyectar({ movimientos, resumen, variables, horizonte });
+    res.json({ ok: true, data: { ...data, variables } });
+  } catch (err) {
+    console.error('Error /api/proyecciones:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Alta de variable personalizada
+app.post('/api/proyecciones/variables', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { nombre, tipo, monto, meses, repite } = req.body;
+    if (!nombre || !monto) return res.status(400).json({ ok: false, error: 'Nombre y monto son obligatorios' });
+    if (!Array.isArray(meses) || !meses.length) return res.status(400).json({ ok: false, error: 'Elegí al menos un mes' });
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+    await ensureVarSheet(sheets);
+    const id = `v${Date.now()}`;
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID, range: `${VAR_SHEET}!A:G`, valueInputOption: 'RAW',
+      requestBody: { values: [[id, nombre, tipo === 'ingreso' ? 'ingreso' : 'gasto', Number(monto), meses.join(','), repite ? 'TRUE' : 'FALSE', new Date().toISOString()]] },
+    });
+    res.json({ ok: true, id, message: 'Variable agregada' });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Baja de variable personalizada
+app.delete('/api/proyecciones/variables/:id', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const vars = await leerVariables();
+    const v = vars.find(x => x.id === req.params.id);
+    if (!v) return res.status(404).json({ ok: false, error: 'Variable no encontrada' });
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+    const meta = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID, fields: 'sheets.properties' });
+    const sheet = (meta.data.sheets || []).find(s => s.properties && s.properties.title === VAR_SHEET);
+    if (!sheet) return res.status(500).json({ ok: false, error: 'No existe la hoja de variables' });
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { requests: [{ deleteDimension: { range: {
+        sheetId: sheet.properties.sheetId, dimension: 'ROWS',
+        startIndex: v.rowIndex - 1, endIndex: v.rowIndex,
+      } } }] },
+    });
+    res.json({ ok: true, message: 'Variable eliminada' });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 // ─── Static y fallback ────────────────────────────────────────────────────────

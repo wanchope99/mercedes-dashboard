@@ -119,7 +119,8 @@ const RE_CUOTA = /^(\d+)\s*\/\s*(\d+)$/;
 
 function parseCuotas(cuotasRaw, estado) {
   const info = { esCuota: false, esCompraEnCuotas: false, cuotaNum: null, cuotasTotal: null };
-  const raw = (cuotasRaw || '').toString().trim();
+  // Tolerar el apóstrofe de "forzar texto" de Sheets ('2/6) por si quedó literal
+  const raw = (cuotasRaw || '').toString().trim().replace(/^'+/, '');
   if (!raw) {
     // Fallback: una fila con estado "En cuotas" es madre aunque falte la col Q
     info.esCompraEnCuotas = (estado || '').toLowerCase() === 'en cuotas';
