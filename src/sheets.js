@@ -49,7 +49,7 @@ async function getSheetRows(sheetName) {
   const sheets = google.sheets({ version: 'v4', auth });
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A:P`,
+    range: `${sheetName}!A:O`,
   });
   const rows = response.data.values || [];
   cache.set(cacheKey, rows);
@@ -73,6 +73,11 @@ function parseAmount(val) {
     cleaned = afterDot.length === 3
       ? noSign.replace(/\./g, '')
       : noSign;
+  } else if (commaIdx !== -1 && dotIdx !== -1) {
+    // Ambos separadores: el que está más a la derecha es el decimal
+    cleaned = commaIdx > dotIdx
+      ? noSign.replace(/\./g, '').replace(',', '.')   // 93.926,67
+      : noSign.replace(/,/g, '');                      // 93,926.67
   } else {
     cleaned = noSign.replace(/[,.]/g, '');
   }
@@ -100,6 +105,38 @@ function getGrupo(categoria) {
   return CATEGORIA_GRUPO[categoria] || 'Otros';
 }
 
+// ─── Cuotas ───────────────────────────────────────────────────────────────────
+// Convención en la planilla Movimientos:
+//   Columna F "Cuotas":    fila madre → total de cuotas (ej: "6")
+//                          fila cuota → "n/m" (ej: "2/6")
+//   Columna G "ID Compra": mismo identificador en la madre y en todas sus cuotas
+// La fila MADRE lleva el importe TOTAL, fecha/mes de la compra, estado "En cuotas"
+// y medio de pago vacío (no toca cajas). Computa el total en el estado de
+// resultados del mes de la compra.
+// Cada CUOTA lleva el monto de la cuota, vencimiento, y estado A pagar/Pagado.
+// Las cuotas mueven caja pero NO computan en el estado de resultados.
+const RE_CUOTA = /^(\d+)\s*\/\s*(\d+)$/;
+
+function parseCuotas(cuotasRaw, estado) {
+  const info = { esCuota: false, esCompraEnCuotas: false, cuotaNum: null, cuotasTotal: null };
+  const raw = (cuotasRaw || '').toString().trim();
+  if (!raw) {
+    // Fallback: una fila con estado "En cuotas" es madre aunque falte la col Q
+    info.esCompraEnCuotas = (estado || '').toLowerCase() === 'en cuotas';
+    return info;
+  }
+  const m = raw.match(RE_CUOTA);
+  if (m) {
+    info.esCuota = true;
+    info.cuotaNum = parseInt(m[1]);
+    info.cuotasTotal = parseInt(m[2]);
+  } else if (/^\d+$/.test(raw) && parseInt(raw) > 1) {
+    info.esCompraEnCuotas = true;
+    info.cuotasTotal = parseInt(raw);
+  }
+  return info;
+}
+
 // ─── Movimientos ──────────────────────────────────────────────────────────────
 async function getMovimientos() {
   const rows = await getSheetRows('Movimientos');
@@ -121,22 +158,29 @@ async function getMovimientos() {
     const row = rows[i];
     if (!row || !row[0] || row[0] === '') continue;
 
+    // Columnas: A Fecha, B Mes, C Tipo, D Estado, E Vencimiento, F Cuotas,
+    // G ID Compra, H Proveedor, I Categoría, J Descripción, K Medio de pago,
+    // L Entrada ARS, M Entrada USD, N Salida ARS, O Salida USD
     const fecha = parseDate(row[0]);
     const tipo = (row[2] || '').trim();       // Gasto, Ingreso, Otros
     const estado = (row[3] || '').trim();
-    const categoria = (row[6] || '').trim();
+    const categoria = (row[8] || '').trim();
 
     if (!fecha || !tipo) continue;
 
     // Montos ARS y USD
-    const entradaARS = parseAmount(row[9]);
-    const entradaUSD = parseAmount(row[10]);
-    const salidaARS  = parseAmount(row[11]);
-    const salidaUSD  = parseAmount(row[12]);
+    const entradaARS = parseAmount(row[11]);
+    const entradaUSD = parseAmount(row[12]);
+    const salidaARS  = parseAmount(row[13]);
+    const salidaUSD  = parseAmount(row[14]);
 
     // Convertir USD a ARS para totales
     const entradaTotal = entradaARS + (entradaUSD * TC_USD);
     const salidaTotal  = salidaARS  + (salidaUSD  * TC_USD);
+
+    // Cuotas (columnas F y G)
+    const cuotasInfo = parseCuotas(row[5], estado);
+    const cuotaId = (row[6] || '').toString().trim();
 
     movimientos.push({
       fecha,
@@ -145,11 +189,11 @@ async function getMovimientos() {
       tipo,
       estado,
       vencimiento: row[4] || '',
-      proveedor: (row[5] || '').trim(),
+      proveedor: (row[7] || '').trim(),
       categoria,
       grupo: getGrupo(categoria),
-      descripcion: row[7] || '',
-      medioPago: (row[8] || '').trim(),
+      descripcion: row[9] || '',
+      medioPago: (row[10] || '').trim(),
       entradaARS,
       entradaUSD,
       salidaARS,
@@ -161,10 +205,52 @@ async function getMovimientos() {
       // Flags para filtrar
       esCambio: categoria === 'Cambio',
       esFondeo: tipo === 'Otros',
+      // Cuotas
+      esCuota: cuotasInfo.esCuota,   // fila de pago de cuota (n/m)
+      esCompraEnCuotas: cuotasInfo.esCompraEnCuotas || estado.toLowerCase() === 'en cuotas', // fila madre
+      cuotaNum: cuotasInfo.cuotaNum,
+      cuotasTotal: cuotasInfo.cuotasTotal,
+      cuotaId: cuotaId || null,
     });
   }
 
   return movimientos;
+}
+
+// Info agregada por compra en cuotas (por ID Compra)
+// { [cuotaId]: { totalCompra, cuotasTotal, cuotasPagadas, pagadoAcum, restante, medioPago, proveedor, descripcion, mesCompra } }
+async function getComprasEnCuotas() {
+  const todos = await getMovimientos();
+  const grupos = {};
+  for (const m of todos) {
+    if (!m.cuotaId) continue;
+    if (!grupos[m.cuotaId]) {
+      grupos[m.cuotaId] = {
+        cuotaId: m.cuotaId, totalCompra: 0, cuotasTotal: null,
+        cuotasPagadas: 0, pagadoAcum: 0, restante: 0,
+        medioPago: '', proveedor: '', descripcion: '', mesCompra: '',
+      };
+    }
+    const g = grupos[m.cuotaId];
+    if (m.esCompraEnCuotas) {
+      g.totalCompra = m.salidaTotal;
+      g.cuotasTotal = m.cuotasTotal || g.cuotasTotal;
+      g.proveedor = g.proveedor || m.proveedor;
+      g.descripcion = g.descripcion || m.descripcion;
+      g.mesCompra = m.mes;
+    }
+    if (m.esCuota) {
+      g.cuotasTotal = g.cuotasTotal || m.cuotasTotal;
+      if (m.pagado) {
+        g.cuotasPagadas++;
+        g.pagadoAcum += m.salidaTotal;
+        if (m.medioPago) g.medioPago = m.medioPago;  // medio real con el que se viene pagando
+      } else {
+        g.restante += m.salidaTotal;
+      }
+    }
+  }
+  return grupos;
 }
 
 // Movimientos que son ingresos/gastos reales (excluye Cambios y Fondeos)
@@ -192,6 +278,10 @@ async function getResumenMensual({ mes, fechaDesde, fechaHasta } = {}) {
   const meses = {};
 
   for (const m of filtered) {
+    // Las CUOTAS no computan en el estado de resultados: el importe total
+    // de la compra ya computa completo en el mes de la compra (fila madre).
+    if (m.esCuota) continue;
+
     // Agrupar por mes (o por rango completo si hay fechas)
     const key = mes ? m.mes : (fechaDesde ? 'Período' : m.mes);
 
@@ -227,7 +317,9 @@ async function getResumenMensual({ mes, fechaDesde, fechaHasta } = {}) {
       entry.gastos.total += m.salidaTotal;
       const cat = m.categoria || 'Sin categoría';
       entry.gastosPorCategoria[cat] = (entry.gastosPorCategoria[cat] || 0) + m.salidaTotal;
-      if (m.pagado) entry.totalGastosPagados += m.salidaTotal;
+      // Una compra en cuotas se considera "pagada" en el estado de resultados
+      // del mes de la compra (la financiación es tema de caja, no de P&L)
+      if (m.pagado || m.esCompraEnCuotas) entry.totalGastosPagados += m.salidaTotal;
       entry.totalGastosComprometidos += m.salidaTotal;
     }
   }
@@ -282,6 +374,8 @@ async function getActividadPorDia({ mes, fechaDesde, fechaHasta } = {}) {
 
   const dias = {};
   for (const m of filtered) {
+    // Cuotas: no computan como gasto del día (igual que en el resumen mensual)
+    if (m.esCuota) continue;
     const key = m.fecha.toISOString().split('T')[0];
     if (!dias[key]) {
       dias[key] = { fecha: key, fechaDisplay: `${m.fecha.getDate()}/${m.fecha.getMonth() + 1}`, diaSemana: m.diaSemana, mes: m.mes, ingresos: 0, gastosPagados: 0, gastosComprometidos: 0, movimientos: [], servicioDelDia: false };
@@ -289,7 +383,7 @@ async function getActividadPorDia({ mes, fechaDesde, fechaHasta } = {}) {
     const entry = dias[key];
     entry.movimientos.push(m);
     if (m.tipo === 'Ingreso') { entry.ingresos += m.entradaTotal; if (m.proveedor === 'Servicio') entry.servicioDelDia = true; }
-    if (m.tipo === 'Gasto') { if (m.pagado) entry.gastosPagados += m.salidaTotal; entry.gastosComprometidos += m.salidaTotal; }
+    if (m.tipo === 'Gasto') { if (m.pagado || m.esCompraEnCuotas) entry.gastosPagados += m.salidaTotal; entry.gastosComprometidos += m.salidaTotal; }
   }
   return Object.values(dias).sort((a, b) => a.fecha.localeCompare(b.fecha));
 }
@@ -351,5 +445,6 @@ function clearCache() { cache.flushAll(); }
 module.exports = {
   getMovimientos, getResumenMensual, getActividadPorDia,
   getActividadPorDiaSemana, getCajas, getMovimientosCambio,
+  getComprasEnCuotas,
   getMeses, getCategorias, clearCache,
 };

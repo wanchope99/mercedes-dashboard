@@ -7,6 +7,7 @@ const { google } = require('googleapis');
 const {
   getMovimientos, getResumenMensual, getActividadPorDia,
   getActividadPorDiaSemana, getCajas, getMovimientosCambio,
+  getComprasEnCuotas,
   getMeses, getCategorias, clearCache,
 } = require('./sheets');
 const { getServicios, getServicioDetalle, clearFudoCache } = require('./fudo');
@@ -236,12 +237,12 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
       },
     });
 
-    // 2. Escribir en Movimientos — columnas A:M
-    // A:Fecha, B:Mes, C:Tipo Movimiento, D:Estado, E:Vencimiento, F:Proveedor,
-    // G:Categoría, H:Descripción, I:Medio de Pago, J:Monto Entrada ARS,
-    // K:Monto Entrada USD, L:Monto Salida ARS, M:Monto Salida USD
+    // 2. Escribir en Movimientos — columnas A:O
+    // A:Fecha, B:Mes, C:Tipo Movimiento, D:Estado, E:Vencimiento, F:Cuotas,
+    // G:ID Compra, H:Proveedor, I:Categoría, J:Descripción, K:Medio de Pago,
+    // L:Monto Entrada ARS, M:Monto Entrada USD, N:Monto Salida ARS, O:Monto Salida USD
     const makeIngreso = (medioPago, montoEntrada) => [
-      fechaServicio, mesServicio, 'Ingreso', 'Pagado', '',
+      fechaServicio, mesServicio, 'Ingreso', 'Pagado', '', '', '',
       'Servicio', 'Ingreso', descripcionServicio,
       medioPago, montoEntrada, '', '', '',
     ];
@@ -256,7 +257,7 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
     if (deltaGalicia  > 0) rowsMovimientos.push(makeIngreso('Galicia',        deltaGalicia));
     if (impuestos > 0) {
       rowsMovimientos.push([
-        fechaServicio, mesServicio, 'Gasto', 'Pagado', '',
+        fechaServicio, mesServicio, 'Gasto', 'Pagado', '', '', '',
         'Servicio', 'Fiscales', descripcionServicio,
         'Galicia', '', '', impuestos, '',
       ]);
@@ -264,7 +265,7 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
     if (rowsMovimientos.length > 0) {
       await sheets.spreadsheets.values.append({
         spreadsheetId: SPREADSHEET_ID,
-        range: 'Movimientos!A:M',
+        range: 'Movimientos!A:O',
         valueInputOption: 'USER_ENTERED',
         requestBody: { values: rowsMovimientos },
       });
@@ -390,7 +391,25 @@ app.get('/api/pagos', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { sort = 'vencimiento', medioPago, q } = req.query;
     const todos = await getMovimientos();
-    let pagos = todos.filter(m => m.tipo === 'Gasto' && !m.pagado && !m.esCambio && !m.esFondeo);
+    const comprasCuotas = await getComprasEnCuotas();
+    // Las filas MADRE de compras en cuotas no son pagables: se pagan sus cuotas
+    let pagos = todos.filter(m => m.tipo === 'Gasto' && !m.pagado && !m.esCambio && !m.esFondeo && !m.esCompraEnCuotas);
+    // Enriquecer cuotas con info de la compra (total, restante, medio de pago heredado)
+    pagos = pagos.map(p => {
+      if (!p.esCuota || !p.cuotaId || !comprasCuotas[p.cuotaId]) return p;
+      const info = comprasCuotas[p.cuotaId];
+      return {
+        ...p,
+        // Heredar medio de pago de la compra para agrupar (ej: tarjeta Galicia)
+        medioPago: p.medioPago || info.medioPago || '',
+        cuotaLabel: `${p.cuotaNum}/${p.cuotasTotal || info.cuotasTotal || '?'}`,
+        compraTotal: info.totalCompra,
+        compraPagado: info.pagadoAcum,
+        compraRestante: info.restante,
+        compraCuotasPagadas: info.cuotasPagadas,
+        compraCuotasTotal: info.cuotasTotal,
+      };
+    });
     if (medioPago) pagos = pagos.filter(p => (p.medioPago || '').toLowerCase().includes(medioPago.toLowerCase()));
     if (q) pagos = pagos.filter(p => (p.proveedor || '').toLowerCase().includes(q.toLowerCase()));
     pagos = pagos.map(p => ({ ...p, fecha: p.fecha.toISOString().split('T')[0], ...calcUrgencia(p.vencimiento) }));
@@ -413,19 +432,62 @@ app.get('/api/pagos', authMiddleware, adminOnly, async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// Suma meses a una fecha dd/mm/yyyy manteniendo el día (con clamp a fin de mes)
+function addMonthsDDMM(fechaStr, meses) {
+  const parts = (fechaStr || '').split('/').map(Number);
+  if (parts.length !== 3) return fechaStr;
+  let [d, m, y] = parts;
+  if (y < 100) y += 2000;
+  const target = new Date(y, m - 1 + meses, 1);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  const day = Math.min(d, lastDay);
+  return `${String(day).padStart(2,'0')}/${String(target.getMonth()+1).padStart(2,'0')}/${target.getFullYear()}`;
+}
+
+const MESES_NOMBRES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+function mesDeFecha(fechaStr) {
+  const parts = (fechaStr || '').split('/').map(Number);
+  return parts.length === 3 ? MESES_NOMBRES[parts[1] - 1] || '' : '';
+}
+
 app.post('/api/pagos', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { fecha, mes, proveedor, categoria, medioPago, salidaARS, vencimiento, descripcion } = req.body;
+    const { fecha, mes, proveedor, categoria, medioPago, salidaARS, vencimiento, descripcion, cuotas } = req.body;
     if (!fecha || !proveedor) return res.status(400).json({ ok: false, error: 'Fecha y proveedor son obligatorios' });
     const auth = getAuth();
     const sheets = google.sheets({ version: 'v4', auth });
-    const row = [fecha, mes||'', 'Gasto', 'A pagar', vencimiento||'', proveedor, categoria||'', descripcion||'', medioPago||'', '', '', salidaARS||'', ''];
+
+    const nCuotas = parseInt(cuotas) || 1;
+    let values;
+
+    if (nCuotas > 1) {
+      // Compra en cuotas: fila madre (importe total, sin medio de pago → no toca cajas,
+      // computa completa en el estado de resultados del mes de compra) + una fila por cuota.
+      if (!vencimiento) return res.status(400).json({ ok: false, error: 'Para cuotas indicá el vencimiento de la primera cuota' });
+      const total = Number(salidaARS) || 0;
+      const montoCuota = Math.round(total / nCuotas);  // cuotas enteras (ARS)
+      const cuotaId = `${proveedor}-${fecha}`.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const descBase = descripcion || proveedor;
+      // Fila madre: estado "En cuotas", medio de pago vacío, col F = total de cuotas, col G = ID
+      values = [[fecha, mes||'', 'Gasto', 'En cuotas', '', String(nCuotas), cuotaId, proveedor, categoria||'', `${descBase} — Total en ${nCuotas} cuotas`, '', '', '', total, '']];
+      for (let i = 1; i <= nCuotas; i++) {
+        const venc = addMonthsDDMM(vencimiento, i - 1);
+        // Ajuste última cuota para que la suma cierre exacta con el total
+        const monto = i === nCuotas ? total - montoCuota * (nCuotas - 1) : montoCuota;
+        // Medio de pago vacío hasta que se pague (las fórmulas de Cajas suman por medio):
+        // al marcarla Pagado se completa el medio, la fecha real y el mes.
+        values.push([venc, mesDeFecha(venc), 'Gasto', 'A pagar', venc, `${i}/${nCuotas}`, cuotaId, proveedor, categoria||'', `${descBase} — Cuota ${i}/${nCuotas}${medioPago ? ' ('+medioPago+')' : ''}`, '', '', '', monto, '']);
+      }
+    } else {
+      values = [[fecha, mes||'', 'Gasto', 'A pagar', vencimiento||'', '', '', proveedor, categoria||'', descripcion||'', medioPago||'', '', '', salidaARS||'', '']];
+    }
+
     await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID, range: 'Movimientos!A:N',
-      valueInputOption: 'USER_ENTERED', requestBody: { values: [row] },
+      spreadsheetId: SPREADSHEET_ID, range: 'Movimientos!A:O',
+      valueInputOption: 'USER_ENTERED', requestBody: { values },
     });
     clearCache();
-    res.json({ ok: true, message: 'Pago registrado correctamente' });
+    res.json({ ok: true, message: nCuotas > 1 ? `Compra en ${nCuotas} cuotas registrada (${values.length} filas)` : 'Pago registrado correctamente' });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
