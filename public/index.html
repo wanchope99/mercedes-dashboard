@@ -754,7 +754,7 @@
 </div>
 
 <!-- Modal confirmación de cierre (¿cerró la caja?) -->
-<div id="confirm-cierre-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:400;align-items:center;justify-content:center;padding:20px">
+<div id="confirm-cierre-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:800;align-items:center;justify-content:center;padding:20px">
   <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:480px;width:100%;padding:28px">
     <div id="confirm-cierre-body"></div>
     <div class="modal-actions" id="confirm-cierre-actions" style="margin-top:18px"></div>
@@ -1220,7 +1220,11 @@ async function cerrarCaja() {
   //   Saldo Calculado de la hoja Cajas (F8 Efectivo Local, F2 Mercado Pago)
   //   + ventas del día según Fudo (fuente independiente de lo que debería haber entrado).
   // NADA se escribe en la planilla hasta que el usuario confirme.
-  errEl.textContent = '⏳ Verificando contra la planilla y Fudo...';
+  const btnCierre = document.querySelector('#cierre-modal .btn-accent');
+  const btnTextoOriginal = btnCierre ? btnCierre.textContent : '';
+  if (btnCierre) { btnCierre.disabled = true; btnCierre.textContent = '⏳ Verificando...'; }
+  errEl.textContent = '⏳ Comparando contra la planilla y las ventas de Fudo...';
+
   let fudoHoy = null, saldosPlanilla = null;
   try {
     const [rFudo, rSaldos] = await Promise.all([
@@ -1229,21 +1233,27 @@ async function cerrarCaja() {
     ]);
     fudoHoy = rFudo.data; saldosPlanilla = rSaldos.data;
   } catch (e) { /* sin datos mostramos el modal igual, con aviso */ }
-  errEl.textContent = '';
 
-  let diffs = null;
-  if (fudoHoy && fudoHoy.encontrado && saldosPlanilla) {
-    const espEfectivo = (saldosPlanilla.efectivoEsperado || 0) + (fudoHoy.efectivo || 0);
-    const espMP       = (saldosPlanilla.mpEsperado || 0) + (fudoHoy.mercadoPago || 0);
-    diffs = {
-      efectivo: { esperado: espEfectivo, contado: efectivo, diff: efectivo - espEfectivo },
-      mp:       { esperado: espMP,       contado: mp,       diff: mp - espMP },
-    };
+  errEl.textContent = '';
+  if (btnCierre) { btnCierre.disabled = false; btnCierre.textContent = btnTextoOriginal; }
+
+  let diffs = null, motivo = 'error';
+  if (fudoHoy && saldosPlanilla) {
+    if (!fudoHoy.encontrado) {
+      motivo = 'sin-fudo-hoy';
+    } else {
+      const espEfectivo = (saldosPlanilla.efectivoEsperado || 0) + (fudoHoy.efectivo || 0);
+      const espMP       = (saldosPlanilla.mpEsperado || 0) + (fudoHoy.mercadoPago || 0);
+      diffs = {
+        efectivo: { esperado: espEfectivo, contado: efectivo, diff: efectivo - espEfectivo },
+        mp:       { esperado: espMP,       contado: mp,       diff: mp - espMP },
+      };
+    }
   }
-  renderConfirmCierre(diffs);
+  renderConfirmCierre(diffs, motivo);
 }
 
-function renderConfirmCierre(diffs) {
+function renderConfirmCierre(diffs, motivo) {
   const body = document.getElementById('confirm-cierre-body');
   const actions = document.getElementById('confirm-cierre-actions');
   const filaCaja = (icono, nombre, d) => {
@@ -1258,9 +1268,15 @@ function renderConfirmCierre(diffs) {
   };
 
   if (!diffs) {
-    body.innerHTML = `
-      <h3 style="margin-bottom:8px">⚠️ No se pudo verificar el cierre</h3>
-      <p style="font-size:13px;color:var(--text-muted)">No pude leer la planilla o las ventas del día de Fudo. Podés cerrar igual: se registrará lo contado tal cual.</p>`;
+    if (motivo === 'sin-fudo-hoy') {
+      body.innerHTML = `
+        <h3 style="margin-bottom:8px">📭 No se encontraron datos en Fudo para hoy</h3>
+        <p style="font-size:13px;color:var(--text-muted)">Fudo no tiene ventas cerradas para el día de servicio en curso, así que no puedo verificar si la caja cierra. Si hoy hubo servicio, revisá que las mesas estén cerradas en Fudo. Podés cerrar igual: se registrará lo contado tal cual.</p>`;
+    } else {
+      body.innerHTML = `
+        <h3 style="margin-bottom:8px">⚠️ No se pudo verificar el cierre</h3>
+        <p style="font-size:13px;color:var(--text-muted)">No pude leer la planilla o las ventas del día de Fudo. Podés cerrar igual: se registrará lo contado tal cual.</p>`;
+    }
     actions.innerHTML = `
       <button class="btn" onclick="closeConfirmCierre()">🔄 Arquear nuevamente</button>
       <button class="btn btn-accent" onclick="confirmarCierreDefinitivo()">Cerrar igual</button>`;
