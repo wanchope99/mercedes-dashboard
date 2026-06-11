@@ -730,18 +730,22 @@
 <div id="cierre-modal-overlay">
   <div id="cierre-modal">
     <h3>Cierre de Caja</h3>
-    <p class="subtitle">Ingresá los saldos finales contados al cerrar el servicio.</p>
+    <p class="subtitle">Contá el efectivo y verificá Mercado Pago contra lo que ingresó según Fudo.</p>
+    <div id="cierre-fudo-resumen" style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:16px"></div>
     <div class="arqueo-field">
       <label>💵 Efectivo Local final</label>
+      <div id="ci-efectivo-hint" style="font-size:11px;color:var(--text-muted);margin-bottom:6px"></div>
       <input type="number" id="ci-efectivo" placeholder="0" min="0" />
     </div>
     <div class="arqueo-field">
       <label>📱 Mercado Pago final</label>
+      <div id="ci-mp-hint" style="font-size:11px;color:var(--text-muted);margin-bottom:6px"></div>
       <input type="number" id="ci-mp" placeholder="0" min="0" />
     </div>
     <div class="arqueo-field">
       <label>🏦 Galicia</label>
       <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Total Bruto — monto antes de descuentos impositivos</div>
+      <div id="ci-galicia-hint" style="font-size:11px;color:var(--text-muted);margin-bottom:6px"></div>
       <input type="number" id="ci-galicia" placeholder="0" min="0" title="Ingresá el total bruto acreditado en Galicia antes de impuestos" />
       <div style="margin-top:10px;padding:12px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
         <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px">Total Neto Acreditado</label>
@@ -923,6 +927,7 @@ const state = {
   charts: {}, pagosSort: 'vencimiento', proveedores: {},
   pagosVista: 'todos', pagosData: [], proy: null, cuotasAgrup: 'compra', cierrePendiente: null,
   galiciaFuturos: false, servAgrup: 'crono', servData: [], servDetalle: null,
+  fudoCierre: null, arqueoEstado: null,
   servVista: localStorage.getItem('mb_serv_vista') || 'numeros',
   tc: 1425,
   // Auth
@@ -1204,13 +1209,48 @@ async function abrirCaja() {
   }
 }
 
-function openCierreModal() {
+async function openCierreModal() {
   document.getElementById('cierre-modal-overlay').classList.add('open');
-  document.getElementById('ci-efectivo').value = '';
-  document.getElementById('ci-mp').value = '';
-  document.getElementById('ci-galicia').value = '';
-  document.getElementById('ci-galicia-neto').value = '';
+  ['ci-efectivo', 'ci-mp', 'ci-galicia', 'ci-galicia-neto'].forEach(id => document.getElementById(id).value = '');
+  ['ci-efectivo-hint', 'ci-mp-hint', 'ci-galicia-hint'].forEach(id => document.getElementById(id).innerHTML = '');
   document.getElementById('cierre-error').textContent = '';
+  state.fudoCierre = null; state.arqueoEstado = null;
+
+  // Paso 2 del flujo: al abrir el cierre, traer de Fudo el ingreso del día
+  // discriminado en Efectivo / Mercado Pago / Galicia (QR + Tarj. Débito + Tarj. Crédito)
+  const res = document.getElementById('cierre-fudo-resumen');
+  res.innerHTML = '<div style="color:var(--text-muted);font-size:12px">⏳ Consultando ingresos del día en Fudo...</div>';
+  try {
+    const [rFudo, rEstado] = await Promise.all([api('/api/arqueo/fudo-hoy'), api('/api/arqueo/estado')]);
+    state.fudoCierre = rFudo.data; state.arqueoEstado = rEstado.data;
+    const f = rFudo.data, est = rEstado.data;
+
+    if (!f.encontrado) {
+      res.innerHTML = '<div style="color:#e0c95c;font-size:12px">📭 No se encontraron datos en Fudo para hoy. No voy a poder verificar el cierre, pero podés cerrar igual.</div>';
+      return;
+    }
+
+    const row = (icon, nombre, monto) => `<div style="display:flex;justify-content:space-between;font-size:13px;padding:3px 0"><span style="color:var(--text-muted)">${icon} ${nombre}</span><b>${fmt(monto)}</b></div>`;
+    res.innerHTML = `
+      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Ingresos del día según Fudo</div>
+      ${row('💵', 'Efectivo', f.efectivo)}
+      ${row('📱', 'Mercado Pago', f.mercadoPago)}
+      ${row('🏦', 'Galicia (QR + T. Débito + T. Crédito)', f.galicia)}
+      ${f.otros > 0 ? row('❔', 'Otros medios', f.otros) : ''}
+      <div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0 0;border-top:1px solid var(--border);margin-top:5px"><span>Total</span><b>${fmt(f.total)}</b></div>`;
+
+    if (est && est.abierta) {
+      document.getElementById('ci-efectivo-hint').innerHTML =
+        `Debería haber <b style="color:var(--text)">${fmt((est.efectivoInicial || 0) + f.efectivo)}</b> · inicial ${fmt(est.efectivoInicial || 0)} + Fudo ${fmt(f.efectivo)}`;
+      document.getElementById('ci-mp-hint').innerHTML =
+        `Debería haber <b style="color:var(--text)">${fmt((est.mpInicial || 0) + f.mercadoPago)}</b> · inicial ${fmt(est.mpInicial || 0)} + Fudo ${fmt(f.mercadoPago)}`;
+    }
+    document.getElementById('ci-galicia-hint').innerHTML =
+      `Según Fudo: <b style="color:var(--text)">${fmt(f.galicia)}</b> — precargado, verificá contra Nave`;
+    document.getElementById('ci-galicia').value = f.galicia || '';
+  } catch (e) {
+    res.innerHTML = `<div style="color:var(--red);font-size:12px">No se pudo consultar Fudo (${e.message}). Podés cerrar igual; no habrá verificación.</div>`;
+  }
 }
 
 function closeCierreModal() {
@@ -1230,37 +1270,36 @@ async function cerrarCaja() {
 
   state.cierrePendiente = { efectivo, mercadoPago: mp, galicia, galiciaNeto };
 
-  // Comparar lo contado (real) contra el CALCULADO:
-  //   Saldo Calculado de la hoja Cajas (F8 Efectivo Local, F2 Mercado Pago)
-  //   + ventas del día según Fudo (fuente independiente de lo que debería haber entrado).
-  // NADA se escribe en la planilla hasta que el usuario confirme.
+  // Verificación del cierre (paso 3 y 4 del flujo):
+  //   Esperado por caja = saldo inicial contado en la apertura + ingresos del día según Fudo.
+  //   Real = lo contado recién. NADA se escribe hasta que el usuario confirme en el modal.
   const btnCierre = document.querySelector('#cierre-modal .btn-accent');
   const btnTextoOriginal = btnCierre ? btnCierre.textContent : '';
   if (btnCierre) { btnCierre.disabled = true; btnCierre.textContent = '⏳ Verificando...'; }
-  errEl.textContent = '⏳ Comparando contra la planilla y las ventas de Fudo...';
 
-  let fudoHoy = null, saldosPlanilla = null;
-  try {
-    const [rFudo, rSaldos] = await Promise.all([
-      api('/api/arqueo/fudo-hoy'),
-      api('/api/arqueo/saldos-iniciales'),   // lee Cajas!F8 y Cajas!F2
-    ]);
-    fudoHoy = rFudo.data; saldosPlanilla = rSaldos.data;
-  } catch (e) { /* sin datos mostramos el modal igual, con aviso */ }
+  // Reusar lo traído al abrir el modal; si faltó (error de red), reintentar acá
+  let fudoHoy = state.fudoCierre, estado = state.arqueoEstado;
+  if (!fudoHoy || !estado) {
+    try {
+      const [rFudo, rEstado] = await Promise.all([api('/api/arqueo/fudo-hoy'), api('/api/arqueo/estado')]);
+      fudoHoy = rFudo.data; estado = rEstado.data;
+    } catch (e) { /* sin datos mostramos el modal igual, con aviso */ }
+  }
 
-  errEl.textContent = '';
   if (btnCierre) { btnCierre.disabled = false; btnCierre.textContent = btnTextoOriginal; }
 
   let diffs = null, motivo = 'error';
-  if (fudoHoy && saldosPlanilla) {
+  if (fudoHoy && estado && estado.abierta) {
     if (!fudoHoy.encontrado) {
       motivo = 'sin-fudo-hoy';
     } else {
-      const espEfectivo = (saldosPlanilla.efectivoEsperado || 0) + (fudoHoy.efectivo || 0);
-      const espMP       = (saldosPlanilla.mpEsperado || 0) + (fudoHoy.mercadoPago || 0);
+      const iniE = estado.efectivoInicial || 0;
+      const iniM = estado.mpInicial || 0;
+      const fE = fudoHoy.efectivo || 0;
+      const fM = fudoHoy.mercadoPago || 0;
       diffs = {
-        efectivo: { esperado: espEfectivo, contado: efectivo, diff: efectivo - espEfectivo },
-        mp:       { esperado: espMP,       contado: mp,       diff: mp - espMP },
+        efectivo: { inicial: iniE, fudo: fE, esperado: iniE + fE, contado: efectivo, diff: efectivo - (iniE + fE) },
+        mp:       { inicial: iniM, fudo: fM, esperado: iniM + fM, contado: mp,       diff: mp - (iniM + fM) },
       };
     }
   }
@@ -1275,7 +1314,8 @@ function renderConfirmCierre(diffs, motivo) {
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(46,46,62,0.4);font-size:13px">
       <span>${icono} ${nombre}</span>
       <span style="text-align:right">
-        <div>Calculado <b>${fmt(d.esperado)}</b> · Real <b>${fmt(d.contado)}</b></div>
+        <div style="font-size:11px;color:var(--text-muted)">inicial ${fmt(d.inicial)} + Fudo ${fmt(d.fudo)}</div>
+        <div>Esperado <b>${fmt(d.esperado)}</b> · Contado <b>${fmt(d.contado)}</b></div>
         <div style="color:${ok ? 'var(--green)' : 'var(--red)'};font-weight:700">${ok ? '✓ Cierra' : (d.diff > 0 ? 'Sobran ' : 'Faltan ') + fmt(Math.abs(d.diff))}</div>
       </span>
     </div>`;
@@ -1298,7 +1338,7 @@ function renderConfirmCierre(diffs, motivo) {
     const cerro = Math.abs(diffs.efectivo.diff) <= TOLERANCIA_CIERRE && Math.abs(diffs.mp.diff) <= TOLERANCIA_CIERRE;
     body.innerHTML = `
       <h3 style="margin-bottom:8px">${cerro ? '✅ La caja cerró' : '⚠️ La caja NO cerró'}</h3>
-      <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Calculado = saldo de la planilla (hoja Cajas) + ventas del día según Fudo. Real = lo contado:</p>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Esperado = saldo inicial contado en la apertura + ingresos del día según Fudo. Contado = lo que acabás de contar:</p>
       ${filaCaja('💵', 'Efectivo', diffs.efectivo)}
       ${filaCaja('📱', 'Mercado Pago', diffs.mp)}
       ${cerro ? '' : `<p style="font-size:12px;color:var(--text-muted);margin-top:10px">Si hubo error al contar, arqueá de nuevo. Si la diferencia es real (pagos en efectivo durante el servicio, propinas, etc.), podés cerrar igual y queda registrada.</p>`}`;
