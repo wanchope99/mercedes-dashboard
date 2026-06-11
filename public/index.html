@@ -555,21 +555,10 @@
     <div class="kpi-grid" id="proy-kpis"><div class="loading"><div class="spinner"></div> Calculando proyección...</div></div>
 
     <div class="card">
-      <div class="card-title">Ingresos vs gastos — real y proyección 12 meses
+      <div class="card-title">Ingresos vs gastos — real y proyección 3 meses
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· barras translúcidas = proyección</span>
       </div>
       <div class="chart-container" style="height:330px"><canvas id="chart-proy-main"></canvas></div>
-    </div>
-
-    <div class="charts-row">
-      <div class="card">
-        <div class="card-title">Resultado acumulado proyectado</div>
-        <div class="chart-container"><canvas id="chart-proy-acum"></canvas></div>
-      </div>
-      <div class="card">
-        <div class="card-title">Composición del gasto proyectado</div>
-        <div class="chart-container"><canvas id="chart-proy-comp"></canvas></div>
-      </div>
     </div>
 
     <div class="card">
@@ -638,6 +627,10 @@
         <span class="pv-toggle">
           <button class="pv-btn active" id="pv-btn-todos" onclick="setPagosVista('todos')">Todos</button>
           <button class="pv-btn" id="pv-btn-cuotas" onclick="setPagosVista('cuotas')">📅 Cuotas</button>
+        </span>
+        <span class="pv-toggle" id="pv-agrup" style="display:none">
+          <button class="pv-btn active" id="pv-agrup-compra" onclick="setCuotasAgrup('compra')">Por compra</button>
+          <button class="pv-btn" id="pv-agrup-venc" onclick="setCuotasAgrup('vencimiento')">Por vencimiento</button>
         </span>
         <span id="pagos-count" style="font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted)"></span>
       </div>
@@ -757,6 +750,14 @@
       <button class="btn" onclick="closeCierreModal()">Cancelar</button>
       <button class="btn btn-accent" onclick="cerrarCaja()">Confirmar cierre</button>
     </div>
+  </div>
+</div>
+
+<!-- Modal confirmación de cierre (¿cerró la caja?) -->
+<div id="confirm-cierre-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:400;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:480px;width:100%;padding:28px">
+    <div id="confirm-cierre-body"></div>
+    <div class="modal-actions" id="confirm-cierre-actions" style="margin-top:18px"></div>
   </div>
 </div>
 
@@ -908,7 +909,7 @@ const state = {
   modo: 'mes', mes: '', desde: '', hasta: '',
   resumen: [], diasData: [], diasSemana: [],
   charts: {}, pagosSort: 'vencimiento', proveedores: {},
-  pagosVista: 'todos', pagosData: [], proy: null,
+  pagosVista: 'todos', pagosData: [], proy: null, cuotasAgrup: 'compra', cierrePendiente: null,
   tc: 1425,
   // Auth
   token: null, rol: null, nombre: null,
@@ -1202,6 +1203,9 @@ function closeCierreModal() {
   document.getElementById('cierre-modal-overlay').classList.remove('open');
 }
 
+// Tolerancia para considerar que una caja "cerró" (diferencias de redondeo)
+const TOLERANCIA_CIERRE = 1000;
+
 async function cerrarCaja() {
   const efectivo    = parseFloat(document.getElementById('ci-efectivo').value) || 0;
   const mp          = parseFloat(document.getElementById('ci-mp').value) || 0;
@@ -1209,16 +1213,88 @@ async function cerrarCaja() {
   const galiciaNeto = parseFloat(document.getElementById('ci-galicia-neto').value) || 0;
   const errEl = document.getElementById('cierre-error');
   errEl.textContent = '';
+
+  state.cierrePendiente = { efectivo, mercadoPago: mp, galicia, galiciaNeto };
+
+  // Comparar lo contado vs lo esperado (inicial + ventas del día según Fudo).
+  // NADA se escribe en la planilla hasta que el usuario confirme.
+  errEl.textContent = '⏳ Verificando contra Fudo...';
+  let fudoHoy = null, estado = null;
   try {
+    const [rFudo, rEstado] = await Promise.all([api('/api/arqueo/fudo-hoy'), api('/api/arqueo/estado')]);
+    fudoHoy = rFudo.data; estado = rEstado.data;
+  } catch (e) { /* sin Fudo mostramos el modal igual, con aviso */ }
+  errEl.textContent = '';
+
+  let diffs = null;
+  if (fudoHoy && fudoHoy.encontrado && estado && estado.abierta) {
+    const espEfectivo = (estado.efectivoInicial || 0) + (fudoHoy.efectivo || 0);
+    const espMP       = (estado.mpInicial || 0) + (fudoHoy.mercadoPago || 0);
+    diffs = {
+      efectivo: { esperado: espEfectivo, contado: efectivo, diff: efectivo - espEfectivo },
+      mp:       { esperado: espMP,       contado: mp,       diff: mp - espMP },
+    };
+  }
+  renderConfirmCierre(diffs);
+}
+
+function renderConfirmCierre(diffs) {
+  const body = document.getElementById('confirm-cierre-body');
+  const actions = document.getElementById('confirm-cierre-actions');
+  const filaCaja = (icono, nombre, d) => {
+    const ok = Math.abs(d.diff) <= TOLERANCIA_CIERRE;
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(46,46,62,0.4);font-size:13px">
+      <span>${icono} ${nombre}</span>
+      <span style="text-align:right">
+        <div>Esperado <b>${fmt(d.esperado)}</b> · Contado <b>${fmt(d.contado)}</b></div>
+        <div style="color:${ok ? 'var(--green)' : 'var(--red)'};font-weight:700">${ok ? '✓ Cierra' : (d.diff > 0 ? 'Sobran ' : 'Faltan ') + fmt(Math.abs(d.diff))}</div>
+      </span>
+    </div>`;
+  };
+
+  if (!diffs) {
+    body.innerHTML = `
+      <h3 style="margin-bottom:8px">⚠️ No se pudo verificar contra Fudo</h3>
+      <p style="font-size:13px;color:var(--text-muted)">No hay datos de ventas del día en Fudo (o no respondió). Podés cerrar igual: se registrará lo contado tal cual.</p>`;
+    actions.innerHTML = `
+      <button class="btn" onclick="closeConfirmCierre()">🔄 Arquear nuevamente</button>
+      <button class="btn btn-accent" onclick="confirmarCierreDefinitivo()">Cerrar igual</button>`;
+  } else {
+    const cerro = Math.abs(diffs.efectivo.diff) <= TOLERANCIA_CIERRE && Math.abs(diffs.mp.diff) <= TOLERANCIA_CIERRE;
+    body.innerHTML = `
+      <h3 style="margin-bottom:8px">${cerro ? '✅ La caja cerró' : '⚠️ La caja NO cerró'}</h3>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Comparación entre lo contado y lo esperado (saldo inicial + ventas del día según Fudo):</p>
+      ${filaCaja('💵', 'Efectivo', diffs.efectivo)}
+      ${filaCaja('📱', 'Mercado Pago', diffs.mp)}
+      ${cerro ? '' : `<p style="font-size:12px;color:var(--text-muted);margin-top:10px">Si hubo error al contar, arqueá de nuevo. Si la diferencia es real (pagos en efectivo durante el servicio, propinas, etc.), podés cerrar igual y queda registrada.</p>`}`;
+    actions.innerHTML = `
+      <button class="btn" onclick="closeConfirmCierre()">🔄 Arquear nuevamente</button>
+      <button class="btn btn-accent" onclick="confirmarCierreDefinitivo()">${cerro ? '✅ Entendido, cerrar caja' : '⚠️ Entiendo la diferencia, cerrar igual'}</button>`;
+  }
+  document.getElementById('confirm-cierre-overlay').style.display = 'flex';
+}
+
+function closeConfirmCierre() {
+  // Vuelve al modal de cierre con los valores cargados para recontar
+  document.getElementById('confirm-cierre-overlay').style.display = 'none';
+}
+
+async function confirmarCierreDefinitivo() {
+  const btns = document.querySelectorAll('#confirm-cierre-actions .btn');
+  btns.forEach(b => b.disabled = true);
+  try {
+    // Recién acá se escribe en la planilla (Movimientos + Arqueo de Cajas + Cajas)
     const { data } = await api('/api/arqueo/cerrar', {
       method: 'POST',
-      body: JSON.stringify({ efectivo, mercadoPago: mp, galicia, galiciaNeto }),
+      body: JSON.stringify(state.cierrePendiente),
     });
+    closeConfirmCierre();
     closeCierreModal();
     renderEstadoArqueo({ abierta: false });
     renderResumenCierre(data);
-  } catch(err) {
-    errEl.textContent = err.message;
+  } catch (err) {
+    document.getElementById('confirm-cierre-body').innerHTML += `<div style="color:var(--red);font-size:13px;margin-top:10px">❌ ${err.message}</div>`;
+    btns.forEach(b => b.disabled = false);
   }
 }
 
@@ -1582,7 +1658,16 @@ function openDrawerDia(dia) {
     <div class="drawer-kpi"><div class="drawer-kpi-label">MP + Galicia</div><div class="drawer-kpi-val">${fmtFull(d.mercadoPago + d.galicia)}</div></div>`;
   document.getElementById('drawer-mov-list').innerHTML = d.fechas.sort().map(f => {
     const [y, m, dd] = f.split('-');
-    return `<div class="drawer-mov-item"><div class="drawer-mov-proveedor">${dd}/${m}/${y}</div><div></div></div>`;
+    const diaData = state.diasData.find(x => x.fecha === f);
+    let resultadoHtml = '<div></div>', subHtml = '';
+    if (diaData) {
+      const resultado = diaData.ingresos - diaData.gastosPagados;
+      resultadoHtml = `<div class="drawer-mov-amount ${resultado >= 0 ? 'pos' : 'neg'}">${resultado >= 0 ? '+' : ''}${fmtFull(resultado)}</div>`;
+      subHtml = `<div class="drawer-mov-cat">Ingresos ${fmt(diaData.ingresos)} · Gastos ${fmt(diaData.gastosPagados)}</div><div class="drawer-mov-mp">clic para detalle</div>`;
+    }
+    return `<div class="drawer-mov-item" style="cursor:pointer" onclick="openDrawerFecha('${f}')">
+      <div class="drawer-mov-proveedor">${dd}/${m}/${y}</div>${resultadoHtml}${subHtml}
+    </div>`;
   }).join('');
   openDrawer();
 }
@@ -1752,7 +1837,15 @@ function setPagosVista(vista) {
   state.pagosVista = vista;
   document.getElementById('pv-btn-todos').classList.toggle('active', vista === 'todos');
   document.getElementById('pv-btn-cuotas').classList.toggle('active', vista === 'cuotas');
+  document.getElementById('pv-agrup').style.display = vista === 'cuotas' ? '' : 'none';
   loadPagos();
+}
+
+function setCuotasAgrup(modo) {
+  state.cuotasAgrup = modo;
+  document.getElementById('pv-agrup-compra').classList.toggle('active', modo === 'compra');
+  document.getElementById('pv-agrup-venc').classList.toggle('active', modo === 'vencimiento');
+  if (state.pagosData.length) renderPagosCuotas(state.pagosData);
 }
 
 function renderPagosCuotas(pagos) {
@@ -1762,27 +1855,55 @@ function renderPagosCuotas(pagos) {
     document.getElementById('pagos-tbody').innerHTML = `<tr><td colspan="7"><div class="pagos-empty">No hay cuotas pendientes. 🎉</div></td></tr>`;
     return;
   }
-  // Agrupar por compra (ID Compra)
+
+  // Agrupar por compra (ID) o por vencimiento
   const grupos = {};
-  for (const c of cuotas) {
-    (grupos[c.cuotaId || 'sin-id'] = grupos[c.cuotaId || 'sin-id'] || []).push(c);
+  if (state.cuotasAgrup === 'vencimiento') {
+    for (const c of cuotas) {
+      const key = c.vencDate || 'sin-fecha';
+      if (!grupos[key]) {
+        const label = c.vencDate ? new Date(c.vencDate + 'T12:00:00').toLocaleDateString('es-AR') : 'Sin fecha';
+        grupos[key] = { titulo: `📅 Vencen el ${label}`, sub: '', extra: '', cuotas: [], orden: key };
+      }
+      grupos[key].cuotas.push(c);
+    }
+  } else {
+    for (const c of cuotas) {
+      const key = c.cuotaId || 'sin-id';
+      if (!grupos[key]) {
+        const descBase = (c.descripcion || '').replace(/\s*—\s*Cuota.*$/i, '');
+        const pagadas = c.compraCuotasPagadas != null ? `${c.compraCuotasPagadas}/${c.compraCuotasTotal} pagadas` : '';
+        grupos[key] = {
+          titulo: `🧾 ${c.proveedor || key}`,
+          sub: descBase,
+          extra: `${pagadas}${c.compraTotal ? ` · total ${fmt(c.compraTotal)}` : ''}${c.compraRestante ? ` · restan ${fmt(c.compraRestante)}` : ''}`,
+          cuotas: [], orden: c.vencDate || 'zzz',
+        };
+      }
+      grupos[key].cuotas.push(c);
+    }
   }
+
   let html = '';
-  for (const [id, grp] of Object.entries(grupos)) {
-    grp.sort((a, b) => (a.cuotaNum || 0) - (b.cuotaNum || 0));
-    const g0 = grp[0];
-    const pagadas = g0.compraCuotasPagadas != null ? `${g0.compraCuotasPagadas}/${g0.compraCuotasTotal} pagadas` : '';
-    const descBase = (g0.descripcion || '').replace(/\s*—\s*Cuota.*$/i, '');
-    html += `<tr><td colspan="7" style="padding:0"><div class="cuota-grp-header">
-      <span>🧾 ${g0.proveedor || id}</span>
-      <span style="color:var(--text-muted);font-weight:400">${descBase}</span>
-      <span class="pagadas">${pagadas}${g0.compraTotal ? ` · total ${fmt(g0.compraTotal)}` : ''}</span>
-      <span class="restante">${g0.compraRestante ? `restan ${fmt(g0.compraRestante)}` : ''}</span>
-    </div></td></tr>`;
-    html += buildPagosRows(grp, 'cuotas-' + id.replace(/[^a-zA-Z0-9]/g, ''));
+  const ordenados = Object.entries(grupos).sort((a, b) => (a[1].orden || '').localeCompare(b[1].orden || ''));
+  for (const [key, grp] of ordenados) {
+    grp.cuotas.sort((a, b) => (a.vencDate || '').localeCompare(b.vencDate || '') || (a.cuotaNum || 0) - (b.cuotaNum || 0));
+    const gid = 'cuo-' + key.replace(/[^a-zA-Z0-9]/g, '');
+    const total = grp.cuotas.reduce((s, c) => s + (c.salidaARS || 0), 0);
+    html += `<tr class="group-header-row" id="grp-hdr-${gid}"><td colspan="7" style="padding:0">
+      <div class="group-header" onclick="toggleGroup('${gid}')">
+        <span class="group-chevron">▾</span>
+        <span class="group-badge">${grp.titulo}</span>
+        ${grp.sub ? `<span style="color:var(--text-muted)">${grp.sub}</span>` : ''}
+        <span style="color:var(--text-muted);font-size:11px">${grp.cuotas.length} cuota${grp.cuotas.length !== 1 ? 's' : ''}${grp.extra ? ' · ' + grp.extra : ''}</span>
+        <span class="group-total">${fmt(total)}</span>
+      </div>
+    </td></tr>`;
+    html += buildPagosRows(grp.cuotas, gid);
   }
   document.getElementById('pagos-tbody').innerHTML = html;
 }
+
 
 // ─── PROYECCIONES ─────────────────────────────────────────────────────────────
 const MESES_PROY = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -1807,8 +1928,6 @@ function renderProyKPIs(data) {
   if (!p.length) { document.getElementById('proy-kpis').innerHTML = '<div style="color:var(--text-muted);padding:20px">Sin datos suficientes para proyectar.</div>'; return; }
   const prox = p[0];
   const prom = p.reduce((s, x) => s + x.resultado, 0) / p.length;
-  const fin = p[p.length - 1];
-  const aguinaldos = p.reduce((s, x) => s + (x.desglose.aguinaldo || 0), 0);
   const kpi = (label, valor, sub, color) => `
     <div class="kpi-card ${color}">
       <div class="kpi-label">${label}</div>
@@ -1817,9 +1936,7 @@ function renderProyKPIs(data) {
     </div>`;
   document.getElementById('proy-kpis').innerHTML =
     kpi(`Resultado proyectado · ${prox.label}`, fmt(prox.resultado), prox.resultado >= 0 ? 'Mes positivo ✓' : '⚠️ Mes negativo', prox.resultado >= 0 ? 'green' : 'red') +
-    kpi('Promedio mensual proyectado', fmt(prom), `Próximos ${p.length} meses`, prom >= 0 ? 'green' : 'red') +
-    kpi(`Acumulado a ${fin.label}`, fmt(fin.acumulado), 'Suma de resultados proyectados', fin.acumulado >= 0 ? 'blue' : 'red') +
-    kpi('Aguinaldos en el período', fmt(aguinaldos), 'Junio 50% · Diciembre 100% de la masa salarial', 'orange');
+    kpi('Promedio mensual proyectado', fmt(prom), `Próximos ${p.length} meses`, prom >= 0 ? 'green' : 'red');
 }
 
 function renderProyCharts(data) {
@@ -1844,32 +1961,6 @@ function renderProyCharts(data) {
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: leyenda, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.raw)}${c.dataIndex >= nH ? ' (proy.)' : ''}` } } }, scales: ejes }
   });
 
-  destroyChart('proy-acum');
-  state.charts['proy-acum'] = new Chart(document.getElementById('chart-proy-acum').getContext('2d'), {
-    type: 'line',
-    data: { labels: proy.map(x => x.label), datasets: [{
-      label: 'Resultado acumulado', data: proy.map(x => x.acumulado),
-      borderColor: '#4caf82', backgroundColor: 'rgba(76,175,130,0.12)', fill: true, tension: 0.3, pointRadius: 3, borderDash: [6, 4],
-    }]},
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` Acumulado: ${fmt(c.raw)}` } } }, scales: ejes }
-  });
-
-  destroyChart('proy-comp');
-  const comp = [
-    { label: 'Mercadería + Insumos', key: 'costoVariable', color: '#e08a5c' },
-    { label: 'Personal', key: 'personal', color: '#a05ce0' },
-    { label: 'Aguinaldo', key: 'aguinaldo', color: '#e05c5c' },
-    { label: 'Alquiler', key: 'alquiler', color: '#5c8fe0' },
-    { label: 'Operativos + Impuestos', key: 'operativos', color: '#5ce0c9' },
-    { label: 'Variables personalizadas', key: 'varGastos', color: '#e0c95c' },
-  ];
-  state.charts['proy-comp'] = new Chart(document.getElementById('chart-proy-comp').getContext('2d'), {
-    type: 'bar',
-    data: { labels: proy.map(x => x.label), datasets: comp.map(c => ({
-      label: c.label, data: proy.map(x => x.desglose[c.key] || 0), backgroundColor: c.color, stack: 'g',
-    })).filter(ds => ds.data.some(v => v > 0)) },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { ...leyenda, position: 'bottom', labels: { color: '#7878a0', font: { size: 10 }, boxWidth: 10 } }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.raw)}` } } }, scales: { x: { ...ejes.x, stacked: true }, y: { ...ejes.y, stacked: true } } }
-  });
 }
 
 function renderProyVars(vars) {
