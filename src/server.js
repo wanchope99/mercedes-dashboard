@@ -310,16 +310,20 @@ app.get('/api/arqueo/fudo-hoy', authMiddleware, async (req, res) => {
     const fecha = fechaServicioHoy();
     const det = await getServicioDetalle(fecha);
     if (!det || !det.encontrado) {
-      return res.json({ ok: true, data: { fecha, encontrado: false, efectivo: 0, mercadoPago: 0, otros: 0, total: 0, mediosPago: {} } });
+      return res.json({ ok: true, data: { fecha, encontrado: false, efectivo: 0, mercadoPago: 0, galicia: 0, otros: 0, total: 0, mediosPago: {} } });
     }
-    let efectivo = 0, mercadoPago = 0, otros = 0;
+    // Mapeo de medios de pago de Fudo a cajas internas:
+    //   Galicia = QR + Tarjeta Débito + Tarjeta Crédito (los 3 liquidan vía Nave en Galicia)
+    //   Mercado Pago = transferencias/dinero en cuenta MP · Efectivo = efectivo
+    let efectivo = 0, mercadoPago = 0, galicia = 0, otros = 0;
     for (const [nombre, monto] of Object.entries(det.mediosPago || {})) {
       const n = nombre.toLowerCase();
       if (n.includes('efectivo')) efectivo += monto;
-      else if (n.includes('mercado') || n === 'mp' || n.includes('qr')) mercadoPago += monto;
+      else if (n.includes('qr') || n.includes('tarj') || n.includes('credito') || n.includes('crédito') || n.includes('debito') || n.includes('débito') || n.includes('visa') || n.includes('master')) galicia += monto;
+      else if (n.includes('mercado') || n === 'mp') mercadoPago += monto;
       else otros += monto;
     }
-    res.json({ ok: true, data: { fecha, encontrado: true, efectivo, mercadoPago, otros, total: det.total, mediosPago: det.mediosPago } });
+    res.json({ ok: true, data: { fecha, encontrado: true, efectivo, mercadoPago, galicia, otros, total: det.total, mediosPago: det.mediosPago } });
   } catch (err) {
     console.error('Error /api/arqueo/fudo-hoy:', err.message);
     res.status(500).json({ ok: false, error: err.message });
