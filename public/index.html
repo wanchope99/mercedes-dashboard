@@ -163,6 +163,10 @@
     .pagos-empty { text-align: center; color: var(--text-muted); padding: 48px 24px; font-size: 14px; }
     .badge-cuota { display: inline-block; background: rgba(155,89,182,0.14); color: var(--purple); border: 1px solid rgba(155,89,182,0.35); border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 700; margin-left: 6px; white-space: nowrap; vertical-align: middle; }
     .cuota-restante { font-size: 10px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; }
+    .serv-grp { margin-bottom: 6px; }
+    .serv-grp .group-header { border-radius: 8px; margin-bottom: 4px; }
+    .serv-grp-collapsed .serv-grp-body { display: none; }
+    .serv-grp-collapsed .group-chevron { transform: rotate(-90deg); }
     .pv-toggle { display: inline-flex; margin-left: 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; vertical-align: middle; }
     .pv-btn { padding: 4px 12px; font-size: 11px; background: none; border: none; color: var(--text-muted); cursor: pointer; font-family: inherit; font-weight: 600; text-transform: none; letter-spacing: 0; }
     .pv-btn.active { background: var(--accent); color: #f0e6d3; }
@@ -801,6 +805,10 @@
     <div class="card" style="padding:0;overflow:hidden">
       <div class="card-title" style="padding:20px 24px 0;margin-bottom:0">
         Servicios
+        <span class="pv-toggle">
+          <button class="pv-btn active" id="sv-agrup-crono" onclick="setServAgrup('crono')">Cronológico</button>
+          <button class="pv-btn" id="sv-agrup-dia" onclick="setServAgrup('dia')">Por día de semana</button>
+        </span>
         <span id="serv-count" style="font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted)"></span>
       </div>
       <div style="padding:16px 24px 24px">
@@ -820,6 +828,10 @@
         <div class="serv-modal-title" id="serv-modal-title">Servicio</div>
         <div class="serv-modal-sub" id="serv-modal-sub"></div>
       </div>
+      <span class="pv-toggle" style="margin-left:0;margin-top:4px">
+        <button class="pv-btn" id="sv-vista-num" onclick="setServVista('numeros')">🔢 Números</button>
+        <button class="pv-btn" id="sv-vista-graf" onclick="setServVista('graficos')">📊 Gráficos</button>
+      </span>
       <button class="btn-close" onclick="closeServModal()">×</button>
     </div>
     <div id="serv-modal-body">
@@ -910,6 +922,8 @@ const state = {
   resumen: [], diasData: [], diasSemana: [],
   charts: {}, pagosSort: 'vencimiento', proveedores: {},
   pagosVista: 'todos', pagosData: [], proy: null, cuotasAgrup: 'compra', cierrePendiente: null,
+  galiciaFuturos: false, servAgrup: 'crono', servData: [], servDetalle: null,
+  servVista: localStorage.getItem('mb_serv_vista') || 'numeros',
   tc: 1425,
   // Auth
   token: null, rol: null, nombre: null,
@@ -1591,6 +1605,13 @@ async function loadCajas() {
     if (getRol() !== 'admin') {
       cajas = cajas.filter(c => CAJAS_ENCARGADO.includes((c.caja || '').toLowerCase()));
     }
+    // Orden por importancia
+    const ORDEN_CAJAS = ['galicia', 'mercado pago', 'efectivo local', 'efectivo pablo', 'efectivo tincho', 'usd pablo', 'usd tincho'];
+    cajas.sort((a, b) => {
+      const ia = ORDEN_CAJAS.indexOf((a.caja || '').toLowerCase().trim());
+      const ib = ORDEN_CAJAS.indexOf((b.caja || '').toLowerCase().trim());
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
     const container = document.getElementById('cajas-grid');
     if (!cajas.length) { container.innerHTML = '<div style="color:var(--text-muted)">Sin datos</div>'; return; }
 
@@ -1657,7 +1678,7 @@ async function loadCajas() {
           <div class="caja-row" style="color:var(--text-muted);font-size:11px"><span>${equiv}</span></div>
           <div class="caja-row"><span>Entradas</span><span>${c.moneda === 'USD' ? 'USD ' + c.entradas : fmt(c.entradas)}</span></div>
           <div class="caja-row"><span>Salidas</span><span>${c.moneda === 'USD' ? 'USD ' + c.salidas : fmt(c.salidas)}</span></div>
-          ${c.cobroPendiente ? `<div class="caja-row"><span>Pendiente cobro</span><span style="color:var(--accent)">${fmt(c.cobroPendiente)}</span></div>` : ''}
+          ${c.cobroPendiente ? `<div class="caja-row"><span>Pendiente cobro</span><span style="color:#e0c95c;font-weight:600">${fmt(c.cobroPendiente)}</span></div>` : ''}
           ${c.diff !== 0 ? `<div class="caja-diff"><span>Diff real vs calc</span><span style="color:${c.diff >= 0 ? 'var(--green)' : 'var(--red)'}}">${fmt(c.diff)}</span></div>` : ''}
         </div>`;
     }).join('');
@@ -1818,9 +1839,19 @@ async function loadPagos() {
     const galiciaTotal = galiciaPagos.reduce((s, p) => s + p.salidaARS, 0);
     const independientes = pagos.filter(p => !(p.medioPago || '').toLowerCase().includes('galicia'));
 
+    // Próximo vencimiento de la tarjeta: por defecto solo se muestran esos cargos
+    const vencsGalicia = [...new Set(galiciaPagos.filter(p => p.vencDate).map(p => p.vencDate))].sort();
+    const proxVencGalicia = vencsGalicia[0] || null;
+    const galiciaVisibles = state.galiciaFuturos || !proxVencGalicia
+      ? galiciaPagos
+      : galiciaPagos.filter(p => !p.vencDate || p.vencDate <= proxVencGalicia);
+    const galiciaProxTotal = (proxVencGalicia
+      ? galiciaPagos.filter(p => !p.vencDate || p.vencDate <= proxVencGalicia)
+      : galiciaPagos).reduce((s, p) => s + p.salidaARS, 0);
+
     document.getElementById('pagos-kpis').innerHTML = `
       <div class="kpi-card red"><div class="kpi-label">Total pendiente ARS</div><div class="kpi-value">${fmt(summary.totalARS)}</div><div class="kpi-sub">${summary.total} pagos</div></div>
-      <div class="kpi-card blue"><div class="kpi-label">Tarjeta Galicia</div><div class="kpi-value">${fmt(galiciaTotal)}</div><div class="kpi-sub">${galiciaPagos.length} cargo${galiciaPagos.length !== 1 ? 's' : ''}</div></div>
+      <div class="kpi-card blue"><div class="kpi-label">Tarjeta Galicia</div><div class="kpi-value">${fmt(galiciaTotal)}</div><div class="kpi-sub">${galiciaPagos.length} cargo${galiciaPagos.length !== 1 ? 's' : ''}${galiciaProxTotal > 0 && galiciaProxTotal < galiciaTotal ? ` · próx. venc: ${fmt(galiciaProxTotal)}` : ''}</div></div>
       <div class="kpi-card accent"><div class="kpi-label">Proveedores independientes</div><div class="kpi-value">${fmt(summary.totalARS - galiciaTotal)}</div><div class="kpi-sub">${independientes.length} pago${independientes.length !== 1 ? 's' : ''}</div></div>
       <div class="kpi-card ${summary.vencidos > 0 ? 'red' : 'green'}" ${summary.vencidos > 0 ? 'onclick="openVencidosModal(state.vencidosPagos)" style="cursor:pointer;transition:opacity 0.15s" onmouseenter="this.style.opacity=\'0.8\'" onmouseleave="this.style.opacity=\'1\'"' : ''}><div class="kpi-label">Vencidos</div><div class="kpi-value">${summary.vencidos}</div><div class="kpi-sub">${summary.vencidos > 0 ? '⚠️ Clic para ver' : 'Al día ✓'}</div></div>
       <div class="kpi-card ${summary.estaSemanaCant > 0 ? 'orange' : 'green'}" ${summary.estaSemanaCant > 0 ? 'onclick="openSemanModal(state.estaSemanaPagos)" style="cursor:pointer;transition:opacity 0.15s" onmouseenter="this.style.opacity=\'0.8\'" onmouseleave="this.style.opacity=\'1\'"' : ''}><div class="kpi-label">Esta semana</div><div class="kpi-value">${summary.estaSemanaCant}</div><div class="kpi-sub">${summary.estaSemanaCant > 0 ? fmt(summary.estaSemanaARS) + ' · Clic para ver' : fmt(summary.estaSemanaARS)}</div></div>
@@ -1838,8 +1869,19 @@ async function loadPagos() {
 
     let html = '';
     if (galiciaPagos.length > 0) {
-      html += `<tr class="group-header-row" id="grp-hdr-galicia"><td colspan="7" style="padding:0"><div class="group-header" onclick="toggleGroup('galicia')"><span class="group-chevron" id="grp-chv-galicia">▾</span><span class="group-badge">💳 Tarjeta Galicia</span><span>${galiciaPagos.length} cargo${galiciaPagos.length !== 1 ? 's' : ''}</span><span class="group-total">${fmt(galiciaTotal)}</span></div></td></tr>`;
-      html += buildPagosRows(galiciaPagos, 'galicia');
+      const ocultos = galiciaPagos.length - galiciaVisibles.length;
+      const vencLbl = proxVencGalicia ? new Date(proxVencGalicia + 'T12:00:00').toLocaleDateString('es-AR') : '';
+      html += `<tr class="group-header-row" id="grp-hdr-galicia"><td colspan="7" style="padding:0"><div class="group-header" onclick="toggleGroup('galicia')">
+        <span class="group-chevron" id="grp-chv-galicia">▾</span>
+        <span class="group-badge">💳 Tarjeta Galicia</span>
+        <span>${state.galiciaFuturos ? `${galiciaPagos.length} cargo${galiciaPagos.length !== 1 ? 's' : ''}` : `${galiciaVisibles.length} de ${galiciaPagos.length} cargo${galiciaPagos.length !== 1 ? 's' : ''}${vencLbl ? ` · venc ${vencLbl}` : ''}`}</span>
+        <label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted);cursor:pointer;font-weight:400" onclick="event.stopPropagation()">
+          <input type="checkbox" ${state.galiciaFuturos ? 'checked' : ''} onchange="toggleGaliciaFuturos(this.checked)" style="accent-color:var(--accent)">
+          mostrar futuros vencimientos${ocultos > 0 ? ` (${ocultos})` : ''}
+        </label>
+        <span class="group-total">${fmt(galiciaVisibles.reduce((s, p) => s + p.salidaARS, 0))}${!state.galiciaFuturos && ocultos > 0 ? ` <span style="color:var(--text-muted);font-weight:400;font-size:11px">de ${fmt(galiciaTotal)}</span>` : ''}</span>
+      </div></td></tr>`;
+      html += buildPagosRows(galiciaVisibles, 'galicia');
     }
     if (independientes.length > 0) {
       if (galiciaPagos.length > 0) {
@@ -1859,6 +1901,11 @@ function setPagosVista(vista) {
   document.getElementById('pv-btn-todos').classList.toggle('active', vista === 'todos');
   document.getElementById('pv-btn-cuotas').classList.toggle('active', vista === 'cuotas');
   document.getElementById('pv-agrup').style.display = vista === 'cuotas' ? '' : 'none';
+  loadPagos();
+}
+
+function toggleGaliciaFuturos(v) {
+  state.galiciaFuturos = v;
   loadPagos();
 }
 
@@ -2156,6 +2203,7 @@ async function loadServicios() {
 
   try {
     const { data } = await api(url);
+    state.servData = data;
     renderServiciosKPIs(data);
     renderServiciosList(data);
     document.getElementById('serv-count').textContent =
@@ -2200,37 +2248,76 @@ function renderServiciosKPIs(servicios) {
   `;
 }
 
+function setServAgrup(modo) {
+  state.servAgrup = modo;
+  document.getElementById('sv-agrup-crono').classList.toggle('active', modo === 'crono');
+  document.getElementById('sv-agrup-dia').classList.toggle('active', modo === 'dia');
+  if (state.servData.length) renderServiciosList(state.servData);
+}
+
+function buildServRow(s) {
+  const fl = fechaLabel(s.fecha);
+  const pctC = Math.round(s.pctComida);
+  const pctB = Math.round(s.pctBebida);
+  return `
+    <div class="serv-row" onclick="openServModal('${s.fecha}')">
+      <div class="serv-fecha">${fl.dia}<span class="serv-dow">${fl.dow}</span></div>
+      <div class="serv-pax">
+        <div class="serv-pax-num">${s.pax}</div>
+        <div class="serv-pax-lbl">pax</div>
+      </div>
+      <div class="serv-total">${fmt(s.total)}<span class="serv-ticket">${fmt(s.ticketPromedio)}/pax · ${s.ventas} venta${s.ventas !== 1 ? 's' : ''}${(s.propinas || 0) > 0 ? ` · <span style="color:var(--green)">+${fmt(s.propinas)} propina</span>` : ''}</span></div>
+      <div class="serv-cb">
+        <div class="serv-cb-bar">
+          <div class="serv-cb-comida" style="width:${pctC}%"></div>
+          <div class="serv-cb-bebida" style="width:${pctB}%"></div>
+        </div>
+        <div class="serv-cb-legend">
+          <span><span class="dot-c">●</span> Comida ${pctC}%</span>
+          <span><span class="dot-b">●</span> Bebida ${pctB}%</span>
+        </div>
+      </div>
+    </div>`;
+}
+
 function renderServiciosList(servicios) {
   const listEl = document.getElementById('serv-list');
   if (!servicios.length) {
     listEl.innerHTML = '<div class="serv-empty">No hay servicios en este período.</div>';
     return;
   }
-  listEl.innerHTML = servicios.map(s => {
-    const fl = fechaLabel(s.fecha);
-    const pctC = Math.round(s.pctComida);
-    const pctB = Math.round(s.pctBebida);
+
+  if (state.servAgrup !== 'dia') {
+    listEl.innerHTML = servicios.map(buildServRow).join('');
+    return;
+  }
+
+  // Agrupado por día de la semana (respeta el filtro de fechas vigente)
+  const ORDEN_DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+  const grupos = {};
+  for (const s of servicios) {
+    const dow = fechaLabel(s.fecha).dow;
+    (grupos[dow] = grupos[dow] || []).push(s);
+  }
+  listEl.innerHTML = ORDEN_DIAS.filter(d => grupos[d]).map(d => {
+    const ss = grupos[d].sort((a, b) => b.fecha.localeCompare(a.fecha));
+    const total = ss.reduce((sum, x) => sum + x.total, 0);
+    const pax = ss.reduce((sum, x) => sum + x.pax, 0);
+    const prom = ss.length ? total / ss.length : 0;
     return `
-      <div class="serv-row" onclick="openServModal('${s.fecha}')">
-        <div class="serv-fecha">${fl.dia}<span class="serv-dow">${fl.dow}</span></div>
-        <div class="serv-pax">
-          <div class="serv-pax-num">${s.pax}</div>
-          <div class="serv-pax-lbl">pax</div>
+      <div class="serv-grp">
+        <div class="group-header" onclick="this.parentElement.classList.toggle('serv-grp-collapsed')">
+          <span class="group-chevron">▾</span>
+          <span class="group-badge">📅 ${d}</span>
+          <span>${ss.length} servicio${ss.length !== 1 ? 's' : ''} · ${pax} pax</span>
+          <span style="color:var(--text-muted);font-size:11px">prom ${fmt(prom)}/servicio</span>
+          <span class="group-total">${fmt(total)}</span>
         </div>
-        <div class="serv-total">${fmt(s.total)}<span class="serv-ticket">${fmt(s.ticketPromedio)}/pax · ${s.ventas} venta${s.ventas !== 1 ? 's' : ''}${(s.propinas || 0) > 0 ? ` · <span style="color:var(--green)">+${fmt(s.propinas)} propina</span>` : ''}</span></div>
-        <div class="serv-cb">
-          <div class="serv-cb-bar">
-            <div class="serv-cb-comida" style="width:${pctC}%"></div>
-            <div class="serv-cb-bebida" style="width:${pctB}%"></div>
-          </div>
-          <div class="serv-cb-legend">
-            <span><span class="dot-c">●</span> Comida ${pctC}%</span>
-            <span><span class="dot-b">●</span> Bebida ${pctB}%</span>
-          </div>
-        </div>
+        <div class="serv-grp-body">${ss.map(buildServRow).join('')}</div>
       </div>`;
   }).join('');
 }
+
 
 async function openServModal(fecha) {
   const fl = fechaLabel(fecha);
@@ -2251,7 +2338,54 @@ async function openServModal(fecha) {
   }
 }
 
+function setServVista(v) {
+  state.servVista = v;
+  localStorage.setItem('mb_serv_vista', v);
+  if (state.servDetalle) renderServModal(state.servDetalle);
+}
+
+function destroyServCharts() {
+  ['serv-cat', 'serv-prod', 'serv-pagos'].forEach(destroyChart);
+}
+
+const SERV_GRUPO_COLOR = { comida: '#e08a5c', bebida: '#5c8fe0', otros: '#7878a0' };
+
 function renderServModal(d) {
+  state.servDetalle = d;
+  destroyServCharts();
+  document.getElementById('sv-vista-num').classList.toggle('active', state.servVista !== 'graficos');
+  document.getElementById('sv-vista-graf').classList.toggle('active', state.servVista === 'graficos');
+
+  const head = `
+    <div class="serv-modal-kpis">
+      <div class="serv-mk"><div class="serv-mk-label">Pax</div><div class="serv-mk-val blue">${d.pax}</div></div>
+      <div class="serv-mk"><div class="serv-mk-label">Facturación</div><div class="serv-mk-val green">${fmt(d.total)}</div></div>
+      <div class="serv-mk"><div class="serv-mk-label">Ticket / pax</div><div class="serv-mk-val accent">${fmt(d.ticketPromedio)}</div></div>
+    </div>
+    <div style="margin-bottom:18px">
+      <div class="serv-cb-bar" style="height:14px">
+        <div class="serv-cb-comida" style="width:${Math.round(d.pctComida)}%"></div>
+        <div class="serv-cb-bebida" style="width:${Math.round(d.pctBebida)}%"></div>
+      </div>
+      <div class="serv-cb-legend" style="margin-top:6px">
+        <span><span class="dot-c">●</span> Comida ${pct(d.pctComida)} (${fmt(d.comida)})</span>
+        <span><span class="dot-b">●</span> Bebida ${pct(d.pctBebida)} (${fmt(d.bebida)})</span>
+        ${d.otros > 0 ? `<span style="color:var(--text-muted)">● Otros ${fmt(d.otros)}</span>` : ''}
+      </div>
+    </div>`;
+  const nota = `
+    <div style="margin-top:14px;font-size:11px;color:var(--text-muted)">
+      Montos por categoría estimados (precio de lista × cantidad). La facturación total surge del cierre real de cada venta en Fudo.
+    </div>`;
+
+  if (state.servVista === 'graficos') {
+    renderServModalGraficos(d, head, nota);
+  } else {
+    renderServModalNumeros(d, head, nota);
+  }
+}
+
+function renderServModalNumeros(d, head, nota) {
   const grupos = { comida: { titulo: 'Comida', cats: [] }, bebida: { titulo: 'Bebida', cats: [] }, otros: { titulo: 'Otros / Combos', cats: [] } };
   d.categorias.forEach(c => { (grupos[c.grupo] || grupos.otros).cats.push(c); });
 
@@ -2290,33 +2424,78 @@ function renderServModal(d) {
     .join('');
 
   document.getElementById('serv-modal-body').innerHTML = `
-    <div class="serv-modal-kpis">
-      <div class="serv-mk"><div class="serv-mk-label">Pax</div><div class="serv-mk-val blue">${d.pax}</div></div>
-      <div class="serv-mk"><div class="serv-mk-label">Facturación</div><div class="serv-mk-val green">${fmt(d.total)}</div></div>
-      <div class="serv-mk"><div class="serv-mk-label">Ticket / pax</div><div class="serv-mk-val accent">${fmt(d.ticketPromedio)}</div></div>
-    </div>
-    <div style="margin-bottom:18px">
-      <div class="serv-cb-bar" style="height:14px">
-        <div class="serv-cb-comida" style="width:${Math.round(d.pctComida)}%"></div>
-        <div class="serv-cb-bebida" style="width:${Math.round(d.pctBebida)}%"></div>
-      </div>
-      <div class="serv-cb-legend" style="margin-top:6px">
-        <span><span class="dot-c">●</span> Comida ${pct(d.pctComida)} (${fmt(d.comida)})</span>
-        <span><span class="dot-b">●</span> Bebida ${pct(d.pctBebida)} (${fmt(d.bebida)})</span>
-        ${d.otros > 0 ? `<span style="color:var(--text-muted)">● Otros ${fmt(d.otros)}</span>` : ''}
-      </div>
-    </div>
+    ${head}
     ${renderGrupo('comida')}
     ${renderGrupo('bebida')}
     ${renderGrupo('otros')}
     ${pagos ? `<div style="margin-top:16px"><div class="serv-cat-group-title" style="color:var(--text-muted)">Medios de pago</div><div class="serv-pagos">${pagos}</div></div>` : ''}
-    <div style="margin-top:14px;font-size:11px;color:var(--text-muted)">
-      Montos por categoría estimados (precio de lista × cantidad). La facturación total surge del cierre real de cada venta en Fudo.
-    </div>
+    ${nota}
   `;
 }
 
+function renderServModalGraficos(d, head, nota) {
+  const ordGrupo = { comida: 0, bebida: 1, otros: 2 };
+  const cats = [...d.categorias].sort((a, b) => (ordGrupo[a.grupo] - ordGrupo[b.grupo]) || (b.monto - a.monto));
+
+  // Top productos por unidades (todas las categorías)
+  const prods = d.categorias.flatMap(c => c.productos.map(p => ({ ...p, grupo: c.grupo })));
+  const topProds = prods.sort((a, b) => b.unidades - a.unidades).slice(0, 10);
+
+  const hCats = Math.max(160, cats.length * 32);
+  const hProds = Math.max(160, topProds.length * 30);
+
+  document.getElementById('serv-modal-body').innerHTML = `
+    ${head}
+    <div class="serv-cat-group-title" style="margin-bottom:8px"><span>Categorías consumidas ($)</span></div>
+    <div style="position:relative;height:${hCats}px;margin-bottom:22px"><canvas id="chart-serv-cat"></canvas></div>
+    <div class="serv-cat-group-title" style="margin-bottom:8px"><span>Top productos (unidades)</span></div>
+    <div style="position:relative;height:${hProds}px;margin-bottom:22px"><canvas id="chart-serv-prod"></canvas></div>
+    <div class="serv-cat-group-title" style="margin-bottom:8px"><span>Medios de pago</span></div>
+    <div style="position:relative;height:220px"><canvas id="chart-serv-pagos"></canvas></div>
+    ${nota}
+  `;
+
+  const ejesH = {
+    x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#7878a0', callback: v => fmt(v) } },
+    y: { grid: { display: false }, ticks: { color: '#c8c8e0', font: { size: 11 } } },
+  };
+
+  state.charts['serv-cat'] = new Chart(document.getElementById('chart-serv-cat').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: cats.map(c => c.categoria),
+      datasets: [{ data: cats.map(c => c.monto), backgroundColor: cats.map(c => SERV_GRUPO_COLOR[c.grupo] || SERV_GRUPO_COLOR.otros), borderRadius: 4 }],
+    },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => { const cat = cats[c.dataIndex]; return ` ${fmt(c.raw)} · ${cat.unidades % 1 === 0 ? cat.unidades : cat.unidades.toFixed(1)} u. · ${cat.grupo}`; } } } },
+      scales: ejesH }
+  });
+
+  state.charts['serv-prod'] = new Chart(document.getElementById('chart-serv-prod').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: topProds.map(p => p.nombre.length > 28 ? p.nombre.slice(0, 27) + '…' : p.nombre),
+      datasets: [{ data: topProds.map(p => p.unidades), backgroundColor: topProds.map(p => SERV_GRUPO_COLOR[p.grupo] || SERV_GRUPO_COLOR.otros), borderRadius: 4 }],
+    },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.raw} u. · ${fmt(topProds[c.dataIndex].monto)}` } } },
+      scales: { x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#7878a0', precision: 0 } }, y: ejesH.y } }
+  });
+
+  const pagosEntries = Object.entries(d.mediosPago || {}).sort((a, b) => b[1] - a[1]);
+  if (pagosEntries.length) {
+    state.charts['serv-pagos'] = new Chart(document.getElementById('chart-serv-pagos').getContext('2d'), {
+      type: 'doughnut',
+      data: { labels: pagosEntries.map(e => e[0]), datasets: [{ data: pagosEntries.map(e => e[1]), backgroundColor: CHART_COLORS, borderColor: '#1a1a26', borderWidth: 2 }] },
+      options: { responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'right', labels: { color: '#7878a0', font: { size: 11 }, boxWidth: 12, padding: 10 } },
+          tooltip: { callbacks: { label: c => ` ${c.label}: ${fmt(c.raw)}` } } } }
+    });
+  }
+}
+
 function closeServModal() {
+  destroyServCharts();
   document.getElementById('serv-modal-overlay').classList.remove('open');
 }
 document.getElementById('serv-modal-overlay').addEventListener('click', function(e) { if (e.target === this) closeServModal(); });
