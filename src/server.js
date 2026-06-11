@@ -10,7 +10,7 @@ const {
   getComprasEnCuotas,
   getMeses, getCategorias, clearCache,
 } = require('./sheets');
-const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, clearFudoCache } = require('./fudo');
+const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, clearFudoCache, fechaServicioHoy } = require('./fudo');
 const { proyectar } = require('./proyecciones');
 
 const app = express();
@@ -300,6 +300,30 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   estadoCaja = { abierta: false, apertura: null, encargado: null, efectivoInicial: null, mpInicial: null };
 
   res.json({ ok: true, data: resumen });
+});
+
+// GET /api/arqueo/fudo-hoy — ventas del día de servicio en curso según Fudo,
+// agrupadas en Efectivo / Mercado Pago / Otros. Para el control de cierre de caja.
+app.get('/api/arqueo/fudo-hoy', authMiddleware, async (req, res) => {
+  try {
+    clearFudoCache(); // datos frescos: es el momento de la verdad del arqueo
+    const fecha = fechaServicioHoy();
+    const det = await getServicioDetalle(fecha);
+    if (!det || !det.encontrado) {
+      return res.json({ ok: true, data: { fecha, encontrado: false, efectivo: 0, mercadoPago: 0, otros: 0, total: 0, mediosPago: {} } });
+    }
+    let efectivo = 0, mercadoPago = 0, otros = 0;
+    for (const [nombre, monto] of Object.entries(det.mediosPago || {})) {
+      const n = nombre.toLowerCase();
+      if (n.includes('efectivo')) efectivo += monto;
+      else if (n.includes('mercado') || n === 'mp' || n.includes('qr')) mercadoPago += monto;
+      else otros += monto;
+    }
+    res.json({ ok: true, data: { fecha, encontrado: true, efectivo, mercadoPago, otros, total: det.total, mediosPago: det.mediosPago } });
+  } catch (err) {
+    console.error('Error /api/arqueo/fudo-hoy:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // ─── Healthcheck público (para Railway) ──────────────────────────────────────
@@ -626,7 +650,7 @@ async function leerVariables() {
 // Proyección completa (baselines + variables + aguinaldos)
 app.get('/api/proyecciones', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const horizonte = Math.min(parseInt(req.query.meses) || 12, 24);
+    const horizonte = Math.min(parseInt(req.query.meses) || 3, 24);
     const [movimientos, resumen, variables] = await Promise.all([
       getMovimientos(), getResumenMensual({}), leerVariables(),
     ]);

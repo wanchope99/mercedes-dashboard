@@ -11,7 +11,7 @@
 //  · Operativos + Impuestos: promedio diario de los últimos 28 días × 30.44
 //    (excluye alquiler, que va aparte).
 //  · Equipamiento / inversión y cuotas: EXCLUIDOS (no son gasto recurrente).
-//  · Aguinaldos: Junio = 50% de la masa salarial · Diciembre = 100% (configurable
+//  · Aguinaldos: Junio = 50% de la masa salarial · Diciembre = 50% (configurable
 //    via env AGUINALDO_JUNIO_PCT / AGUINALDO_DICIEMBRE_PCT).
 //  · Variables personalizadas: definidas por el usuario desde la app (hoja
 //    "Proyeccion Variables"): gasto o ingreso mensual, meses elegidos,
@@ -20,7 +20,7 @@
 const ORDEN_MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 const AGUINALDO_JUNIO_PCT = parseFloat(process.env.AGUINALDO_JUNIO_PCT || '0.5');
-const AGUINALDO_DICIEMBRE_PCT = parseFloat(process.env.AGUINALDO_DICIEMBRE_PCT || '1');
+const AGUINALDO_DICIEMBRE_PCT = parseFloat(process.env.AGUINALDO_DICIEMBRE_PCT || '0.5');
 
 const DIA_MS = 86_400_000;
 const DIAS_VENTANA = 28;          // ventana de observación para los baselines
