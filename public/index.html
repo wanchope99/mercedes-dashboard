@@ -721,6 +721,13 @@
       <button class="arqueo-btn close" onclick="openCierreModal()">Cerrar Caja</button>
     </div>
 
+    <!-- Gastos rápidos -->
+    <div class="arqueo-card" style="margin-top:16px">
+      <div class="arqueo-card-title">Gastos rápidos</div>
+      <button class="btn" style="width:100%;padding:14px;font-size:15px" onclick="openHieloModal()">🧊 Ingresar hielo</button>
+      <div id="hielo-status" style="font-size:12px;margin-top:10px;text-align:center;display:none"></div>
+    </div>
+
     <!-- Último resumen (post-cierre) -->
     <div id="arqueo-ultimo-resumen" style="display:none"></div>
   </div>
@@ -757,6 +764,42 @@
     <div class="modal-actions">
       <button class="btn" onclick="closeCierreModal()">Cancelar</button>
       <button class="btn btn-accent" onclick="cerrarCaja()">Confirmar cierre</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal gasto rápido: hielo -->
+<div id="hielo-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:550;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:440px;width:100%;padding:26px;max-height:90vh;overflow-y:auto">
+    <h3 style="margin-bottom:4px">🧊 Ingresar hielo</h3>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Revisá los valores y aceptá. Todo es editable por si pasó algo distinto.</p>
+    <div class="arqueo-field"><label>Fecha</label><input type="date" id="hi-fecha" /></div>
+    <div class="arqueo-field"><label>Monto ARS</label><input type="number" id="hi-monto" min="0" /></div>
+    <div class="arqueo-field"><label>Proveedor</label><input type="text" id="hi-proveedor" /></div>
+    <div class="arqueo-field"><label>Categoría</label><select id="hi-categoria" style="width:100%">
+      <option value="Insumos">Insumos</option>
+      <option value="Mercaderia">Mercadería</option>
+      <option value="Operativos">Operativos</option>
+      <option value="Cocina">Cocina</option>
+      <option value="Sala">Sala</option>
+    </select></div>
+    <div class="arqueo-field"><label>Descripción</label><input type="text" id="hi-descripcion" /></div>
+    <div class="arqueo-field"><label>Medio de pago</label><select id="hi-medio" style="width:100%">
+      <option value="Efectivo Local">Efectivo Local</option>
+      <option value="Efectivo Tincho">Efectivo Tincho</option>
+      <option value="Efectivo Pablo">Efectivo Pablo</option>
+      <option value="Mercado Pago">Mercado Pago</option>
+      <option value="Galicia">Galicia</option>
+    </select></div>
+    <div class="arqueo-field"><label>Estado</label><select id="hi-estado" style="width:100%">
+      <option value="Pagado">Pagado</option>
+      <option value="A pagar">A pagar</option>
+    </select></div>
+    <div id="hi-nota-caja" style="font-size:12px;color:#e0c95c;margin-bottom:12px;display:none">🔓 La caja está abierta: este gasto se va a descontar del esperado en el cierre.</div>
+    <div id="hi-error" style="color:var(--red);font-size:13px;margin-bottom:10px;text-align:center"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeHieloModal()">Cancelar</button>
+      <button class="btn btn-accent" id="hi-guardar" onclick="saveHielo()">✓ Registrar gasto</button>
     </div>
   </div>
 </div>
@@ -1209,6 +1252,16 @@ async function abrirCaja() {
   }
 }
 
+function gastosSesionPorCaja(est) {
+  const g = { efectivo: 0, mp: 0, items: [] };
+  for (const x of (est && est.gastosSesion) || []) {
+    if (x.bucket === 'efectivo') g.efectivo += x.monto;
+    else if (x.bucket === 'mp') g.mp += x.monto;
+    g.items.push(x);
+  }
+  return g;
+}
+
 async function openCierreModal() {
   document.getElementById('cierre-modal-overlay').classList.add('open');
   ['ci-efectivo', 'ci-mp', 'ci-galicia', 'ci-galicia-neto'].forEach(id => document.getElementById(id).value = '');
@@ -1240,10 +1293,14 @@ async function openCierreModal() {
       <div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0 0;border-top:1px solid var(--border);margin-top:5px"><span>Total</span><b>${fmt(f.total)}</b></div>`;
 
     if (est && est.abierta) {
+      const gs = gastosSesionPorCaja(est);
       document.getElementById('ci-efectivo-hint').innerHTML =
-        `Debería haber <b style="color:var(--text)">${fmt((est.efectivoInicial || 0) + f.efectivo)}</b> · inicial ${fmt(est.efectivoInicial || 0)} + Fudo ${fmt(f.efectivo)}`;
+        `Debería haber <b style="color:var(--text)">${fmt((est.efectivoInicial || 0) + f.efectivo - gs.efectivo)}</b> · inicial ${fmt(est.efectivoInicial || 0)} + Fudo ${fmt(f.efectivo)}${gs.efectivo > 0 ? ` − gastos ${fmt(gs.efectivo)}` : ''}`;
       document.getElementById('ci-mp-hint').innerHTML =
-        `Debería haber <b style="color:var(--text)">${fmt((est.mpInicial || 0) + f.mercadoPago)}</b> · inicial ${fmt(est.mpInicial || 0)} + Fudo ${fmt(f.mercadoPago)}`;
+        `Debería haber <b style="color:var(--text)">${fmt((est.mpInicial || 0) + f.mercadoPago - gs.mp)}</b> · inicial ${fmt(est.mpInicial || 0)} + Fudo ${fmt(f.mercadoPago)}${gs.mp > 0 ? ` − gastos ${fmt(gs.mp)}` : ''}`;
+      if (gs.items.length) {
+        res.innerHTML += `<div style="font-size:11px;color:#e0c95c;margin-top:8px">💸 Gastos durante el servicio: ${gs.items.map(x => `${escapeHtml(x.descripcion)} ${fmt(x.monto)}`).join(' · ')}</div>`;
+      }
     }
     document.getElementById('ci-galicia-hint').innerHTML =
       `Según Fudo: <b style="color:var(--text)">${fmt(f.galicia)}</b> — precargado, verificá contra Nave`;
@@ -1255,6 +1312,59 @@ async function openCierreModal() {
 
 function closeCierreModal() {
   document.getElementById('cierre-modal-overlay').classList.remove('open');
+}
+
+// ─── Gasto rápido: hielo ──────────────────────────────────────────────────────
+async function openHieloModal() {
+  document.getElementById('hi-fecha').value = new Date().toISOString().split('T')[0];
+  document.getElementById('hi-monto').value = 6000;
+  document.getElementById('hi-proveedor').value = 'Hielo Cristalino';
+  document.getElementById('hi-categoria').value = 'Insumos';
+  document.getElementById('hi-descripcion').value = 'Hielo';
+  document.getElementById('hi-medio').value = 'Efectivo Local';
+  document.getElementById('hi-estado').value = 'Pagado';
+  document.getElementById('hi-error').textContent = '';
+  document.getElementById('hi-nota-caja').style.display = 'none';
+  document.getElementById('hielo-modal-overlay').style.display = 'flex';
+  try {
+    const { data } = await api('/api/arqueo/estado');
+    if (data.abierta) document.getElementById('hi-nota-caja').style.display = 'block';
+  } catch (e) {}
+}
+function closeHieloModal() { document.getElementById('hielo-modal-overlay').style.display = 'none'; }
+
+async function saveHielo() {
+  const fechaISO = document.getElementById('hi-fecha').value;
+  const monto = parseFloat(document.getElementById('hi-monto').value) || 0;
+  const proveedor = document.getElementById('hi-proveedor').value.trim();
+  const errEl = document.getElementById('hi-error');
+  if (!fechaISO || !proveedor || !monto) { errEl.textContent = 'Completá fecha, proveedor y monto.'; return; }
+  const [y, m, d] = fechaISO.split('-');
+  const mesesN = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const btn = document.getElementById('hi-guardar');
+  btn.disabled = true; btn.textContent = '⏳ Guardando...';
+  try {
+    const { registradoEnSesion } = await api('/api/gastos-rapidos', {
+      method: 'POST',
+      body: JSON.stringify({
+        fecha: `${d}/${m}/${y}`, mes: mesesN[parseInt(m) - 1],
+        proveedor, monto,
+        categoria: document.getElementById('hi-categoria').value,
+        descripcion: document.getElementById('hi-descripcion').value.trim(),
+        medioPago: document.getElementById('hi-medio').value,
+        estado: document.getElementById('hi-estado').value,
+      }),
+    });
+    closeHieloModal();
+    const st = document.getElementById('hielo-status');
+    st.style.display = 'block'; st.style.color = 'var(--green)';
+    st.textContent = `✅ ${proveedor} ${fmt(monto)} registrado` + (registradoEnSesion ? ' · se descuenta del esperado al cierre' : '');
+    setTimeout(() => { st.style.display = 'none'; }, 6000);
+  } catch (err) {
+    errEl.textContent = err.message;
+  } finally {
+    btn.disabled = false; btn.textContent = '✓ Registrar gasto';
+  }
 }
 
 // Tolerancia para considerar que una caja "cerró" (diferencias de redondeo)
@@ -1297,9 +1407,10 @@ async function cerrarCaja() {
       const iniM = estado.mpInicial || 0;
       const fE = fudoHoy.efectivo || 0;
       const fM = fudoHoy.mercadoPago || 0;
+      const gs = gastosSesionPorCaja(estado);
       diffs = {
-        efectivo: { inicial: iniE, fudo: fE, esperado: iniE + fE, contado: efectivo, diff: efectivo - (iniE + fE) },
-        mp:       { inicial: iniM, fudo: fM, esperado: iniM + fM, contado: mp,       diff: mp - (iniM + fM) },
+        efectivo: { inicial: iniE, fudo: fE, gastos: gs.efectivo, esperado: iniE + fE - gs.efectivo, contado: efectivo, diff: efectivo - (iniE + fE - gs.efectivo) },
+        mp:       { inicial: iniM, fudo: fM, gastos: gs.mp,       esperado: iniM + fM - gs.mp,       contado: mp,       diff: mp - (iniM + fM - gs.mp) },
       };
     }
   }
@@ -1314,7 +1425,7 @@ function renderConfirmCierre(diffs, motivo) {
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(46,46,62,0.4);font-size:13px">
       <span>${icono} ${nombre}</span>
       <span style="text-align:right">
-        <div style="font-size:11px;color:var(--text-muted)">inicial ${fmt(d.inicial)} + Fudo ${fmt(d.fudo)}</div>
+        <div style="font-size:11px;color:var(--text-muted)">inicial ${fmt(d.inicial)} + Fudo ${fmt(d.fudo)}${(d.gastos || 0) > 0 ? ` − gastos ${fmt(d.gastos)}` : ''}</div>
         <div>Esperado <b>${fmt(d.esperado)}</b> · Contado <b>${fmt(d.contado)}</b></div>
         <div style="color:${ok ? 'var(--green)' : 'var(--red)'};font-weight:700">${ok ? '✓ Cierra' : (d.diff > 0 ? 'Sobran ' : 'Faltan ') + fmt(Math.abs(d.diff))}</div>
       </span>
