@@ -903,9 +903,22 @@
   <div id="modal">
     <h3>Registrar nuevo pago</h3>
     <div class="form-grid">
-      <div class="form-group"><label>Fecha *</label><input type="date" id="f-fecha"></div>
-      <div class="form-group"><label>Mes</label><input type="text" id="f-mes" placeholder="ej: Junio"></div>
-      <div class="form-group full"><label>Proveedor / Concepto *</label><input type="text" id="f-proveedor" placeholder="ej: Aurea, Culpable, Alquiler..."></div>
+      <div class="form-group full">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-size:13px">
+          <input type="checkbox" id="f-hoy" checked onchange="onHoyChange()" style="accent-color:var(--accent)">
+          📅 El pago es del día de la fecha
+        </label>
+      </div>
+      <div class="form-group" id="f-fecha-wrap" style="display:none"><label>Fecha *</label><input type="date" id="f-fecha" onchange="recalcVencimiento()"></div>
+      <div class="form-group" id="f-mes-wrap" style="display:none"><label>Mes</label><input type="text" id="f-mes" placeholder="ej: Junio"></div>
+
+      <div class="form-group full">
+        <label>Proveedor / Concepto *</label>
+        <input type="text" id="f-proveedor" list="proveedores-datalist" autocomplete="off" placeholder="Escribí y elegí de las sugerencias..." oninput="onProveedorInput()">
+        <datalist id="proveedores-datalist"></datalist>
+        <div id="f-prov-hint" style="font-size:11px;color:var(--green);margin-top:4px"></div>
+      </div>
+
       <div class="form-group">
         <label>Categoría</label>
         <select id="f-categoria">
@@ -915,6 +928,7 @@
           <option value="Mobiliario">Mobiliario</option>
           <option value="Sala">Sala</option>
           <option value="Frios">Fríos</option>
+          <option value="Insumos">Insumos</option>
           <option value="Personal">Personal</option>
           <option value="Operativos">Operativos</option>
           <option value="Legal / Escribano">Legal / Escribano</option>
@@ -924,7 +938,7 @@
         </select>
       </div>
       <div class="form-group">
-        <label>Forma de pago</label>
+        <label>Medio de pago</label>
         <select id="f-medio">
           <option value="Efectivo">Efectivo</option>
           <option value="Galicia">Galicia (transferencia)</option>
@@ -932,16 +946,35 @@
           <option value="Echeq">Echeq</option>
         </select>
       </div>
+
+      <div class="form-group full">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-size:13px">
+          <input type="checkbox" id="f-pagado" checked onchange="onPagadoChange()" style="accent-color:var(--accent)">
+          ✅ Pagado <span style="color:var(--text-muted);font-weight:400">(deschequear si queda A Pagar)</span>
+        </label>
+      </div>
+      <div class="form-group full" id="f-venc-wrap" style="display:none">
+        <label>Vencimiento</label>
+        <input type="date" id="f-vencimiento" onchange="state.vencManual = true">
+        <div id="f-venc-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px"></div>
+      </div>
+
       <div class="form-group"><label>Monto ARS (total)</label><input type="number" id="f-monto" placeholder="0" min="0"></div>
-      <div class="form-group"><label>Vencimiento (1ª cuota si hay cuotas)</label><input type="date" id="f-vencimiento"></div>
-      <div class="form-group"><label>Cuotas</label><select id="f-cuotas">
-        <option value="1">Pago único (sin cuotas)</option>
+
+      <div class="form-group full">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-size:13px">
+          <input type="checkbox" id="f-concuotas" onchange="onConCuotasChange()" style="accent-color:var(--accent)">
+          💳 Compra en cuotas <span style="color:var(--text-muted);font-weight:400">(por defecto: pago único)</span>
+        </label>
+      </div>
+      <div class="form-group" id="f-cuotas-wrap" style="display:none"><label>Cantidad de cuotas</label><select id="f-cuotas">
         <option value="2">2 cuotas</option>
-        <option value="3">3 cuotas</option>
+        <option value="3" selected>3 cuotas</option>
         <option value="6">6 cuotas</option>
         <option value="9">9 cuotas</option>
         <option value="12">12 cuotas</option>
       </select></div>
+
       <div class="form-group full"><label>Descripción / Notas</label><textarea id="f-descripcion" placeholder="Detalle adicional, datos bancarios, etc."></textarea></div>
     </div>
     <div id="modal-status"></div>
@@ -971,6 +1004,7 @@ const state = {
   pagosVista: 'todos', pagosData: [], proy: null, cuotasAgrup: 'compra', cierrePendiente: null,
   galiciaFuturos: false, servAgrup: 'crono', servData: [], servDetalle: null,
   fudoCierre: null, arqueoEstado: null,
+  provSugerencias: null, vencManual: false,
   servVista: localStorage.getItem('mb_serv_vista') || 'numeros',
   tc: 1425,
   // Auth
@@ -2285,41 +2319,172 @@ function escapeHtml(str) { return (str||'').replace(/&/g,'&amp;').replace(/</g,'
 function escapeAttr(str) { return (str||'').replace(/'/g,"\\'").replace(/\n/g,' '); }
 
 // ─── Modal nuevo pago ─────────────────────────────────────────────────────────
-function openModal() {
+const MESES_NOMBRES_PAGO = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+async function openModal() {
   const today = new Date().toISOString().split('T')[0];
-  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  document.getElementById('f-hoy').checked = true;
   document.getElementById('f-fecha').value = today;
-  document.getElementById('f-mes').value = meses[new Date().getMonth()];
+  document.getElementById('f-mes').value = MESES_NOMBRES_PAGO[new Date().getMonth()];
+  document.getElementById('f-fecha-wrap').style.display = 'none';
+  document.getElementById('f-mes-wrap').style.display = 'none';
   document.getElementById('f-proveedor').value = '';
-  document.getElementById('f-monto').value = '';
+  document.getElementById('f-prov-hint').textContent = '';
+  document.getElementById('f-pagado').checked = true;
+  document.getElementById('f-venc-wrap').style.display = 'none';
   document.getElementById('f-vencimiento').value = '';
-  document.getElementById('f-cuotas').value = '1';
+  document.getElementById('f-venc-hint').textContent = '';
+  document.getElementById('f-monto').value = '';
+  document.getElementById('f-concuotas').checked = false;
+  document.getElementById('f-cuotas-wrap').style.display = 'none';
   document.getElementById('f-descripcion').value = '';
   document.getElementById('modal-status').style.display = 'none';
+  state.vencManual = false;
   document.getElementById('modal-overlay').classList.add('open');
+  ensureSugerencias();
 }
-function closeModal() { document.getElementById('modal-overlay').classList.remove('open'); }
-document.getElementById('modal-overlay').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
+
+// Sugerencias de proveedor: Movimientos + hoja Proveedores (se cachean por sesión)
+async function ensureSugerencias() {
+  if (state.provSugerencias) return;
+  try {
+    const { data } = await api('/api/proveedores-sugerencias');
+    state.provSugerencias = data;
+    document.getElementById('proveedores-datalist').innerHTML =
+      data.map(s => `<option value="${escapeHtml(s.nombre)}"></option>`).join('');
+  } catch (e) { state.provSugerencias = []; }
+  // Asegurar también los datos de la hoja Proveedores (plazo, forma de pago)
+  if (!Object.keys(state.proveedores).length) {
+    try { const { data } = await api('/api/proveedores'); state.proveedores = data; } catch (e) {}
+  }
+}
+
+function buscarSugerencia(nombre) {
+  const key = (nombre || '').trim().toLowerCase();
+  if (!key) return null;
+  return (state.provSugerencias || []).find(s => s.nombre.toLowerCase() === key) || null;
+}
+
+function getPlazoDias(nombre) {
+  const s = buscarSugerencia(nombre);
+  if (s && s.plazoDias != null) return s.plazoDias;
+  const p = state.proveedores[(nombre || '').trim().toLowerCase()];
+  return p && p.plazoDias != null ? p.plazoDias : null;
+}
+
+// Mapear texto libre de medio/forma de pago a las opciones del select
+function mapMedioOption(texto) {
+  const t = (texto || '').toLowerCase();
+  const candidatos = [
+    { kw: 'echeq', val: 'Echeq' },
+    { kw: 'mercado', val: 'Mercado Pago' },
+    { kw: 'galicia', val: 'Galicia' },
+    { kw: 'efectivo', val: 'Efectivo' },
+  ];
+  // gana el que aparece primero en el texto (ej: "Mercado Pago / Galicia" → Mercado Pago)
+  let best = null, bestIdx = Infinity;
+  for (const c of candidatos) {
+    const i = t.indexOf(c.kw);
+    if (i !== -1 && i < bestIdx) { best = c.val; bestIdx = i; }
+  }
+  return best;
+}
+
+function setSelectValue(sel, val) {
+  if (!val) return;
+  if (![...sel.options].some(o => o.value === val)) {
+    const o = document.createElement('option'); o.value = val; o.textContent = val; sel.appendChild(o);
+  }
+  sel.value = val;
+}
+
+function onProveedorInput() {
+  const s = buscarSugerencia(document.getElementById('f-proveedor').value);
+  const hint = document.getElementById('f-prov-hint');
+  if (!s) { hint.textContent = ''; return; }
+  const partes = [];
+  if (s.categoria) { setSelectValue(document.getElementById('f-categoria'), s.categoria); partes.push(s.categoria); }
+  const medio = mapMedioOption(s.medioPago);
+  if (medio) { document.getElementById('f-medio').value = medio; partes.push(medio); }
+  const plazo = getPlazoDias(s.nombre);
+  if (plazo != null) partes.push(`plazo ${plazo} días`);
+  hint.textContent = `✓ Autocompletado: ${partes.join(' · ')}${s.usos ? ` (${s.usos} movs previos)` : ''}`;
+  state.vencManual = false;
+  recalcVencimiento();
+}
+
+function onHoyChange() {
+  const hoy = document.getElementById('f-hoy').checked;
+  document.getElementById('f-fecha-wrap').style.display = hoy ? 'none' : '';
+  document.getElementById('f-mes-wrap').style.display = hoy ? 'none' : '';
+  if (hoy) {
+    document.getElementById('f-fecha').value = new Date().toISOString().split('T')[0];
+    document.getElementById('f-mes').value = MESES_NOMBRES_PAGO[new Date().getMonth()];
+  }
+  recalcVencimiento();
+}
+
+function onPagadoChange() {
+  const pagado = document.getElementById('f-pagado').checked;
+  document.getElementById('f-venc-wrap').style.display = (pagado && !document.getElementById('f-concuotas').checked) ? 'none' : '';
+  state.vencManual = false;
+  recalcVencimiento();
+}
+
+function onConCuotasChange() {
+  const cc = document.getElementById('f-concuotas').checked;
+  document.getElementById('f-cuotas-wrap').style.display = cc ? '' : 'none';
+  // Las cuotas siempre necesitan el vencimiento de la primera
+  document.getElementById('f-venc-wrap').style.display = (cc || !document.getElementById('f-pagado').checked) ? '' : 'none';
+  document.querySelector('#f-venc-wrap label').textContent = cc ? 'Vencimiento (1ª cuota)' : 'Vencimiento';
+  recalcVencimiento();
+}
+
+// Vencimiento automático = fecha del gasto + plazo del proveedor (hoja Proveedores)
+function recalcVencimiento() {
+  const hint = document.getElementById('f-venc-hint');
+  const visible = document.getElementById('f-venc-wrap').style.display !== 'none';
+  if (!visible || state.vencManual) return;
+  const plazo = getPlazoDias(document.getElementById('f-proveedor').value);
+  if (plazo == null) { hint.textContent = 'Sin plazo definido en la hoja Proveedores — completalo a mano.'; return; }
+  const fechaISO = document.getElementById('f-fecha').value;
+  if (!fechaISO) return;
+  const [y, m, d] = fechaISO.split('-').map(Number);
+  const venc = new Date(y, m - 1, d + plazo);
+  const vy = venc.getFullYear(), vm = String(venc.getMonth() + 1).padStart(2, '0'), vd = String(venc.getDate()).padStart(2, '0');
+  document.getElementById('f-vencimiento').value = `${vy}-${vm}-${vd}`;
+  hint.textContent = `Auto: fecha del gasto + ${plazo} días (hoja Proveedores). Editable.`;
+}
 
 async function saveNewPago() {
-  const fecha = document.getElementById('f-fecha').value;
-  const mes = document.getElementById('f-mes').value;
+  const esHoy = document.getElementById('f-hoy').checked;
+  const hoyDate = new Date();
+  const fecha = esHoy ? hoyDate.toISOString().split('T')[0] : document.getElementById('f-fecha').value;
+  const mes = esHoy ? MESES_NOMBRES_PAGO[hoyDate.getMonth()] : document.getElementById('f-mes').value;
   const proveedor = document.getElementById('f-proveedor').value.trim();
   const categoria = document.getElementById('f-categoria').value;
   const medioPago = document.getElementById('f-medio').value;
   const salidaARS = parseFloat(document.getElementById('f-monto').value) || 0;
+  const pagado = document.getElementById('f-pagado').checked;
+  const conCuotas = document.getElementById('f-concuotas').checked;
+  const cuotas = conCuotas ? (parseInt(document.getElementById('f-cuotas').value) || 1) : 1;
   const vencRaw = document.getElementById('f-vencimiento').value;
-  const cuotas = parseInt(document.getElementById('f-cuotas').value) || 1;
   const descripcion = document.getElementById('f-descripcion').value.trim();
+
   if (!fecha || !proveedor) { alert('Fecha y Proveedor son obligatorios.'); return; }
   if (cuotas > 1 && !vencRaw) { alert('Para compras en cuotas indicá el vencimiento de la primera cuota.'); return; }
   if (cuotas > 1 && !salidaARS) { alert('Para compras en cuotas indicá el monto TOTAL de la compra.'); return; }
+
   const fmtDate = iso => { if (!iso) return ''; const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; };
   const statusEl = document.getElementById('modal-status');
   statusEl.style.display = 'block'; statusEl.style.color = 'var(--text-muted)'; statusEl.textContent = '⏳ Guardando en planilla...';
   try {
-    await api('/api/pagos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fecha: fmtDate(fecha), mes, proveedor, categoria, medioPago, salidaARS, vencimiento: fmtDate(vencRaw), descripcion, cuotas }) });
-    statusEl.style.color = 'var(--green)'; statusEl.textContent = `✅ Pago de ${proveedor} registrado. Recargando...`;
+    await api('/api/pagos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      fecha: fmtDate(fecha), mes, proveedor, categoria, medioPago, salidaARS,
+      vencimiento: fmtDate(vencRaw), descripcion, cuotas,
+      estado: pagado && cuotas === 1 ? 'Pagado' : 'A pagar',
+    }) });
+    statusEl.style.color = 'var(--green)'; statusEl.textContent = `✅ ${pagado && cuotas === 1 ? 'Gasto' : 'Pago'} de ${proveedor} registrado. Recargando...`;
     setTimeout(() => { closeModal(); loadPagos(); }, 1500);
   } catch(err) { statusEl.style.color = 'var(--red)'; statusEl.textContent = `❌ Error: ${err.message}`; }
 }
