@@ -574,7 +574,8 @@ function mesDeFecha(fechaStr) {
 
 app.post('/api/pagos', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { fecha, mes, proveedor, categoria, medioPago, salidaARS, vencimiento, descripcion, cuotas } = req.body;
+    const { fecha, mes, proveedor, categoria, medioPago, salidaARS, vencimiento, descripcion, cuotas, estado } = req.body;
+    const estadoRow = estado === 'Pagado' ? 'Pagado' : 'A pagar';
     if (!fecha || !proveedor) return res.status(400).json({ ok: false, error: 'Fecha y proveedor son obligatorios' });
     const auth = getAuth();
     const sheets = google.sheets({ version: 'v4', auth });
@@ -601,7 +602,8 @@ app.post('/api/pagos', authMiddleware, adminOnly, async (req, res) => {
         values.push([venc, mesDeFecha(venc), 'Gasto', 'A pagar', venc, `${i}/${nCuotas}`, cuotaId, proveedor, categoria||'', `${descBase} — Cuota ${i}/${nCuotas}${medioPago ? ' ('+medioPago+')' : ''}`, '', '', '', monto, '']);
       }
     } else {
-      values = [[fecha, mes||'', 'Gasto', 'A pagar', vencimiento||'', '', '', proveedor, categoria||'', descripcion||'', medioPago||'', '', '', salidaARS||'', '']];
+      // Pagado: sin vencimiento (ya salió de caja) · A pagar: con vencimiento
+      values = [[fecha, mes||'', 'Gasto', estadoRow, estadoRow === 'Pagado' ? '' : (vencimiento||''), '', '', proveedor, categoria||'', descripcion||'', medioPago||'', '', '', salidaARS||'', '']];
     }
 
     await sheets.spreadsheets.values.append({
@@ -613,34 +615,70 @@ app.post('/api/pagos', authMiddleware, adminOnly, async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// Lee la hoja Proveedores → { nombreLower: { nombre, formaPago, datosParaPagar, comentarios, plazoDias } }
+async function leerProveedoresSheet() {
+  const auth = getAuth();
+  const sheets = google.sheets({ version: 'v4', auth });
+  const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: 'Proveedores!A:H' });
+  const rows = response.data.values || [];
+  if (rows.length < 2) return {};
+  let headerIdx = rows.findIndex(r => r && (r[0]||'').toString().trim().toLowerCase() === 'proveedor');
+  if (headerIdx === -1) headerIdx = 0;
+  const header = rows[headerIdx].map(h => (h||'').toString().trim().toLowerCase());
+  const idxNombre = header.indexOf('proveedor');
+  const idxFormaPago = header.findIndex(h => h.includes('forma') || h.includes('pago'));
+  const idxDatos = header.findIndex(h => h.includes('datos') || h.includes('banco') || h.includes('cbu') || h.includes('alias'));
+  const idxComentarios = header.findIndex(h => h.includes('comentario') || h.includes('nota'));
+  const idxPlazo = header.findIndex(h => h.includes('plazo'));
+  const proveedores = {};
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || !row[idxNombre]) continue;
+    const nombre = (row[idxNombre]||'').trim();
+    if (!nombre) continue;
+    const plazoRaw = idxPlazo >= 0 ? parseInt(String(row[idxPlazo] || '').replace(/[^0-9]/g, '')) : NaN;
+    proveedores[nombre.toLowerCase()] = {
+      nombre, formaPago: idxFormaPago >= 0 ? (row[idxFormaPago]||'') : '',
+      datosParaPagar: idxDatos >= 0 ? (row[idxDatos]||'') : '',
+      comentarios: idxComentarios >= 0 ? (row[idxComentarios]||'') : '',
+      plazoDias: Number.isFinite(plazoRaw) ? plazoRaw : null,
+    };
+  }
+  return proveedores;
+}
+
 app.get('/api/proveedores', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const auth = getAuth();
-    const sheets = google.sheets({ version: 'v4', auth });
-    const response = await sheets.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: 'Proveedores!A:F' });
-    const rows = response.data.values || [];
-    if (rows.length < 2) return res.json({ ok: true, data: {} });
-    let headerIdx = rows.findIndex(r => r && (r[0]||'').toString().trim().toLowerCase() === 'proveedor');
-    if (headerIdx === -1) headerIdx = 0;
-    const header = rows[headerIdx].map(h => (h||'').toString().trim().toLowerCase());
-    const idxNombre = header.indexOf('proveedor');
-    const idxFormaPago = header.findIndex(h => h.includes('forma') || h.includes('pago'));
-    const idxDatos = header.findIndex(h => h.includes('datos') || h.includes('banco') || h.includes('cbu') || h.includes('alias'));
-    const idxComentarios = header.findIndex(h => h.includes('comentario') || h.includes('nota'));
-    const proveedores = {};
-    for (let i = headerIdx + 1; i < rows.length; i++) {
-      const row = rows[i];
-      if (!row || !row[idxNombre]) continue;
-      const nombre = (row[idxNombre]||'').trim();
-      if (!nombre) continue;
-      proveedores[nombre.toLowerCase()] = {
-        nombre, formaPago: idxFormaPago >= 0 ? (row[idxFormaPago]||'') : '',
-        datosParaPagar: idxDatos >= 0 ? (row[idxDatos]||'') : '',
-        comentarios: idxComentarios >= 0 ? (row[idxComentarios]||'') : '',
-      };
-    }
-    res.json({ ok: true, data: proveedores });
+    res.json({ ok: true, data: await leerProveedoresSheet() });
   } catch (err) { res.json({ ok: true, data: {} }); }
+});
+
+// Sugerencias para el alta de pagos: proveedores ya usados en Movimientos
+// (con su última categoría y medio de pago) + los de la hoja Proveedores.
+app.get('/api/proveedores-sugerencias', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const movs = await getMovimientos();
+    const map = {};
+    for (const m of movs) {
+      if (m.tipo !== 'Gasto' || !m.proveedor || m.esCambio || m.esFondeo || m.esCuota || m.esCompraEnCuotas) continue;
+      const key = m.proveedor.toLowerCase();
+      const e = map[key] = map[key] || { nombre: m.proveedor, categoria: '', medioPago: '', plazoDias: null, usos: 0, _fc: null, _fm: null };
+      e.usos++;
+      if (m.categoria && (!e._fc || m.fecha > e._fc)) { e.categoria = m.categoria; e._fc = m.fecha; }
+      if (m.medioPago && (!e._fm || m.fecha > e._fm)) { e.medioPago = m.medioPago; e._fm = m.fecha; }
+    }
+    let provSheet = {};
+    try { provSheet = await leerProveedoresSheet(); } catch (e) {}
+    for (const [key, p] of Object.entries(provSheet)) {
+      const e = map[key] = map[key] || { nombre: p.nombre, categoria: '', medioPago: '', plazoDias: null, usos: 0 };
+      if (!e.medioPago && p.formaPago) e.medioPago = p.formaPago;
+      if (p.plazoDias != null) e.plazoDias = p.plazoDias;
+    }
+    const data = Object.values(map)
+      .map(({ _fc, _fm, ...r }) => r)
+      .sort((a, b) => b.usos - a.usos || a.nombre.localeCompare(b.nombre));
+    res.json({ ok: true, data });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 // ─── Servicios (Fudo) — solo admin ──────────────────────────────────────────────
@@ -809,4 +847,4 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Mercedes Dashboard corriendo en puerto ${PORT}`);
 });
 
-module.exports = { buildFilasCierreServicio };
+module.exports = { buildFilasCierreServicio, leerProveedoresSheet };
