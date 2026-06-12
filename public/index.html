@@ -167,6 +167,11 @@
     .serv-grp .group-header { border-radius: 8px; margin-bottom: 4px; }
     .serv-grp-collapsed .serv-grp-body { display: none; }
     .serv-grp-collapsed .group-chevron { transform: rotate(-90deg); }
+    .pg-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; cursor: pointer; font-size: 13px; transition: border-color 0.15s; }
+    .pg-item:hover { border-color: var(--accent); }
+    .pg-item.selected { border-color: var(--accent); background: rgba(107,53,48,0.18); }
+    .pg-item .pg-item-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .pg-item .pg-item-monto { font-weight: 700; color: var(--red); white-space: nowrap; }
     .pv-toggle { display: inline-flex; margin-left: 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; vertical-align: middle; }
     .pv-btn { padding: 4px 12px; font-size: 11px; background: none; border: none; color: var(--text-muted); cursor: pointer; font-family: inherit; font-weight: 600; text-transform: none; letter-spacing: 0; }
     .pv-btn.active { background: var(--accent); color: #f0e6d3; }
@@ -619,6 +624,7 @@
     <input type="text" id="pagos-search" placeholder="Buscar proveedor..." oninput="loadPagos()" style="width:200px" />
     <div style="flex:1"></div>
     <button class="btn btn-accent" onclick="openModal()">+ Nuevo pago</button>
+    <button class="btn" onclick="openPagarModal()">✓ Pagar</button>
   </div>
 
   <main style="padding-top:24px">
@@ -985,6 +991,53 @@
   </div>
 </div>
 
+<!-- Modal pagar registro pendiente -->
+<div id="pagar-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:560;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:480px;width:100%;padding:26px;max-height:90vh;overflow-y:auto">
+    <h3 style="margin-bottom:4px">✓ Pagar registro pendiente</h3>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Cambia el estado de la fila existente a Pagado — no crea una línea nueva.</p>
+    <div class="form-group full" style="margin-bottom:12px">
+      <label>Proveedor *</label>
+      <input type="text" id="pg-proveedor" list="pg-prov-datalist" autocomplete="off" placeholder="Escribí y elegí de las sugerencias..." oninput="onPgProveedorInput()">
+      <datalist id="pg-prov-datalist"></datalist>
+    </div>
+    <div class="form-group full" id="pg-lista-wrap" style="display:none;margin-bottom:12px">
+      <label id="pg-lista-label">Pagos pendientes del proveedor</label>
+      <div id="pg-lista"></div>
+    </div>
+    <div id="pg-detalle" style="display:none;font-size:12px;color:var(--text-muted);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;line-height:1.9;margin-bottom:12px"></div>
+    <div class="form-group full" style="margin-bottom:8px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-size:13px">
+        <input type="checkbox" id="pg-hoy" checked onchange="document.getElementById('pg-fecha-wrap').style.display = this.checked ? 'none' : ''" style="accent-color:var(--accent)">
+        📅 El pago es del día de la fecha
+      </label>
+    </div>
+    <div class="form-group" id="pg-fecha-wrap" style="display:none;margin-bottom:12px">
+      <label>Fecha de pago</label>
+      <input type="date" id="pg-fecha">
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">La fila conserva su fecha de registración original.</div>
+    </div>
+    <div class="form-group full" style="margin-bottom:14px">
+      <label>Medio de pago</label>
+      <select id="pg-medio" style="width:100%">
+        <option value="">— sin cambio —</option>
+        <option value="Efectivo Local">Efectivo Local</option>
+        <option value="Efectivo Tincho">Efectivo Tincho</option>
+        <option value="Efectivo Pablo">Efectivo Pablo</option>
+        <option value="Mercado Pago">Mercado Pago</option>
+        <option value="Galicia">Galicia</option>
+        <option value="Echeq">Echeq</option>
+      </select>
+      <div id="pg-medio-hint" style="font-size:11px;color:var(--green);margin-top:4px"></div>
+    </div>
+    <div id="pg-error" style="color:var(--red);font-size:13px;margin-bottom:10px;text-align:center"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closePagarModal()">Cancelar</button>
+      <button class="btn btn-accent" onclick="confirmarPagar()">✓ Pagar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal resultado de escritura (estándar) -->
 <div id="resultado-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:900;align-items:center;justify-content:center;padding:20px">
   <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:420px;width:100%;padding:28px;text-align:center">
@@ -1014,7 +1067,7 @@ const state = {
   pagosVista: 'todos', pagosData: [], proy: null, cuotasAgrup: 'compra', cierrePendiente: null,
   galiciaFuturos: false, servAgrup: 'crono', servData: [], servDetalle: null,
   fudoCierre: null, arqueoEstado: null,
-  provSugerencias: null, vencManual: false,
+  provSugerencias: null, vencManual: false, pgSeleccion: null,
   servVista: localStorage.getItem('mb_serv_vista') || 'numeros',
   tc: 1425,
   // Auth
@@ -2306,7 +2359,146 @@ async function deleteProyVar(id) {
   } catch (e) { alert('Error: ' + e.message); }
 }
 
-// ─── Modal proveedor ──────────────────────────────────────────────────────────
+// ─── Pagar registro pendiente ─────────────────────────────────────────────────
+async function openPagarModal() {
+  document.getElementById('pg-error').textContent = '';
+  document.getElementById('pg-proveedor').value = '';
+  document.getElementById('pg-lista-wrap').style.display = 'none';
+  document.getElementById('pg-lista').innerHTML = '';
+  document.getElementById('pg-detalle').style.display = 'none';
+  document.getElementById('pg-medio').value = '';
+  document.getElementById('pg-medio-hint').textContent = '';
+  document.getElementById('pg-hoy').checked = true;
+  document.getElementById('pg-fecha-wrap').style.display = 'none';
+  document.getElementById('pg-fecha').value = new Date().toISOString().split('T')[0];
+  state.pgSeleccion = null;
+  document.getElementById('pagar-modal-overlay').style.display = 'flex';
+
+  if (!state.pagosData.length) {
+    try { const { data } = await api('/api/pagos?sort=vencimiento'); state.pagosData = data; } catch (e) {}
+  }
+  ensureSugerencias();
+
+  // Datalist: solo proveedores CON pagos pendientes (y cuántos tiene cada uno)
+  const porProv = pgAgruparPorProveedor();
+  document.getElementById('pg-prov-datalist').innerHTML = Object.values(porProv)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre))
+    .map(g => `<option value="${escapeHtml(g.nombre)}">${g.items.length} pendiente${g.items.length !== 1 ? 's' : ''}</option>`)
+    .join('');
+}
+
+function pgAgruparPorProveedor() {
+  const map = {};
+  for (const p of state.pagosData) {
+    const key = (p.proveedor || '—').toLowerCase();
+    (map[key] = map[key] || { nombre: p.proveedor || '—', items: [] }).items.push(p);
+  }
+  return map;
+}
+
+function closePagarModal() { document.getElementById('pagar-modal-overlay').style.display = 'none'; }
+document.getElementById('pagar-modal-overlay').addEventListener('click', function(e) { if (e.target === this) closePagarModal(); });
+
+function onPgProveedorInput() {
+  const key = document.getElementById('pg-proveedor').value.trim().toLowerCase();
+  const grupo = pgAgruparPorProveedor()[key];
+  const wrap = document.getElementById('pg-lista-wrap');
+  const lista = document.getElementById('pg-lista');
+  state.pgSeleccion = null;
+  document.getElementById('pg-detalle').style.display = 'none';
+  document.getElementById('pg-medio-hint').textContent = '';
+
+  if (!grupo) { wrap.style.display = 'none'; lista.innerHTML = ''; return; }
+
+  const items = [...grupo.items].sort((a, b) => (a.vencDate || '9999').localeCompare(b.vencDate || '9999'));
+  document.getElementById('pg-lista-label').textContent = items.length === 1
+    ? 'Pago pendiente del proveedor'
+    : `Este proveedor tiene ${items.length} pagos pendientes — elegí cuál pagar`;
+  lista.innerHTML = items.map(p => {
+    const venc = p.vencDate ? `vence ${new Date(p.vencDate + 'T12:00:00').toLocaleDateString('es-AR')}` : 'sin vencimiento';
+    const monto = p.salidaARS > 0 ? fmt(p.salidaARS) : (p.salidaUSD > 0 ? `USD ${p.salidaUSD}` : '—');
+    const desc = (p.descripcion || '').substring(0, 45);
+    return `<div class="pg-item" id="pg-item-${p.rowIndex}" onclick="selectPgRow(${p.rowIndex})">
+      <div>
+        <div>${venc}${p.cuotaLabel ? ` · <span class="badge-cuota">Cuota ${p.cuotaLabel}</span>` : ''}</div>
+        ${desc ? `<div class="pg-item-sub">${escapeHtml(desc)}</div>` : ''}
+        <div class="pg-item-sub">Registrado ${p.fecha} · ${p.categoria || '—'}</div>
+      </div>
+      <div class="pg-item-monto">${monto}</div>
+    </div>`;
+  }).join('');
+  wrap.style.display = '';
+
+  // Si tiene UN solo pendiente, se selecciona solo
+  if (items.length === 1) selectPgRow(items[0].rowIndex);
+}
+
+function selectPgRow(idx) {
+  state.pgSeleccion = idx;
+  document.querySelectorAll('.pg-item').forEach(el => el.classList.toggle('selected', el.id === `pg-item-${idx}`));
+  const p = state.pagosData.find(x => x.rowIndex === idx);
+  const det = document.getElementById('pg-detalle');
+  const hint = document.getElementById('pg-medio-hint');
+  if (!p) { det.style.display = 'none'; return; }
+
+  det.style.display = 'block';
+  det.innerHTML = `
+    <b>${escapeHtml(p.proveedor || '—')}</b> · ${p.categoria || '—'}<br>
+    Registrado: ${p.fecha} · Vence: ${p.vencDate ? new Date(p.vencDate + 'T12:00:00').toLocaleDateString('es-AR') : '—'}<br>
+    Monto: <b>${p.salidaARS > 0 ? fmt(p.salidaARS) : (p.salidaUSD > 0 ? 'USD ' + p.salidaUSD : '—')}</b>
+    ${p.descripcion ? `<br>${escapeHtml(p.descripcion.substring(0, 80))}` : ''}`;
+
+  // Medio de pago: el de la fila si tiene; si está en blanco, sugerir por proveedor
+  const medioSel = document.getElementById('pg-medio');
+  if (p.medioPago) {
+    setSelectValue(medioSel, p.medioPago);
+    hint.textContent = `Medio actual de la fila: ${p.medioPago}`;
+  } else {
+    const s = buscarSugerencia(p.proveedor);
+    const provSheet = state.proveedores[(p.proveedor || '').toLowerCase()];
+    const sugerido = mapMedioOption((s && s.medioPago) || (provSheet && provSheet.formaPago) || '');
+    if (sugerido) {
+      const mapeado = sugerido === 'Efectivo' ? 'Efectivo Local' : sugerido;
+      setSelectValue(medioSel, mapeado);
+      hint.textContent = `⚠️ La fila no tenía medio de pago — sugerido por proveedor: ${mapeado}`;
+    } else {
+      medioSel.value = '';
+      hint.textContent = '⚠️ La fila no tiene medio de pago y no hay datos del proveedor — elegilo a mano.';
+    }
+  }
+}
+
+async function confirmarPagar() {
+  const p = state.pagosData.find(x => x.rowIndex === state.pgSeleccion);
+  if (!p) { document.getElementById('pg-error').textContent = 'Elegí el pago pendiente a pagar.'; return; }
+  const medioPago = document.getElementById('pg-medio').value;
+
+  // Comportamiento estándar: cerrar ya, notificar al terminar
+  closePagarModal();
+  showToast('⏳ Actualizando planilla...');
+  try {
+    const { proveedor, monto, medio } = await api('/api/pagos/pagar', {
+      method: 'POST',
+      body: JSON.stringify({ rowIndex: p.rowIndex, proveedor: p.proveedor, medioPago }),
+    });
+    showResultadoModal({
+      ok: true,
+      titulo: 'Registro pagado',
+      detalle: `<b>${escapeHtml(proveedor || p.proveedor)}</b> · ${fmt(monto || p.salidaARS)}<br>` +
+        `Estado: A pagar → <b>Pagado</b>${medio ? ` · Medio: ${escapeHtml(medio)}` : ''}<br>` +
+        `<span style="font-size:11px">Fila actualizada en la hoja Movimientos ✓</span>`,
+    });
+    loadPagos();
+  } catch (err) {
+    showResultadoModal({
+      ok: false,
+      titulo: 'No se pudo actualizar',
+      detalle: `${escapeHtml(err.message)}<br><span style="font-size:11px">El registro sigue como A pagar.</span>`,
+    });
+  }
+}
+
+// ─── Modal proveedor ──────────────────────────────────────────────────────────// ─── Modal proveedor ──────────────────────────────────────────────────────────
 function openProvModal(nombreProveedor) {
   const key = (nombreProveedor || '').toLowerCase();
   const prov = state.proveedores[key];
