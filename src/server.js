@@ -45,6 +45,7 @@ let estadoCaja = {
   efectivoInicial: null,
   mpInicial: null,
   galiciaInicial: null,
+  gastosSesion: [],       // gastos registrados con la caja abierta (hielo, etc.)
 };
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
@@ -103,7 +104,9 @@ app.get('/api/me', authMiddleware, (req, res) => {
 //  · Sin datos de Fudo: se registra el delta contado (comportamiento anterior).
 //  · Galicia: el ingreso se registra en BRUTO; los impuestos (Bruto − Neto)
 //    van como Gasto · Fiscales. El neto queda como resultado, discriminado.
-function buildFilasCierreServicio({ fechaServicio, mesServicio, descripcionServicio, deltaEfectivo, deltaMP, galiciaBruto, impuestos, fudo }) {
+// gastosEfectivoSesion / gastosMPSesion: gastos YA registrados en Movimientos con la
+// caja abierta (ej: hielo). Reducen el esperado y NO deben generar fila delta duplicada.
+function buildFilasCierreServicio({ fechaServicio, mesServicio, descripcionServicio, deltaEfectivo, deltaMP, galiciaBruto, impuestos, fudo, gastosEfectivoSesion = 0, gastosMPSesion = 0 }) {
   const ingreso = (medio, monto, desc) => [
     fechaServicio, mesServicio, 'Ingreso', 'Pagado', '', '', '',
     'Servicio', 'Ingreso', desc || descripcionServicio,
@@ -118,22 +121,25 @@ function buildFilasCierreServicio({ fechaServicio, mesServicio, descripcionServi
   const rows = [];
   const fudoOk = fudo && fudo.encontrado;
 
-  const registrarCaja = (medio, delta, fudoMonto, etiqueta) => {
+  const registrarCaja = (medio, delta, fudoMonto, gastosSesion, etiqueta) => {
     if (fudoOk) {
       if (fudoMonto > 0) rows.push(ingreso(medio, fudoMonto));
-      const diff = Math.round((delta - fudoMonto) * 100) / 100;
+      // El esperado del delta contado es: ventas Fudo − gastos pagados de la caja
+      // durante el servicio (esos gastos ya tienen su propia fila en Movimientos).
+      const diff = Math.round((delta - (fudoMonto - gastosSesion)) * 100) / 100;
       if (diff > 0.005) {
         rows.push(ingreso(medio, diff, `${descripcionServicio} delta ${etiqueta}`));
       } else if (diff < -0.005) {
         rows.push(gasto(medio, Math.abs(diff), `${descripcionServicio} delta ${etiqueta} (faltante)`));
       }
     } else if (delta > 0) {
-      rows.push(ingreso(medio, delta));
+      // Sin Fudo: delta + gastos de sesión = ingreso bruto del día por esa caja
+      rows.push(ingreso(medio, delta + gastosSesion));
     }
   };
 
-  registrarCaja('Efectivo Local', deltaEfectivo, fudoOk ? (Number(fudo.efectivo) || 0) : 0, 'efectivo');
-  registrarCaja('Mercado Pago', deltaMP, fudoOk ? (Number(fudo.mercadoPago) || 0) : 0, 'mercado pago');
+  registrarCaja('Efectivo Local', deltaEfectivo, fudoOk ? (Number(fudo.efectivo) || 0) : 0, gastosEfectivoSesion, 'efectivo');
+  registrarCaja('Mercado Pago', deltaMP, fudoOk ? (Number(fudo.mercadoPago) || 0) : 0, gastosMPSesion, 'mercado pago');
 
   // Galicia: ingreso BRUTO + impuestos como gasto fiscal → resultado neto discriminado
   if (galiciaBruto > 0) rows.push(ingreso('Galicia', galiciaBruto));
@@ -193,6 +199,7 @@ app.post('/api/arqueo/abrir', authMiddleware, (req, res) => {
     mpEsperado: Number(mpEsperado || 0),
     diffEfectivoInicial: diffEfectivo,
     diffMPInicial: diffMP,
+    gastosSesion: [],
   };
   res.json({ ok: true, data: estadoCaja, diffEfectivo, diffMP });
 });
@@ -296,11 +303,16 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
     // L:Monto Entrada ARS, M:Monto Entrada USD, N:Monto Salida ARS, O:Monto Salida USD
     const deltaEfectivo = Number(efectivo) - estadoCaja.efectivoInicial;
     const deltaMP       = Number(mercadoPago) - estadoCaja.mpInicial;
+    // Gastos registrados durante la sesión (server-side, no se confía en el cliente)
+    const gastosSesion = estadoCaja.gastosSesion || [];
+    const gastosEfectivoSesion = gastosSesion.filter(g => g.bucket === 'efectivo').reduce((s, g) => s + g.monto, 0);
+    const gastosMPSesion = gastosSesion.filter(g => g.bucket === 'mp').reduce((s, g) => s + g.monto, 0);
     const rowsMovimientos = buildFilasCierreServicio({
       fechaServicio, mesServicio, descripcionServicio,
       deltaEfectivo, deltaMP,
       galiciaBruto, impuestos,
       fudo,
+      gastosEfectivoSesion, gastosMPSesion,
     });
     if (rowsMovimientos.length > 0) {
       await sheets.spreadsheets.values.append({
@@ -336,9 +348,51 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   };
 
   // Resetear estado
-  estadoCaja = { abierta: false, apertura: null, encargado: null, efectivoInicial: null, mpInicial: null };
+  estadoCaja = { abierta: false, apertura: null, encargado: null, efectivoInicial: null, mpInicial: null, gastosSesion: [] };
 
   res.json({ ok: true, data: resumen });
+});
+
+// POST /api/gastos-rapidos — gasto pagado en el momento (ej: hielo al empezar
+// el servicio). Accesible para el encargado. Si la caja está ABIERTA y el medio
+// es una caja arqueada (Efectivo Local / Mercado Pago), se anota en la sesión
+// para descontarlo del esperado en el cierre.
+app.post('/api/gastos-rapidos', authMiddleware, async (req, res) => {
+  try {
+    const { fecha, mes, proveedor, categoria, medioPago, monto, descripcion, estado } = req.body;
+    if (!fecha || !proveedor || !monto) {
+      return res.status(400).json({ ok: false, error: 'Fecha, proveedor y monto son obligatorios' });
+    }
+    const estadoRow = (estado || 'Pagado') === 'A pagar' ? 'A pagar' : 'Pagado';
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+    const row = [fecha, mes || '', 'Gasto', estadoRow, '', '', '', proveedor, categoria || 'Insumos', descripcion || '', medioPago || '', '', '', Number(monto), ''];
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID, range: 'Movimientos!A:O',
+      valueInputOption: 'USER_ENTERED', requestBody: { values: [row] },
+    });
+    clearCache();
+
+    // Si la caja está abierta y es un gasto YA PAGADO desde una caja arqueada,
+    // anotarlo para el cierre (el esperado descuenta este efectivo que salió).
+    let registradoEnSesion = false;
+    const medioLower = (medioPago || '').toLowerCase();
+    if (estadoCaja.abierta && estadoRow === 'Pagado') {
+      const bucket = medioLower.includes('efectivo local') ? 'efectivo'
+        : medioLower.includes('mercado pago') ? 'mp' : null;
+      if (bucket) {
+        estadoCaja.gastosSesion = estadoCaja.gastosSesion || [];
+        estadoCaja.gastosSesion.push({
+          bucket, monto: Number(monto),
+          descripcion: descripcion || proveedor,
+          ts: new Date().toISOString(),
+          usuario: req.user.nombre,
+        });
+        registradoEnSesion = true;
+      }
+    }
+    res.json({ ok: true, message: 'Gasto registrado', registradoEnSesion });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 // GET /api/arqueo/fudo-hoy — ventas del día de servicio en curso según Fudo,
