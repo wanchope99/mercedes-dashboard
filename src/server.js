@@ -359,7 +359,8 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
 // para descontarlo del esperado en el cierre.
 app.post('/api/gastos-rapidos', authMiddleware, async (req, res) => {
   try {
-    const { fecha, mes, proveedor, categoria, medioPago, monto, descripcion, estado } = req.body;
+    const { fecha, mes, proveedor, categoria, monto, descripcion, estado } = req.body;
+    const medioPago = normalizarMedio(req.body.medioPago);
     if (!fecha || !proveedor || !monto) {
       return res.status(400).json({ ok: false, error: 'Fecha, proveedor y monto son obligatorios' });
     }
@@ -572,9 +573,15 @@ function mesDeFecha(fechaStr) {
   return parts.length === 3 ? MESES_NOMBRES[parts[1] - 1] || '' : '';
 }
 
+// Un Echeq sale de la cuenta Galicia: en Movimientos se registra como Galicia.
+function normalizarMedio(medio) {
+  return (medio || '').trim().toLowerCase() === 'echeq' ? 'Galicia' : (medio || '');
+}
+
 app.post('/api/pagos', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { fecha, mes, proveedor, categoria, medioPago, salidaARS, vencimiento, descripcion, cuotas, estado } = req.body;
+    const { fecha, mes, proveedor, categoria, salidaARS, vencimiento, descripcion, cuotas, estado } = req.body;
+    const medioPago = normalizarMedio(req.body.medioPago);
     const estadoRow = estado === 'Pagado' ? 'Pagado' : 'A pagar';
     if (!fecha || !proveedor) return res.status(400).json({ ok: false, error: 'Fecha y proveedor son obligatorios' });
     const auth = getAuth();
