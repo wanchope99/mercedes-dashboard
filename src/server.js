@@ -654,6 +654,38 @@ async function leerProveedoresSheet() {
   return proveedores;
 }
 
+// POST /api/pagos/pagar — marca un registro "A pagar" como Pagado MODIFICANDO la
+// fila existente (no agrega línea): Estado (col D) → Pagado, y Medio de pago (col K)
+// si vino uno. La fecha de registración original se conserva.
+app.post('/api/pagos/pagar', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { rowIndex, proveedor, medioPago } = req.body;
+    const idx = parseInt(rowIndex);
+    if (!idx || idx < 2) return res.status(400).json({ ok: false, error: 'Falta el registro a pagar' });
+
+    // Releer la fila para validar que sigue siendo la que el usuario eligió
+    const movs = await getMovimientos();
+    const m = movs.find(x => x.rowIndex === idx);
+    if (!m) return res.status(404).json({ ok: false, error: 'No se encontró el registro. Refrescá la página e intentá de nuevo.' });
+    if (m.pagado) return res.status(400).json({ ok: false, error: `"${m.proveedor}" ya figura como Pagado.` });
+    if (proveedor && m.proveedor && proveedor.trim().toLowerCase() !== m.proveedor.toLowerCase()) {
+      return res.status(409).json({ ok: false, error: 'La planilla cambió desde que abriste el modal. Refrescá e intentá de nuevo.' });
+    }
+
+    const medio = normalizarMedio(medioPago);
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+    const data = [{ range: `Movimientos!D${idx}`, values: [['Pagado']] }];
+    if (medio) data.push({ range: `Movimientos!K${idx}`, values: [[medio]] });
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { valueInputOption: 'USER_ENTERED', data },
+    });
+    clearCache();
+    res.json({ ok: true, message: `${m.proveedor} marcado como Pagado`, proveedor: m.proveedor, monto: m.salidaARS, medio });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 app.get('/api/proveedores', authMiddleware, adminOnly, async (req, res) => {
   try {
     res.json({ ok: true, data: await leerProveedoresSheet() });

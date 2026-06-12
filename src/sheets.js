@@ -212,6 +212,7 @@ async function getMovimientos() {
       cuotaNum: cuotasInfo.cuotaNum,
       cuotasTotal: cuotasInfo.cuotasTotal,
       cuotaId: cuotaId || null,
+      rowIndex: i + 1,   // fila real en la hoja (1-based) para updates in-place
     });
   }
 
