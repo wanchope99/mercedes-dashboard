@@ -985,6 +985,16 @@
   </div>
 </div>
 
+<!-- Modal resultado de escritura (estándar) -->
+<div id="resultado-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:900;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:420px;width:100%;padding:28px;text-align:center">
+    <div id="resultado-icono" style="font-size:42px;margin-bottom:10px">✅</div>
+    <h3 id="resultado-titulo" style="margin-bottom:8px">Listo</h3>
+    <div id="resultado-detalle" style="font-size:13px;color:var(--text-muted);line-height:1.7;margin-bottom:20px"></div>
+    <button class="btn btn-accent" style="min-width:140px" onclick="closeResultadoModal()">Entendido</button>
+  </div>
+</div>
+
 <!-- Modal vencidos -->
 <div id="vencidos-modal-overlay">
   <div id="vencidos-modal">
@@ -1375,8 +1385,10 @@ async function saveHielo() {
   if (!fechaISO || !proveedor || !monto) { errEl.textContent = 'Completá fecha, proveedor y monto.'; return; }
   const [y, m, d] = fechaISO.split('-');
   const mesesN = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-  const btn = document.getElementById('hi-guardar');
-  btn.disabled = true; btn.textContent = '⏳ Guardando...';
+
+  // Comportamiento estándar: cerrar el modal ya, avisar con modal al terminar
+  closeHieloModal();
+  showToast('⏳ Guardando en planilla...');
   try {
     const { registradoEnSesion } = await api('/api/gastos-rapidos', {
       method: 'POST',
@@ -1389,15 +1401,19 @@ async function saveHielo() {
         estado: document.getElementById('hi-estado').value,
       }),
     });
-    closeHieloModal();
-    const st = document.getElementById('hielo-status');
-    st.style.display = 'block'; st.style.color = 'var(--green)';
-    st.textContent = `✅ ${proveedor} ${fmt(monto)} registrado` + (registradoEnSesion ? ' · se descuenta del esperado al cierre' : '');
-    setTimeout(() => { st.style.display = 'none'; }, 6000);
+    showResultadoModal({
+      ok: true,
+      titulo: 'Gasto registrado',
+      detalle: `<b>${escapeHtml(proveedor)}</b> · ${fmt(monto)}<br>` +
+        (registradoEnSesion ? '🔓 La caja está abierta: se descuenta del esperado al cierre.<br>' : '') +
+        `<span style="font-size:11px">Escrito en la hoja Movimientos ✓</span>`,
+    });
   } catch (err) {
-    errEl.textContent = err.message;
-  } finally {
-    btn.disabled = false; btn.textContent = '✓ Registrar gasto';
+    showResultadoModal({
+      ok: false,
+      titulo: 'No se pudo guardar',
+      detalle: `${escapeHtml(err.message)}<br><span style="font-size:11px">El gasto NO quedó registrado. Volvé a intentarlo.</span>`,
+    });
   }
 }
 
@@ -2321,6 +2337,19 @@ function escapeAttr(str) { return (str||'').replace(/'/g,"\\'").replace(/\n/g,' 
 // ─── Modal nuevo pago ─────────────────────────────────────────────────────────
 const MESES_NOMBRES_PAGO = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
+function closeModal() { document.getElementById('modal-overlay').classList.remove('open'); }
+document.getElementById('modal-overlay').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
+
+// Modal estándar de resultado: se muestra cuando una escritura a la planilla termina
+function showResultadoModal({ ok, titulo, detalle }) {
+  document.getElementById('resultado-icono').textContent = ok ? '✅' : '❌';
+  document.getElementById('resultado-titulo').textContent = titulo;
+  document.getElementById('resultado-detalle').innerHTML = detalle || '';
+  document.getElementById('resultado-modal-overlay').style.display = 'flex';
+}
+function closeResultadoModal() { document.getElementById('resultado-modal-overlay').style.display = 'none'; }
+document.getElementById('resultado-modal-overlay').addEventListener('click', function(e) { if (e.target === this) closeResultadoModal(); });
+
 async function openModal() {
   const today = new Date().toISOString().split('T')[0];
   document.getElementById('f-hoy').checked = true;
@@ -2471,22 +2500,39 @@ async function saveNewPago() {
   const vencRaw = document.getElementById('f-vencimiento').value;
   const descripcion = document.getElementById('f-descripcion').value.trim();
 
+  // Validaciones: el modal queda abierto para corregir
   if (!fecha || !proveedor) { alert('Fecha y Proveedor son obligatorios.'); return; }
   if (cuotas > 1 && !vencRaw) { alert('Para compras en cuotas indicá el vencimiento de la primera cuota.'); return; }
   if (cuotas > 1 && !salidaARS) { alert('Para compras en cuotas indicá el monto TOTAL de la compra.'); return; }
 
+  // Comportamiento estándar: cerrar el modal ya, avisar con modal al terminar
+  closeModal();
+  showToast('⏳ Guardando en planilla...');
+
   const fmtDate = iso => { if (!iso) return ''; const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; };
-  const statusEl = document.getElementById('modal-status');
-  statusEl.style.display = 'block'; statusEl.style.color = 'var(--text-muted)'; statusEl.textContent = '⏳ Guardando en planilla...';
+  const estado = pagado && cuotas === 1 ? 'Pagado' : 'A pagar';
   try {
     await api('/api/pagos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
       fecha: fmtDate(fecha), mes, proveedor, categoria, medioPago, salidaARS,
-      vencimiento: fmtDate(vencRaw), descripcion, cuotas,
-      estado: pagado && cuotas === 1 ? 'Pagado' : 'A pagar',
+      vencimiento: fmtDate(vencRaw), descripcion, cuotas, estado,
     }) });
-    statusEl.style.color = 'var(--green)'; statusEl.textContent = `✅ ${pagado && cuotas === 1 ? 'Gasto' : 'Pago'} de ${proveedor} registrado. Recargando...`;
-    setTimeout(() => { closeModal(); loadPagos(); }, 1500);
-  } catch(err) { statusEl.style.color = 'var(--red)'; statusEl.textContent = `❌ Error: ${err.message}`; }
+    showResultadoModal({
+      ok: true,
+      titulo: 'Pago registrado',
+      detalle: `<b>${escapeHtml(proveedor)}</b> · ${fmt(salidaARS)}<br>` +
+        (cuotas > 1
+          ? `Compra en ${cuotas} cuotas (madre + ${cuotas} filas creadas)`
+          : `Estado: ${estado}${estado === 'A pagar' && vencRaw ? ` · vence ${fmtDate(vencRaw)}` : ''}`) +
+        `<br><span style="font-size:11px">Escrito en la hoja Movimientos ✓</span>`,
+    });
+    loadPagos();
+  } catch (err) {
+    showResultadoModal({
+      ok: false,
+      titulo: 'No se pudo guardar',
+      detalle: `${escapeHtml(err.message)}<br><span style="font-size:11px">El pago de <b>${escapeHtml(proveedor)}</b> NO quedó registrado. Volvé a intentarlo.</span>`,
+    });
+  }
 }
 
 // ─── SERVICIOS (Fudo) ───────────────────────────────────────────────────────────
