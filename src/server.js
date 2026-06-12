@@ -10,7 +10,7 @@ const {
   getComprasEnCuotas,
   getMeses, getCategorias, clearCache,
 } = require('./sheets');
-const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, clearFudoCache, fechaServicioHoy } = require('./fudo');
+const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy } = require('./fudo');
 const { proyectar } = require('./proyecciones');
 
 const app = express();
@@ -94,6 +94,55 @@ app.get('/api/me', authMiddleware, (req, res) => {
   res.json({ ok: true, usuario: req.user.usuario, rol: req.user.rol, nombre: req.user.nombre });
 });
 
+// ─── Filas de Movimientos que genera un cierre de caja ───────────────────────
+// Regla de registración:
+//  · Si hay datos de Fudo: por cada caja (Efectivo / MP) se registra el ingreso
+//    según FUDO, y si lo contado difiere, una fila aparte por el DELTA
+//    (Ingreso si sobra, Gasto si falta) con descripción explícita.
+//    Así la planilla siempre matchea con Fudo y la diferencia queda a la vista.
+//  · Sin datos de Fudo: se registra el delta contado (comportamiento anterior).
+//  · Galicia: el ingreso se registra en BRUTO; los impuestos (Bruto − Neto)
+//    van como Gasto · Fiscales. El neto queda como resultado, discriminado.
+function buildFilasCierreServicio({ fechaServicio, mesServicio, descripcionServicio, deltaEfectivo, deltaMP, galiciaBruto, impuestos, fudo }) {
+  const ingreso = (medio, monto, desc) => [
+    fechaServicio, mesServicio, 'Ingreso', 'Pagado', '', '', '',
+    'Servicio', 'Ingreso', desc || descripcionServicio,
+    medio, monto, '', '', '',
+  ];
+  const gasto = (medio, monto, desc, categoria = 'Operativos') => [
+    fechaServicio, mesServicio, 'Gasto', 'Pagado', '', '', '',
+    'Servicio', categoria, desc,
+    medio, '', '', monto, '',
+  ];
+
+  const rows = [];
+  const fudoOk = fudo && fudo.encontrado;
+
+  const registrarCaja = (medio, delta, fudoMonto, etiqueta) => {
+    if (fudoOk) {
+      if (fudoMonto > 0) rows.push(ingreso(medio, fudoMonto));
+      const diff = Math.round((delta - fudoMonto) * 100) / 100;
+      if (diff > 0.005) {
+        rows.push(ingreso(medio, diff, `${descripcionServicio} delta ${etiqueta}`));
+      } else if (diff < -0.005) {
+        rows.push(gasto(medio, Math.abs(diff), `${descripcionServicio} delta ${etiqueta} (faltante)`));
+      }
+    } else if (delta > 0) {
+      rows.push(ingreso(medio, delta));
+    }
+  };
+
+  registrarCaja('Efectivo Local', deltaEfectivo, fudoOk ? (Number(fudo.efectivo) || 0) : 0, 'efectivo');
+  registrarCaja('Mercado Pago', deltaMP, fudoOk ? (Number(fudo.mercadoPago) || 0) : 0, 'mercado pago');
+
+  // Galicia: ingreso BRUTO + impuestos como gasto fiscal → resultado neto discriminado
+  if (galiciaBruto > 0) rows.push(ingreso('Galicia', galiciaBruto));
+  if (impuestos > 0) {
+    rows.push(gasto('Galicia', impuestos, descripcionServicio, 'Fiscales'));
+  }
+  return rows;
+}
+
 // ─── Arqueo de Cajas ──────────────────────────────────────────────────────────
 
 // GET /api/arqueo/estado — estado actual de la caja
@@ -161,7 +210,8 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
 
   // galicia = Total Bruto; galiciaNeto = Total Neto Acreditado
   // impuestos se calcula como Bruto - Neto
-  const { efectivo, mercadoPago, galicia, galiciaNeto } = req.body;
+  // fudo = ingresos del día según Fudo { encontrado, efectivo, mercadoPago, galicia }
+  const { efectivo, mercadoPago, galicia, galiciaNeto, fudo } = req.body;
   if (efectivo === undefined || mercadoPago === undefined || galicia === undefined) {
     estadoCaja.cerrando = false;
     return res.status(400).json({ ok: false, error: 'Faltan valores de saldo final' });
@@ -175,15 +225,17 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   const minutos = Math.floor((duracionMs % 3_600_000) / 60_000);
   const duracionStr = `${horas}h ${minutos}m`;
 
-  // Fecha del servicio en formato dd/mm/yy (día de apertura)
-  // Convertir a hora AR (UTC-3) para que cierres después de las 21:00 no caigan en el día siguiente
-  const aperturaAR = new Date(apertura.getTime() - 3 * 60 * 60 * 1000);
-  const dd = String(aperturaAR.getUTCDate()).padStart(2, '0');
-  const mm = String(aperturaAR.getUTCMonth() + 1).padStart(2, '0');
-  const yy = String(aperturaAR.getUTCFullYear()).slice(-2);
+  // Fecha del servicio = día de APERTURA del TURNO, con el mismo corte que Fudo
+  // (16:00 hora AR). Así, aunque la caja se abra pasada la medianoche (ej: se
+  // reabrió tras un redeploy), el servicio queda fechado en el día que abrió el
+  // local. Ej: caja abierta 12/6 00:30 → servicio del 11/6.
+  const [anioServ, mesServNum, diaServ] = fechaServicioDe(apertura.toISOString()).split('-').map(Number);
+  const dd = String(diaServ).padStart(2, '0');
+  const mm = String(mesServNum).padStart(2, '0');
+  const yy = String(anioServ).slice(-2);
   const fechaServicio = `${dd}/${mm}/${yy}`;
   const mesesNombres = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-  const mesServicio = mesesNombres[aperturaAR.getUTCMonth()];
+  const mesServicio = mesesNombres[mesServNum - 1];
   const descripcionServicio = `Servicio ${dd}/${mm}`;
 
   // Fechas para hoja Arqueo de Cajas (formato largo local)
@@ -242,27 +294,14 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
     // A:Fecha, B:Mes, C:Tipo Movimiento, D:Estado, E:Vencimiento, F:Cuotas,
     // G:ID Compra, H:Proveedor, I:Categoría, J:Descripción, K:Medio de Pago,
     // L:Monto Entrada ARS, M:Monto Entrada USD, N:Monto Salida ARS, O:Monto Salida USD
-    const makeIngreso = (medioPago, montoEntrada) => [
-      fechaServicio, mesServicio, 'Ingreso', 'Pagado', '', '', '',
-      'Servicio', 'Ingreso', descripcionServicio,
-      medioPago, montoEntrada, '', '', '',
-    ];
-    // Solo se registra ingreso si el saldo final supera al inicial (delta > 0)
-    const rowsMovimientos = [];
     const deltaEfectivo = Number(efectivo) - estadoCaja.efectivoInicial;
     const deltaMP       = Number(mercadoPago) - estadoCaja.mpInicial;
-    // Para Galicia usamos el neto acreditado como ingreso (bruto ya descuenta impuestos)
-    const deltaGalicia  = galiciaNetoVal > 0 ? galiciaNetoVal : 0;
-    if (deltaEfectivo > 0) rowsMovimientos.push(makeIngreso('Efectivo Local', deltaEfectivo));
-    if (deltaMP       > 0) rowsMovimientos.push(makeIngreso('Mercado Pago',   deltaMP));
-    if (deltaGalicia  > 0) rowsMovimientos.push(makeIngreso('Galicia',        deltaGalicia));
-    if (impuestos > 0) {
-      rowsMovimientos.push([
-        fechaServicio, mesServicio, 'Gasto', 'Pagado', '', '', '',
-        'Servicio', 'Fiscales', descripcionServicio,
-        'Galicia', '', '', impuestos, '',
-      ]);
-    }
+    const rowsMovimientos = buildFilasCierreServicio({
+      fechaServicio, mesServicio, descripcionServicio,
+      deltaEfectivo, deltaMP,
+      galiciaBruto, impuestos,
+      fudo,
+    });
     if (rowsMovimientos.length > 0) {
       await sheets.spreadsheets.values.append({
         spreadsheetId: SPREADSHEET_ID,
@@ -715,3 +754,5 @@ app.get('*', (req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Mercedes Dashboard corriendo en puerto ${PORT}`);
 });
+
+module.exports = { buildFilasCierreServicio };

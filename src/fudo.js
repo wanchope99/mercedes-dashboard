@@ -584,5 +584,5 @@ function clearFudoCache() {
 
 module.exports = {
   getServicios, getServicioDetalle, getServicioDebug, resnapshotDia,
-  clearFudoCache, grupoDeCategoria, fechaServicioHoy,
+  clearFudoCache, grupoDeCategoria, fechaServicio, fechaServicioHoy,
 };
