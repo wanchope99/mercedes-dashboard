@@ -1358,10 +1358,15 @@ async function confirmarCierreDefinitivo() {
   const btns = document.querySelectorAll('#confirm-cierre-actions .btn');
   btns.forEach(b => b.disabled = true);
   try {
-    // Recién acá se escribe en la planilla (Movimientos + Arqueo de Cajas + Cajas)
+    // Recién acá se escribe en la planilla (Movimientos + Arqueo de Cajas + Cajas).
+    // Se mandan los ingresos según Fudo para registrar el valor de Fudo + fila delta.
+    const f = state.fudoCierre;
     const { data } = await api('/api/arqueo/cerrar', {
       method: 'POST',
-      body: JSON.stringify(state.cierrePendiente),
+      body: JSON.stringify({
+        ...state.cierrePendiente,
+        fudo: f ? { encontrado: !!f.encontrado, efectivo: f.efectivo || 0, mercadoPago: f.mercadoPago || 0, galicia: f.galicia || 0 } : null,
+      }),
     });
     closeConfirmCierre();
     closeCierreModal();
