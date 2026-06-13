@@ -1,7 +1,9 @@
+# Config de build a nivel repo. NO definimos startCommand ni healthcheck global
+# acá, porque eso lo heredarían TODOS los servicios (incluido el bot Python).
+#
+# · El servicio de la APP toma su start command de package.json ("npm start"
+#   → node src/server.js), que Railway detecta solo.
+# · El servicio del BOT define su propio arranque en bot/railway.json.
+
 [build]
 builder = "nixpacks"
-
-[deploy]
-startCommand = "node src/server.js"
-healthcheckPath = "/api/health"
-restartPolicyType = "on_failure"
