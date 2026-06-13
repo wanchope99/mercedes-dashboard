@@ -432,6 +432,34 @@
     .vencidos-item-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
     .vencidos-item-monto { font-weight: 700; font-size: 16px; color: var(--red); text-align: right; }
     .vencidos-item-dias { font-size: 11px; color: var(--red); text-align: right; margin-top: 2px; }
+
+    /* ── Proveedores ── */
+    .prov-badge { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 5px; border-radius:99px; background:var(--red); color:#fff; font-size:10px; font-weight:700; margin-left:4px; }
+    .prov-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+    .prov-notif-btn { position:relative; background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:8px 14px; border-radius:8px; cursor:pointer; font-size:13px; font-family:inherit; }
+    .prov-notif-btn:hover { background:var(--border); }
+    .prov-notif-btn .prov-badge { position:absolute; top:-6px; right:-6px; }
+    .prov-resumen-table { width:100%; border-collapse:collapse; font-size:13px; }
+    .prov-resumen-table th { text-align:right; padding:8px 12px; color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:.05em; border-bottom:1px solid var(--border); }
+    .prov-resumen-table th:first-child { text-align:left; }
+    .prov-resumen-table td { padding:8px 12px; border-bottom:1px solid rgba(46,46,62,.5); text-align:right; }
+    .prov-resumen-table td:first-child { text-align:left; font-weight:600; }
+    .prov-mejor { color:var(--green); font-weight:700; }
+    .prov-empty { text-align:center; color:var(--text-muted); padding:48px 24px; font-size:14px; }
+
+    /* Panel de notificaciones (pendientes) */
+    #prov-notif-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:450; }
+    #prov-notif-overlay.open { display:block; }
+    #prov-notif-panel { position:fixed; right:0; top:0; bottom:0; width:min(560px,96vw); background:var(--surface); border-left:1px solid var(--border); z-index:451; padding:28px; overflow-y:auto; }
+    .prov-pend-card { background:var(--surface2); border:1px solid var(--accent); border-radius:12px; padding:16px; margin-bottom:14px; }
+    .prov-pend-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-size:12px; color:var(--text-muted); }
+    .prov-pend-item { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:8px; }
+    .prov-pend-item.ok { opacity:.6; }
+    .prov-pend-prod { font-weight:600; font-size:14px; margin-bottom:6px; }
+    .prov-duda { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:6px 0; font-size:12px; }
+    .prov-duda label { color:var(--text-muted); min-width:90px; }
+    .prov-duda select, .prov-duda input { background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:6px 10px; border-radius:6px; font-size:12px; font-family:inherit; flex:1; min-width:140px; }
+    .prov-duda .sug { font-size:10px; color:#c9a84c; }
   </style>
 </head>
 <body>
@@ -495,6 +523,7 @@
   <button class="tab-btn" id="tab-btn-cajas" onclick="switchTab('cajas', this)">🏦 Cajas</button>
   <button class="tab-btn" id="tab-btn-arqueo" onclick="switchTab('arqueo', this)">🗃️ Arqueo de Caja</button>
   <button class="tab-btn" id="tab-btn-servicios" onclick="switchTab('servicios', this)">🍽️ Servicios</button>
+  <button class="tab-btn" id="tab-btn-proveedores" onclick="switchTab('proveedores', this)">🛒 Proveedores <span id="prov-badge" class="prov-badge" style="display:none">0</span></button>
   <button class="tab-btn" id="tab-btn-proyecciones" onclick="switchTab('proyecciones', this)">📈 Proyecciones</button>
 </div>
 
@@ -556,6 +585,66 @@
       <div id="actividad-list"><div class="loading"><div class="spinner"></div></div></div>
     </div>
   </main>
+</div>
+
+<!-- ═══ PROVEEDORES TAB ═══ -->
+<div id="tab-proveedores" class="tab-panel">
+  <div class="filters-bar">
+    <div class="prov-toolbar">
+      <span class="filter-label">Categoría</span>
+      <select id="prov-filter-categoria" onchange="onProvCategoriaChange()">
+        <option value="">Todas</option>
+      </select>
+      <span class="filter-label">Producto</span>
+      <select id="prov-filter-producto" onchange="loadProvSerie()">
+        <option value="">Elegí un producto…</option>
+      </select>
+      <div class="filter-sep"></div>
+      <span class="filter-label">Desde</span>
+      <input type="date" id="prov-desde" onchange="loadProvSerie()" />
+      <span class="filter-label">Hasta</span>
+      <input type="date" id="prov-hasta" onchange="loadProvSerie()" />
+    </div>
+    <div style="margin-left:auto">
+      <button class="prov-notif-btn" onclick="openProvNotif()">🔔 Pendientes
+        <span id="prov-badge-2" class="prov-badge" style="display:none">0</span>
+      </button>
+    </div>
+  </div>
+
+  <main>
+    <div class="card">
+      <div class="card-title">Evolución del precio unitario
+        <span id="prov-serie-sub" style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· una línea por proveedor</span>
+      </div>
+      <div class="chart-container" style="height:340px"><canvas id="chart-prov-serie"></canvas></div>
+      <div id="prov-serie-empty" class="prov-empty" style="display:none">Elegí un producto para ver cómo evolucionó su costo por proveedor.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Comparación por proveedor <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· últimas compras del producto seleccionado</span></div>
+      <div class="table-wrap">
+        <table class="prov-resumen-table">
+          <thead><tr>
+            <th>Proveedor</th><th>Último precio</th><th>Promedio</th>
+            <th>Mín</th><th>Máx</th><th>Compras</th>
+          </tr></thead>
+          <tbody id="prov-resumen-body"><tr><td colspan="6" class="prov-empty">—</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Drawer pendientes de proveedores -->
+<div id="prov-notif-overlay" onclick="if(event.target===this)closeProvNotif()">
+  <div id="prov-notif-panel">
+    <div class="drawer-header">
+      <div class="drawer-title">🔔 Facturas pendientes de confirmar</div>
+      <button class="btn-close" onclick="closeProvNotif()">×</button>
+    </div>
+    <div id="prov-notif-list"><div class="loading"><div class="spinner"></div></div></div>
+  </div>
 </div>
 
 <!-- ═══ PROYECCIONES TAB ═══ -->
@@ -1142,15 +1231,17 @@ function onLoginSuccess(rol, nombre) {
     document.getElementById('last-updated').style.display = '';
     document.getElementById('btn-refresh').style.display = '';
     // Todas las tabs visibles
-    ['tab-btn-dashboard','tab-btn-pagos','tab-btn-cajas','tab-btn-arqueo','tab-btn-servicios','tab-btn-proyecciones'].forEach(id => {
+    ['tab-btn-dashboard','tab-btn-pagos','tab-btn-cajas','tab-btn-arqueo','tab-btn-servicios','tab-btn-proveedores','tab-btn-proyecciones'].forEach(id => {
       document.getElementById(id).style.display = '';
     });
     init(); // carga dashboard
+    refreshProvBadge(); // badge de pendientes de proveedores
   } else {
     // Encargado: tabs Cajas y Arqueo
     document.getElementById('tab-btn-dashboard').style.display = 'none';
     document.getElementById('tab-btn-pagos').style.display = 'none';
     document.getElementById('tab-btn-servicios').style.display = 'none';
+    document.getElementById('tab-btn-proveedores').style.display = 'none';
     document.getElementById('tab-btn-proyecciones').style.display = 'none';
     document.getElementById('tab-btn-cajas').style.display = '';
     document.getElementById('tab-btn-arqueo').style.display = '';
@@ -1252,6 +1343,7 @@ function switchTab(tab, btn) {
   if (tab === 'cajas') loadCajas();
   if (tab === 'arqueo') initArqueo();
   if (tab === 'servicios') loadServicios();
+  if (tab === 'proveedores') loadProveedores();
   if (tab === 'proyecciones') loadProyecciones();
 }
 
@@ -2525,6 +2617,7 @@ function copyProvDatos(texto, btn) {
 }
 function escapeHtml(str) { return (str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function escapeAttr(str) { return (str||'').replace(/'/g,"\\'").replace(/\n/g,' '); }
+function escAttr2(str){return (str||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
 // ─── Modal nuevo pago ─────────────────────────────────────────────────────────
 const MESES_NOMBRES_PAGO = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -3062,6 +3155,215 @@ document.getElementById('serv-modal-overlay').addEventListener('click', function
 async function refreshServicios() {
   try { await api('/api/servicios/refresh', { method: 'POST' }); } catch(e) {}
   loadServicios();
+}
+
+
+// ═══ PROVEEDORES ════════════════════════════════════════════════════════════════
+const PROV_COLORS = ['#4caf82','#5c8fe0','#e08a5c','#a05ce0','#e0c95c','#e05c5c','#5ce0d0','#c95ce0','#8ae05c','#e05c9b'];
+let _provInit = false;
+
+async function loadProveedores() {
+  if (!_provInit) {
+    try {
+      const { data } = await api('/api/proveedores/productos');
+      state.provProductos = data.productos || [];
+      state.provCategorias = data.categorias || [];
+      const catSel = document.getElementById('prov-filter-categoria');
+      catSel.innerHTML = '<option value="">Todas</option>' +
+        state.provCategorias.map(c => `<option value="${escAttr2(c)}">${escapeHtml(c)}</option>`).join('');
+      renderProvProductoOptions('');
+      _provInit = true;
+    } catch (e) { showToast('Error cargando proveedores: ' + e.message); }
+  }
+  refreshProvBadge();
+}
+
+function renderProvProductoOptions(categoria) {
+  const sel = document.getElementById('prov-filter-producto');
+  const prev = sel.value;
+  const lista = (state.provProductos || []).filter(p => !categoria || p.categoria === categoria);
+  sel.innerHTML = '<option value="">Elegí un producto…</option>' +
+    lista.map(p => `<option value="${escAttr2(p.nombre)}">${escapeHtml(p.nombre)}${p.proveedores.length>1?` · ${p.proveedores.length} prov.`:''}</option>`).join('');
+  if (lista.some(p => p.nombre === prev)) sel.value = prev;
+}
+
+function onProvCategoriaChange() {
+  renderProvProductoOptions(document.getElementById('prov-filter-categoria').value);
+  loadProvSerie();
+}
+
+async function loadProvSerie() {
+  const producto = document.getElementById('prov-filter-producto').value;
+  const categoria = document.getElementById('prov-filter-categoria').value;
+  const desde = document.getElementById('prov-desde').value;
+  const hasta = document.getElementById('prov-hasta').value;
+  const emptyEl = document.getElementById('prov-serie-empty');
+  const bodyEl = document.getElementById('prov-resumen-body');
+
+  if (!producto) {
+    emptyEl.style.display = 'block';
+    if (state.charts['prov-serie']) { state.charts['prov-serie'].destroy(); delete state.charts['prov-serie']; }
+    bodyEl.innerHTML = '<tr><td colspan="6" class="prov-empty">—</td></tr>';
+    return;
+  }
+  emptyEl.style.display = 'none';
+
+  const qs = new URLSearchParams({ producto });
+  if (categoria) qs.set('categoria', categoria);
+  if (desde) qs.set('desde', desde);
+  if (hasta) qs.set('hasta', hasta);
+
+  let data;
+  try { ({ data } = await api('/api/proveedores/serie?' + qs.toString())); }
+  catch (e) { showToast('Error: ' + e.message); return; }
+
+  document.getElementById('prov-serie-sub').textContent =
+    `· ${producto}${data.unidad ? ' (precio por ' + data.unidad + ')' : ''} · una línea por proveedor`;
+
+  // Eje X = fechas únicas ordenadas (escala categórica → sin adaptador de tiempo).
+  const fechasSet = new Set();
+  (data.series || []).forEach(s => s.puntos.forEach(p => { if (p.fecha) fechasSet.add(p.fecha); }));
+  const labels = [...fechasSet].sort();
+  const labelFmt = iso => { const [y,m,d] = iso.split('-'); return `${d}/${m}`; };
+
+  const datasets = (data.series || []).map((s, i) => {
+    const porFecha = {};
+    s.puntos.forEach(p => { if (p.fecha) porFecha[p.fecha] = p.precioUnit; });
+    return {
+      label: s.proveedor,
+      data: labels.map(f => porFecha[f] != null ? porFecha[f] : null),
+      borderColor: PROV_COLORS[i % PROV_COLORS.length],
+      backgroundColor: PROV_COLORS[i % PROV_COLORS.length],
+      tension: 0.2, spanGaps: true, pointRadius: 4,
+    };
+  });
+
+  if (state.charts['prov-serie']) state.charts['prov-serie'].destroy();
+  state.charts['prov-serie'] = new Chart(document.getElementById('chart-prov-serie').getContext('2d'), {
+    type: 'line',
+    data: { labels: labels.map(labelFmt), datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'nearest', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#e8e8f0', usePointStyle: true } },
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y != null ? fmt(c.parsed.y) : '—'}` } },
+      },
+      scales: {
+        x: { ticks: { color: '#7878a0' }, grid: { color: 'rgba(46,46,62,.4)' } },
+        y: { ticks: { color: '#7878a0', callback: v => '$' + Number(v).toLocaleString('es-AR') },
+             grid: { color: 'rgba(46,46,62,.4)' } },
+      },
+    },
+  });
+
+  // Tabla resumen: mejor último precio resaltado.
+  const resumen = data.resumen || [];
+  if (!resumen.length) {
+    bodyEl.innerHTML = '<tr><td colspan="6" class="prov-empty">Sin compras de este producto en el período.</td></tr>';
+  } else {
+    const minUlt = Math.min(...resumen.filter(r => r.ultimoPrecio != null).map(r => r.ultimoPrecio));
+    bodyEl.innerHTML = resumen.map(r => `<tr>
+      <td>${escapeHtml(r.proveedor)}</td>
+      <td class="${r.ultimoPrecio === minUlt ? 'prov-mejor' : ''}">${r.ultimoPrecio != null ? fmt(r.ultimoPrecio) : '—'}</td>
+      <td>${r.precioPromedio != null ? fmt(r.precioPromedio) : '—'}</td>
+      <td>${r.minPrecio != null ? fmt(r.minPrecio) : '—'}</td>
+      <td>${r.maxPrecio != null ? fmt(r.maxPrecio) : '—'}</td>
+      <td>${r.compras}</td>
+    </tr>`).join('');
+  }
+}
+
+// ─── Badge + panel de pendientes ───────────────────────────────────────────────
+async function refreshProvBadge() {
+  try {
+    const { count } = await api('/api/proveedores/pendientes/count');
+    [['prov-badge', count], ['prov-badge-2', count]].forEach(([id, c]) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = c;
+      el.style.display = c > 0 ? 'inline-flex' : 'none';
+    });
+  } catch (e) { /* no bloqueante */ }
+}
+
+async function openProvNotif() {
+  document.getElementById('prov-notif-overlay').classList.add('open');
+  const list = document.getElementById('prov-notif-list');
+  list.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  try {
+    const { data } = await api('/api/proveedores/pendientes');
+    if (!data.length) { list.innerHTML = '<div class="prov-empty">No hay facturas pendientes. 🎉</div>'; return; }
+    list.innerHTML = data.map(renderPendCard).join('');
+  } catch (e) { list.innerHTML = `<div class="prov-empty">Error: ${escapeHtml(e.message)}</div>`; }
+}
+function closeProvNotif() { document.getElementById('prov-notif-overlay').classList.remove('open'); }
+
+function renderPendCard(reg) {
+  const fecha = new Date(reg.creado).toLocaleString('es-AR');
+  const origen = reg.origen && reg.origen.usuario ? `de ${escapeHtml(reg.origen.usuario)}` : '';
+  const items = reg.items.map(it => {
+    const ok = !it.dudas || it.dudas.length === 0;
+    const dudasHtml = (it.dudas || []).map(d => {
+      const id = `res-${reg.id}-${it.idx}-${d.campo}`;
+      if (d.opciones && d.opciones.length) {
+        const opts = d.opciones.map(o => `<option value="${escAttr2(o)}" ${o===d.sugerido?'selected':''}>${escapeHtml(o)}</option>`).join('');
+        return `<div class="prov-duda"><label>${escapeHtml(d.campo)}</label>
+          <select id="${id}"><option value="">— elegir —</option>${opts}</select>
+          ${d.sugerido?`<span class="sug">sug: ${escapeHtml(d.sugerido)}</span>`:''}</div>`;
+      }
+      return `<div class="prov-duda"><label>${escapeHtml(d.campo)}</label>
+        <input id="${id}" value="${escAttr2(d.sugerido||'')}" placeholder="valor correcto" /></div>`;
+    }).join('');
+    return `<div class="prov-pend-item ${ok?'ok':''}">
+      <div class="prov-pend-prod">${escapeHtml(it.producto || '(producto ilegible)')} <span style="font-weight:400;color:var(--text-muted)">· ${escapeHtml(it.proveedor||'?')}</span></div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">${it.precioUnit?fmt(it.precioUnit):'sin precio'} · ${escapeHtml(it.categoria||'sin categoría')} · ${escapeHtml(it.formaPago||'sin medio de pago')}</div>
+      ${dudasHtml}
+    </div>`;
+  }).join('');
+  return `<div class="prov-pend-card" id="pend-${reg.id}">
+    <div class="prov-pend-head"><span>🧾 ${escapeHtml(reg.imagenInfo?.nombre||'factura')} ${origen}</span><span>${fecha}</span></div>
+    ${items}
+    <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
+      <button class="btn" onclick="descartarPend('${reg.id}')">Descartar</button>
+      <button class="btn btn-accent" onclick="resolverPend('${reg.id}')">✅ Confirmar y cargar</button>
+    </div>
+  </div>`;
+}
+
+async function resolverPend(id) {
+  const reg = (await api('/api/proveedores/pendientes/' + id)).data;
+  const resoluciones = {};
+  for (const it of reg.items) {
+    for (const d of (it.dudas || [])) {
+      const el = document.getElementById(`res-${id}-${it.idx}-${d.campo}`);
+      if (!el || !el.value) continue;
+      const key = d.campo === 'precio_unitario' ? 'precioUnit' : (d.campo === 'medioPago' ? 'medioPago' : d.campo);
+      resoluciones[it.idx] = resoluciones[it.idx] || {};
+      resoluciones[it.idx][key] = el.value;
+    }
+  }
+  try {
+    const r = await api('/api/proveedores/pendientes/' + id + '/resolver', {
+      method: 'POST', body: JSON.stringify({ resoluciones }),
+    });
+    if (r.status === 'escrito') {
+      showToast(`✅ ${r.message}`);
+      document.getElementById('pend-' + id)?.remove();
+    } else {
+      showToast(`⚠️ ${r.message}`);
+    }
+    refreshProvBadge();
+    if (document.getElementById('prov-filter-producto').value) loadProvSerie();
+  } catch (e) { showToast('Error: ' + e.message); }
+}
+
+async function descartarPend(id) {
+  try {
+    await api('/api/proveedores/pendientes/' + id + '/descartar', { method: 'POST', body: '{}' });
+    document.getElementById('pend-' + id)?.remove();
+    refreshProvBadge();
+  } catch (e) { showToast('Error: ' + e.message); }
 }
 
 // Arrancar: verificar token guardado o mostrar login
