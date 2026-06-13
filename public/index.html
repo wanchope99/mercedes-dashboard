@@ -3299,22 +3299,41 @@ async function openProvNotif() {
 }
 function closeProvNotif() { document.getElementById('prov-notif-overlay').classList.remove('open'); }
 
+const DUDA_LABEL = { categoria:'Categoría', medioPago:'Medio de pago', iva:'¿Con o sin IVA?', producto:'Producto', precio_unitario:'Precio unitario' };
+const IVA_OPT_LABEL = { con:'Con IVA', sin:'Sin IVA' };
+
+function renderDudaControl(domId, d) {
+  const lbl = DUDA_LABEL[d.campo] || d.campo;
+  if (d.opciones && d.opciones.length) {
+    const opts = d.opciones.map(o => {
+      const txt = IVA_OPT_LABEL[o] || o;
+      return `<option value="${escAttr2(o)}" ${o===d.sugerido?'selected':''}>${escapeHtml(txt)}</option>`;
+    }).join('');
+    const sug = d.sugerido ? `<span class="sug">sug: ${escapeHtml(IVA_OPT_LABEL[d.sugerido]||d.sugerido)}</span>` : '';
+    return `<div class="prov-duda"><label>${escapeHtml(lbl)}</label>
+      <select id="${domId}"><option value="">— elegir —</option>${opts}</select>${sug}</div>`;
+  }
+  return `<div class="prov-duda"><label>${escapeHtml(lbl)}</label>
+    <input id="${domId}" value="${escAttr2(d.sugerido||'')}" placeholder="valor correcto" /></div>`;
+}
+
 function renderPendCard(reg) {
   const fecha = new Date(reg.creado).toLocaleString('es-AR');
   const origen = reg.origen && reg.origen.usuario ? `de ${escapeHtml(reg.origen.usuario)}` : '';
+
+  // Dudas a nivel FACTURA (medio de pago, IVA): se confirman una vez.
+  const fact = reg.factura || {};
+  const factDudas = (fact.dudas || []).map(d =>
+    renderDudaControl(`resf-${reg.id}-${d.campo}`, d)).join('');
+  const factBlock = factDudas ? `<div class="prov-pend-item" style="border-color:var(--blue)">
+      <div class="prov-pend-prod">📋 Datos de la factura <span style="font-weight:400;color:var(--text-muted)">· ${escapeHtml(fact.proveedor||'?')}</span></div>
+      ${factDudas}
+    </div>` : '';
+
   const items = reg.items.map(it => {
     const ok = !it.dudas || it.dudas.length === 0;
-    const dudasHtml = (it.dudas || []).map(d => {
-      const id = `res-${reg.id}-${it.idx}-${d.campo}`;
-      if (d.opciones && d.opciones.length) {
-        const opts = d.opciones.map(o => `<option value="${escAttr2(o)}" ${o===d.sugerido?'selected':''}>${escapeHtml(o)}</option>`).join('');
-        return `<div class="prov-duda"><label>${escapeHtml(d.campo)}</label>
-          <select id="${id}"><option value="">— elegir —</option>${opts}</select>
-          ${d.sugerido?`<span class="sug">sug: ${escapeHtml(d.sugerido)}</span>`:''}</div>`;
-      }
-      return `<div class="prov-duda"><label>${escapeHtml(d.campo)}</label>
-        <input id="${id}" value="${escAttr2(d.sugerido||'')}" placeholder="valor correcto" /></div>`;
-    }).join('');
+    const dudasHtml = (it.dudas || []).map(d =>
+      renderDudaControl(`res-${reg.id}-${it.idx}-${d.campo}`, d)).join('');
     return `<div class="prov-pend-item ${ok?'ok':''}">
       <div class="prov-pend-prod">${escapeHtml(it.producto || '(producto ilegible)')} <span style="font-weight:400;color:var(--text-muted)">· ${escapeHtml(it.proveedor||'?')}</span></div>
       <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">${it.precioUnit?fmt(it.precioUnit):'sin precio'} · ${escapeHtml(it.categoria||'sin categoría')} · ${escapeHtml(it.formaPago||'sin medio de pago')}</div>
@@ -3323,6 +3342,7 @@ function renderPendCard(reg) {
   }).join('');
   return `<div class="prov-pend-card" id="pend-${reg.id}">
     <div class="prov-pend-head"><span>🧾 ${escapeHtml(reg.imagenInfo?.nombre||'factura')} ${origen}</span><span>${fecha}</span></div>
+    ${factBlock}
     ${items}
     <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
       <button class="btn" onclick="descartarPend('${reg.id}')">Descartar</button>
@@ -3334,11 +3354,19 @@ function renderPendCard(reg) {
 async function resolverPend(id) {
   const reg = (await api('/api/proveedores/pendientes/' + id)).data;
   const resoluciones = {};
+  // Dudas de factura (medio de pago, IVA)
+  for (const d of ((reg.factura && reg.factura.dudas) || [])) {
+    const el = document.getElementById(`resf-${id}-${d.campo}`);
+    if (!el || !el.value) continue;
+    resoluciones.factura = resoluciones.factura || {};
+    resoluciones.factura[d.campo] = el.value;
+  }
+  // Dudas por item
   for (const it of reg.items) {
     for (const d of (it.dudas || [])) {
       const el = document.getElementById(`res-${id}-${it.idx}-${d.campo}`);
       if (!el || !el.value) continue;
-      const key = d.campo === 'precio_unitario' ? 'precioUnit' : (d.campo === 'medioPago' ? 'medioPago' : d.campo);
+      const key = d.campo === 'precio_unitario' ? 'precioUnit' : d.campo;
       resoluciones[it.idx] = resoluciones[it.idx] || {};
       resoluciones[it.idx][key] = el.value;
     }
