@@ -12,12 +12,14 @@ const {
 } = require('./sheets');
 const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy } = require('./fudo');
 const { proyectar } = require('./proyecciones');
+const proveedoresRoutes = require('./proveedores-routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
+// Las fotos de facturas viajan en base64 dentro del JSON → subir el límite.
+app.use(express.json({ limit: '25mb' }));
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
@@ -875,6 +877,9 @@ app.delete('/api/proyecciones/variables/:id', authMiddleware, adminOnly, async (
     res.json({ ok: true, message: 'Variable eliminada' });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
+
+// ─── Módulo Proveedores (ingesta de facturas + dashboard de costos) ───────────
+app.use(proveedoresRoutes({ authMiddleware, adminOnly }));
 
 // ─── Static y fallback ────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, '../public')));
