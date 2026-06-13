@@ -1,0 +1,5 @@
+# El bot es un worker de Telegram (polling), NO un servidor web.
+providers = ["python"]
+
+[start]
+cmd = "python bot.py"
