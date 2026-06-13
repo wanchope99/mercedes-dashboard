@@ -20,6 +20,7 @@ const express = require('express');
 const prov = require('./proveedores');
 const { extraerDeImagen } = require('./extractor');
 const cats = require('./proveedores-categorias');
+const provCfg = require('./proveedores-config');
 
 // Umbral de confianza por debajo del cual un campo se considera dudoso.
 const UMBRAL = parseFloat(process.env.PROVEEDORES_UMBRAL_CONFIANZA || '0.6');
@@ -30,16 +31,13 @@ function procesarItems(itemsCrudos, indice) {
     const resuelto = cats.resolverItem(raw, indice);
     const conf = raw.confianza || {};
 
-    // Dudas adicionales por baja confianza del extractor, aunque la normalización
-    // haya "encajado" el valor. Ej: leyó "Carnes" con confianza 0.3 → confirmar.
-    const dudas = [...resuelto.dudas];
+    // Dudas SOLO por-item: categoría, producto, precio. El medio de pago y el IVA
+    // se resuelven a nivel FACTURA (ver procesarFactura).
+    const dudas = resuelto.dudas.filter(d => d.campo !== 'medioPago');
     const yaDuda = campo => dudas.some(d => d.campo === campo);
 
     if (resuelto.categoria && !yaDuda('categoria') && (conf.categoria ?? 1) < UMBRAL) {
       dudas.push({ campo: 'categoria', sugerido: resuelto.categoria, fuente: 'baja-confianza', opciones: cats.CATEGORIAS });
-    }
-    if (resuelto.medioPago && !yaDuda('medioPago') && (conf.forma_de_pago ?? 1) < UMBRAL) {
-      dudas.push({ campo: 'medioPago', sugerido: resuelto.medioPago, fuente: 'baja-confianza', opciones: cats.MEDIOS_PAGO });
     }
     if (raw.producto && !yaDuda('producto') && (conf.producto ?? 1) < UMBRAL) {
       dudas.push({ campo: 'producto', sugerido: raw.producto, fuente: 'baja-confianza', opciones: [] });
@@ -56,14 +54,47 @@ function procesarItems(itemsCrudos, indice) {
       cantidad: raw.cantidad ?? null,
       unidad: raw.unidad || '',
       precioUnit: Number(raw.precio_unitario) || null,
-      total: raw.total != null ? Number(raw.total) : null,
-      formaPago: resuelto.medioPago || raw.forma_de_pago || '',
+      total_linea: raw.total_linea != null ? Number(raw.total_linea) : null,
+      ivaPct: raw.iva_porcentaje != null && raw.iva_porcentaje !== '' ? Number(raw.iva_porcentaje) : null,
       diasCredito: raw.dias_credito ?? 0,
       entregaOk: raw.entrega_ok || 'Sí',
       notas: raw.notas || '',
       dudas,
     };
   });
+}
+
+// Resuelve los datos a nivel FACTURA: medio de pago e IVA (con/sin) del proveedor.
+// Consulta la hoja Proveedores (config): si ya sabemos el medio/IVA del proveedor,
+// lo usamos; si no, queda como duda para preguntar UNA sola vez.
+async function procesarFactura(factura, items) {
+  const proveedor = (factura.proveedor || (items[0] && items[0].proveedor) || '').trim();
+  const dudas = [];
+
+  // Config conocida del proveedor (hoja Proveedores de Gestion Mercedes)
+  let cfg = null;
+  try { cfg = await provCfg.getProveedor(proveedor); } catch (e) { cfg = null; }
+
+  // ── Medio de pago ──
+  const fconf = factura.confianza || {};
+  let medioPago = cats.normalizarMedioPago(factura.forma_de_pago);
+  // Si la factura no lo dice claro pero el proveedor tiene medio habitual, usarlo.
+  if ((!medioPago || (fconf.forma_de_pago ?? 1) < UMBRAL) && cfg && cfg.medioPago) {
+    const m = cats.normalizarMedioPago(cfg.medioPago);
+    if (m) { medioPago = m; }
+  }
+  if (!medioPago || !cats.MEDIOS_PAGO.includes(medioPago)) {
+    dudas.push({ campo: 'medioPago', sugerido: medioPago || (cfg && cats.normalizarMedioPago(cfg.medioPago)) || '', fuente: cfg && cfg.medioPago ? 'proveedor-config' : 'ninguna', opciones: cats.MEDIOS_PAGO });
+  }
+
+  // ── IVA con/sin (atributo del proveedor) ──
+  let iva = cfg && cfg.iva ? cfg.iva : null;  // 'con' | 'sin'
+  if (!iva) {
+    // No lo sabemos todavía → preguntar la primera vez para este proveedor.
+    dudas.push({ campo: 'iva', sugerido: '', fuente: 'ninguna', opciones: ['con', 'sin'] });
+  }
+
+  return { proveedor, medioPago, iva, dudas };
 }
 
 module.exports = function ({ authMiddleware, adminOnly } = {}) {
@@ -89,7 +120,7 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
       const { imageBase64, mime, origen = {}, imagenInfo = {} } = req.body || {};
       if (!imageBase64) return res.status(400).json({ ok: false, error: 'Falta imageBase64' });
 
-      const [{ items: crudos }, indice] = await Promise.all([
+      const [{ items: crudos, factura }, indice] = await Promise.all([
         extraerDeImagen({ base64: imageBase64, mime: mime || 'image/jpeg' }),
         prov.getIndiceInferencia(),
       ]);
@@ -99,29 +130,41 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
       }
 
       const items = procesarItems(crudos, indice);
-      const conDudas = items.filter(it => it.dudas.length > 0);
-      const limpios  = items.filter(it => it.dudas.length === 0);
+      // Datos a nivel factura: medio de pago e IVA (con/sin) del proveedor.
+      const fact = await procesarFactura(factura || {}, items);
 
-      // Si TODO está claro → escribir directo.
-      if (conDudas.length === 0) {
-        const n = await prov.appendCompras(limpios);
+      // Propagar el medio de pago (de la factura) a todos los items.
+      if (fact.medioPago) items.forEach(it => { it.formaPago = fact.medioPago; });
+      // Control E*G vs total leído: si difiere, anotarlo en notas (no bloquea).
+      for (const it of items) {
+        const chk = prov.chequearTotalLinea(it);
+        if (!chk.ok && chk.diff != null) {
+          const aviso = `⚠ Control: E×G=${Math.round((it.cantidad||0)*(it.precioUnit||0))} vs total factura ${it.total_linea} (dif ${chk.diff})`;
+          it.notas = it.notas ? `${it.notas} · ${aviso}` : aviso;
+        }
+      }
+
+      const itemDudas = items.filter(it => it.dudas.length > 0);
+      const hayDudas = itemDudas.length > 0 || fact.dudas.length > 0;
+
+      // Todo claro (items + factura) → escribir directo.
+      if (!hayDudas) {
+        const n = await prov.appendCompras(items);
         return res.json({
           ok: true, status: 'escrito',
-          escritas: n, items: limpios,
+          escritas: n, items,
           message: `${n} producto(s) cargado(s) sin dudas.`,
         });
       }
 
-      // Hay dudas → crear pendiente. Lo que está limpio NO se escribe todavía:
-      // se escribe junto al resto cuando el usuario resuelve (así una factura
-      // queda atómica). Pero se marca cuál estaba ok.
-      const reg = prov.crearPendiente({ origen, imagenInfo, items });
+      // Hay dudas → crear pendiente (factura + items). No se escribe hasta resolver.
+      const reg = prov.crearPendiente({ origen, imagenInfo, items, factura: fact });
       return res.json({
         ok: true, status: 'pendiente',
         pendienteId: reg.id,
-        total: items.length, conDudas: conDudas.length, limpios: limpios.length,
-        items, // incluye dudas para que el bot/app pregunten
-        message: `${conDudas.length} de ${items.length} producto(s) necesitan confirmación.`,
+        total: items.length, conDudas: itemDudas.length, limpios: items.length - itemDudas.length,
+        factura: reg.factura, items,
+        message: `Esta factura necesita confirmación${fact.dudas.length ? ' (medio de pago / IVA)' : ''}.`,
       });
     } catch (err) {
       console.error('Error /api/proveedores/ingest:', err.message);
@@ -158,8 +201,22 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
         });
       }
 
+      // Aplicar el IVA del proveedor (con/sin) a los items según la resolución.
+      const reg = prov.getPendiente(req.params.id);
+      const ivaProv = reg && reg.factura && reg.factura.iva;  // 'con' | 'sin'
+      // Si es "sin IVA", la columna % IVA queda 0; si "con", se respeta lo leído.
+      for (const it of out.listoParaEscribir) {
+        if (ivaProv === 'sin') it.ivaPct = 0;
+      }
       const n = await prov.appendCompras(out.listoParaEscribir);
       prov.marcarResuelto(req.params.id);
+
+      // Recordar el criterio de IVA del proveedor para la próxima vez.
+      if (ivaProv && reg.factura.proveedor) {
+        try { await provCfg.setIvaProveedor(reg.factura.proveedor, ivaProv); }
+        catch (e) { console.warn('No se pudo guardar IVA del proveedor:', e.message); }
+      }
+
       res.json({
         ok: true, status: 'escrito', escritas: n,
         items: out.listoParaEscribir,
