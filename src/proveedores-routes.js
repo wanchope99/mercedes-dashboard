@@ -69,6 +69,10 @@ function procesarItems(itemsCrudos, indice) {
 module.exports = function ({ authMiddleware, adminOnly } = {}) {
   const router = express.Router();
 
+  // Solo admin puede ver el tab Proveedores (dashboard + panel de pendientes).
+  // Si por algún motivo no llega adminOnly, caemos a authMiddleware (nunca abierto).
+  const soloAdmin = adminOnly || authMiddleware || ((q, s, n) => n());
+
   // Auth para la ingesta: token de servicio (bot) O usuario logueado.
   function ingestAuth(req, res, next) {
     const svcToken = process.env.PROVEEDORES_INGEST_TOKEN;
@@ -126,13 +130,13 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
   });
 
   // ─── Listado de pendientes (panel de notificaciones) ──────────────────────────
-  router.get('/api/proveedores/pendientes', authMiddleware, (req, res) => {
+  router.get('/api/proveedores/pendientes', authMiddleware, soloAdmin, (req, res) => {
     res.json({ ok: true, data: prov.listPendientes() });
   });
-  router.get('/api/proveedores/pendientes/count', authMiddleware, (req, res) => {
+  router.get('/api/proveedores/pendientes/count', authMiddleware, soloAdmin, (req, res) => {
     res.json({ ok: true, count: prov.countPendientes() });
   });
-  router.get('/api/proveedores/pendientes/:id', authMiddleware, (req, res) => {
+  router.get('/api/proveedores/pendientes/:id', authMiddleware, soloAdmin, (req, res) => {
     const reg = prov.getPendiente(req.params.id);
     if (!reg) return res.status(404).json({ ok: false, error: 'Pendiente no encontrado' });
     res.json({ ok: true, data: reg });
@@ -173,13 +177,13 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
   });
 
   // ─── Dashboard: productos + categorías ────────────────────────────────────────
-  router.get('/api/proveedores/productos', authMiddleware, async (req, res) => {
+  router.get('/api/proveedores/productos', authMiddleware, soloAdmin, async (req, res) => {
     try { res.json({ ok: true, data: await prov.getProductosYCategorias() }); }
     catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
   // ─── Dashboard: serie temporal de precio unitario ─────────────────────────────
-  router.get('/api/proveedores/serie', authMiddleware, async (req, res) => {
+  router.get('/api/proveedores/serie', authMiddleware, soloAdmin, async (req, res) => {
     try {
       const { producto, categoria, desde, hasta } = req.query;
       if (!producto) return res.status(400).json({ ok: false, error: 'Falta el parámetro producto' });
@@ -188,12 +192,12 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
   });
 
   // ─── Categorías disponibles (para selects del front) ──────────────────────────
-  router.get('/api/proveedores/categorias', authMiddleware, (req, res) => {
+  router.get('/api/proveedores/categorias', authMiddleware, soloAdmin, (req, res) => {
     res.json({ ok: true, data: cats.CATEGORIAS });
   });
 
   // ─── Normalizar categorías históricas (admin) ─────────────────────────────────
-  router.post('/api/proveedores/normalizar-historico', authMiddleware, adminOnly || ((q, s, n) => n()), async (req, res) => {
+  router.post('/api/proveedores/normalizar-historico', authMiddleware, soloAdmin, async (req, res) => {
     try {
       const dryRun = String(req.query.aplicar || req.body?.aplicar || '') !== 'true';
       const out = await prov.normalizarHistoricoCategorias({ dryRun });
@@ -201,7 +205,7 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
-  router.post('/api/proveedores/refresh', authMiddleware, (req, res) => {
+  router.post('/api/proveedores/refresh', authMiddleware, soloAdmin, (req, res) => {
     prov.clearProvCache();
     res.json({ ok: true, message: 'Cache de proveedores limpiado.' });
   });
