@@ -13,6 +13,7 @@
 const { google } = require('googleapis');
 const NodeCache = require('node-cache');
 const cats = require('./proveedores-categorias');
+let provCfg = null; try { provCfg = require('./proveedores-config'); } catch (e) {}
 
 const cache = new NodeCache({ stdTTL: 120 });
 
@@ -21,12 +22,14 @@ const cache = new NodeCache({ stdTTL: 120 });
 const PROV_SHEET_ID = process.env.PROVEEDORES_SHEET_ID || process.env.SPREADSHEET_ID;
 const COMPRAS_SHEET = process.env.PROVEEDORES_COMPRAS_SHEET || 'Compras';
 
-// Columnas de la hoja Compras (A:L):
+// Columnas de la hoja Compras (A:N):
 // A Fecha · B Proveedor · C Categoría · D Producto · E Cantidad · F Unidad
-// G Precio Unit. ($) · H Total ($) · I Forma de Pago · J Días de Crédito
-// K Entrega OK? · L Notas
+// G Precio Unit. ($) · H Total ($) · I % IVA · J Total con IVA
+// K Forma de Pago · L Días de Crédito · M Entrega OK? · N Notas
 const COL = { fecha:0, proveedor:1, categoria:2, producto:3, cantidad:4, unidad:5,
-  precioUnit:6, total:7, formaPago:8, diasCredito:9, entregaOk:10, notas:11 };
+  precioUnit:6, total:7, ivaPct:8, totalConIva:9, formaPago:10, diasCredito:11,
+  entregaOk:12, notas:13 };
+const RANGE_COMPRAS = 'A:N';
 
 function getAuthRW() {
   const credentials = process.env.GOOGLE_CREDENTIALS_JSON
@@ -87,7 +90,7 @@ async function getComprasRaw() {
   const sheets = sheetsClient();
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: PROV_SHEET_ID,
-    range: `${COMPRAS_SHEET}!A:L`,
+    range: `${COMPRAS_SHEET}!A:N`,
   });
   const rows = res.data.values || [];
   cache.set('compras_raw', rows);
@@ -133,6 +136,8 @@ async function getCompras() {
       unidad: (r[COL.unidad] || '').toString().trim(),
       precioUnit,
       total,
+      ivaPct: parseNum(r[COL.ivaPct]),
+      totalConIva: parseNum(r[COL.totalConIva]),
       formaPago: (r[COL.formaPago] || '').toString().trim(),
       diasCredito: parseNum(r[COL.diasCredito]),
       entregaOk: (r[COL.entregaOk] || '').toString().trim(),
@@ -161,47 +166,63 @@ async function getIndiceInferencia() {
 async function appendCompras(items) {
   if (!items || !items.length) return 0;
   const sheets = sheetsClient();
-  const values = items.map(it => {
+
+  // Averiguar la primera fila libre para poder escribir la fórmula =E*G con el
+  // número de fila real (Sheets necesita la fila concreta en la fórmula).
+  const existentes = await getComprasRaw();
+  let nextRow = existentes.length + 1; // append va después de la última fila con datos
+
+  const values = items.map((it) => {
+    const fila = nextRow++;
     const cant = it.cantidad ?? '';
     const pu = it.precioUnit ?? '';
-    // Total como fórmula si tenemos ambos; si no, total explícito o vacío.
-    let total = '';
-    if (it.total != null && it.total !== '') total = it.total;
-    else if (cant !== '' && pu !== '') total = `=E{ROW}*G{ROW}`; // placeholder, ver abajo
+    // Total ($) SIEMPRE como fórmula =E*G (cantidad * precio unitario).
+    const total = (cant !== '' && pu !== '') ? `=E${fila}*G${fila}` : '';
+    // IVA %: lo que leyó el extractor (21, 10.5, 0) o vacío.
+    const ivaPct = (it.ivaPct != null && it.ivaPct !== '') ? it.ivaPct : '';
+    // Total con IVA: fórmula =Total*(1+IVA%/100) si hay IVA; si no, vacío.
+    const totalConIva = (ivaPct !== '') ? `=H${fila}*(1+I${fila}/100)` : '';
     return [
-      it.fecha || new Date().toISOString().slice(0, 10),
-      it.proveedor || '',
-      it.categoria || '',
-      it.producto || '',
-      cant,
-      it.unidad || '',
-      pu,
-      total,
-      cats.normalizarMedioPago(it.formaPago) || it.formaPago || '',
-      it.diasCredito ?? 0,
-      it.entregaOk || 'Sí',
-      it.notas || '',
+      it.fecha || new Date().toISOString().slice(0, 10),  // A
+      it.proveedor || '',                                  // B
+      it.categoria || '',                                  // C
+      it.producto || '',                                   // D
+      cant,                                                // E
+      it.unidad || '',                                     // F
+      pu,                                                  // G
+      total,                                               // H (=E*G)
+      ivaPct,                                              // I % IVA
+      totalConIva,                                         // J Total con IVA
+      cats.normalizarMedioPago(it.formaPago) || it.formaPago || '', // K
+      it.diasCredito ?? 0,                                 // L
+      it.entregaOk || 'Sí',                                // M
+      it.notas || '',                                      // N
     ];
   });
 
-  // Resolver la fórmula =E*G con el número de fila real. Para eso necesitamos
-  // saber dónde se van a insertar. append no nos lo dice de antemano de forma
-  // fiable, así que en vez de fórmula escribimos el total ya calculado.
-  for (const row of values) {
-    if (row[COL.total] === '=E{ROW}*G{ROW}') {
-      const cant = Number(row[COL.cantidad]); const pu = Number(row[COL.precioUnit]);
-      row[COL.total] = Number.isFinite(cant) && Number.isFinite(pu) ? Math.round(cant * pu * 100) / 100 : '';
-    }
-  }
-
   await sheets.spreadsheets.values.append({
     spreadsheetId: PROV_SHEET_ID,
-    range: `${COMPRAS_SHEET}!A:L`,
+    range: `${COMPRAS_SHEET}!A:N`,
     valueInputOption: 'USER_ENTERED',
+    insertDataOption: 'INSERT_ROWS',
     requestBody: { values },
   });
   cache.del('compras_raw');
   return values.length;
+}
+
+// Control de consistencia: compara E*G calculado vs el total que leyó el extractor
+// de la factura. Devuelve { ok, diff, pct } por item. Si difiere > 1%, ok=false.
+function chequearTotalLinea(it) {
+  const cant = Number(it.cantidad), pu = Number(it.precioUnit);
+  const totalLeido = Number(it.total_linea ?? it.totalLinea);
+  if (!Number.isFinite(cant) || !Number.isFinite(pu) || !Number.isFinite(totalLeido) || totalLeido === 0) {
+    return { ok: true, diff: null, pct: null }; // sin datos para comparar: no flaggear
+  }
+  const calc = cant * pu;
+  const diff = calc - totalLeido;
+  const pct = Math.abs(diff) / Math.abs(totalLeido);
+  return { ok: pct <= 0.01, diff: Math.round(diff * 100) / 100, pct };
 }
 
 // ─── Normalización de filas históricas (categorías viejas → canónicas) ──────────
@@ -267,6 +288,27 @@ async function getProductosYCategorias() {
 async function getSerieProducto({ producto, categoria, desde, hasta } = {}) {
   const compras = await getCompras();
   const pn = cats.norm(producto);
+
+  // Config de IVA por proveedor: para "con IVA" comparamos el precio CON IVA;
+  // para "sin IVA" o desconocido, el precio tal cual figura.
+  let cfg = { byNombre: {} };
+  if (provCfg) { try { cfg = await provCfg.leerConfig(); } catch (e) {} }
+  const ivaDe = (proveedor) => {
+    const c = cfg.byNombre && cfg.byNombre[cats.norm(proveedor)];
+    return c && c.iva ? c.iva : null; // 'con' | 'sin' | null
+  };
+  // Precio de comparación de una compra según el criterio de su proveedor.
+  const precioComparacion = (c) => {
+    if (c.precioUnit == null) return null;
+    const iva = ivaDe(c.proveedor);
+    if (iva === 'con') {
+      // Preferir el precio con IVA real (Total con IVA / cantidad); si no, aplicar %.
+      if (c.totalConIva != null && c.cantidad) return c.totalConIva / c.cantidad;
+      if (c.ivaPct != null) return c.precioUnit * (1 + c.ivaPct / 100);
+    }
+    return c.precioUnit;
+  };
+
   const filtradas = compras.filter(c => {
     if (!c.producto || cats.norm(c.producto) !== pn) return false;
     if (c.precioUnit == null) return false;
@@ -282,18 +324,23 @@ async function getSerieProducto({ producto, categoria, desde, hasta } = {}) {
     if (!unidad && c.unidad) unidad = c.unidad;
     const pv = c.proveedor || 'Sin proveedor';
     (porProveedor[pv] = porProveedor[pv] || []).push({
-      fecha: c.fecha, precioUnit: c.precioUnit, cantidad: c.cantidad, total: c.total,
+      fecha: c.fecha,
+      precioUnit: precioComparacion(c),   // ajustado por IVA del proveedor
+      precioFactura: c.precioUnit,        // el que figura tal cual (referencia)
+      iva: ivaDe(pv),
+      cantidad: c.cantidad, total: c.total,
     });
   }
 
   const series = [], resumen = [];
   for (const [pv, puntos] of Object.entries(porProveedor)) {
     puntos.sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
-    series.push({ proveedor: pv, puntos });
+    series.push({ proveedor: pv, iva: ivaDe(pv), puntos });
     const precios = puntos.map(p => p.precioUnit).filter(x => x != null);
     const sum = precios.reduce((s, x) => s + x, 0);
     resumen.push({
       proveedor: pv,
+      iva: ivaDe(pv),
       ultimoPrecio: puntos.length ? puntos[puntos.length - 1].precioUnit : null,
       precioPromedio: precios.length ? sum / precios.length : null,
       minPrecio: precios.length ? Math.min(...precios) : null,
@@ -311,10 +358,17 @@ async function getSerieProducto({ producto, categoria, desde, hasta } = {}) {
 const pendientes = new Map();
 let _pendSeq = 1;
 
-function crearPendiente({ origen = {}, imagenInfo = {}, items }) {
+function crearPendiente({ origen = {}, imagenInfo = {}, items, factura = {} }) {
   const id = `p${Date.now()}_${_pendSeq++}`;
   const reg = {
     id, creado: new Date().toISOString(), origen, imagenInfo,
+    // Datos a nivel factura (comunes a todos los items): medio de pago e IVA.
+    factura: {
+      proveedor: factura.proveedor || (items[0] && items[0].proveedor) || '',
+      medioPago: factura.medioPago || '',
+      iva: factura.iva || null,            // 'con' | 'sin' | null
+      dudas: factura.dudas || [],          // [{campo:'medioPago'|'iva', sugerido, opciones}]
+    },
     items: items.map((it, i) => ({ idx: i, ...it })),
     estado: 'pendiente',
   };
@@ -336,6 +390,23 @@ function countPendientes() { return listPendientes().length; }
 function aplicarResoluciones(id, resoluciones = {}) {
   const reg = pendientes.get(id);
   if (!reg) return null;
+
+  // Resolución a nivel FACTURA (medio de pago e IVA, comunes a todos los items).
+  const rf = resoluciones.factura || resoluciones.__factura__;
+  if (rf) {
+    if (rf.medioPago) reg.factura.medioPago = rf.medioPago;
+    if (rf.iva) reg.factura.iva = rf.iva;
+    reg.factura.dudas = (reg.factura.dudas || []).filter(d => {
+      if (d.campo === 'medioPago') return !reg.factura.medioPago || !cats.MEDIOS_PAGO.includes(cats.normalizarMedioPago(reg.factura.medioPago));
+      if (d.campo === 'iva') return !reg.factura.iva;
+      return false;
+    });
+  }
+  // Propagar el medio de pago de la factura a todos los items (es de toda la factura).
+  if (reg.factura.medioPago) {
+    for (const it of reg.items) it.formaPago = reg.factura.medioPago;
+  }
+
   for (const it of reg.items) {
     const r = resoluciones[it.idx];
     if (!r) continue;
@@ -347,16 +418,18 @@ function aplicarResoluciones(id, resoluciones = {}) {
     // Re-evaluar dudas restantes tras la resolución
     it.dudas = (it.dudas || []).filter(d => {
       if (d.campo === 'categoria') return !it.categoria || !cats.CATEGORIAS_SET.has(it.categoria);
-      if (d.campo === 'medioPago') return !it.formaPago || !cats.MEDIOS_PAGO.includes(cats.normalizarMedioPago(it.formaPago));
       if (d.campo === 'producto') return !it.producto || !it.producto.toString().trim();
       if (d.campo === 'precio_unitario') return !(Number(it.precioUnit) > 0);
-      return false;
+      return false; // medioPago ya NO es duda por-item
     });
   }
+  const facturaOk = !reg.factura.dudas || reg.factura.dudas.length === 0;
   const activos = reg.items.filter(it => !it.descartado);
-  const listoParaEscribir = activos.filter(it => !it.dudas || it.dudas.length === 0);
-  const faltan = activos.filter(it => it.dudas && it.dudas.length > 0);
-  return { reg, listoParaEscribir, faltan };
+  const itemsLimpios = activos.filter(it => !it.dudas || it.dudas.length === 0);
+  // Solo se escribe si la factura está resuelta Y el item no tiene dudas propias.
+  const listoParaEscribir = facturaOk ? itemsLimpios : [];
+  const faltan = activos.filter(it => (it.dudas && it.dudas.length > 0)) ;
+  return { reg, listoParaEscribir, faltan, facturaOk, facturaDudas: reg.factura.dudas || [] };
 }
 
 function marcarResuelto(id) {
@@ -376,6 +449,7 @@ module.exports = {
   getProductosYCategorias, getSerieProducto,
   crearPendiente, getPendiente, listPendientes, countPendientes,
   aplicarResoluciones, marcarResuelto, descartarPendiente,
+  chequearTotalLinea,
   clearProvCache,
   // re-export para server.js
   cats,
