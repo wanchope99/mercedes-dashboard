@@ -1382,10 +1382,19 @@ function renderEstadoArqueo(data) {
     formApertura.style.display = 'none';
     btnCerrarWrap.style.display = 'block';
 
-    // Mostrar saldos iniciales
+    // Mostrar saldos iniciales. El efectivo inicial se muestra AJUSTADO: se le
+    // descuentan los gastos en efectivo registrados con la caja abierta (ej: hielo),
+    // así el encargado ve el efectivo que debería haber físicamente en la caja.
+    const gsCaja = gastosSesionPorCaja(data);
+    const efectivoAjustado = (data.efectivoInicial || 0) - gsCaja.efectivo;
+    const mpAjustado = (data.mpInicial || 0) - gsCaja.mp;
+    const efSub = gsCaja.efectivo > 0
+      ? `<div class="arqueo-saldo-sub" style="font-size:11px;color:var(--text-muted);margin-top:2px">inicial ${fmt(data.efectivoInicial)} − gastos ${fmt(gsCaja.efectivo)}</div>` : '';
+    const mpSub = gsCaja.mp > 0
+      ? `<div class="arqueo-saldo-sub" style="font-size:11px;color:var(--text-muted);margin-top:2px">inicial ${fmt(data.mpInicial)} − gastos ${fmt(gsCaja.mp)}</div>` : '';
     document.getElementById('arqueo-saldos-iniciales').innerHTML = `
-      <div class="arqueo-saldo-item"><div class="arqueo-saldo-label">💵 Efectivo inicial</div><div class="arqueo-saldo-val">${fmt(data.efectivoInicial)}</div></div>
-      <div class="arqueo-saldo-item"><div class="arqueo-saldo-label">📱 MP inicial</div><div class="arqueo-saldo-val">${fmt(data.mpInicial)}</div></div>
+      <div class="arqueo-saldo-item"><div class="arqueo-saldo-label">💵 Efectivo en caja</div><div class="arqueo-saldo-val">${fmt(efectivoAjustado)}</div>${efSub}</div>
+      <div class="arqueo-saldo-item"><div class="arqueo-saldo-label">📱 MP actual</div><div class="arqueo-saldo-val">${fmt(mpAjustado)}</div>${mpSub}</div>
     `;
 
     // Timer
@@ -1550,9 +1559,14 @@ async function saveHielo() {
       ok: true,
       titulo: 'Gasto registrado',
       detalle: `<b>${escapeHtml(proveedor)}</b> · ${fmt(monto)}<br>` +
-        (registradoEnSesion ? '🔓 La caja está abierta: se descuenta del esperado al cierre.<br>' : '') +
+        (registradoEnSesion ? '🔓 La caja está abierta: se descuenta del efectivo en caja.<br>' : '') +
         `<span style="font-size:11px">Escrito en la hoja Movimientos ✓</span>`,
     });
+    // Refrescar el estado de la caja para que el "Efectivo en caja" se actualice
+    // ya con el descuento del gasto recién registrado (ej: hielo).
+    if (registradoEnSesion) {
+      try { const { data } = await api('/api/arqueo/estado'); renderEstadoArqueo(data); } catch (e) {}
+    }
   } catch (err) {
     showResultadoModal({
       ok: false,
