@@ -54,6 +54,7 @@ function procesarItems(itemsCrudos, indice) {
       cantidad: raw.cantidad ?? null,
       unidad: raw.unidad || '',
       precioUnit: Number(raw.precio_unitario) || null,
+      descuento: raw.descuento_porcentaje != null && raw.descuento_porcentaje !== '' ? Number(raw.descuento_porcentaje) : null,
       total_linea: raw.total_linea != null ? Number(raw.total_linea) : null,
       ivaPct: raw.iva_porcentaje != null && raw.iva_porcentaje !== '' ? Number(raw.iva_porcentaje) : null,
       diasCredito: raw.dias_credito ?? 0,
