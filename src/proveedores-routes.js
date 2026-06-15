@@ -77,14 +77,34 @@ async function procesarFactura(factura, items) {
 
   // ── Medio de pago ──
   const fconf = factura.confianza || {};
+  const fpRaw = (factura.forma_de_pago || '').toString().trim().toLowerCase();
+  // "Contado" (y "Contado contra entrega") en una factura es un PLAZO/condición,
+  // no el medio real con el que se pagó. Lo tratamos como ambiguo: por defecto
+  // sugiere "Efectivo Local" pero SIEMPRE se pregunta (salvo medio del proveedor).
+  const esContadoAmbiguo = fpRaw.includes('contado');
   let medioPago = cats.normalizarMedioPago(factura.forma_de_pago);
-  // Si la factura no lo dice claro pero el proveedor tiene medio habitual, usarlo.
-  if ((!medioPago || (fconf.forma_de_pago ?? 1) < UMBRAL) && cfg && cfg.medioPago) {
+
+  // Si la factura no lo dice claro (o era "Contado") pero el proveedor tiene
+  // medio habitual confirmado, usarlo y NO molestar.
+  let medioDeProveedor = false;
+  if ((!medioPago || esContadoAmbiguo || (fconf.forma_de_pago ?? 1) < UMBRAL) && cfg && cfg.medioPago) {
     const m = cats.normalizarMedioPago(cfg.medioPago);
-    if (m) { medioPago = m; }
+    if (m && cats.MEDIOS_PAGO.includes(m)) { medioPago = m; medioDeProveedor = true; }
   }
-  if (!medioPago || !cats.MEDIOS_PAGO.includes(medioPago)) {
-    dudas.push({ campo: 'medioPago', sugerido: medioPago || (cfg && cats.normalizarMedioPago(cfg.medioPago)) || '', fuente: cfg && cfg.medioPago ? 'proveedor-config' : 'ninguna', opciones: cats.MEDIOS_PAGO });
+
+  const necesitaConfirmar =
+    !medioPago ||
+    !cats.MEDIOS_PAGO.includes(medioPago) ||
+    (esContadoAmbiguo && !medioDeProveedor) ||         // "Contado" sin medio del proveedor → preguntar
+    ((fconf.forma_de_pago ?? 1) < UMBRAL && !medioDeProveedor);
+
+  if (necesitaConfirmar) {
+    dudas.push({
+      campo: 'medioPago',
+      sugerido: medioPago || (cfg && cats.normalizarMedioPago(cfg.medioPago)) || 'Efectivo Local',
+      fuente: esContadoAmbiguo ? 'plazo-no-es-medio' : (cfg && cfg.medioPago ? 'proveedor-config' : 'ninguna'),
+      opciones: cats.MEDIOS_PAGO,
+    });
   }
 
   // ── IVA con/sin (atributo del proveedor) ──
@@ -128,6 +148,14 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
       if (!crudos.length) {
         return res.json({ ok: true, status: 'sin_datos', message: 'No se pudieron extraer productos de la imagen.' });
       }
+
+      // Normalizar el nombre del proveedor (alias). Ej: "Adicional 2015" o el
+      // vendedor "Diego Wesenack" → "Thames". Se aplica a la factura y a cada item.
+      const vendedor = (factura && factura.vendedor) || '';
+      const provNombre = cats.normalizarProveedor(
+        (factura && factura.proveedor) || (crudos[0] && crudos[0].proveedor) || '', vendedor);
+      if (factura) factura.proveedor = provNombre;
+      crudos.forEach(c => { c.proveedor = provNombre; });
 
       const items = procesarItems(crudos, indice);
       // Datos a nivel factura: medio de pago e IVA (con/sin) del proveedor.
