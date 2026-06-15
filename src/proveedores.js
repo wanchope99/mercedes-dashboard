@@ -22,14 +22,15 @@ const cache = new NodeCache({ stdTTL: 120 });
 const PROV_SHEET_ID = process.env.PROVEEDORES_SHEET_ID || process.env.SPREADSHEET_ID;
 const COMPRAS_SHEET = process.env.PROVEEDORES_COMPRAS_SHEET || 'Compras';
 
-// Columnas de la hoja Compras (A:N):
+// Columnas de la hoja Compras (A:P):
 // A Fecha · B Proveedor · C Categoría · D Producto · E Cantidad · F Unidad
-// G Precio Unit. ($) · H Total ($) · I % IVA · J Total con IVA
-// K Forma de Pago · L Días de Crédito · M Entrega OK? · N Notas
+// G Precio Unit. ($) · H Subtotal (=E*G) · I Descuento (%) · J Total ($) (=H*(1-I/100))
+// K % IVA · L Total con IVA (=J*(1+K/100)) · M Forma de Pago · N Días de Crédito
+// O Entrega OK? · P Notas
 const COL = { fecha:0, proveedor:1, categoria:2, producto:3, cantidad:4, unidad:5,
-  precioUnit:6, total:7, ivaPct:8, totalConIva:9, formaPago:10, diasCredito:11,
-  entregaOk:12, notas:13 };
-const RANGE_COMPRAS = 'A:N';
+  precioUnit:6, subtotal:7, descuento:8, total:9, ivaPct:10, totalConIva:11,
+  formaPago:12, diasCredito:13, entregaOk:14, notas:15 };
+const RANGE_COMPRAS = 'A:P';
 
 function getAuthRW() {
   const credentials = process.env.GOOGLE_CREDENTIALS_JSON
@@ -90,7 +91,7 @@ async function getComprasRaw() {
   const sheets = sheetsClient();
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: PROV_SHEET_ID,
-    range: `${COMPRAS_SHEET}!A:N`,
+    range: `${COMPRAS_SHEET}!A:P`,
   });
   const rows = res.data.values || [];
   cache.set('compras_raw', rows);
@@ -123,8 +124,13 @@ async function getCompras() {
     if (!proveedor && !producto) continue;
     const cantidad = parseNum(r[COL.cantidad]);
     const precioUnit = parseNum(r[COL.precioUnit]);
+    const descuento = parseNum(r[COL.descuento]);   // % de descuento
+    let subtotal = parseNum(r[COL.subtotal]);
+    if (subtotal === null && cantidad !== null && precioUnit !== null) subtotal = cantidad * precioUnit;
     let total = parseNum(r[COL.total]);
-    if (total === null && cantidad !== null && precioUnit !== null) total = cantidad * precioUnit;
+    if (total === null && subtotal !== null) {
+      total = descuento ? subtotal * (1 - descuento / 100) : subtotal;
+    }
     out.push({
       rowIndex: i + 1,
       fecha: parseFechaISO(r[COL.fecha]),
@@ -135,6 +141,8 @@ async function getCompras() {
       cantidad,
       unidad: (r[COL.unidad] || '').toString().trim(),
       precioUnit,
+      subtotal,
+      descuento,
       total,
       ivaPct: parseNum(r[COL.ivaPct]),
       totalConIva: parseNum(r[COL.totalConIva]),
@@ -176,33 +184,39 @@ async function appendCompras(items) {
     const fila = nextRow++;
     const cant = it.cantidad ?? '';
     const pu = it.precioUnit ?? '';
-    // Total ($) SIEMPRE como fórmula =E*G (cantidad * precio unitario).
-    const total = (cant !== '' && pu !== '') ? `=E${fila}*G${fila}` : '';
-    // IVA %: lo que leyó el extractor (21, 10.5, 0) o vacío.
+    // Descuento en % (0 si no hay).
+    const descuento = (it.descuento != null && it.descuento !== '') ? it.descuento : '';
+    // H Subtotal = E*G (cantidad * precio unitario).
+    const subtotal = (cant !== '' && pu !== '') ? `=E${fila}*G${fila}` : '';
+    // J Total ($) = Subtotal con descuento aplicado: =H*(1-I/100). Si Subtotal vacío, vacío.
+    const total = subtotal ? `=H${fila}*(1-N(I${fila})/100)` : '';
+    // K % IVA: lo que leyó el extractor (21, 10.5, 0) o vacío.
     const ivaPct = (it.ivaPct != null && it.ivaPct !== '') ? it.ivaPct : '';
-    // Total con IVA: fórmula =Total*(1+IVA%/100) si hay IVA; si no, vacío.
-    const totalConIva = (ivaPct !== '') ? `=H${fila}*(1+I${fila}/100)` : '';
+    // L Total con IVA = Total * (1 + IVA%/100). Si no hay IVA, igual al Total.
+    const totalConIva = total ? `=J${fila}*(1+N(K${fila})/100)` : '';
     return [
-      it.fecha || new Date().toISOString().slice(0, 10),  // A
-      it.proveedor || '',                                  // B
-      it.categoria || '',                                  // C
-      it.producto || '',                                   // D
-      cant,                                                // E
-      it.unidad || '',                                     // F
-      pu,                                                  // G
-      total,                                               // H (=E*G)
-      ivaPct,                                              // I % IVA
-      totalConIva,                                         // J Total con IVA
-      cats.normalizarMedioPago(it.formaPago) || it.formaPago || '', // K
-      it.diasCredito ?? 0,                                 // L
-      it.entregaOk || 'Sí',                                // M
-      it.notas || '',                                      // N
+      it.fecha || new Date().toISOString().slice(0, 10),  // A Fecha
+      it.proveedor || '',                                  // B Proveedor
+      it.categoria || '',                                  // C Categoría
+      it.producto || '',                                   // D Producto
+      cant,                                                // E Cantidad
+      it.unidad || '',                                     // F Unidad
+      pu,                                                  // G Precio Unit.
+      subtotal,                                            // H Subtotal (=E*G)
+      descuento,                                           // I Descuento (%)
+      total,                                               // J Total (=H*(1-I/100))
+      ivaPct,                                              // K % IVA
+      totalConIva,                                         // L Total con IVA (=J*(1+K/100))
+      cats.normalizarMedioPago(it.formaPago) || it.formaPago || '', // M Forma de Pago
+      it.diasCredito ?? 0,                                 // N Días de Crédito
+      it.entregaOk || 'Sí',                                // O Entrega OK?
+      it.notas || '',                                      // P Notas
     ];
   });
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: PROV_SHEET_ID,
-    range: `${COMPRAS_SHEET}!A:N`,
+    range: `${COMPRAS_SHEET}!A:P`,
     valueInputOption: 'USER_ENTERED',
     insertDataOption: 'INSERT_ROWS',
     requestBody: { values },
@@ -219,7 +233,10 @@ function chequearTotalLinea(it) {
   if (!Number.isFinite(cant) || !Number.isFinite(pu) || !Number.isFinite(totalLeido) || totalLeido === 0) {
     return { ok: true, diff: null, pct: null }; // sin datos para comparar: no flaggear
   }
-  const calc = cant * pu;
+  // Aplicar el descuento (si hay) antes de comparar: el total leído de la factura
+  // ya viene con el descuento aplicado, mientras que E*G es el subtotal sin descuento.
+  const desc = Number(it.descuento) || 0;
+  const calc = cant * pu * (1 - desc / 100);
   const diff = calc - totalLeido;
   const pct = Math.abs(diff) / Math.abs(totalLeido);
   return { ok: pct <= 0.01, diff: Math.round(diff * 100) / 100, pct };

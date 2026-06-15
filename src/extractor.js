@@ -40,6 +40,7 @@ producto). Devolvé un OBJETO JSON con esta forma EXACTA, sin texto adicional:
       "cantidad": 10,
       "unidad": "Kg | Unidad | Caja | Bandeja | Litro | Atado | Bolsa | Maple | ...",
       "precio_unitario": 350,
+      "descuento_porcentaje": 0,
       "iva_porcentaje": 21,
       "total_linea": 3500,
       "notas": "",
@@ -64,7 +65,10 @@ Reglas IMPORTANTES:
   producto).
 - iva_porcentaje: la alícuota de IVA de esa línea (21, 10.5, 0). Si la factura la
   discrimina por línea, usá la de cada línea; si es general, repetí la misma.
-- precio_unitario = precio por unidad (P.U.), NO el total de la línea.
+- precio_unitario = precio por unidad (P.U.) ANTES de descuento, NO el total de la línea.
+- descuento_porcentaje = el % de descuento de esa línea si la factura tiene una
+  columna "% Dto", "Dcto", "Descuento" o similar (ej. 50 = 50%). Si no hay, 0.
+  OJO: el precio_unitario es el de lista (sin descuento); el descuento se aplica aparte.
 - total_linea = el total de esa línea tal como figura en la factura (para control).
 - total_factura = el TOTAL final de la factura (con impuestos), para control.
 - "confianza" 0 a 1. Si no podés leer algo, poné tu mejor estimación con confianza
@@ -115,6 +119,7 @@ async function extraerDeImagen({ base64, mime = 'image/jpeg' }) {
     cantidad: l.cantidad ?? null,
     unidad: l.unidad || '',
     precio_unitario: l.precio_unitario ?? l.precioUnit ?? null,
+    descuento_porcentaje: l.descuento_porcentaje ?? l.descuento ?? l.dcto ?? null,
     iva_porcentaje: l.iva_porcentaje ?? l.iva ?? null,
     total_linea: l.total_linea ?? l.total ?? null,
     forma_de_pago: factura.forma_de_pago || l.forma_de_pago || '',
