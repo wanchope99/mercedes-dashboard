@@ -239,10 +239,36 @@ function resolverItem(item, indice) {
   return { categoria, medioPago, dudas };
 }
 
+
+// ─── Nombre canónico de producto (para agrupar equivalentes en la vista) ────────
+// Quita sufijos que describen la FORMA de cobro/entrega, no el producto:
+// "+ IVA", "en Remito", "c/IVA", "s/IVA", "con IVA", códigos entre [] o (), etc.
+// "Langostino Entero L1 Congelado a Bordo + IVA" y "... en Remito" → mismo canónico.
+function nombreCanonico(nombre) {
+  let s = (nombre || '').toString();
+  // Quitar codigos entre corchetes o parentesis: [EMLB027], (964043)
+  s = s.replace(/\[[^\]]*\]/g, ' ').replace(/\([^)]*\)/g, ' ');
+  // Quitar sufijos de cobro/entrega/IVA (incluyendo un "+" previo)
+  s = s.replace(/\+?\s*con\s+iva/gi, ' ');
+  s = s.replace(/\+?\s*sin\s+iva/gi, ' ');
+  s = s.replace(/\+?\s*c\/\s*iva/gi, ' ');
+  s = s.replace(/\+?\s*s\/\s*iva/gi, ' ');
+  s = s.replace(/\+\s*iva/gi, ' ');
+  s = s.replace(/\biva\s*\d+([.,]\d+)?\s*%?/gi, ' ');
+  s = s.replace(/\biva\b/gi, ' ');
+  s = s.replace(/\ben\s+remito\b/gi, ' ');
+  s = s.replace(/\bremito\b/gi, ' ');
+  // Compactar espacios y limpiar un "+" o separador suelto que haya quedado
+  s = s.replace(/\s{2,}/g, ' ').trim();
+  s = s.replace(/\s+\+\s+/g, ' ').replace(/\s*\+\s*$/g, '').trim();
+  s = s.replace(/\s{2,}/g, ' ').trim();
+  return s || (nombre || '').toString().trim();
+}
+
 module.exports = {
   CATEGORIAS, CATEGORIAS_SET, MEDIOS_PAGO,
   MAPEO_CATEGORIAS_VIEJAS, KEYWORDS,
   normalizarMedioPago, normalizarCategoria,
   inferirPorKeywords, construirIndiceInferencia, sugerirCategoria,
-  resolverItem, norm,
+  resolverItem, norm, nombreCanonico,
 };
