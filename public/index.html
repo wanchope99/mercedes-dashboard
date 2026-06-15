@@ -3421,4 +3421,244 @@ async function refreshProvBadge() {
 
 async function openProvNotif() {
   document.getElementById('prov-notif-overlay').classList.add('open');
-  const list = document.getElementById
+  const list = document.getElementById('prov-notif-list');
+  list.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  try {
+    const { data } = await api('/api/proveedores/pendientes');
+    if (!data.length) { list.innerHTML = '<div class="prov-empty">No hay facturas pendientes. 🎉</div>'; return; }
+    list.innerHTML = data.map(renderPendCard).join('');
+  } catch (e) { list.innerHTML = `<div class="prov-empty">Error: ${escapeHtml(e.message)}</div>`; }
+}
+function closeProvNotif() { document.getElementById('prov-notif-overlay').classList.remove('open'); }
+
+const DUDA_LABEL = { categoria:'Categoría', medioPago:'Medio de pago', iva:'¿Con o sin IVA?', producto:'Producto', precio_unitario:'Precio unitario' };
+const IVA_OPT_LABEL = { con:'Con IVA', sin:'Sin IVA' };
+
+function renderDudaControl(domId, d) {
+  const lbl = DUDA_LABEL[d.campo] || d.campo;
+  if (d.opciones && d.opciones.length) {
+    const opts = d.opciones.map(o => {
+      const txt = IVA_OPT_LABEL[o] || o;
+      return `<option value="${escAttr2(o)}" ${o===d.sugerido?'selected':''}>${escapeHtml(txt)}</option>`;
+    }).join('');
+    const sug = d.sugerido ? `<span class="sug">sug: ${escapeHtml(IVA_OPT_LABEL[d.sugerido]||d.sugerido)}</span>` : '';
+    return `<div class="prov-duda"><label>${escapeHtml(lbl)}</label>
+      <select id="${domId}"><option value="">— elegir —</option>${opts}</select>${sug}</div>`;
+  }
+  return `<div class="prov-duda"><label>${escapeHtml(lbl)}</label>
+    <input id="${domId}" value="${escAttr2(d.sugerido||'')}" placeholder="valor correcto" /></div>`;
+}
+
+function renderPendCard(reg) {
+  const fecha = new Date(reg.creado).toLocaleString('es-AR');
+  const origen = reg.origen && reg.origen.usuario ? `de ${escapeHtml(reg.origen.usuario)}` : '';
+
+  // Dudas a nivel FACTURA (medio de pago, IVA): se confirman una vez.
+  const fact = reg.factura || {};
+  const factDudas = (fact.dudas || []).map(d =>
+    renderDudaControl(`resf-${reg.id}-${d.campo}`, d)).join('');
+  const factBlock = factDudas ? `<div class="prov-pend-item" style="border-color:var(--blue)">
+      <div class="prov-pend-prod">📋 Datos de la factura <span style="font-weight:400;color:var(--text-muted)">· ${escapeHtml(fact.proveedor||'?')}</span></div>
+      ${factDudas}
+    </div>` : '';
+
+  const items = reg.items.map(it => {
+    const ok = !it.dudas || it.dudas.length === 0;
+    const dudasHtml = (it.dudas || []).map(d =>
+      renderDudaControl(`res-${reg.id}-${it.idx}-${d.campo}`, d)).join('');
+    return `<div class="prov-pend-item ${ok?'ok':''}">
+      <div class="prov-pend-prod">${escapeHtml(it.producto || '(producto ilegible)')} <span style="font-weight:400;color:var(--text-muted)">· ${escapeHtml(it.proveedor||'?')}</span></div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">${it.precioUnit?fmt(it.precioUnit):'sin precio'} · ${escapeHtml(it.categoria||'sin categoría')} · ${escapeHtml(it.formaPago||'sin medio de pago')}</div>
+      ${dudasHtml}
+    </div>`;
+  }).join('');
+  return `<div class="prov-pend-card" id="pend-${reg.id}">
+    <div class="prov-pend-head"><span>🧾 ${escapeHtml(reg.imagenInfo?.nombre||'factura')} ${origen}</span><span>${fecha}</span></div>
+    ${factBlock}
+    ${items}
+    <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
+      <button class="btn" onclick="descartarPend('${reg.id}')">Descartar</button>
+      <button class="btn btn-accent" onclick="resolverPend('${reg.id}')">✅ Confirmar y cargar</button>
+    </div>
+  </div>`;
+}
+
+async function resolverPend(id) {
+  const reg = (await api('/api/proveedores/pendientes/' + id)).data;
+  const resoluciones = {};
+  // Dudas de factura (medio de pago, IVA)
+  for (const d of ((reg.factura && reg.factura.dudas) || [])) {
+    const el = document.getElementById(`resf-${id}-${d.campo}`);
+    if (!el || !el.value) continue;
+    resoluciones.factura = resoluciones.factura || {};
+    resoluciones.factura[d.campo] = el.value;
+  }
+  // Dudas por item
+  for (const it of reg.items) {
+    for (const d of (it.dudas || [])) {
+      const el = document.getElementById(`res-${id}-${it.idx}-${d.campo}`);
+      if (!el || !el.value) continue;
+      const key = d.campo === 'precio_unitario' ? 'precioUnit' : d.campo;
+      resoluciones[it.idx] = resoluciones[it.idx] || {};
+      resoluciones[it.idx][key] = el.value;
+    }
+  }
+  try {
+    const r = await api('/api/proveedores/pendientes/' + id + '/resolver', {
+      method: 'POST', body: JSON.stringify({ resoluciones }),
+    });
+    if (r.status === 'escrito') {
+      showToast(`✅ ${r.message}`);
+      document.getElementById('pend-' + id)?.remove();
+    } else {
+      showToast(`⚠️ ${r.message}`);
+    }
+    refreshProvBadge();
+    if (document.getElementById('prov-filter-producto').value) loadProvSerie();
+  } catch (e) { showToast('Error: ' + e.message); }
+}
+
+async function descartarPend(id) {
+  try {
+    await api('/api/proveedores/pendientes/' + id + '/descartar', { method: 'POST', body: '{}' });
+    document.getElementById('pend-' + id)?.remove();
+    refreshProvBadge();
+  } catch (e) { showToast('Error: ' + e.message); }
+}
+
+// ═══ COMPORTAMIENTO DE STOCKS ═══════════════════════════════════════════════════
+const STK_COLORS = { compra: '#4caf82', venta: '#e08a5c' };
+let _stkInit = false;
+let _stkProductos = [], _stkCategorias = [];
+
+async function loadComportamiento() {
+  if (!_stkInit) {
+    try {
+      const { data } = await api('/api/stocks/productos');
+      _stkProductos = data.productos || [];
+      _stkCategorias = data.categorias || [];
+      const catSel = document.getElementById('stk-filter-categoria');
+      catSel.innerHTML = '<option value="">Todas</option>' +
+        _stkCategorias.map(c => `<option value="${escAttr2(c)}">${escapeHtml(c)}</option>`).join('');
+      renderStkProductoOptions('');
+      _stkInit = true;
+    } catch (e) { showToast('Error cargando stocks: ' + e.message); }
+  }
+}
+
+function renderStkProductoOptions(categoria) {
+  const sel = document.getElementById('stk-filter-producto');
+  const prev = sel.value;
+  const lista = (_stkProductos || []).filter(p => !categoria || p.categoria === categoria);
+  sel.innerHTML = '<option value="">Elegí un producto…</option>' +
+    lista.map(p => `<option value="${escAttr2(p.nombre)}">${escapeHtml(p.nombre)}</option>`).join('');
+  if (lista.some(p => p.nombre === prev)) sel.value = prev;
+}
+
+function onStkCategoriaChange() {
+  renderStkProductoOptions(document.getElementById('stk-filter-categoria').value);
+  loadStkProducto();
+}
+
+async function loadStkProducto() {
+  const producto = document.getElementById('stk-filter-producto').value;
+  const categoria = document.getElementById('stk-filter-categoria').value;
+  const desde = document.getElementById('stk-desde').value;
+  const hasta = document.getElementById('stk-hasta').value;
+  const emptyEl = document.getElementById('stk-empty');
+  const bodyEl = document.getElementById('stk-mov-body');
+
+  if (!producto) {
+    emptyEl.style.display = 'block';
+    if (state.charts['stk']) { state.charts['stk'].destroy(); delete state.charts['stk']; }
+    bodyEl.innerHTML = '<tr><td colspan="4" class="prov-empty">—</td></tr>';
+    ['stk-kpi-dias','stk-kpi-compra','stk-kpi-venta','stk-kpi-riesgo'].forEach(id => document.getElementById(id).textContent = '—');
+    return;
+  }
+  emptyEl.style.display = 'none';
+
+  const qs = new URLSearchParams({ producto });
+  if (categoria) qs.set('categoria', categoria);
+  if (desde) qs.set('desde', desde);
+  if (hasta) qs.set('hasta', hasta);
+
+  let data;
+  try { ({ data } = await api('/api/stocks/serie?' + qs.toString())); }
+  catch (e) { showToast('Error: ' + e.message); return; }
+
+  // Info del tipo de match (directo para bebidas, indirecto para insumos)
+  document.getElementById('stk-match-info').textContent = data.matchInfo || '';
+
+  // KPIs
+  document.getElementById('stk-kpi-dias').textContent =
+    data.diasPromedio != null ? `${data.diasPromedio} días` : '—';
+  document.getElementById('stk-kpi-compra').textContent =
+    data.ultimaCompra ? fechaCorta(data.ultimaCompra.fecha) : '—';
+  document.getElementById('stk-kpi-compra-sub').textContent =
+    data.ultimaCompra ? `${data.ultimaCompra.cantidad ?? ''} ${data.unidad || ''}`.trim() : '';
+  document.getElementById('stk-kpi-venta').textContent =
+    data.ultimaVenta ? fechaCorta(data.ultimaVenta.fecha) : '—';
+  document.getElementById('stk-kpi-venta-sub').textContent =
+    data.ultimaVenta ? `${data.ultimaVenta.unidades ?? ''} un.`.trim() : 'sin ventas registradas';
+  const riesgo = data.riesgo || { nivel: '—', detalle: '' };
+  const riesgoEl = document.getElementById('stk-kpi-riesgo');
+  riesgoEl.textContent = riesgo.nivel;
+  document.getElementById('stk-kpi-riesgo-sub').textContent = riesgo.detalle || '';
+
+  // Gráfico: compras (barras verdes) y ventas (barras naranjas) por fecha.
+  const fechasSet = new Set();
+  (data.compras || []).forEach(c => c.fecha && fechasSet.add(c.fecha));
+  (data.ventas || []).forEach(v => v.fecha && fechasSet.add(v.fecha));
+  const labels = [...fechasSet].sort();
+  const lf = iso => { const [y,m,d] = iso.split('-'); return `${d}/${m}`; };
+
+  const comprasPorFecha = {}, ventasPorFecha = {};
+  (data.compras || []).forEach(c => { if (c.fecha) comprasPorFecha[c.fecha] = (comprasPorFecha[c.fecha]||0) + (c.cantidad||0); });
+  (data.ventas || []).forEach(v => { if (v.fecha) ventasPorFecha[v.fecha] = (ventasPorFecha[v.fecha]||0) + (v.unidades||0); });
+
+  if (state.charts['stk']) state.charts['stk'].destroy();
+  state.charts['stk'] = new Chart(document.getElementById('chart-stk').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: labels.map(lf),
+      datasets: [
+        { label: 'Ingreso (compra)', data: labels.map(f => comprasPorFecha[f] || 0), backgroundColor: STK_COLORS.compra },
+        { label: 'Venta', data: labels.map(f => ventasPorFecha[f] || 0), backgroundColor: STK_COLORS.venta },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#e8e8f0', usePointStyle: true } } },
+      scales: {
+        x: { ticks: { color: '#7878a0' }, grid: { color: 'rgba(46,46,62,.4)' } },
+        y: { ticks: { color: '#7878a0' }, grid: { color: 'rgba(46,46,62,.4)' }, beginAtZero: true },
+      },
+    },
+  });
+
+  // Tabla de movimientos (compras + ventas ordenados por fecha)
+  const movs = [];
+  (data.compras || []).forEach(c => movs.push({ fecha: c.fecha, tipo: 'Ingreso', cant: c.cantidad, detalle: `${c.proveedor || ''} · ${fmt(c.precioUnit || 0)}/u` }));
+  (data.ventas || []).forEach(v => movs.push({ fecha: v.fecha, tipo: 'Venta', cant: v.unidades, detalle: v.nombre || '' }));
+  movs.sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+  bodyEl.innerHTML = movs.length
+    ? movs.map(m => `<tr>
+        <td>${fechaCorta(m.fecha)}</td>
+        <td style="color:${m.tipo==='Ingreso'?'var(--green)':'var(--orange)'}">${m.tipo}</td>
+        <td>${m.cant ?? ''}</td>
+        <td style="text-align:left">${escapeHtml(m.detalle)}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="4" class="prov-empty">Sin movimientos en el período.</td></tr>';
+}
+
+function fechaCorta(iso) {
+  if (!iso) return '—';
+  const [y,m,d] = iso.split('-');
+  return `${d}/${m}/${y.slice(-2)}`;
+}
+
+// Arrancar: verificar token guardado o mostrar login
+checkSavedToken();
+</script>
+</body>
+</html>
