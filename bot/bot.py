@@ -48,7 +48,10 @@ log = logging.getLogger(__name__)
 # ── Config ────────────────────────────────────────────────────────────
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 # URL base de la app mercedes-dashboard (ej: https://mercedes-dashboard.up.railway.app)
-APP_BASE_URL = os.environ["APP_BASE_URL"].rstrip("/")
+APP_BASE_URL = os.environ["APP_BASE_URL"].strip().rstrip("/")
+# Tolerancia: si la variable se cargó sin esquema, asumimos https://
+if APP_BASE_URL and not APP_BASE_URL.startswith(("http://", "https://")):
+    APP_BASE_URL = "https://" + APP_BASE_URL
 # Token de servicio que la app valida en el header X-Ingest-Token.
 INGEST_TOKEN = os.environ["PROVEEDORES_INGEST_TOKEN"]
 ALLOWED_USERS = set(u.strip() for u in os.environ.get("ALLOWED_USERS", "").split(",") if u.strip())
@@ -105,20 +108,42 @@ def is_allowed(update: Update) -> bool:
 CAMPO_LABEL = {
     "categoria": "categoría",
     "medioPago": "medio de pago",
+    "iva": "¿se paga con o sin IVA?",
     "producto": "nombre del producto",
     "precio_unitario": "precio unitario",
 }
 
+# Índice especial para las dudas de FACTURA (medio de pago, IVA): -1.
+FACTURA_IDX = -1
 
-def construir_cola(items):
+
+def construir_cola(items, factura=None):
     cola = []
+    # Primero las dudas de FACTURA (medio de pago, IVA) — se preguntan una vez.
+    for d in (factura or {}).get("dudas", []):
+        cola.append((FACTURA_IDX, d["campo"]))
     for it in items:
         for d in it.get("dudas", []):
             cola.append((it["idx"] if "idx" in it else items.index(it), d["campo"]))
     return cola
 
 
-def duda_de(items, item_idx, campo):
+def duda_factura(factura, campo):
+    for d in (factura or {}).get("dudas", []):
+        if d["campo"] == campo:
+            return d
+    return None
+
+
+def duda_de(pend, item_idx, campo):
+    if item_idx == FACTURA_IDX:
+        fact = pend.get("factura") or {}
+        d = duda_factura(fact, campo)
+        if d:
+            # "it" sintético para mostrar contexto del proveedor
+            return {"producto": "(toda la factura)", "proveedor": fact.get("proveedor", "?")}, d
+        return None, None
+    items = pend["items"]
     for it in items:
         idx = it.get("idx", items.index(it))
         if idx == item_idx:
@@ -143,7 +168,7 @@ async def preguntar_siguiente(update_or_query, context):
         return
 
     item_idx, campo = pend["cola"][0]
-    it, d = duda_de(pend["items"], item_idx, campo)
+    it, d = duda_de(pend, item_idx, campo)
     if it is None:
         pend["cola"].pop(0)
         await preguntar_siguiente(update_or_query, context)
@@ -302,18 +327,24 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         items = resp.get("items", [])
         for i, it in enumerate(items):
             it.setdefault("idx", i)
+        factura = resp.get("factura", {}) or {}
         context.chat_data["pend"] = {
             "id": resp.get("pendienteId"),
             "items": items,
-            "cola": construir_cola(items),
+            "factura": factura,
+            "cola": construir_cola(items, factura),
             "resoluciones": {},
             "esperando_texto": None,
             "opciones": {},
         }
-        ok = resp.get("limpios", 0)
+        nfac = len((factura or {}).get("dudas", []))
+        ndud = resp.get("conDudas", 0)
+        partes = []
+        if nfac: partes.append("datos de la factura (medio de pago / IVA)")
+        if ndud: partes.append(f"{ndud} producto(s)")
+        detalle = " y ".join(partes) if partes else "algunos datos"
         await update.message.reply_text(
-            f"📝 Leí {resp.get('total')} producto(s). {ok} sin dudas, "
-            f"{resp.get('conDudas')} para confirmar. Vamos uno por uno:"
+            f"📝 Leí {resp.get('total')} producto(s). Necesito confirmar {detalle}:"
         )
         await preguntar_siguiente(update, context)
         return
@@ -345,9 +376,11 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("No pude registrar la opción, probá de nuevo.")
         return
 
-    pend["resoluciones"].setdefault(item_idx, {})[campo] = valor
+    key = "factura" if item_idx == FACTURA_IDX else item_idx
+    pend["resoluciones"].setdefault(key, {})[campo] = valor
     pend["cola"] = [c for c in pend["cola"] if not (c[0] == item_idx and c[1] == campo)]
-    await query.edit_message_text(f"✅ {CAMPO_LABEL.get(campo, campo).capitalize()}: *{valor}*", parse_mode="Markdown")
+    etiqueta = CAMPO_LABEL.get(campo, campo)
+    await query.edit_message_text(f"✅ {etiqueta}: *{valor}*", parse_mode="Markdown")
     await preguntar_siguiente(query, context)
 
 
@@ -364,13 +397,15 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if campo == "precio_unitario":
             try:
                 valor_num = float(valor.replace(".", "").replace(",", "."))
-                pend["resoluciones"].setdefault(item_idx, {})["precioUnit"] = valor_num
+                key = "factura" if item_idx == FACTURA_IDX else item_idx
+                pend["resoluciones"].setdefault(key, {})["precioUnit"] = valor_num
             except ValueError:
                 await update.message.reply_text("No entendí el número. Probá de nuevo (ej: 17990).")
                 pend["esperando_texto"] = (item_idx, campo)
                 return
         else:
-            pend["resoluciones"].setdefault(item_idx, {})[campo] = valor
+            key = "factura" if item_idx == FACTURA_IDX else item_idx
+            pend["resoluciones"].setdefault(key, {})[campo] = valor
         await update.message.reply_text(f"✅ Anotado: *{valor}*", parse_mode="Markdown")
     else:
         await update.message.reply_text("⏭️ Lo dejo para la app.")
