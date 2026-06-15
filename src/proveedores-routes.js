@@ -267,5 +267,26 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
     res.json({ ok: true, message: 'Cache de proveedores limpiado.' });
   });
 
+  // ─── Stocks: productos (lista) y serie ingreso vs venta ───────────────────────
+  const stocks = require('./stocks');
+  router.get('/api/stocks/productos', authMiddleware, soloAdmin, async (req, res) => {
+    try { res.json({ ok: true, data: await stocks.getProductosStock() }); }
+    catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+  router.get('/api/stocks/serie', authMiddleware, soloAdmin, async (req, res) => {
+    try {
+      const { producto, categoria, desde, hasta } = req.query;
+      if (!producto) return res.status(400).json({ ok: false, error: 'Falta el parámetro producto' });
+      res.json({ ok: true, data: await stocks.getSerieStock({ producto, categoria, desde, hasta }) });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+  // Corrección manual del match producto↔venta FUDO
+  router.post('/api/stocks/match', authMiddleware, soloAdmin, (req, res) => {
+    const { producto, nombreFudo } = req.body || {};
+    if (!producto || !nombreFudo) return res.status(400).json({ ok: false, error: 'Faltan producto y nombreFudo' });
+    stocks.setMatchOverride(producto, nombreFudo);
+    res.json({ ok: true, message: 'Match actualizado' });
+  });
+
   return router;
 };
