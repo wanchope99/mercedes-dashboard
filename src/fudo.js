@@ -516,6 +516,40 @@ async function getServicios({ desde, hasta } = {}) {
     .map(resumenDeDetalle);
 }
 
+// ─── Detalles completos de todos los días (para análisis de stock) ─────────────
+// Igual que getServicios pero devuelve el detalle COMPLETO (productos por categoría)
+// de cada día, no el resumen. Lo usa el módulo de stocks para rastrear ventas de un
+// producto a lo largo del tiempo.
+async function getDetallesTodos({ desde, hasta } = {}) {
+  const dDesde = desde || null;
+  const dHasta = hasta || null;
+  const hoyServ = fechaServicioHoy();
+
+  const hist = await loadHistorico();
+  const fechasHist = Object.keys(hist).sort();
+  const maxHist = fechasHist[fechasHist.length - 1] || null;
+  const necesitaFudo = !maxHist || !dHasta || dHasta > maxHist;
+
+  let frescos = {};
+  if (necesitaFudo) {
+    try {
+      const raw = await loadRaw();
+      frescos = buildDetalles(raw);
+    } catch (e) {
+      if (!fechasHist.length) throw e;
+      console.warn('Fudo no disponible (stocks), uso histórico:', e.message);
+    }
+  }
+
+  const dias = {};
+  for (const [fecha, d] of Object.entries(frescos)) if (!hist[fecha]) dias[fecha] = d;
+  for (const [fecha, h] of Object.entries(hist)) dias[fecha] = h.detalle;
+
+  return Object.values(dias)
+    .filter(d => (!dDesde || d.fecha >= dDesde) && (!dHasta || d.fecha <= dHasta))
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+
 // ─── Detalle de un servicio (un día) ───────────────────────────────────────────
 async function getServicioDetalle(fecha) {
   const hist = await loadHistorico();
@@ -584,5 +618,6 @@ function clearFudoCache() {
 
 module.exports = {
   getServicios, getServicioDetalle, getServicioDebug, resnapshotDia,
+  getDetallesTodos,
   clearFudoCache, grupoDeCategoria, fechaServicio, fechaServicioHoy,
 };

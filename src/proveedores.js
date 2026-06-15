@@ -264,9 +264,11 @@ async function getProductosYCategorias() {
     if (!c.producto) continue;
     const cat = cats.normalizarCategoria(c.categoria).categoria || c.categoria;
     if (cat) categorias.add(cat);
-    const key = cats.norm(c.producto);
+    // Agrupar productos equivalentes bajo su nombre canónico (sin sufijos de IVA/remito).
+    const canon = cats.nombreCanonico(c.producto);
+    const key = cats.norm(canon);
     if (!productos.has(key)) {
-      productos.set(key, { nombre: c.producto, categoria: cat, proveedores: new Set(), compras: 0 });
+      productos.set(key, { nombre: canon, categoria: cat, proveedores: new Set(), compras: 0 });
     }
     const p = productos.get(key);
     p.compras++;
@@ -287,7 +289,9 @@ async function getProductosYCategorias() {
 //            resumen: [{ proveedor, ultimoPrecio, precioPromedio, minPrecio, maxPrecio, compras }] }
 async function getSerieProducto({ producto, categoria, desde, hasta } = {}) {
   const compras = await getCompras();
-  const pn = cats.norm(producto);
+  // El producto que llega del selector es el NOMBRE CANÓNICO; matcheamos contra
+  // el canónico de cada compra para juntar variantes (+IVA, en Remito, etc.).
+  const pn = cats.norm(cats.nombreCanonico(producto));
 
   // Config de IVA por proveedor: para "con IVA" comparamos el precio CON IVA;
   // para "sin IVA" o desconocido, el precio tal cual figura.
@@ -310,7 +314,7 @@ async function getSerieProducto({ producto, categoria, desde, hasta } = {}) {
   };
 
   const filtradas = compras.filter(c => {
-    if (!c.producto || cats.norm(c.producto) !== pn) return false;
+    if (!c.producto || cats.norm(cats.nombreCanonico(c.producto)) !== pn) return false;
     if (c.precioUnit == null) return false;
     if (categoria && cats.normalizarCategoria(c.categoria).categoria !== categoria) return false;
     if (desde && c.fecha && c.fecha < desde) return false;
