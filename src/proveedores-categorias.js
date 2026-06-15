@@ -23,7 +23,6 @@ const CATEGORIAS = [
   'Bebidas y Alcohol',
   // Catch-all para gastos que no son ingredientes pero entran por factura
   'Insumos',
-  'Limpieza',
   'Otro',
 ];
 
@@ -74,7 +73,7 @@ const MAPEO_CATEGORIAS_VIEJAS = {
   'vino': 'Bebidas y Alcohol',
   // No-ingredientes
   'insumos': 'Insumos',
-  'limpieza': 'Limpieza',
+  'limpieza': 'Insumos',
   'otro': 'Otro',
   'otros': 'Otro',
 };
@@ -91,13 +90,12 @@ const KEYWORDS = {
   'Lacteos y Huevos': ['huevo', 'maple', 'leche', 'crema', 'queso', 'manteca', 'yogur', 'ricota', 'muzzarella', 'mozzarella', 'parmesano', 'dulce de leche', 'lacteo'],
   'Panificados y Masas': ['pan', 'panificado', 'factura', 'masa', 'tapa', 'prepizza', 'bizcocho', 'galleta', 'tostada', 'budin', 'medialuna', 'acequia'],
   'Bebidas y Alcohol': ['vino', 'cerveza', 'birra', 'barril', 'gaseosa', 'coca', 'sprite', 'schweppes', 'tonica', 'agua', 'soda', 'vermut', 'vermu', 'whisky', 'gin', 'fernet', 'aperitivo', 'espumante', 'champagne', 'malbec', 'cabernet', 'pinot', 'chardonnay', 'sauvignon', 'jugo', 'tetra', 'conac'],
-  'Limpieza': ['detergente', 'lavandina', 'esponja', 'fibra', 'rejilla', 'trapo', 'virulana', 'jabon', 'limpiador', 'rociador', 'escoba', 'balde', 'cloro', 'papelera'],
-  'Insumos': ['film', 'aluminio', 'papel', 'servilleta', 'descartable', 'bolsa', 'guante', 'frasco', 'precinto', 'rollo', 'vela', 'pila', 'escarbadiente', 'alumax', 'polyfilm', 'folex', 'tupper', 'envase'],
+  'Insumos': ['detergente', 'lavandina', 'esponja', 'fibra', 'rejilla', 'trapo', 'virulana', 'jabon', 'limpiador', 'rociador', 'escoba', 'balde', 'cloro', 'papelera', 'film', 'aluminio', 'papel', 'servilleta', 'descartable', 'bolsa', 'guante', 'frasco', 'precinto', 'rollo', 'vela', 'pila', 'escarbadiente', 'alumax', 'polyfilm', 'folex', 'tupper', 'envase'],
 };
 
 // ─── Medios de pago ──────────────────────────────────────────────────────────────
 // REGLA CLAVE: "Efectivo" en una factura = "Efectivo Local" en el sistema.
-const MEDIOS_PAGO = ['Efectivo Local', 'Mercado Pago', 'Galicia', 'Echeq', 'Contado', 'Otro'];
+const MEDIOS_PAGO = ['Efectivo Local', 'Mercado Pago', 'Galicia', 'Echeq', 'Otro'];
 
 function normalizarMedioPago(medio) {
   const m = (medio || '').toString().trim().toLowerCase();
@@ -107,7 +105,7 @@ function normalizarMedioPago(medio) {
   if (m.includes('mercado pago') || m === 'mp') return 'Mercado Pago';
   if (m.includes('galicia')) return 'Galicia';
   if (m.includes('echeq') || m.includes('cheque')) return 'Echeq';
-  if (m === 'contado' || m.includes('contado')) return 'Contado';
+  if (m === 'contado' || m.includes('contado')) return 'Efectivo Local';
   return medio; // dejar tal cual si no matchea (puede quedar pendiente de confirmar)
 }
 
@@ -265,10 +263,40 @@ function nombreCanonico(nombre) {
   return s || (nombre || '').toString().trim();
 }
 
+
+// ─── Normalización de nombre de proveedor (alias) ───────────────────────────────
+// Algunos proveedores aparecen en la factura con un nombre distinto al que usamos.
+// Reglas:
+//  · "Adicional 2015"  → "Thames"
+//  · vendedor "Diego Wesenack" (en cualquier factura) → proveedor "Thames"
+// alias por nombre: { nombreNormalizado: 'Nombre Final' }
+const ALIAS_PROVEEDOR = {
+  'adicional 2015': 'Thames',
+  'adicional2015': 'Thames',
+};
+// alias por vendedor (si el vendedor matchea, se fuerza ese proveedor)
+const ALIAS_POR_VENDEDOR = {
+  'diego wesenack': 'Thames',
+};
+
+function normalizarProveedor(nombre, vendedor) {
+  const v = norm(vendedor);
+  for (const [k, final] of Object.entries(ALIAS_POR_VENDEDOR)) {
+    if (v && v.includes(k)) return final;
+  }
+  const n = norm(nombre);
+  if (ALIAS_PROVEEDOR[n]) return ALIAS_PROVEEDOR[n];
+  // match parcial (por si viene "Adicional 2015 SRL" o similar)
+  for (const [k, final] of Object.entries(ALIAS_PROVEEDOR)) {
+    if (n && n.includes(k)) return final;
+  }
+  return (nombre || '').toString().trim();
+}
+
 module.exports = {
   CATEGORIAS, CATEGORIAS_SET, MEDIOS_PAGO,
   MAPEO_CATEGORIAS_VIEJAS, KEYWORDS,
   normalizarMedioPago, normalizarCategoria,
   inferirPorKeywords, construirIndiceInferencia, sugerirCategoria,
-  resolverItem, norm, nombreCanonico,
+  resolverItem, norm, nombreCanonico, normalizarProveedor,
 };
