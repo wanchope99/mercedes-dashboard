@@ -185,6 +185,8 @@ async def preguntar_siguiente(update_or_query, context):
         "producto-historico": " (según compras previas de este producto)",
         "keywords": " (estimado por el nombre)",
         "baja-confianza": " (la imagen no era clara)",
+        "plazo-no-es-medio": " (la factura dice \"Contado\", que es un plazo, no el medio real)",
+        "proveedor-config": " (medio habitual de este proveedor)",
     }.get(fuente, "")
 
     texto = (
