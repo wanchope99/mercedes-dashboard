@@ -28,6 +28,7 @@ producto). Devolvé un OBJETO JSON con esta forma EXACTA, sin texto adicional:
     "fecha": "YYYY-MM-DD",
     "proveedor": "Nombre del proveedor",
     "forma_de_pago": "Efectivo | Mercado Pago | Galicia | Echeq | Contado | \\"\\"",
+    "vendedor": "Nombre del vendedor si figura en la factura, o \\"\\"",
     "dias_credito": 0,
     "total_factura": 0,
     "confianza": { "proveedor": 0.0, "fecha": 0.0, "forma_de_pago": 0.0, "total_factura": 0.0 }
@@ -51,10 +52,14 @@ Categorías válidas (usá EXACTAMENTE estos nombres):
 ${cats.CATEGORIAS.map(c => `  · ${c}`).join('\n')}
 
 Reglas IMPORTANTES:
-- DISTINGUÍ forma de pago (cómo se paga: efectivo, transferencia, etc.) de
-  días de crédito (plazo: "30 días", "Contado"). NUNCA pongas "30 días" como
-  forma de pago: eso es dias_credito = 30. Si dice "Contado" / "Contado efectivo",
-  forma_de_pago = "Efectivo" y dias_credito = 0.
+- DISTINGUÍ forma de pago (CÓMO se paga: efectivo, transferencia, Mercado Pago,
+  tarjeta) de días de crédito / condición (plazo: "30 días", "Contado").
+  · "30 días" → dias_credito = 30, NO es forma de pago.
+  · "Contado" o "Plazo de Pago: Contado" es una CONDICIÓN, no dice cómo se pagó.
+    En ese caso poné forma_de_pago = "Contado" PERO con confianza BAJA (0.2),
+    porque no sabés si fue efectivo, transferencia o MP — que un humano confirme.
+  · Solo poné forma_de_pago con confianza ALTA si la factura dice explícitamente
+    el medio (ej. "Efectivo", "Transferencia", "Mercado Pago", "Tarjeta").
 - forma_de_pago y dias_credito van en "factura" (son de toda la factura, NO por
   producto).
 - iva_porcentaje: la alícuota de IVA de esa línea (21, 10.5, 0). Si la factura la
@@ -98,6 +103,7 @@ async function extraerDeImagen({ base64, mime = 'image/jpeg' }) {
     lineas = Array.isArray(parsed.items) ? parsed.items : [];
   }
 
+  factura.vendedor = factura.vendedor || '';
   const fconf = factura.confianza || {};
   // Aplanar: cada línea hereda los datos de cabecera de la factura. Así el resto
   // del pipeline (resolverItem, etc.) sigue trabajando con items planos.
