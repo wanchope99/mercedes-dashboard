@@ -273,6 +273,10 @@ function nombreCanonico(nombre) {
 const ALIAS_PROVEEDOR = {
   'adicional 2015': 'Thames',
   'adicional2015': 'Thames',
+  // El Ekeko: proveedor de carne más importante (figura mucho en Movimientos)
+  'lisandro de la torre': 'El Ekeko',
+  // El Rey del Lechon
+  'federico miguel alexander': 'El Rey del Lechon',
 };
 // alias por vendedor (si el vendedor matchea, se fuerza ese proveedor)
 const ALIAS_POR_VENDEDOR = {
