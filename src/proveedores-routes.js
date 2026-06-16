@@ -202,13 +202,17 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
   });
 
   // ─── Listado de pendientes (panel de notificaciones) ──────────────────────────
-  router.get('/api/proveedores/pendientes', authMiddleware, soloAdmin, (req, res) => {
+  // Antes de listar, rehidratamos desde la hoja (sobreviven a los redeploys).
+  router.get('/api/proveedores/pendientes', authMiddleware, soloAdmin, async (req, res) => {
+    try { await prov.cargarPendientesPersistidos(); } catch (e) {}
     res.json({ ok: true, data: prov.listPendientes() });
   });
-  router.get('/api/proveedores/pendientes/count', authMiddleware, soloAdmin, (req, res) => {
+  router.get('/api/proveedores/pendientes/count', authMiddleware, soloAdmin, async (req, res) => {
+    try { await prov.cargarPendientesPersistidos(); } catch (e) {}
     res.json({ ok: true, count: prov.countPendientes() });
   });
-  router.get('/api/proveedores/pendientes/:id', authMiddleware, soloAdmin, (req, res) => {
+  router.get('/api/proveedores/pendientes/:id', authMiddleware, soloAdmin, async (req, res) => {
+    try { await prov.cargarPendientesPersistidos(); } catch (e) {}
     const reg = prov.getPendiente(req.params.id);
     if (!reg) return res.status(404).json({ ok: false, error: 'Pendiente no encontrado' });
     res.json({ ok: true, data: reg });
@@ -219,6 +223,7 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
   // Acepta token de servicio (bot) o usuario.
   router.post('/api/proveedores/pendientes/:id/resolver', ingestAuth, async (req, res) => {
     try {
+      try { await prov.cargarPendientesPersistidos(); } catch (e) {}
       const out = prov.aplicarResoluciones(req.params.id, (req.body && req.body.resoluciones) || {});
       if (!out) return res.status(404).json({ ok: false, error: 'Pendiente no encontrado' });
 
