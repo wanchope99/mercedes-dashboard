@@ -2747,9 +2747,9 @@ document.getElementById('prov-modal-overlay').addEventListener('click', function
 function copyProvDatos(texto, btn) {
   navigator.clipboard.writeText(texto).then(() => { btn.textContent = '✅ Copiado'; btn.classList.add('copied'); setTimeout(() => { btn.textContent = '📋 Copiar datos'; btn.classList.remove('copied'); }, 2000); });
 }
-function escapeHtml(str) { return (str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function escapeAttr(str) { return (str||'').replace(/'/g,"\\'").replace(/\n/g,' '); }
-function escAttr2(str){return (str||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function escapeHtml(str) { return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escapeAttr(str) { return String(str ?? '').replace(/'/g,"\\'").replace(/\n/g,' '); }
+function escAttr2(str){return String(str ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
 // ─── Modal nuevo pago ─────────────────────────────────────────────────────────
 const MESES_NOMBRES_PAGO = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
