@@ -681,6 +681,18 @@
       <div class="kpi-card red"><div class="kpi-label">Riesgo out-of-stock</div><div class="kpi-value" id="stk-kpi-riesgo">—</div><div class="kpi-sub" id="stk-kpi-riesgo-sub"></div></div>
     </div>
 
+    <div class="card" id="stk-totales-card" style="display:none">
+      <div class="card-title">Balance en unidad base
+        <span id="stk-totales-unidad" style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"></span>
+      </div>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:baseline;padding:4px 2px">
+        <div><div style="font-size:11px;color:var(--text-muted)">Ingresó (compras)</div><div id="stk-tot-ingreso" style="font-size:22px;font-weight:700;color:var(--green)">—</div></div>
+        <div><div style="font-size:11px;color:var(--text-muted)">Se vendió (FUDO)</div><div id="stk-tot-venta" style="font-size:22px;font-weight:700;color:var(--orange)">—</div></div>
+        <div><div style="font-size:11px;color:var(--text-muted)">Balance (stock teórico)</div><div id="stk-tot-balance" style="font-size:22px;font-weight:700">—</div></div>
+      </div>
+      <div id="stk-tot-nota" style="font-size:11px;color:var(--text-muted);margin-top:4px"></div>
+    </div>
+
     <div class="card">
       <div class="card-title">Ingresos (compras) vs Ventas en el tiempo
         <span id="stk-match-info" style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"></span>
@@ -3431,7 +3443,7 @@ async function openProvNotif() {
 }
 function closeProvNotif() { document.getElementById('prov-notif-overlay').classList.remove('open'); }
 
-const DUDA_LABEL = { categoria:'Categoría', medioPago:'Medio de pago', iva:'¿Con o sin IVA?', producto:'Producto', precio_unitario:'Precio unitario' };
+const DUDA_LABEL = { categoria:'Categoría', medioPago:'Medio de pago', iva:'¿Con o sin IVA?', producto:'Producto', precio_unitario:'Precio unitario', factor:'¿Cuántas botellas por empaque?' };
 const IVA_OPT_LABEL = { con:'Con IVA', sin:'Sin IVA' };
 
 function renderDudaControl(domId, d) {
@@ -3444,6 +3456,13 @@ function renderDudaControl(domId, d) {
     const sug = d.sugerido ? `<span class="sug">sug: ${escapeHtml(IVA_OPT_LABEL[d.sugerido]||d.sugerido)}</span>` : '';
     return `<div class="prov-duda"><label>${escapeHtml(lbl)}</label>
       <select id="${domId}"><option value="">— elegir —</option>${opts}</select>${sug}</div>`;
+  }
+  if (d.campo === 'factor') {
+    const uni = d.unidad ? escapeHtml(d.unidad) : 'empaque';
+    const base = d.unidadBase ? escapeHtml(d.unidadBase) : 'botellas';
+    return `<div class="prov-duda"><label>${escapeHtml(lbl)}</label>
+      <input id="${domId}" type="number" min="1" step="1" value="${escAttr2(d.sugerido||'')}" placeholder="ej: 6" />
+      <span class="sug">1 ${uni} = ? ${base}</span></div>`;
   }
   return `<div class="prov-duda"><label>${escapeHtml(lbl)}</label>
     <input id="${domId}" value="${escAttr2(d.sugerido||'')}" placeholder="valor correcto" /></div>`;
@@ -3573,6 +3592,7 @@ async function loadStkProducto() {
     if (state.charts['stk']) { state.charts['stk'].destroy(); delete state.charts['stk']; }
     bodyEl.innerHTML = '<tr><td colspan="4" class="prov-empty">—</td></tr>';
     ['stk-kpi-dias','stk-kpi-compra','stk-kpi-venta','stk-kpi-riesgo'].forEach(id => document.getElementById(id).textContent = '—');
+    document.getElementById('stk-totales-card').style.display = 'none';
     return;
   }
   emptyEl.style.display = 'none';
@@ -3598,12 +3618,32 @@ async function loadStkProducto() {
     data.ultimaCompra ? `${data.ultimaCompra.cantidad ?? ''} ${data.unidad || ''}`.trim() : '';
   document.getElementById('stk-kpi-venta').textContent =
     data.ultimaVenta ? fechaCorta(data.ultimaVenta.fecha) : '—';
+  const uniBase = (data.totales && data.totales.unidad) || data.unidadBase || 'un.';
   document.getElementById('stk-kpi-venta-sub').textContent =
-    data.ultimaVenta ? `${data.ultimaVenta.unidades ?? ''} un.`.trim() : 'sin ventas registradas';
+    data.ultimaVenta ? `${data.ultimaVenta.unidades ?? ''} ${uniBase}`.trim() : 'sin ventas registradas';
   const riesgo = data.riesgo || { nivel: '—', detalle: '' };
   const riesgoEl = document.getElementById('stk-kpi-riesgo');
   riesgoEl.textContent = riesgo.nivel;
   document.getElementById('stk-kpi-riesgo-sub').textContent = riesgo.detalle || '';
+
+  // Totales comparables (misma unidad base: botellas)
+  const tot = data.totales;
+  const totCard = document.getElementById('stk-totales-card');
+  if (tot && data.directo) {
+    const u = tot.unidad || 'un.';
+    document.getElementById('stk-totales-unidad').textContent = '· en ' + u.toLowerCase() + 's';
+    document.getElementById('stk-tot-ingreso').textContent = `${tot.ingresado} ${u}`;
+    document.getElementById('stk-tot-venta').textContent = `${tot.vendido} ${u}`;
+    const balEl = document.getElementById('stk-tot-balance');
+    balEl.textContent = `${tot.balance} ${u}`;
+    balEl.style.color = tot.balance < 0 ? 'var(--red)' : 'var(--text)';
+    document.getElementById('stk-tot-nota').textContent = tot.huboEmpaque
+      ? 'Incluye compras por caja/pack normalizadas a ' + u.toLowerCase() + 's. Balance = ingresó − vendió (stock teórico del período).'
+      : 'Balance = ingresó − vendió (stock teórico del período).';
+    totCard.style.display = '';
+  } else {
+    totCard.style.display = 'none';
+  }
 
   // Gráfico: compras (barras verdes) y ventas (barras naranjas) por fecha.
   const fechasSet = new Set();
@@ -3638,7 +3678,13 @@ async function loadStkProducto() {
 
   // Tabla de movimientos (compras + ventas ordenados por fecha)
   const movs = [];
-  (data.compras || []).forEach(c => movs.push({ fecha: c.fecha, tipo: 'Ingreso', cant: c.cantidad, detalle: `${c.proveedor || ''} · ${fmt(c.precioUnit || 0)}/u` }));
+  (data.compras || []).forEach(c => {
+    let det = `${c.proveedor || ''} · ${fmt(c.precioUnit || 0)}/u`;
+    if (c.factor && c.factor > 1 && c.cantidadOriginal != null) {
+      det += ` · (factura: ${c.cantidadOriginal} ${c.unidadOriginal || 'caja'} × ${c.factor})`;
+    }
+    movs.push({ fecha: c.fecha, tipo: 'Ingreso', cant: c.cantidad, detalle: det });
+  });
   (data.ventas || []).forEach(v => movs.push({ fecha: v.fecha, tipo: 'Venta', cant: v.unidades, detalle: v.nombre || '' }));
   movs.sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
   bodyEl.innerHTML = movs.length
