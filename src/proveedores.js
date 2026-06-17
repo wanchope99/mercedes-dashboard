@@ -13,6 +13,7 @@
 const { google } = require('googleapis');
 const NodeCache = require('node-cache');
 const cats = require('./proveedores-categorias');
+const unidades = require('./unidades');
 let provCfg = null; try { provCfg = require('./proveedores-config'); } catch (e) {}
 
 const cache = new NodeCache({ stdTTL: 120 });
@@ -22,15 +23,20 @@ const cache = new NodeCache({ stdTTL: 120 });
 const PROV_SHEET_ID = process.env.PROVEEDORES_SHEET_ID || process.env.SPREADSHEET_ID;
 const COMPRAS_SHEET = process.env.PROVEEDORES_COMPRAS_SHEET || 'Compras';
 
-// Columnas de la hoja Compras (A:P):
+// Columnas de la hoja Compras (A:S):
 // A Fecha · B Proveedor · C Categoría · D Producto · E Cantidad · F Unidad
 // G Precio Unit. ($) · H Subtotal (=E*G) · I Descuento (%) · J Total ($) (=H*(1-I/100))
 // K % IVA · L Total con IVA (=J*(1+K/100)) · M Forma de Pago · N Días de Crédito
 // O Entrega OK? · P Notas
+// --- Normalización de unidades (la unidad de venta/FUDO es la BASE; ej: Botella) ---
+// E/F/G se guardan YA NORMALIZADOS a la unidad base. Estas columnas preservan lo
+// que decía la factura, para trazabilidad:
+// Q Cantidad Original · R Unidad Original · S Factor (unidades base por empaque)
 const COL = { fecha:0, proveedor:1, categoria:2, producto:3, cantidad:4, unidad:5,
   precioUnit:6, subtotal:7, descuento:8, total:9, ivaPct:10, totalConIva:11,
-  formaPago:12, diasCredito:13, entregaOk:14, notas:15 };
-const RANGE_COMPRAS = 'A:P';
+  formaPago:12, diasCredito:13, entregaOk:14, notas:15,
+  cantidadOriginal:16, unidadOriginal:17, factor:18 };
+const RANGE_COMPRAS = 'A:S';
 
 function getAuthRW() {
   const credentials = process.env.GOOGLE_CREDENTIALS_JSON
@@ -91,7 +97,7 @@ async function getComprasRaw() {
   const sheets = sheetsClient();
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: PROV_SHEET_ID,
-    range: `${COMPRAS_SHEET}!A:P`,
+    range: `${COMPRAS_SHEET}!A:S`,
   });
   const rows = res.data.values || [];
   cache.set('compras_raw', rows);
@@ -150,6 +156,10 @@ async function getCompras() {
       diasCredito: parseNum(r[COL.diasCredito]),
       entregaOk: (r[COL.entregaOk] || '').toString().trim(),
       notas: (r[COL.notas] || '').toString().trim(),
+      // Trazabilidad de normalización de unidades (columnas Q/R/S)
+      cantidadOriginal: parseNum(r[COL.cantidadOriginal]),
+      unidadOriginal: (r[COL.unidadOriginal] || '').toString().trim(),
+      factor: parseNum(r[COL.factor]),
     });
   }
   return out;
@@ -180,7 +190,10 @@ async function appendCompras(items) {
   const existentes = await getComprasRaw();
   let nextRow = existentes.length + 1; // append va después de la última fila con datos
 
-  const values = items.map((it) => {
+  const values = items.map((raw) => {
+    // Normalizar unidad → base (ej: Caja x6 → 6 Botellas). Idempotente: si ya viene
+    // normalizado (esBase / factor 1) o no es normalizable, no cambia cantidad.
+    const it = unidades.normalizarLinea(raw);
     const fila = nextRow++;
     const cant = it.cantidad ?? '';
     const pu = it.precioUnit ?? '';
@@ -211,12 +224,15 @@ async function appendCompras(items) {
       it.diasCredito ?? 0,                                 // N Días de Crédito
       it.entregaOk || 'Sí',                                // O Entrega OK?
       it.notas || '',                                      // P Notas
+      it.normalizada ? (it.cantidadOriginal ?? '') : '',   // Q Cantidad Original
+      it.normalizada ? (it.unidadOriginal || '') : '',     // R Unidad Original
+      it.normalizada ? (it.factorConversion ?? '') : '',   // S Factor (base/empaque)
     ];
   });
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: PROV_SHEET_ID,
-    range: `${COMPRAS_SHEET}!A:P`,
+    range: `${COMPRAS_SHEET}!A:S`,
     valueInputOption: 'USER_ENTERED',
     insertDataOption: 'INSERT_ROWS',
     requestBody: { values },
@@ -497,10 +513,17 @@ function aplicarResoluciones(id, resoluciones = {}) {
     if (r.medioPago) it.formaPago = r.medioPago;
     if (r.producto) it.producto = r.producto;
     if (r.precioUnit != null && r.precioUnit !== '') it.precioUnit = Number(r.precioUnit);
+    // Factor de conversión confirmado por el humano (cuántas botellas trae el empaque).
+    // Se guarda como unidadesPorPaquete para que normalizarLinea lo aplique al escribir.
+    if (r.factor != null && r.factor !== '') {
+      const fnum = Number(r.factor);
+      if (Number.isFinite(fnum) && fnum >= 1) it.unidadesPorPaquete = fnum;
+    }
     it.dudas = (it.dudas || []).filter(d => {
       if (d.campo === 'categoria') return !it.categoria || !cats.CATEGORIAS_SET.has(it.categoria);
       if (d.campo === 'producto') return !it.producto || !it.producto.toString().trim();
       if (d.campo === 'precio_unitario') return !(Number(it.precioUnit) > 0);
+      if (d.campo === 'factor') return !(Number(it.unidadesPorPaquete) >= 1);
       return false;
     });
   }

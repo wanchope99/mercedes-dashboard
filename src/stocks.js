@@ -96,7 +96,12 @@ async function getSerieStock({ producto, categoria, desde, hasta } = {}) {
     .filter(c => c.producto && cats.norm(cats.nombreCanonico(c.producto)) === pn)
     .filter(c => !categoria || cats.normalizarCategoria(c.categoria).categoria === categoria)
     .filter(c => (!desde || !c.fecha || c.fecha >= desde) && (!hasta || !c.fecha || c.fecha <= hasta))
-    .map(c => ({ fecha: c.fecha, cantidad: c.cantidad, precioUnit: c.precioUnit, proveedor: c.proveedor, unidad: c.unidad }))
+    .map(c => ({
+      fecha: c.fecha, cantidad: c.cantidad, precioUnit: c.precioUnit,
+      proveedor: c.proveedor, unidad: c.unidad,
+      // Trazabilidad: lo que decía la factura antes de normalizar a unidad base.
+      cantidadOriginal: c.cantidadOriginal, unidadOriginal: c.unidadOriginal, factor: c.factor,
+    }))
     .sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
 
   // Categoría del producto (para decidir match directo/indirecto)
@@ -147,11 +152,28 @@ async function getSerieStock({ producto, categoria, desde, hasta } = {}) {
     ? (matchNombre ? `· venta FUDO: "${matchNombre}" (match directo)` : '· sin venta FUDO encontrada')
     : (matchNombre ? `· match indirecto con "${matchNombre}" — este insumo se vende dentro de platos, el dato es aproximado` : '· insumo de cocina: no se vende tal cual, sin match directo');
 
+  // ── Totales en la UNIDAD BASE (ej: botellas) ──
+  // Como las compras se guardan ya normalizadas (Caja→Botella), ingreso y venta
+  // están en la misma unidad y son comparables directamente.
+  const totalIngresado = compras.reduce((s, c) => s + (Number(c.cantidad) || 0), 0);
+  const totalVendido   = ventas.reduce((s, v) => s + (Number(v.unidades) || 0), 0);
+  // ¿Alguna compra entró por empaque (caja/pack) y fue normalizada?
+  const huboEmpaque = compras.some(c => c.factor && c.factor > 1);
+  const unidadBase = unidad || (directo ? 'Botella' : '');
+
   return {
-    producto: canon, categoria: catProd, unidad, directo,
+    producto: canon, categoria: catProd, unidad, unidadBase, directo,
     compras, ventas,
     diasPromedio, ultimaCompra, ultimaVenta, riesgo,
     matchNombre, matchSim, matchInfo,
+    // Resumen comparable ingreso vs venta (misma unidad base)
+    totales: {
+      ingresado: Math.round(totalIngresado * 100) / 100,
+      vendido: Math.round(totalVendido * 100) / 100,
+      balance: Math.round((totalIngresado - totalVendido) * 100) / 100,
+      unidad: unidadBase,
+      huboEmpaque,
+    },
   };
 }
 

@@ -39,12 +39,13 @@ producto). Devolvé un OBJETO JSON con esta forma EXACTA, sin texto adicional:
       "producto": "Nombre del producto",
       "cantidad": 10,
       "unidad": "Kg | Unidad | Caja | Bandeja | Litro | Atado | Bolsa | Maple | ...",
+      "unidades_por_paquete": 6,
       "precio_unitario": 350,
       "descuento_porcentaje": 0,
       "iva_porcentaje": 21,
       "total_linea": 3500,
       "notas": "",
-      "confianza": { "categoria": 0.0, "producto": 0.0, "precio_unitario": 0.0, "iva_porcentaje": 0.0 }
+      "confianza": { "categoria": 0.0, "producto": 0.0, "precio_unitario": 0.0, "iva_porcentaje": 0.0, "unidades_por_paquete": 0.0 }
     }
   ]
 }
@@ -73,6 +74,12 @@ Reglas IMPORTANTES:
 - total_factura = el TOTAL final de la factura (con impuestos), para control.
 - "confianza" 0 a 1. Si no podés leer algo, poné tu mejor estimación con confianza
   BAJA (< 0.6) o "" / 0 si es ilegible. NO inventes. Es mejor que un humano confirme.
+- unidades_por_paquete: SOLO para bebidas/vinos vendidos por EMPAQUE (Caja, Cajón,
+  Pack, Bulto). Es cuántas BOTELLAS trae ese empaque. Buscalo en la descripción:
+  "Caja x6", "x6", "Pack 6u", "6x750ml", "Caja de 12". Ej: "Malbec Caja x6" → 6.
+  · Si la unidad ya es Botella/Unidad suelta, poné 1.
+  · Si NO podés determinar cuántas botellas trae el empaque, poné 0 con confianza 0
+    (un humano lo confirmará). NO inventes el número.
 - La fecha en formato YYYY-MM-DD. Si no aparece, "" con confianza 0.`;
 }
 
@@ -118,6 +125,7 @@ async function extraerDeImagen({ base64, mime = 'image/jpeg' }) {
     producto: l.producto || '',
     cantidad: l.cantidad ?? null,
     unidad: l.unidad || '',
+    unidades_por_paquete: l.unidades_por_paquete ?? l.unidadesPorPaquete ?? l.unidades_por_caja ?? null,
     precio_unitario: l.precio_unitario ?? l.precioUnit ?? null,
     descuento_porcentaje: l.descuento_porcentaje ?? l.descuento ?? l.dcto ?? null,
     iva_porcentaje: l.iva_porcentaje ?? l.iva ?? null,
