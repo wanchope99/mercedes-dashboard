@@ -1,3 +1,4 @@
+const _unidades = require('./unidades');
 // ─── Categorías, normalización e inferencia para Compras de Proveedores ─────────
 //
 // Fuente única de verdad para las CATEGORÍAS de ingredientes (las mismas que usa
@@ -234,7 +235,25 @@ function resolverItem(item, indice) {
     dudas.push({ campo: 'precio_unitario', sugerido: item.precio_unitario || '', fuente: 'ilegible', opciones: [] });
   }
 
-  return { categoria, medioPago, dudas };
+  // ── Normalización de unidad → unidad base (ej: Caja → Botella) ──
+  // Solo para categorías normalizables (bebidas). Si la unidad es de empaque y no
+  // pudimos deducir cuántas botellas trae (ni factura ni texto), preguntamos UNA vez.
+  const rf = _unidades.resolverFactor({
+    categoria, unidad: item.unidad, producto: item.producto, notas: item.notas,
+    unidadesPorPaquete: item.unidades_por_paquete ?? item.unidadesPorPaquete,
+  });
+  if (rf.normalizable && rf.necesitaConfirmar) {
+    dudas.push({
+      campo: 'factor',
+      sugerido: rf.factor || '',
+      fuente: 'empaque-sin-factor',
+      unidad: item.unidad || '',
+      unidadBase: rf.unidadBase,
+      opciones: [],   // entrada numérica libre (cuántas botellas trae el empaque)
+    });
+  }
+
+  return { categoria, medioPago, dudas, factor: rf.factor, unidadBase: rf.unidadBase, normalizable: rf.normalizable };
 }
 
 
