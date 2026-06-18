@@ -470,6 +470,38 @@ async function resnapshotDia(fecha) {
   return detalle;
 }
 
+// Rehace TODOS los snapshots guardados con el cálculo actual (útil tras corregir
+// la fórmula de montos). Devuelve cuántos días se regeneraron.
+async function resnapshotTodos() {
+  if (!persistenciaActiva()) throw new Error('Persistencia desactivada (falta SPREADSHEET_ID)');
+  cache.del('fudo_raw');
+  const raw = await loadRaw();
+  const detalles = buildDetalles(raw);
+  const hist = await loadHistorico();
+  const sheetsApi = getSheetsClient();
+  await ensureHistSheet(sheetsApi);
+
+  const fechas = Object.keys(hist).sort();
+  const data = [];
+  const regenerados = [], faltantes = [];
+  for (const fecha of fechas) {
+    const d = detalles[fecha];
+    if (!d) { faltantes.push(fecha); continue; } // Fudo ya no tiene ese día (no lo tocamos)
+    const row = [fecha, new Date().toISOString(), d.ventas, d.pax, d.total, d.propinas || 0, JSON.stringify(d)];
+    data.push({ range: `${HIST_SHEET}!A${hist[fecha].rowIndex}:G${hist[fecha].rowIndex}`, values: [row] });
+    regenerados.push(fecha);
+  }
+  // batchUpdate en lotes de 100 rangos
+  for (let i = 0; i < data.length; i += 100) {
+    await sheetsApi.spreadsheets.values.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { valueInputOption: 'RAW', data: data.slice(i, i + 100) },
+    });
+  }
+  cache.del('fudo_hist');
+  return { regenerados: regenerados.length, faltantes, fechas: regenerados };
+}
+
 // ─── Resumen de servicios por día ──────────────────────────────────────────────
 // Histórico desde la hoja; Fudo solo para días posteriores al último snapshot.
 async function getServicios({ desde, hasta } = {}) {
@@ -718,7 +750,7 @@ function clearFudoCache() {
 }
 
 module.exports = {
-  getServicios, getServicioDetalle, getServicioDebug, resnapshotDia,
+  getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos,
   getDetallesTodos, getAgregadoProductos, getProductoDebug,
   clearFudoCache, grupoDeCategoria, fechaServicio, fechaServicioHoy,
 };

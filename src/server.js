@@ -10,7 +10,7 @@ const {
   getComprasEnCuotas,
   getMeses, getCategorias, clearCache,
 } = require('./sheets');
-const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, getDetallesTodos, getAgregadoProductos, getProductoDebug, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy } = require('./fudo');
+const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos, getDetallesTodos, getAgregadoProductos, getProductoDebug, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy } = require('./fudo');
 const { proyectar, calcularCalculadora, proyeccionMes } = require('./proyecciones');
 const proveedoresRoutes = require('./proveedores-routes');
 const prov = require('./proveedores');
@@ -761,6 +761,17 @@ app.get('/api/servicios/debug/:fecha', authMiddleware, adminOnly, async (req, re
     res.json({ ok: true, data });
   } catch (err) {
     console.error('Error /api/servicios/debug:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Rehacer TODOS los snapshots guardados con el cálculo actual (tras corregir la fórmula)
+app.post('/api/servicios/resnapshot-todos', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const data = await resnapshotTodos();
+    res.json({ ok: true, message: `Snapshots regenerados: ${data.regenerados}`, data });
+  } catch (err) {
+    console.error('Error /api/servicios/resnapshot-todos:', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
