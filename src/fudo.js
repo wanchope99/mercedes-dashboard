@@ -170,7 +170,10 @@ async function fetchAll(resource) {
     all = all.concat(data);
     if (data.length < size) break;
     page++;
-    if (page > 50) break;
+    // Tope de seguridad MUY alto. Antes era 50 (25.000 registros), lo que truncaba
+    // los items/payments más nuevos cuando el histórico crecía y hacía que faltaran
+    // productos de ventas recientes en el desglose. 4000 páginas = 2M registros.
+    if (page > 4000) { console.warn(`Fudo ${resource}: alcanzado el tope de paginación (${all.length} registros). Puede faltar data.`); break; }
   }
   return all;
 }
