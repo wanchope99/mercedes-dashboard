@@ -553,6 +553,24 @@ async function getServicios({ desde, hasta } = {}) {
 // Igual que getServicios pero devuelve el detalle COMPLETO (productos por categoría)
 // de cada día, no el resumen. Lo usa el módulo de stocks para rastrear ventas de un
 // producto a lo largo del tiempo.
+// Detalles FRESCOS directo de Fudo (sin snapshots históricos). Para análisis de
+// Costos donde necesitamos el cálculo actual aplicado a todo el rango, ignorando
+// snapshots viejos que puedan tener montos de una fórmula anterior.
+async function getDetallesFrescos({ desde, hasta } = {}) {
+  let frescos = {};
+  try {
+    const raw = await loadRaw();
+    frescos = buildDetalles(raw);
+  } catch (e) {
+    // Si Fudo no responde, como último recurso usar histórico (mejor algo que nada)
+    const hist = await loadHistorico();
+    for (const [fecha, h] of Object.entries(hist)) frescos[fecha] = h.detalle;
+  }
+  return Object.values(frescos)
+    .filter(d => (!desde || d.fecha >= desde) && (!hasta || d.fecha <= hasta))
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+
 async function getDetallesTodos({ desde, hasta } = {}) {
   const dDesde = desde || null;
   const dHasta = hasta || null;
@@ -751,6 +769,6 @@ function clearFudoCache() {
 
 module.exports = {
   getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos,
-  getDetallesTodos, getAgregadoProductos, getProductoDebug,
+  getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug,
   clearFudoCache, grupoDeCategoria, fechaServicio, fechaServicioHoy,
 };

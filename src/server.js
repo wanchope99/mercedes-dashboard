@@ -10,7 +10,7 @@ const {
   getComprasEnCuotas,
   getMeses, getCategorias, clearCache,
 } = require('./sheets');
-const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos, getDetallesTodos, getAgregadoProductos, getProductoDebug, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy } = require('./fudo');
+const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos, getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy } = require('./fudo');
 const { proyectar, calcularCalculadora, proyeccionMes } = require('./proyecciones');
 const proveedoresRoutes = require('./proveedores-routes');
 const prov = require('./proveedores');
@@ -919,7 +919,7 @@ app.get('/api/costos', authMiddleware, adminOnly, async (req, res) => {
     const { desde, hasta } = req.query;
     const [compras, detallesFudo] = await Promise.all([
       prov.getCompras().catch(() => []),
-      getDetallesTodos({ desde, hasta }).catch(() => []),
+      getDetallesFrescos({ desde, hasta }).catch(() => []),
     ]);
     res.json({ ok: true, data: costos.costosVsIngresos({ compras, detallesFudo, desde, hasta }) });
   } catch (err) {

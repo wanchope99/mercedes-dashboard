@@ -50,7 +50,7 @@ async function getProductosStock() {
 // Devuelve { ventas: [{fecha, unidades, nombre, sim}], matchNombre, matchSim, directo }.
 async function ventasDeProducto(productoCanon, { desde, hasta } = {}) {
   let detalles = [];
-  try { detalles = await fudo.getDetallesTodos({ desde, hasta }); }
+  try { detalles = await fudo.getDetallesFrescos({ desde, hasta }); }
   catch (e) { detalles = []; }
 
   const overr = overridesMatch.get(cats.norm(productoCanon));
@@ -194,7 +194,7 @@ async function getSerieCategoria({ categoria, desde, hasta } = {}) {
 
   // Ventas Fudo: productos cuya categoría de costo mapeada == categoria elegida
   let detalles = [];
-  try { detalles = await fudo.getDetallesTodos({ desde, hasta }); } catch (e) { detalles = []; }
+  try { detalles = await fudo.getDetallesFrescos({ desde, hasta }); } catch (e) { detalles = []; }
   const ventas = [];
   for (const dia of detalles) {
     for (const cat of (dia.categorias || [])) {
