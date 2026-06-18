@@ -315,6 +315,14 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
       res.json({ ok: true, data: await stocks.getSerieStock({ producto, categoria, desde, hasta }) });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
+  // Serie agregada de toda una categoría (sin elegir producto)
+  router.get('/api/stocks/serie-categoria', authMiddleware, soloAdmin, async (req, res) => {
+    try {
+      const { categoria, desde, hasta } = req.query;
+      if (!categoria) return res.status(400).json({ ok: false, error: 'Falta el parámetro categoria' });
+      res.json({ ok: true, data: await stocks.getSerieCategoria({ categoria, desde, hasta }) });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
   // Corrección manual del match producto↔venta FUDO
   router.post('/api/stocks/match', authMiddleware, soloAdmin, (req, res) => {
     const { producto, nombreFudo } = req.body || {};
