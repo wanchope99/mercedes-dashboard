@@ -10,9 +10,11 @@ const {
   getComprasEnCuotas,
   getMeses, getCategorias, clearCache,
 } = require('./sheets');
-const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy } = require('./fudo');
-const { proyectar } = require('./proyecciones');
+const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, getDetallesTodos, getAgregadoProductos, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy } = require('./fudo');
+const { proyectar, calcularCalculadora, proyeccionMes } = require('./proyecciones');
 const proveedoresRoutes = require('./proveedores-routes');
+const prov = require('./proveedores');
+const costos = require('./costos');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -876,6 +878,123 @@ app.delete('/api/proyecciones/variables/:id', authMiddleware, adminOnly, async (
     });
     res.json({ ok: true, message: 'Variable eliminada' });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─── Servicios: agregado de productos multi-día (solo admin) ──────────────────
+// Responde "¿se vendió más PARA COMER o PARA PICAR en general?" sobre un rango.
+app.get('/api/servicios/agregado', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+    res.json({ ok: true, data: await getAgregadoProductos({ desde, hasta }) });
+  } catch (err) {
+    console.error('Error /api/servicios/agregado:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── Costos vs Ingresos por categoría (solo admin) ────────────────────────────
+// Cruza el costo (hoja Compras, por ingrediente) con el ingreso (FUDO, mapeado por
+// producto a su categoría de costo dominante).
+app.get('/api/costos', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+    const [compras, detallesFudo] = await Promise.all([
+      prov.getCompras().catch(() => []),
+      getDetallesTodos({ desde, hasta }).catch(() => []),
+    ]);
+    res.json({ ok: true, data: costos.costosVsIngresos({ compras, detallesFudo, desde, hasta }) });
+  } catch (err) {
+    console.error('Error /api/costos:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Override manual del mapeo producto FUDO → categoría de costo
+app.post('/api/costos/override', authMiddleware, adminOnly, (req, res) => {
+  const { producto, categoria } = req.body || {};
+  if (!producto || !categoria) return res.status(400).json({ ok: false, error: 'Faltan producto y categoría' });
+  costos.setOverrideProducto(producto, categoria);
+  res.json({ ok: true, message: 'Mapeo actualizado', overrides: costos.getOverrides() });
+});
+
+// ─── CMV desagregado Comida / Bebida / Insumos (composición desde Compras) ─────
+// El TOTAL fiel del CMV sale del resumen (Movimientos); acá damos la composición.
+app.get('/api/cmv-desglose', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const filtro = parseFiltro(req.query);
+    const desde = filtro.fechaDesde ? filtro.fechaDesde.toISOString().slice(0,10) : undefined;
+    const hasta = filtro.fechaHasta ? filtro.fechaHasta.toISOString().slice(0,10) : undefined;
+    const [compras, resumenArr] = await Promise.all([
+      prov.getCompras().catch(() => []),
+      getResumenMensual(filtro).catch(() => []),
+    ]);
+    const desglose = costos.cmvDesglose(compras, { desde, hasta });
+    // Total fiel del CMV desde Movimientos (Mercadería + Insumos)
+    const r = resumenArr[0] || { gastos: {}, ingresos: {} };
+    const cmvMovimientos = (r.gastos?.Mercaderia || 0) + (r.gastos?.Insumos || 0);
+    const ingresos = r.ingresos?.total || 0;
+    res.json({ ok: true, data: {
+      desglose,                       // composición Comida/Bebida/Insumos (Compras)
+      cmvMovimientos,                 // total fiel (Movimientos)
+      ingresos,
+      pctCMV: ingresos > 0 ? Math.round((cmvMovimientos / ingresos) * 1000) / 10 : 0,
+      nota: 'El total del CMV sale de Movimientos (P&L real). La composición Comida/Bebida/Insumos sale de la hoja Compras y puede no sumar exactamente igual.',
+    } });
+  } catch (err) {
+    console.error('Error /api/cmv-desglose:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── Detalle de movimientos por GRUPO de gasto (para modales del dashboard) ────
+// grupo: Mercaderia | Insumos | Equipamiento | Operativos | Impuestos | Personal | Otros
+app.get('/api/movimientos/grupo/:grupo', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const grupo = req.params.grupo;
+    const filtro = parseFiltro(req.query);
+    let movs = await getMovimientos();
+    movs = movs.filter(m => m.tipo === 'Gasto' && !m.esCambio && !m.esFondeo && !m.esCuota);
+    if (filtro.mes) movs = movs.filter(m => m.mes === filtro.mes);
+    if (filtro.fechaDesde) movs = movs.filter(m => m.fecha >= filtro.fechaDesde && m.fecha <= filtro.fechaHasta);
+    movs = movs.filter(m => m.grupo === grupo);
+    // Desglose por categoría dentro del grupo + filas
+    const porCategoria = {};
+    for (const m of movs) {
+      const c = m.categoria || 'Sin categoría';
+      porCategoria[c] = (porCategoria[c] || 0) + m.salidaTotal;
+    }
+    const data = movs
+      .map(m => ({ fecha: m.fecha.toISOString().split('T')[0], proveedor: m.proveedor, categoria: m.categoria, descripcion: m.descripcion, medioPago: m.medioPago, monto: m.salidaTotal, estado: m.estado }))
+      .sort((a, b) => b.fecha.localeCompare(a.fecha));
+    res.json({ ok: true, data, porCategoria, total: data.reduce((s, x) => s + x.monto, 0) });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─── Calculadora P&L (régimen) con inputs editables (solo admin) ──────────────
+app.post('/api/calculadora', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    res.json({ ok: true, data: calcularCalculadora(req.body || {}) });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Defaults de la calculadora a partir de los datos reales (para precargar inputs)
+app.get('/api/calculadora/defaults', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [movimientos, resumen] = await Promise.all([getMovimientos(), getResumenMensual({})]);
+    const base = require('./proyecciones').calcularBaselines(movimientos);
+    res.json({ ok: true, data: base });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─── Proyección del MES en curso (real acumulado + forecast a fin de mes) ──────
+app.get('/api/proyeccion-mes', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const movimientos = await getMovimientos();
+    res.json({ ok: true, data: proyeccionMes({ movimientos }) });
+  } catch (err) {
+    console.error('Error /api/proyeccion-mes:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // ─── Módulo Proveedores (ingesta de facturas + dashboard de costos) ───────────

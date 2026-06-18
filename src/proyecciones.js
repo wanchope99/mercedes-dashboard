@@ -171,4 +171,170 @@ function proyectar({ movimientos, resumen, variables = [], hoy = new Date(), hor
   };
 }
 
-module.exports = { proyectar, calcularBaselines, ORDEN_MESES };
+// ─── Calculadora P&L (réplica de Calculadora.xlsx, inputs editables) ─────────────
+// Reproduce el modelo del Excel: a partir de supuestos operativos y costos, calcula
+// ingreso mensual, costos variables (CMV), fijos, extraordinarios, resultado neto y
+// payback. Todos los inputs tienen default tomado del Excel; el front los puede
+// pisar uno por uno.
+//
+// Estructura del Excel:
+//   A. Servicios/mes (noches) · Ingreso por noche → Ingreso mensual total
+//   C. % CMV → Costo variable
+//   D. Personal + Alquiler + Fijos operativos (electricidad, gas, agua, ABL,
+//      internet, contaduría, software) → Subtotal fijos
+//   E. Extraordinarios + Financieros + Fiscales
+//   F. Total costos → Resultado neto (ARS y %)
+//   G. Inversión total → Payback (meses)
+const CALC_DEFAULTS = {
+  serviciosPorMes: 21,
+  ingresoPorNoche: 1650000,
+  pctCMV: 38,                 // % sobre ingresos
+  costoPersonal: 11300000,
+  alquiler: 930000,
+  fijosOperativos: {
+    electricidad: 500000, gas: 40000, agua: 80000, abl: 15000,
+    internet: 25000, contaduria: 250000, software: 120000,
+  },
+  // NOTA del modelo original (Excel): el "Subtotal Costos Fijos Operativos" que
+  // muestra el Excel (1.960.000) INCLUYE el alquiler (1.030.000 líneas + 930.000
+  // alquiler). Acá los mantenemos separados: operativos = 1.030.000 y alquiler
+  // aparte = 930.000. El TOTAL de costos y el resultado neto coinciden exacto.
+  costosExtraordinarios: 1500000,
+  costosFinancieros: 1178100,
+  costosFiscales: 0,
+  inversionTotalARS: 89400000,
+};
+
+function num(v, def = 0) { const n = Number(v); return Number.isFinite(n) ? n : def; }
+
+function calcularCalculadora(input = {}) {
+  const i = { ...CALC_DEFAULTS, ...input };
+  // Permitir override parcial del objeto de fijos operativos
+  const fo = { ...CALC_DEFAULTS.fijosOperativos, ...(input.fijosOperativos || {}) };
+
+  const ingresoMensual = num(i.serviciosPorMes) * num(i.ingresoPorNoche);
+
+  // C. Costos variables (CMV) — % sobre ingresos
+  const cmv = ingresoMensual * (num(i.pctCMV) / 100);
+
+  // D. Costos fijos
+  const subtotalFijosOperativos = Object.values(fo).reduce((s, x) => s + num(x), 0);
+  const costoPersonal = num(i.costoPersonal);
+  const alquiler = num(i.alquiler);
+  const subtotalFijos = costoPersonal + alquiler + subtotalFijosOperativos;
+
+  // E. Extraordinarios / financieros / fiscales
+  const extFinFis = num(i.costosExtraordinarios) + num(i.costosFinancieros) + num(i.costosFiscales);
+
+  // F. Resultado
+  const totalCostos = cmv + subtotalFijos + extFinFis;
+  const resultadoNeto = ingresoMensual - totalCostos;
+  const pct = (x) => ingresoMensual > 0 ? Math.round((x / ingresoMensual) * 1000) / 10 : 0;
+
+  // G. Payback
+  const inversion = num(i.inversionTotalARS);
+  const payback = resultadoNeto > 0 ? Math.round((inversion / resultadoNeto) * 10) / 10 : null;
+
+  return {
+    inputs: { ...i, fijosOperativos: fo },
+    ingresoMensual,
+    costosVariables: { cmv, pct: pct(cmv) },
+    costosFijos: {
+      personal: costoPersonal, pctPersonal: pct(costoPersonal),
+      alquiler, pctAlquiler: pct(alquiler),
+      operativos: fo, subtotalOperativos: subtotalFijosOperativos, pctOperativos: pct(subtotalFijosOperativos),
+      subtotal: subtotalFijos, pctSubtotal: pct(subtotalFijos),
+    },
+    extraordinarios: {
+      extraordinarios: num(i.costosExtraordinarios),
+      financieros: num(i.costosFinancieros),
+      fiscales: num(i.costosFiscales),
+      subtotal: extFinFis, pct: pct(extFinFis),
+    },
+    totalCostos, pctTotalCostos: pct(totalCostos),
+    resultadoNeto, pctResultadoNeto: pct(resultadoNeto),
+    inversionTotalARS: inversion,
+    paybackMeses: payback,
+  };
+}
+
+// ─── Proyección del MES en curso (estilo Azure: real acumulado + forecast) ───────
+// Toma SOLO el mes actual. Acumula ingresos y gastos REALES registrados hasta hoy
+// y proyecta linealmente hasta fin de mes según el ritmo diario observado, sumando
+// además los costos fijos del mes (alquiler, personal, servicios) que quizá aún no
+// se registraron. Devuelve series diarias para el gráfico acumulado.
+function proyeccionMes({ movimientos, hoy = new Date() }) {
+  const anio = hoy.getFullYear();
+  const mesIdx = hoy.getMonth();
+  const mesNombre = ORDEN_MESES[mesIdx];
+  const primerDia = new Date(anio, mesIdx, 1);
+  const ultimoDia = new Date(anio, mesIdx + 1, 0);
+  const diasMes = ultimoDia.getDate();
+  const diaHoy = hoy.getDate();
+
+  const delMes = (movimientos || []).filter(m =>
+    !m.esCambio && !m.esFondeo && !m.esCuota &&
+    m.fecha >= primerDia && m.fecha <= hoy);
+
+  // Acumulados diarios reales
+  const ingresoPorDia = new Array(diasMes + 1).fill(0);
+  const gastoPorDia = new Array(diasMes + 1).fill(0);
+  let ingresoReal = 0, gastoReal = 0;
+  let diasConServicio = new Set();
+  let fijosYaRegistrados = 0;
+
+  for (const m of delMes) {
+    const d = m.fecha.getDate();
+    if (m.tipo === 'Ingreso') {
+      ingresoPorDia[d] += m.entradaTotal; ingresoReal += m.entradaTotal;
+      if (m.proveedor === 'Servicio') diasConServicio.add(d);
+    } else if (m.tipo === 'Gasto') {
+      const monto = (m.pagado || m.esCompraEnCuotas) ? m.salidaTotal : m.salidaTotal;
+      gastoPorDia[d] += monto; gastoReal += monto;
+      if (m.grupo === 'Personal' || m.categoria === 'Alquiler' || m.grupo === 'Operativos') {
+        fijosYaRegistrados += monto;
+      }
+    }
+  }
+
+  // Ritmo diario observado (sobre días transcurridos)
+  const ingresoDiario = diaHoy > 0 ? ingresoReal / diaHoy : 0;
+  const gastoDiario = diaHoy > 0 ? gastoReal / diaHoy : 0;
+  const diasRestantes = diasMes - diaHoy;
+
+  // Forecast simple: continuar el ritmo diario hasta fin de mes
+  const ingresoForecast = ingresoReal + ingresoDiario * diasRestantes;
+  const gastoForecast = gastoReal + gastoDiario * diasRestantes;
+
+  // Series acumuladas para el gráfico
+  const serie = [];
+  let accIng = 0, accGas = 0;
+  for (let d = 1; d <= diasMes; d++) {
+    const esFuturo = d > diaHoy;
+    if (!esFuturo) { accIng += ingresoPorDia[d]; accGas += gastoPorDia[d]; }
+    serie.push({
+      dia: d,
+      fecha: `${anio}-${String(mesIdx+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`,
+      ingresoReal: esFuturo ? null : Math.round(accIng),
+      gastoReal: esFuturo ? null : Math.round(accGas),
+      ingresoForecast: esFuturo ? Math.round(ingresoReal + ingresoDiario * (d - diaHoy)) : Math.round(accIng),
+      gastoForecast: esFuturo ? Math.round(gastoReal + gastoDiario * (d - diaHoy)) : Math.round(accGas),
+    });
+  }
+
+  return {
+    mes: mesNombre, anio, diasMes, diaHoy, diasRestantes,
+    diasConServicio: diasConServicio.size,
+    ingresoReal: Math.round(ingresoReal),
+    gastoReal: Math.round(gastoReal),
+    resultadoReal: Math.round(ingresoReal - gastoReal),
+    ingresoForecast: Math.round(ingresoForecast),
+    gastoForecast: Math.round(gastoForecast),
+    resultadoForecast: Math.round(ingresoForecast - gastoForecast),
+    ingresoDiario: Math.round(ingresoDiario),
+    gastoDiario: Math.round(gastoDiario),
+    serie,
+  };
+}
+
+module.exports = { proyectar, calcularBaselines, calcularCalculadora, proyeccionMes, CALC_DEFAULTS, ORDEN_MESES };

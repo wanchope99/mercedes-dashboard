@@ -611,6 +611,68 @@ async function getServicioDebug(fecha) {
   };
 }
 
+// ─── Agregado de productos/categorías sobre un rango (multi-día) ─────────────────
+// Suma todas las ventas por categoría y por producto en el período, para responder
+// "¿se vendió más PARA COMER o PARA PICAR en general?" sin entrar día por día.
+async function getAgregadoProductos({ desde, hasta } = {}) {
+  const detalles = await getDetallesTodos({ desde, hasta });
+
+  const categorias = {}; // nombre -> { categoria, grupo, monto, unidades, productos:{} }
+  let totalMonto = 0, totalUnidades = 0;
+  let comida = 0, bebida = 0, otros = 0;
+  const dias = new Set();
+
+  for (const dia of detalles) {
+    if (dia && dia.fecha) dias.add(dia.fecha);
+    for (const cat of (dia.categorias || [])) {
+      const c = categorias[cat.categoria] = categorias[cat.categoria] || {
+        categoria: cat.categoria, grupo: cat.grupo || grupoDeCategoria(cat.categoria),
+        monto: 0, unidades: 0, productos: {},
+      };
+      c.monto += cat.monto || 0;
+      c.unidades += cat.unidades || 0;
+      totalMonto += cat.monto || 0;
+      totalUnidades += cat.unidades || 0;
+      if (c.grupo === 'comida') comida += cat.monto || 0;
+      else if (c.grupo === 'bebida') bebida += cat.monto || 0;
+      else otros += cat.monto || 0;
+      for (const p of (cat.productos || [])) {
+        const pp = c.productos[p.nombre] = c.productos[p.nombre] || { nombre: p.nombre, monto: 0, unidades: 0 };
+        pp.monto += p.monto || 0;
+        pp.unidades += p.unidades || 0;
+      }
+    }
+  }
+
+  const categoriasArr = Object.values(categorias)
+    .map(c => ({
+      categoria: c.categoria, grupo: c.grupo,
+      monto: Math.round(c.monto), unidades: c.unidades,
+      productos: Object.values(c.productos).sort((a, b) => b.unidades - a.unidades),
+    }))
+    .sort((a, b) => {
+      const ord = { comida: 0, bebida: 1, otros: 2 };
+      return (ord[a.grupo] - ord[b.grupo]) || (b.unidades - a.unidades);
+    });
+
+  // Top productos global (todas las categorías)
+  const topProductos = [];
+  for (const c of categoriasArr) for (const p of c.productos) topProductos.push({ ...p, categoria: c.categoria, grupo: c.grupo });
+  topProductos.sort((a, b) => b.unidades - a.unidades);
+
+  const baseCB = comida + bebida;
+  return {
+    desde: desde || null, hasta: hasta || null,
+    diasConVentas: dias.size,
+    totalMonto: Math.round(totalMonto), totalUnidades,
+    comida: Math.round(comida), bebida: Math.round(bebida), otros: Math.round(otros),
+    pctComida: baseCB > 0 ? Math.round((comida / baseCB) * 1000) / 10 : 0,
+    pctBebida: baseCB > 0 ? Math.round((bebida / baseCB) * 1000) / 10 : 0,
+    categorias: categoriasArr,
+    topProductos: topProductos.slice(0, 50),
+  };
+}
+
 function clearFudoCache() {
   cache.del('fudo_raw');
   cache.del('fudo_hist');
@@ -618,6 +680,6 @@ function clearFudoCache() {
 
 module.exports = {
   getServicios, getServicioDetalle, getServicioDebug, resnapshotDia,
-  getDetallesTodos,
+  getDetallesTodos, getAgregadoProductos,
   clearFudoCache, grupoDeCategoria, fechaServicio, fechaServicioHoy,
 };
