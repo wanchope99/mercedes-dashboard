@@ -765,6 +765,39 @@ async function getProductoDebug(nombre, { desde, hasta } = {}) {
   return { nombre, desde: desde||null, hasta: hasta||null, totalUnidades, totalMonto: Math.round(totalMonto), lineas };
 }
 
+// Diagnóstico CRUDO: para una venta, devuelve sus items tal como vienen de Fudo,
+// y cuántos items totales se trajeron. Para detectar items faltantes/no agrupados.
+async function getVentaDebugCrudo(ventaId) {
+  cache.del('fudo_raw');
+  const raw = await loadRaw();
+  const { sales, prod, itemsBySale } = raw;
+  const totalItems = Object.values(itemsBySale).reduce((s, arr) => s + arr.length, 0);
+  const totalVentas = sales.length;
+  const items = (itemsBySale[ventaId] || []).map(it => {
+    const a = it.attributes || {};
+    const pRel = it.relationships && it.relationships.product && it.relationships.product.data;
+    const producto = pRel ? prod[pRel.id] : null;
+    return {
+      itemId: it.id,
+      productId: pRel ? pRel.id : null,
+      productoNombre: producto ? producto.name : '(sin product)',
+      quantity: a.quantity,
+      price: a.price,
+      canceled: a.canceled || false,
+    };
+  });
+  const venta = sales.find(s => s.id === ventaId);
+  return {
+    ventaId,
+    ventaExiste: !!venta,
+    ventaTotal: venta ? (venta.attributes && venta.attributes.total) : null,
+    ventaState: venta ? (venta.attributes && venta.attributes.saleState) : null,
+    itemsDeEstaVenta: items.length,
+    items,
+    _meta: { totalVentasTraidas: totalVentas, totalItemsTraidos: totalItems },
+  };
+}
+
 function clearFudoCache() {
   cache.del('fudo_raw');
   cache.del('fudo_hist');
@@ -772,6 +805,6 @@ function clearFudoCache() {
 
 module.exports = {
   getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos,
-  getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug,
+  getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo,
   clearFudoCache, grupoDeCategoria, fechaServicio, fechaServicioHoy,
 };

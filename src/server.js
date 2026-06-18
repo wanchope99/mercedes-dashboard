@@ -10,7 +10,7 @@ const {
   getComprasEnCuotas,
   getMeses, getCategorias, clearCache,
 } = require('./sheets');
-const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos, getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy } = require('./fudo');
+const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos, getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy } = require('./fudo');
 const { proyectar, calcularCalculadora, proyeccionMes } = require('./proyecciones');
 const proveedoresRoutes = require('./proveedores-routes');
 const prov = require('./proveedores');
@@ -901,6 +901,12 @@ app.get('/api/servicios/agregado', authMiddleware, adminOnly, async (req, res) =
     console.error('Error /api/servicios/agregado:', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+// Diagnóstico CRUDO de una venta (items tal como vienen de Fudo)
+app.get('/api/costos/venta-debug/:id', authMiddleware, adminOnly, async (req, res) => {
+  try { res.json({ ok: true, data: await getVentaDebugCrudo(req.params.id) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 // Diagnóstico por producto (auditar ingreso de Fudo): /api/costos/producto-debug?nombre=Vermu&desde=&hasta=
