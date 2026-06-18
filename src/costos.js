@@ -48,38 +48,99 @@ function getOverrides() {
 
 // Pistas extra propias del menú del bar que las keywords genéricas no cubren bien.
 // (Se suman a las KEYWORDS de proveedores-categorias.js)
-const KEYWORDS_MENU = {
-  'Carnes y Embutidos': ['ojo de bife', 'bife', 'marucha', 'cuadril', 'entraña', 'entrana', 'vacio', 'vacío', 'asado', 'molleja', 'chorizo', 'morcilla', 'bondiola', 'matambre', 'pollo', 'milanesa', 'hamburguesa', 'lomo', 'cordero', 'lechon', 'lechón', 'pastrami', 'tapa de asado'],
-  'Pescados y Mariscos': ['rabas', 'raba', 'langostino', 'calamar', 'pulpo', 'salmon', 'salmón', 'corvina', 'merluza', 'trucha', 'mejillon', 'mejillón', 'pesca', 'ceviche', 'tartar de atun', 'atun', 'atún', 'mar'],
-  'Frutas y Verduras': ['ensalada', 'papas', 'papa', 'fritas', 'rucula', 'rúcula', 'tomate', 'palta', 'verdura', 'champignon', 'hongos', 'berenjena', 'zucchini', 'calabaza'],
-  'Lacteos y Huevos': ['provoleta', 'queso', 'huevo', 'revuelto', 'burrata', 'mozzarella', 'muzzarella'],
-  'Panificados y Masas': ['pan', 'focaccia', 'bruschetta', 'pizza', 'empanada', 'tarta', 'sandwich', 'sándwich', 'tostada'],
-  'Bebidas y Alcohol': ['vino', 'malbec', 'cabernet', 'blend', 'espumante', 'champagne', 'cerveza', 'birra', 'ipa', 'lager', 'vermut', 'vermú', 'aperitivo', 'fernet', 'gin', 'whisky', 'agua', 'soda', 'gaseosa', 'coca', 'sprite', 'tonica', 'tónica', 'jugo', 'limonada', 'cafe', 'café', 'trago', 'negroni', 'spritz', 'campari'],
-};
+// REGLAS ORDENADAS: se evalúan de arriba hacia abajo; la PRIMERA que matchea gana.
+// Por eso las más específicas van primero (ej: "panchito tartar" antes que "tartar").
+// El texto se normaliza (sin tildes, minúsculas) antes de comparar (substring).
+const REGLAS_MENU = [
+  // — Casos específicos primero (ganan a las reglas generales) —
+  ['panchito tartar', 'Carnes y Embutidos'],     // Panchito de Tartar → Carnes
+  ['panchito', 'Carnes y Embutidos'],
+  ['empanada tucumana', 'Carnes y Embutidos'],   // empanada de carne
+  ['empanada de carne', 'Carnes y Embutidos'],
+  ['empanada de queso', 'Lacteos y Huevos'],
+  ['empanada', 'Carnes y Embutidos'],            // resto de empanadas → carne (ajustable)
+  ['tortilla', 'Lacteos y Huevos'],              // tortilla de papa / al corte → Lácteos
+  ['tortillita', 'Lacteos y Huevos'],
+  ['crudo de pez', 'Pescados y Mariscos'],
+  ['crudo pez', 'Pescados y Mariscos'],
+
+  // — Pescados y Mariscos (TartaR es pescado salvo panchito, ya filtrado arriba) —
+  ['tartar', 'Pescados y Mariscos'],
+  ['rabas', 'Pescados y Mariscos'], ['raba', 'Pescados y Mariscos'],
+  ['langostino', 'Pescados y Mariscos'], ['calamar', 'Pescados y Mariscos'],
+  ['pulpo', 'Pescados y Mariscos'], ['salmon', 'Pescados y Mariscos'],
+  ['corvina', 'Pescados y Mariscos'], ['merluza', 'Pescados y Mariscos'],
+  ['trucha', 'Pescados y Mariscos'], ['mejillon', 'Pescados y Mariscos'],
+  ['besugo', 'Pescados y Mariscos'], ['anchoa', 'Pescados y Mariscos'],
+  ['chernia', 'Pescados y Mariscos'], ['pez limon', 'Pescados y Mariscos'],
+  ['ceviche', 'Pescados y Mariscos'], ['pesca', 'Pescados y Mariscos'],
+  ['humita', 'Pescados y Mariscos'],  // (ajustá si humita no es pescado en tu carta)
+
+  // — Bebidas y Alcohol (vinos por nombre + genéricos) —
+  ['vino', 'Bebidas y Alcohol'], ['malbec', 'Bebidas y Alcohol'], ['cabernet', 'Bebidas y Alcohol'],
+  ['sauvignon', 'Bebidas y Alcohol'], ['pinot', 'Bebidas y Alcohol'], ['chardonnay', 'Bebidas y Alcohol'],
+  ['blend', 'Bebidas y Alcohol'], ['anfora', 'Bebidas y Alcohol'], ['ripasso', 'Bebidas y Alcohol'],
+  ['beaujolais', 'Bebidas y Alcohol'], ['franc', 'Bebidas y Alcohol'], ['blanco de', 'Bebidas y Alcohol'],
+  ['blanc de', 'Bebidas y Alcohol'], ['espumante', 'Bebidas y Alcohol'], ['champagne', 'Bebidas y Alcohol'],
+  ['cerveza', 'Bebidas y Alcohol'], ['birra', 'Bebidas y Alcohol'], ['ipa', 'Bebidas y Alcohol'],
+  ['lager', 'Bebidas y Alcohol'], ['imperial', 'Bebidas y Alcohol'], ['heineken', 'Bebidas y Alcohol'],
+  ['porron', 'Bebidas y Alcohol'], ['vermu', 'Bebidas y Alcohol'], ['vermut', 'Bebidas y Alcohol'],
+  ['vesta', 'Bebidas y Alcohol'], ['aperitivo', 'Bebidas y Alcohol'], ['fernet', 'Bebidas y Alcohol'],
+  ['gin', 'Bebidas y Alcohol'], ['whisky', 'Bebidas y Alcohol'], ['negroni', 'Bebidas y Alcohol'],
+  ['spritz', 'Bebidas y Alcohol'], ['campari', 'Bebidas y Alcohol'], ['copa ', 'Bebidas y Alcohol'],
+  ['agua', 'Bebidas y Alcohol'], ['soda', 'Bebidas y Alcohol'], ['sifon', 'Bebidas y Alcohol'],
+  ['gaseosa', 'Bebidas y Alcohol'], ['coca', 'Bebidas y Alcohol'], ['sprite', 'Bebidas y Alcohol'],
+  ['tonica', 'Bebidas y Alcohol'], ['jugo', 'Bebidas y Alcohol'], ['limonada', 'Bebidas y Alcohol'],
+  ['cafe', 'Bebidas y Alcohol'], ['trago', 'Bebidas y Alcohol'],
+
+  // — Carnes —
+  ['ojo de bife', 'Carnes y Embutidos'], ['bife', 'Carnes y Embutidos'], ['marucha', 'Carnes y Embutidos'],
+  ['cuadril', 'Carnes y Embutidos'], ['entraña', 'Carnes y Embutidos'], ['entrana', 'Carnes y Embutidos'],
+  ['vacio', 'Carnes y Embutidos'], ['asado', 'Carnes y Embutidos'], ['molleja', 'Carnes y Embutidos'],
+  ['chorizo', 'Carnes y Embutidos'], ['morcilla', 'Carnes y Embutidos'], ['bondiola', 'Carnes y Embutidos'],
+  ['matambre', 'Carnes y Embutidos'], ['pollo', 'Carnes y Embutidos'], ['milanesa', 'Carnes y Embutidos'],
+  ['hamburguesa', 'Carnes y Embutidos'], ['lomo', 'Carnes y Embutidos'], ['cordero', 'Carnes y Embutidos'],
+  ['lechon', 'Carnes y Embutidos'], ['pastrami', 'Carnes y Embutidos'],
+
+  // — Lácteos y Huevos —
+  ['provoleta', 'Lacteos y Huevos'], ['queso', 'Lacteos y Huevos'], ['huevo', 'Lacteos y Huevos'],
+  ['revuelto', 'Lacteos y Huevos'], ['burrata', 'Lacteos y Huevos'], ['mozzarella', 'Lacteos y Huevos'],
+  ['muzzarella', 'Lacteos y Huevos'], ['flan', 'Lacteos y Huevos'],
+
+  // — Frutas y Verduras —
+  ['ensalada', 'Frutas y Verduras'], ['papas', 'Frutas y Verduras'], ['papa', 'Frutas y Verduras'],
+  ['fritas', 'Frutas y Verduras'], ['rucula', 'Frutas y Verduras'], ['repollito', 'Frutas y Verduras'],
+  ['palta', 'Frutas y Verduras'], ['champignon', 'Frutas y Verduras'], ['hongos', 'Frutas y Verduras'],
+  ['berenjena', 'Frutas y Verduras'], ['zucchini', 'Frutas y Verduras'], ['calabaza', 'Frutas y Verduras'],
+
+  // — Panificados (al final: pan suelto, focaccia, etc.) —
+  ['focaccia', 'Panificados y Masas'], ['bruschetta', 'Panificados y Masas'], ['pizza', 'Panificados y Masas'],
+  ['prepizza', 'Panificados y Masas'], ['tostada', 'Panificados y Masas'], ['servicio de pan', 'Panificados y Masas'],
+  ['extra pan', 'Panificados y Masas'], ['pan', 'Panificados y Masas'],
+];
 
 function clasificarProducto(nombreProducto, categoriaFudo) {
   const n = cats.norm(nombreProducto);
   if (!n) return null;
   if (overrides.has(n)) return overrides.get(n);
 
-  // 1) Keywords del menú (más específicas)
-  let mejor = null, mejorLargo = 0;
-  for (const [cat, kws] of Object.entries(KEYWORDS_MENU)) {
-    for (const kw of kws) {
-      if (n.includes(cats.norm(kw)) && kw.length > mejorLargo) { mejor = cat; mejorLargo = kw.length; }
-    }
+  // 1) Si FUDO ya la marca como bebida/vino/cerveza, es Bebidas y Alcohol (señal fuerte).
+  const cf = cats.norm(categoriaFudo);
+  if (cf.includes('vino') || cf.includes('cerveza') || cf.includes('bebida') ||
+      cf.includes('alcohol') || cf.includes('sin alcohol') || cf.includes('espumos')) {
+    return 'Bebidas y Alcohol';
   }
-  if (mejor) return mejor;
 
-  // 2) Keywords genéricas de proveedores-categorias
+  // 2) Reglas del menú EN ORDEN: la primera que matchea gana (específicas primero).
+  for (const [kw, cat] of REGLAS_MENU) {
+    if (n.includes(cats.norm(kw))) return cat;
+  }
+
+  // 3) Keywords genéricas de proveedores-categorias (respaldo)
   const porKw = cats.inferirPorKeywords(nombreProducto);
   if (porKw) return porKw;
 
-  // 3) Heurística por categoría FUDO de venta (último recurso, grueso)
-  const cf = cats.norm(categoriaFudo);
-  if (cf.includes('vino') || cf.includes('cerveza') || cf.includes('bebida') || cf.includes('alcohol') || cf.includes('sin alcohol')) {
-    return 'Bebidas y Alcohol';
-  }
+  // 4) Postres de FUDO → Lácteos (suelen ser flanes, helados, etc.)
   if (cf.includes('postre')) return 'Lacteos y Huevos';
   return null; // sin clasificar → se reporta aparte como "Sin asignar"
 }
@@ -204,7 +265,7 @@ function costosVsIngresos({ compras, detallesFudo, desde, hasta } = {}) {
 
 module.exports = {
   CATEGORIAS_COSTO, grupoCMV,
-  clasificarProducto, setOverrideProducto, getOverrides, KEYWORDS_MENU,
+  clasificarProducto, setOverrideProducto, getOverrides, REGLAS_MENU,
   ingresosPorCategoriaCosto, costosPorCategoria, cmvDesglose, costosVsIngresos,
   montoCompra,
 };
