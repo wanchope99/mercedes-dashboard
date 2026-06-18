@@ -825,7 +825,7 @@
     <div class="card">
       <div class="card-title">Detalle por categoria</div>
       <div class="table-wrap"><table class="prov-resumen-table" style="width:100%">
-        <thead><tr><th style="text-align:left">Categoria</th><th>Grupo</th><th style="text-align:right">Costo</th><th style="text-align:right">Ingreso</th><th style="text-align:right">Food cost</th><th style="text-align:right">Margen</th></tr></thead>
+        <thead><tr><th style="text-align:left;cursor:pointer" onclick="sortCostos('categoria')">Categoria <span id="cs-arr-categoria"></span></th><th style="cursor:pointer" onclick="sortCostos('grupoCMV')">Grupo <span id="cs-arr-grupoCMV"></span></th><th style="text-align:right;cursor:pointer" onclick="sortCostos('costo')">Costo <span id="cs-arr-costo"></span></th><th style="text-align:right;cursor:pointer" onclick="sortCostos('ingreso')">Ingreso <span id="cs-arr-ingreso"></span></th><th style="text-align:right;cursor:pointer" onclick="sortCostos('ratioCostoIngreso')">Food cost <span id="cs-arr-ratioCostoIngreso"></span></th><th style="text-align:right;cursor:pointer" onclick="sortCostos('margen')">Margen <span id="cs-arr-margen"></span></th></tr></thead>
         <tbody id="costos-body"><tr><td colspan="6" class="prov-empty">-</td></tr></tbody>
       </table></div>
       <div id="costos-nota" style="font-size:11px;color:var(--text-muted);margin-top:8px"></div>
@@ -3992,16 +3992,7 @@ async function loadCostos() {
   document.getElementById('costos-kpi-ingreso-sub').textContent = t.ingresoSinAsignar>0 ? fmt(t.ingresoSinAsignar)+' sin asignar' : 'todo asignado';
   document.getElementById('costos-kpi-ratio').textContent = t.ingresoAsignado>0 ? pct((t.costo/t.ingresoAsignado)*100) : '-';
   const filas = data.filas || [];
-  const body = document.getElementById('costos-body');
-  body.innerHTML = filas.length ? filas.map((f,i) =>
-    '<tr style="cursor:pointer" onclick="openCostoCategoriaModal('+i+')" title="Ver productos">'
-    + '<td style="text-align:left">'+escapeHtml(f.categoria)+'</td>'
-    + '<td style="font-size:11px;color:var(--text-muted)">'+f.grupoCMV+'</td>'
-    + '<td style="text-align:right;color:var(--red)">'+fmt(f.costo)+'</td>'
-    + '<td style="text-align:right;color:var(--green)">'+fmt(f.ingreso)+'</td>'
-    + '<td style="text-align:right">'+(f.ratioCostoIngreso!=null?pct(f.ratioCostoIngreso):'-')+'</td>'
-    + '<td style="text-align:right;color:'+(f.margen>=0?'var(--green)':'var(--red)')+'">'+fmt(f.margen)+'</td></tr>'
-  ).join('') : '<tr><td colspan="6" class="prov-empty">Sin datos en el periodo.</td></tr>';
+  renderCostosBody();
   document.getElementById('costos-nota').textContent = (data.sinAsignar && data.sinAsignar.ingreso>0)
     ? fmt(data.sinAsignar.ingreso)+' de ingresos no se pudieron asignar a una categoria de costo (productos sin clasificar).'
     : 'El costo sale de la hoja Compras (por ingrediente); el ingreso de FUDO, mapeando cada producto a su categoria de costo dominante.';
@@ -4017,6 +4008,39 @@ async function loadCostos() {
       scales: { x: { ticks: { color: '#7878a0' }, grid: { color: 'rgba(46,46,62,.4)' }, beginAtZero: true }, y: { ticks: { color: '#7878a0' }, grid: { color: 'rgba(46,46,62,.4)' } } } },
   });
 }
+var COSTOS_OCULTAR = ['Insumos', 'Condimentos y Otros Secos'];
+var _costosSort = { col: 'ingreso', dir: 'desc' };
+function sortCostos(col){
+  if (_costosSort.col === col) _costosSort.dir = (_costosSort.dir==='asc'?'desc':'asc');
+  else { _costosSort = { col: col, dir: (col==='categoria'||col==='grupoCMV')?'asc':'desc' }; }
+  renderCostosBody();
+}
+function renderCostosBody(){
+  const body = document.getElementById('costos-body');
+  if (!body || !_costosData) return;
+  let filas = (_costosData.filas || []).filter(f => COSTOS_OCULTAR.indexOf(f.categoria) === -1);
+  filas = filas.map(f => Object.assign({}, f, { _idx: (_costosData.filas||[]).indexOf(f) }));
+  const c = _costosSort.col, dir = _costosSort.dir;
+  filas.sort((a,b)=>{
+    let va=a[c], vb=b[c];
+    if (typeof va==='string' || typeof vb==='string'){ va=String(va||''); vb=String(vb||''); const cmp=va.localeCompare(vb); return dir==='asc'?cmp:-cmp; }
+    va = va==null?-Infinity:va; vb = vb==null?-Infinity:vb;
+    return dir==='asc'? va-vb : vb-va;
+  });
+  ['categoria','grupoCMV','costo','ingreso','ratioCostoIngreso','margen'].forEach(k=>{
+    const el=document.getElementById('cs-arr-'+k); if(el) el.textContent = (_costosSort.col===k)?(_costosSort.dir==='asc'?'\u25B2':'\u25BC'):'';
+  });
+  body.innerHTML = filas.length ? filas.map(f =>
+    '<tr style="cursor:pointer" onclick="openCostoCategoriaModal('+f._idx+')" title="Ver productos">'
+    + '<td style="text-align:left">'+escapeHtml(f.categoria)+'</td>'
+    + '<td style="font-size:11px;color:var(--text-muted)">'+f.grupoCMV+'</td>'
+    + '<td style="text-align:right;color:var(--red)">'+fmt(f.costo)+'</td>'
+    + '<td style="text-align:right;color:var(--green)">'+fmt(f.ingreso)+'</td>'
+    + '<td style="text-align:right">'+(f.ratioCostoIngreso!=null?pct(f.ratioCostoIngreso):'-')+'</td>'
+    + '<td style="text-align:right;color:'+(f.margen>=0?'var(--green)':'var(--red)')+'">'+fmt(f.margen)+'</td></tr>'
+  ).join('') : '<tr><td colspan="6" class="prov-empty">Sin datos en el periodo.</td></tr>';
+}
+
 function openCostoCategoriaModal(i) {
   const f = (_costosData && _costosData.filas) ? _costosData.filas[i] : null;
   if (!f) return;
