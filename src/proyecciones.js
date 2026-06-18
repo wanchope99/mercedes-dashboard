@@ -209,16 +209,31 @@ function num(v, def = 0) { const n = Number(v); return Number.isFinite(n) ? n : 
 
 function calcularCalculadora(input = {}) {
   const i = { ...CALC_DEFAULTS, ...input };
-  // Permitir override parcial del objeto de fijos operativos
-  const fo = { ...CALC_DEFAULTS.fijosOperativos, ...(input.fijosOperativos || {}) };
+
+  // Fijos operativos: el front manda un único subtotal (número o { total }).
+  // Si viene así, se usa TAL CUAL (no se le suman las líneas default → evita doble
+  // conteo). Si viene el objeto detallado (electricidad, gas, ...), se suman sus
+  // valores. El alquiler va SIEMPRE aparte (no se incluye acá).
+  let fo, subtotalFijosOperativos;
+  const inFO = input.fijosOperativos;
+  if (typeof inFO === 'number') {
+    subtotalFijosOperativos = num(inFO);
+    fo = { total: subtotalFijosOperativos };
+  } else if (inFO && typeof inFO === 'object' && inFO.total != null && Object.keys(inFO).length === 1) {
+    subtotalFijosOperativos = num(inFO.total);
+    fo = { total: subtotalFijosOperativos };
+  } else if (inFO && typeof inFO === 'object') {
+    fo = { ...CALC_DEFAULTS.fijosOperativos, ...inFO };
+    subtotalFijosOperativos = Object.values(fo).reduce((s, x) => s + num(x), 0);
+  } else {
+    fo = { ...CALC_DEFAULTS.fijosOperativos };
+    subtotalFijosOperativos = Object.values(fo).reduce((s, x) => s + num(x), 0);
+  }
 
   const ingresoMensual = num(i.serviciosPorMes) * num(i.ingresoPorNoche);
 
   // C. Costos variables (CMV) — % sobre ingresos
   const cmv = ingresoMensual * (num(i.pctCMV) / 100);
-
-  // D. Costos fijos
-  const subtotalFijosOperativos = Object.values(fo).reduce((s, x) => s + num(x), 0);
   const costoPersonal = num(i.costoPersonal);
   const alquiler = num(i.alquiler);
   const subtotalFijos = costoPersonal + alquiler + subtotalFijosOperativos;
