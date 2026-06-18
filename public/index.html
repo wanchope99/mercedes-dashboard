@@ -717,43 +717,40 @@
 <!-- ═══ PROYECCIONES TAB ═══ -->
 <div id="tab-proymes" class="tab-panel">
   <main>
-    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
-      <div style="flex:2;min-width:420px">
-        <div class="kpi-grid" id="proymes-kpis"><div class="loading"><div class="spinner"></div> Calculando el mes...</div></div>
-        <div class="card">
-          <div class="card-title">Mes en curso − acumulado real + proyección a fin de mes
-            <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">linea solida = real, punteada = forecast</span>
-          </div>
-          <div class="chart-container" style="height:320px"><canvas id="chart-proymes"></canvas></div>
+    <div class="kpi-grid" id="proymes-kpis"><div class="loading"><div class="spinner"></div> Calculando el mes...</div></div>
+    <div class="card">
+      <div class="card-title">Mes en curso − acumulado real + proyección a fin de mes
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">linea solida = real, punteada = forecast</span>
+      </div>
+      <div class="chart-container" style="height:340px"><canvas id="chart-proymes"></canvas></div>
+    </div>
+    <!-- Zócalo de variables, inmediatamente bajo el gráfico -->
+    <div class="card" style="margin-top:0">
+      <div class="card-title">Variables (simulación)
+        <button class="btn btn-accent" style="float:right;font-size:12px;padding:6px 12px" onclick="toggleVarForm()">➕ Agregar variable</button>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· afectan la proyección del mes y de los 3 meses</span>
+      </div>
+      <div id="proy-var-form" style="display:none">
+        <div class="proy-form-grid">
+          <div class="form-group"><label>Nombre</label><input id="pvf-nombre" placeholder="Ej: Sueldo nuevo empleado"></div>
+          <div class="form-group"><label>Tipo</label><select id="pvf-tipo">
+            <option value="gasto">Gasto fijo mensual</option>
+            <option value="ingreso">Ingreso mensual</option>
+          </select></div>
+          <div class="form-group"><label>Monto ARS (por mes)</label><input type="number" id="pvf-monto" min="0" placeholder="0"></div>
+          <div class="form-group"><label>Frecuencia</label><select id="pvf-repite">
+            <option value="true">🔁 Se repite cada año</option>
+            <option value="false">1️⃣ Una sola vez</option>
+          </select></div>
+        </div>
+        <div class="form-group"><label>Meses en los que aplica</label><div id="pvf-meses" class="pv-meses"></div></div>
+        <div id="pvf-status" style="display:none;font-size:12px;margin:10px 0"></div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn btn-accent" onclick="saveProyVar()">Guardar variable</button>
+          <button class="btn" onclick="toggleVarForm()">Cancelar</button>
         </div>
       </div>
-      <div style="flex:1;min-width:280px">
-        <div class="card" style="margin-top:0">
-          <div class="card-title">Variables
-            <button class="btn btn-accent" style="float:right;font-size:12px;padding:6px 12px" onclick="toggleVarForm()">➕ Agregar</button>
-          </div>
-          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Afectan la proyección del mes y de los 3 meses.</div>
-          <div id="proy-var-form" style="display:none">
-            <div class="form-group"><label>Nombre</label><input id="pvf-nombre" placeholder="Ej: Sueldo nuevo empleado"></div>
-            <div class="form-group"><label>Tipo</label><select id="pvf-tipo">
-              <option value="gasto">Gasto fijo mensual</option>
-              <option value="ingreso">Ingreso mensual</option>
-            </select></div>
-            <div class="form-group"><label>Monto ARS (por mes)</label><input type="number" id="pvf-monto" min="0" placeholder="0"></div>
-            <div class="form-group"><label>Frecuencia</label><select id="pvf-repite">
-              <option value="true">🔁 Se repite cada año</option>
-              <option value="false">1️⃣ Una sola vez</option>
-            </select></div>
-            <div class="form-group"><label>Meses en los que aplica</label><div id="pvf-meses" class="pv-meses"></div></div>
-            <div id="pvf-status" style="display:none;font-size:12px;margin:10px 0"></div>
-            <div style="display:flex;gap:8px;margin-top:10px">
-              <button class="btn btn-accent" onclick="saveProyVar()">Guardar</button>
-              <button class="btn" onclick="toggleVarForm()">Cancelar</button>
-            </div>
-          </div>
-          <div id="proy-var-list"><div style="color:var(--text-muted);font-size:13px;padding:8px 0">Sin variables.</div></div>
-        </div>
-      </div>
+      <div id="proy-var-list"><div style="color:var(--text-muted);font-size:13px;padding:8px 0">Sin variables. Agregá por ejemplo el sueldo de un empleado nuevo para simular su impacto.</div></div>
     </div>
     <div style="margin-top:18px;font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Proyección a 3 meses (tendencia)</div>
     <div class="kpi-grid" id="proy-kpis"><div class="loading"><div class="spinner"></div> Calculando proyección...</div></div>
@@ -3884,7 +3881,47 @@ function fechaCorta(iso) {
 function openDetalleModal(t,h){document.getElementById('detalle-modal-title').innerHTML=t;document.getElementById('detalle-modal-body').innerHTML=h;document.getElementById('detalle-modal-overlay').style.display='flex';}
 function closeDetalleModal(){document.getElementById('detalle-modal-overlay').style.display='none';}
 document.addEventListener('DOMContentLoaded',function(){var o=document.getElementById('detalle-modal-overlay');if(o)o.addEventListener('click',function(e){if(e.target===o)closeDetalleModal();});});
-function miniTabla(cols,rows){return '<table class="prov-resumen-table" style="width:100%"><thead><tr>'+cols.map(function(c){return '<th style="text-align:'+(c.align||'left')+'">'+c.label+'</th>';}).join('')+'</tr></thead><tbody>'+(rows.length?rows.map(function(r){return '<tr>'+r.map(function(cell,i){return '<td style="text-align:'+(cols[i].align||'left')+'">'+cell+'</td>';}).join('')+'</tr>';}).join(''):'<tr><td colspan="'+cols.length+'" style="text-align:center;color:var(--text-muted);padding:14px">Sin datos</td></tr>')+'</tbody></table>';}
+// Tablas de modales con ordenamiento por columna (clic en encabezado = asc/desc).
+var _miniTablas = {}; var _miniSeq = 0;
+function _miniParse(cell){
+  // extraer número de una celda tipo "$1.234" / "12,5%" / "47"; si no, null -> orden texto
+  var t = String(cell).replace(/<[^>]*>/g,'').trim();
+  var num = t.replace(/[^0-9,.\-]/g,'').replace(/\.(?=.*[.,])/g,'').replace(',', '.');
+  var v = parseFloat(num);
+  return (t.match(/[0-9]/) && isFinite(v)) ? v : null;
+}
+function _miniRender(id){
+  var t = _miniTablas[id]; if(!t) return '';
+  var rows = t.rows.slice();
+  if(t.sortCol != null){
+    var ci = t.sortCol, dir = t.sortDir;
+    rows.sort(function(a,b){
+      var na=_miniParse(a[ci]), nb=_miniParse(b[ci]);
+      var cmp;
+      if(na!=null && nb!=null) cmp = na-nb;
+      else cmp = String(a[ci]).replace(/<[^>]*>/g,'').localeCompare(String(b[ci]).replace(/<[^>]*>/g,''));
+      return dir==='asc'? cmp : -cmp;
+    });
+  }
+  var head = '<thead><tr>'+t.cols.map(function(c,i){
+    var arrow = (t.sortCol===i) ? (t.sortDir==='asc'?' ▲':' ▼') : '';
+    return '<th style="text-align:'+(c.align||'left')+';cursor:pointer;user-select:none" onclick="sortMiniTabla(\''+id+'\','+i+')">'+c.label+arrow+'</th>';
+  }).join('')+'</tr></thead>';
+  var body = '<tbody>'+(rows.length?rows.map(function(r){return '<tr>'+r.map(function(cell,i){return '<td style="text-align:'+(t.cols[i].align||'left')+'">'+cell+'</td>';}).join('')+'</tr>';}).join(''):'<tr><td colspan="'+t.cols.length+'" style="text-align:center;color:var(--text-muted);padding:14px">Sin datos</td></tr>')+'</tbody>';
+  return '<table class="prov-resumen-table" style="width:100%" data-mini="'+id+'">'+head+body+'</table>';
+}
+function sortMiniTabla(id, col){
+  var t = _miniTablas[id]; if(!t) return;
+  if(t.sortCol===col){ t.sortDir = (t.sortDir==='asc'?'desc':'asc'); }
+  else { t.sortCol = col; t.sortDir = (t.cols[col].align==='right'?'desc':'asc'); }
+  var el = document.querySelector('[data-mini="'+id+'"]');
+  if(el) el.outerHTML = _miniRender(id);
+}
+function miniTabla(cols,rows){
+  var id = 'mt'+(++_miniSeq);
+  _miniTablas[id] = { cols: cols, rows: rows, sortCol: null, sortDir: 'asc' };
+  return _miniRender(id);
+}
 function toggleServAgg(){var w=document.getElementById('servagg-wrap');var btn=document.getElementById('servagg-toggle');if(w.style.display==='none'){w.style.display='block';btn.textContent='Ocultar agregado';if(!w.dataset.loaded){loadServiciosAgregado();w.dataset.loaded='1';}}else{w.style.display='none';btn.textContent='Ver agregado de productos';}}
 
 function openResultadoNetoModal() {
