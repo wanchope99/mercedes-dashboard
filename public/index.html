@@ -663,9 +663,9 @@
     <select id="stk-filter-categoria" onchange="onStkCategoriaChange()">
       <option value="">Todas</option>
     </select>
-    <span class="filter-label">Producto</span>
-    <select id="stk-filter-producto" onchange="loadStkProducto()">
-      <option value="">Elegí un producto…</option>
+    <span class="filter-label" id="stk-prod-label" style="display:none">Producto</span>
+    <select id="stk-filter-producto" onchange="loadStkProducto()" style="display:none">
+      <option value="">Todos (categoría completa)</option>
     </select>
     <div class="filter-sep"></div>
     <span class="filter-label">Desde</span>
@@ -717,12 +717,43 @@
 <!-- ═══ PROYECCIONES TAB ═══ -->
 <div id="tab-proymes" class="tab-panel">
   <main>
-    <div class="kpi-grid" id="proymes-kpis"><div class="loading"><div class="spinner"></div> Calculando el mes...</div></div>
-    <div class="card">
-      <div class="card-title">Mes en curso − acumulado real + proyección a fin de mes
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">linea solida = real, punteada = forecast</span>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+      <div style="flex:2;min-width:420px">
+        <div class="kpi-grid" id="proymes-kpis"><div class="loading"><div class="spinner"></div> Calculando el mes...</div></div>
+        <div class="card">
+          <div class="card-title">Mes en curso − acumulado real + proyección a fin de mes
+            <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">linea solida = real, punteada = forecast</span>
+          </div>
+          <div class="chart-container" style="height:320px"><canvas id="chart-proymes"></canvas></div>
+        </div>
       </div>
-      <div class="chart-container" style="height:320px"><canvas id="chart-proymes"></canvas></div>
+      <div style="flex:1;min-width:280px">
+        <div class="card" style="margin-top:0">
+          <div class="card-title">Variables
+            <button class="btn btn-accent" style="float:right;font-size:12px;padding:6px 12px" onclick="toggleVarForm()">➕ Agregar</button>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Afectan la proyección del mes y de los 3 meses.</div>
+          <div id="proy-var-form" style="display:none">
+            <div class="form-group"><label>Nombre</label><input id="pvf-nombre" placeholder="Ej: Sueldo nuevo empleado"></div>
+            <div class="form-group"><label>Tipo</label><select id="pvf-tipo">
+              <option value="gasto">Gasto fijo mensual</option>
+              <option value="ingreso">Ingreso mensual</option>
+            </select></div>
+            <div class="form-group"><label>Monto ARS (por mes)</label><input type="number" id="pvf-monto" min="0" placeholder="0"></div>
+            <div class="form-group"><label>Frecuencia</label><select id="pvf-repite">
+              <option value="true">🔁 Se repite cada año</option>
+              <option value="false">1️⃣ Una sola vez</option>
+            </select></div>
+            <div class="form-group"><label>Meses en los que aplica</label><div id="pvf-meses" class="pv-meses"></div></div>
+            <div id="pvf-status" style="display:none;font-size:12px;margin:10px 0"></div>
+            <div style="display:flex;gap:8px;margin-top:10px">
+              <button class="btn btn-accent" onclick="saveProyVar()">Guardar</button>
+              <button class="btn" onclick="toggleVarForm()">Cancelar</button>
+            </div>
+          </div>
+          <div id="proy-var-list"><div style="color:var(--text-muted);font-size:13px;padding:8px 0">Sin variables.</div></div>
+        </div>
+      </div>
     </div>
     <div style="margin-top:18px;font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Proyección a 3 meses (tendencia)</div>
     <div class="kpi-grid" id="proy-kpis"><div class="loading"><div class="spinner"></div> Calculando proyección...</div></div>
@@ -732,33 +763,6 @@
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· barras translúcidas = proyección</span>
       </div>
       <div class="chart-container" style="height:330px"><canvas id="chart-proy-main"></canvas></div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">Variables personalizadas
-        <button class="btn btn-accent" style="float:right;font-size:12px;padding:6px 12px" onclick="toggleVarForm()">➕ Agregar variable</button>
-      </div>
-      <div id="proy-var-form" style="display:none">
-        <div class="proy-form-grid">
-          <div class="form-group"><label>Nombre</label><input id="pvf-nombre" placeholder="Ej: Sueldo nuevo empleado"></div>
-          <div class="form-group"><label>Tipo</label><select id="pvf-tipo">
-            <option value="gasto">Gasto fijo mensual</option>
-            <option value="ingreso">Ingreso mensual</option>
-          </select></div>
-          <div class="form-group"><label>Monto ARS (por mes)</label><input type="number" id="pvf-monto" min="0" placeholder="0"></div>
-          <div class="form-group"><label>Frecuencia</label><select id="pvf-repite">
-            <option value="true">🔁 Se repite cada año</option>
-            <option value="false">1️⃣ Una sola vez</option>
-          </select></div>
-        </div>
-        <div class="form-group"><label>Meses en los que aplica</label><div id="pvf-meses" class="pv-meses"></div></div>
-        <div id="pvf-status" style="display:none;font-size:12px;margin:10px 0"></div>
-        <div style="display:flex;gap:8px;margin-top:10px">
-          <button class="btn btn-accent" onclick="saveProyVar()">Guardar variable</button>
-          <button class="btn" onclick="toggleVarForm()">Cancelar</button>
-        </div>
-      </div>
-      <div id="proy-var-list"><div style="color:var(--text-muted);font-size:13px;padding:8px 0">Sin variables. Agregá por ejemplo el sueldo de un empleado nuevo para simular su impacto.</div></div>
     </div>
 
     <div class="card">
@@ -813,7 +817,7 @@
     <div class="kpi-grid" id="costos-kpis">
       <div class="kpi-card red"><div class="kpi-label">Costo total (Compras)</div><div class="kpi-value" id="costos-kpi-costo">-</div><div class="kpi-sub">facturas de proveedores</div></div>
       <div class="kpi-card green"><div class="kpi-label">Ingreso asignado (Fudo)</div><div class="kpi-value" id="costos-kpi-ingreso">-</div><div class="kpi-sub" id="costos-kpi-ingreso-sub"></div></div>
-      <div class="kpi-card accent"><div class="kpi-label">Food cost global</div><div class="kpi-value" id="costos-kpi-ratio">-</div><div class="kpi-sub">costo / ingreso</div></div>
+      <div class="kpi-card accent" style="cursor:pointer" onclick="openFoodCostModal()" title="Ver Comida / Bebida"><div class="kpi-label">Food cost global</div><div class="kpi-value" id="costos-kpi-ratio">-</div><div class="kpi-sub">costo / ingreso</div></div>
     </div>
     <div class="card">
       <div class="card-title">Costo (por ingrediente) vs Ingreso (por plato Fudo) por categoria
@@ -2061,12 +2065,12 @@ function renderKPIs(resumen, diasSemana, esMensual) {
       </div>
     </div>
     <div class="kpi-card ${resultado >= 0 ? 'green' : 'red'}" style="cursor:pointer" onclick="openResultadoNetoModal()" title="Ver detalle">
-      <div class="kpi-label">Resultado Neto (ver)</div>
+      <div class="kpi-label">Resultado Neto</div>
       <div class="kpi-value">${fmt(resultado)}</div>
       <div class="kpi-sub">${totalIngresos>0 ? pct((resultado/totalIngresos)*100)+' sobre ingresos' : 'Ingresos − Gastos'}</div>
     </div>
     <div class="kpi-card accent" style="cursor:pointer" onclick="openCmvModal()" title="Ver desglose">
-      <div class="kpi-label">Merc + Insumos / Ing (ver)</div>
+      <div class="kpi-label">Merc + Insumos / Ing</div>
       <div class="kpi-value">${pct(pctMI)}</div>
       <div class="kpi-sub">${fmt(mercaderia + insumos)} sobre ingresos</div>
     </div>
@@ -2100,7 +2104,7 @@ function renderTablaResumen(resumen) {
     const cells = vals.map(v => `<td class="${colorFn ? colorFn(v) : ''}">${fmt(v)}</td>`);
     const totalCell = multi ? `<td class="${colorFn ? colorFn(t) : ''}" style="font-weight:600">${fmt(t)}</td>` : '';
     const ck = clickGroup ? ` style="cursor:pointer" onclick="openConceptoModal('${clickGroup}')" title="Ver detalle"` : '';
-    const lbl = clickGroup ? label + ' (ver)' : label;
+    const lbl = label;
     return `<tr class="${cls}"${ck}><td>${lbl}</td>${cells.join('')}${totalCell}</tr>`;
   };
   const section = label => `<tr class="row-header"><td colspan="${cols}">${label}</td></tr>`;
@@ -2696,7 +2700,7 @@ async function saveProyVar() {
   try {
     await api('/api/proyecciones/variables', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nombre, tipo, monto, meses, repite }) });
     st.style.color = 'var(--green)'; st.textContent = '✅ Variable guardada. Recalculando...';
-    setTimeout(() => { toggleVarForm(); loadProyecciones(); }, 800);
+    setTimeout(() => { toggleVarForm(); loadProyecciones(); if (typeof loadProyeccionMes==='function') loadProyeccionMes(); }, 800);
   } catch (e) { st.style.color = 'var(--red)'; st.textContent = '❌ ' + e.message; }
 }
 
@@ -2704,7 +2708,7 @@ async function deleteProyVar(id) {
   if (!confirm('¿Eliminar esta variable de la proyección?')) return;
   try {
     await api('/api/proyecciones/variables/' + id, { method: 'DELETE' });
-    loadProyecciones();
+    loadProyecciones(); if (typeof loadProyeccionMes==='function') loadProyeccionMes();
   } catch (e) { alert('Error: ' + e.message); }
 }
 
@@ -3682,19 +3686,80 @@ function renderStkProductoOptions(categoria) {
   const sel = document.getElementById('stk-filter-producto');
   const prev = sel.value;
   const lista = (_stkProductos || []).filter(p => !categoria || p.categoria === categoria);
-  sel.innerHTML = '<option value="">Elegí un producto…</option>' +
+  sel.innerHTML = '<option value="">Todos (categoría completa)</option>' +
     lista.map(p => `<option value="${escAttr2(p.nombre)}">${escapeHtml(p.nombre)}</option>`).join('');
   if (lista.some(p => p.nombre === prev)) sel.value = prev;
 }
 
 function onStkCategoriaChange() {
-  renderStkProductoOptions(document.getElementById('stk-filter-categoria').value);
-  loadStkProducto();
+  const cat = document.getElementById('stk-filter-categoria').value;
+  const lbl = document.getElementById('stk-prod-label');
+  const sel = document.getElementById('stk-filter-producto');
+  if (cat) {
+    renderStkProductoOptions(cat);
+    sel.value = '';
+    lbl.style.display = ''; sel.style.display = '';
+    loadStkCategoria();           // gráfico agregado de toda la categoría
+  } else {
+    lbl.style.display = 'none'; sel.style.display = 'none';
+    loadStkProducto();            // sin categoría: estado vacío
+  }
+}
+
+async function loadStkCategoria() {
+  const categoria = document.getElementById('stk-filter-categoria').value;
+  const desde = document.getElementById('stk-desde').value;
+  const hasta = document.getElementById('stk-hasta').value;
+  const emptyEl = document.getElementById('stk-empty');
+  const bodyEl = document.getElementById('stk-mov-body');
+  if (!categoria) return;
+  emptyEl.style.display = 'none';
+  const qs = new URLSearchParams({ categoria });
+  if (desde) qs.set('desde', desde);
+  if (hasta) qs.set('hasta', hasta);
+  let data;
+  try { ({ data } = await api('/api/stocks/serie-categoria?' + qs.toString())); }
+  catch (e) { showToast('Error: ' + e.message); return; }
+  document.getElementById('stk-match-info').textContent = 'Categoría completa: ' + categoria;
+  // KPIs: en modo categoría mostramos totales
+  document.getElementById('stk-kpi-dias').textContent = '—';
+  document.getElementById('stk-kpi-compra').textContent = (data.compras||[]).length + ' compras';
+  document.getElementById('stk-kpi-compra-sub').textContent = data.totalIngreso + ' u. ingresadas';
+  document.getElementById('stk-kpi-venta').textContent = (data.ventas||[]).length + ' ventas';
+  document.getElementById('stk-kpi-venta-sub').textContent = data.totalVendido + ' u. vendidas';
+  const tot = document.getElementById('stk-totales-card');
+  if (tot) tot.style.display = 'none';
+  // Gráfico agregado por fecha
+  const fechasSet = new Set();
+  (data.compras||[]).forEach(c => c.fecha && fechasSet.add(c.fecha));
+  (data.ventas||[]).forEach(v => v.fecha && fechasSet.add(v.fecha));
+  const labels = [...fechasSet].sort();
+  const lf = iso => { const [y,m,d] = iso.split('-'); return d+'/'+m; };
+  const cpf = {}, vpf = {};
+  (data.compras||[]).forEach(c => { if (c.fecha) cpf[c.fecha] = (cpf[c.fecha]||0) + (c.cantidad||0); });
+  (data.ventas||[]).forEach(v => { if (v.fecha) vpf[v.fecha] = (vpf[v.fecha]||0) + (v.unidades||0); });
+  if (state.charts['stk']) state.charts['stk'].destroy();
+  state.charts['stk'] = new Chart(document.getElementById('chart-stk').getContext('2d'), {
+    type: 'bar',
+    data: { labels: labels.map(lf), datasets: [
+      { label: 'Ingreso (compras)', data: labels.map(f => cpf[f]||0), backgroundColor: STK_COLORS.compra },
+      { label: 'Venta', data: labels.map(f => vpf[f]||0), backgroundColor: STK_COLORS.venta } ] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#e8e8f0', usePointStyle: true } } },
+      scales: { x: { ticks: { color: '#7878a0' }, grid: { color: 'rgba(46,46,62,.4)' } }, y: { ticks: { color: '#7878a0' }, grid: { color: 'rgba(46,46,62,.4)' }, beginAtZero: true } } },
+  });
+  // Tabla
+  const movs = [];
+  (data.compras||[]).forEach(c => movs.push({ fecha: c.fecha, tipo: 'Ingreso', cant: c.cantidad, detalle: (c.producto||'')+' · '+(c.proveedor||'') }));
+  (data.ventas||[]).forEach(v => movs.push({ fecha: v.fecha, tipo: 'Venta', cant: v.unidades, detalle: v.nombre||'' }));
+  movs.sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  bodyEl.innerHTML = movs.length ? movs.slice(0,100).map(m => '<tr><td>'+fechaCorta(m.fecha)+'</td><td style="color:'+(m.tipo==='Ingreso'?'var(--green)':'var(--orange)')+'">'+m.tipo+'</td><td>'+(m.cant!=null?m.cant:'')+'</td><td style="text-align:left">'+escapeHtml(m.detalle)+'</td></tr>').join('') : '<tr><td colspan="4" class="prov-empty">Sin movimientos.</td></tr>';
 }
 
 async function loadStkProducto() {
   const producto = document.getElementById('stk-filter-producto').value;
   const categoria = document.getElementById('stk-filter-categoria').value;
+  if (!producto && categoria) { return loadStkCategoria(); }
   const desde = document.getElementById('stk-desde').value;
   const hasta = document.getElementById('stk-hasta').value;
   const emptyEl = document.getElementById('stk-empty');
@@ -3847,10 +3912,8 @@ async function openCmvModal() {
   const linea = (nombre, color) => {
     const val = g[nombre] || 0;
     const p = totalComp > 0 ? (val/totalComp)*100 : 0;
-    const cs = (det[nombre]||[]).map(c => escapeHtml(c.categoria)+' '+fmt(c.costo)).join(' / ');
     return '<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between"><strong style="color:'+color+'">'+nombre+'</strong><span>'+fmt(val)+' <span style="color:var(--text-muted)">('+pct(p)+')</span></span></div>'
-      + '<div style="height:8px;background:var(--surface2);border-radius:4px;overflow:hidden;margin:3px 0"><div style="height:100%;width:'+p+'%;background:'+color+'"></div></div>'
-      + '<div style="font-size:11px;color:var(--text-muted)">'+(cs||'sin compras en el periodo')+'</div></div>';
+      + '<div style="height:8px;background:var(--surface2);border-radius:4px;overflow:hidden;margin:3px 0"><div style="height:100%;width:'+p+'%;background:'+color+'"></div></div></div>';
   };
   const body = '<div style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px"><div>CMV total (P&L real, Movimientos): <strong>'+fmt(data.cmvMovimientos)+'</strong> - '+pct(data.pctCMV)+' de ingresos</div></div>'
     + linea('Comida', '#e0a85c') + linea('Bebida', '#5c9ae0') + linea('Insumos', '#9b6fc0') + (g.Otros? linea('Otros', '#888') : '')
@@ -3895,7 +3958,7 @@ async function loadCostos() {
   const body = document.getElementById('costos-body');
   body.innerHTML = filas.length ? filas.map((f,i) =>
     '<tr style="cursor:pointer" onclick="openCostoCategoriaModal('+i+')" title="Ver productos">'
-    + '<td style="text-align:left">'+escapeHtml(f.categoria)+' (ver)</td>'
+    + '<td style="text-align:left">'+escapeHtml(f.categoria)+'</td>'
     + '<td style="font-size:11px;color:var(--text-muted)">'+f.grupoCMV+'</td>'
     + '<td style="text-align:right;color:var(--red)">'+fmt(f.costo)+'</td>'
     + '<td style="text-align:right;color:var(--green)">'+fmt(f.ingreso)+'</td>'
@@ -3931,20 +3994,38 @@ function openCostoCategoriaModal(i) {
     + ((f.proveedores&&f.proveedores.length)?'<div style="font-size:11px;color:var(--text-muted);margin-top:10px">Proveedores: '+f.proveedores.map(escapeHtml).join(', ')+'</div>':'');
   openDetalleModal('Costos - ' + f.categoria, body);
 }
+function openFoodCostModal() {
+  const d = _costosData; if (!d) return;
+  const filas = d.filas || [];
+  const grupo = (g) => {
+    const fs = filas.filter(f => f.grupoCMV === g);
+    const costo = fs.reduce((s,f)=>s+f.costo,0);
+    const ingreso = fs.reduce((s,f)=>s+f.ingreso,0);
+    return { costo, ingreso, fc: ingreso>0 ? (costo/ingreso)*100 : null, fs };
+  };
+  const linea = (nombre, color) => {
+    const x = grupo(nombre);
+    const rows = x.fs.sort((a,b)=>b.ingreso-a.ingreso).map(f => [escapeHtml(f.categoria), fmt(f.costo), fmt(f.ingreso), f.ratioCostoIngreso!=null?pct(f.ratioCostoIngreso):'-']);
+    return '<div style="margin:14px 0 6px;display:flex;justify-content:space-between"><strong style="color:'+color+'">'+nombre+'</strong>'
+      + '<span>costo '+fmt(x.costo)+' / ingreso '+fmt(x.ingreso)+' = <strong>'+(x.fc!=null?pct(x.fc):'-')+'</strong></span></div>'
+      + miniTabla([{label:'Categoria'},{label:'Costo',align:'right'},{label:'Ingreso',align:'right'},{label:'Food cost',align:'right'}], rows);
+  };
+  const t = d.totales;
+  const body = '<div style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:8px;font-size:13px">Food cost global: <strong>'
+    + (t.ingresoAsignado>0?pct((t.costo/t.ingresoAsignado)*100):'-')+'</strong> (costo '+fmt(t.costo)+' / ingreso '+fmt(t.ingresoAsignado)+')</div>'
+    + linea('Comida', '#e0a85c') + linea('Bebida', '#5c9ae0');
+  openDetalleModal('Food cost - Comida / Bebida', body);
+}
 
 let _calcDefaults = null;
 async function loadCalculadora() {
-  if (!_calcDefaults) {
-    try { const r = await api('/api/calculadora/defaults'); _calcDefaults = r.data || {}; }
-    catch (e) { _calcDefaults = {}; }
-  }
-  const d = _calcDefaults;
-  const setIf = (id, val) => { const el = document.getElementById(id); if (el && (el.value === '' || el.value == null)) el.value = Math.round(val); };
-  setIf('calc-servicios', d.diasServicioMes ? Math.round(d.diasServicioMes) : 21);
-  setIf('calc-ingreso-noche', d.ingresoPorDiaServicio || 1650000);
-  setIf('calc-cmv', d.pctCostoVariable ? Math.round(d.pctCostoVariable*1000)/10 : 38);
-  setIf('calc-personal', d.personalMensual || 11300000);
-  setIf('calc-alquiler', d.alquilerMensual || 930000);
+  // Defaults SIEMPRE = valores del Excel (modelo de régimen). El usuario los edita.
+  const setIf = (id, val) => { const el = document.getElementById(id); if (el && (el.value === '' || el.value == null)) el.value = val; };
+  setIf('calc-servicios', 21);
+  setIf('calc-ingreso-noche', 1650000);
+  setIf('calc-cmv', 38);
+  setIf('calc-personal', 11300000);
+  setIf('calc-alquiler', 930000);
   setIf('calc-fijos', 1030000);
   setIf('calc-extra', 1500000);
   setIf('calc-fin', 1178100);
