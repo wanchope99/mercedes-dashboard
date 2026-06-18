@@ -10,7 +10,7 @@ const {
   getComprasEnCuotas,
   getMeses, getCategorias, clearCache,
 } = require('./sheets');
-const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, getDetallesTodos, getAgregadoProductos, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy } = require('./fudo');
+const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, getDetallesTodos, getAgregadoProductos, getProductoDebug, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy } = require('./fudo');
 const { proyectar, calcularCalculadora, proyeccionMes } = require('./proyecciones');
 const proveedoresRoutes = require('./proveedores-routes');
 const prov = require('./proveedores');
@@ -892,6 +892,14 @@ app.get('/api/servicios/agregado', authMiddleware, adminOnly, async (req, res) =
   }
 });
 
+// Diagnóstico por producto (auditar ingreso de Fudo): /api/costos/producto-debug?nombre=Vermu&desde=&hasta=
+app.get('/api/costos/producto-debug', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { nombre, desde, hasta } = req.query;
+    res.json({ ok: true, data: await getProductoDebug(nombre || '', { desde, hasta }) });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // ─── Costos vs Ingresos por categoría (solo admin) ────────────────────────────
 // Cruza el costo (hoja Compras, por ingrediente) con el ingreso (FUDO, mapeado por
 // producto a su categoría de costo dominante).
@@ -929,16 +937,21 @@ app.get('/api/cmv-desglose', authMiddleware, adminOnly, async (req, res) => {
       getResumenMensual(filtro).catch(() => []),
     ]);
     const desglose = costos.cmvDesglose(compras, { desde, hasta });
-    // Total fiel del CMV desde Movimientos (Mercadería + Insumos)
     const r = resumenArr[0] || { gastos: {}, ingresos: {} };
-    const cmvMovimientos = (r.gastos?.Mercaderia || 0) + (r.gastos?.Insumos || 0);
+    const insumosMovimientos = r.gastos?.Insumos || 0;
+    const cmvMovimientos = (r.gastos?.Mercaderia || 0) + insumosMovimientos;
     const ingresos = r.ingresos?.total || 0;
+    // Insumos viene de MOVIMIENTOS (no de Compras): pisar el grupo y su detalle.
+    desglose.grupos.Insumos = insumosMovimientos;
+    desglose.detalle.Insumos = [{ categoria: 'Insumos (Movimientos)', costo: insumosMovimientos }];
+    // Recalcular total de composición con el Insumos de Movimientos
+    desglose.total = (desglose.grupos.Comida||0) + (desglose.grupos.Bebida||0) + (desglose.grupos.Insumos||0) + (desglose.grupos.Otros||0);
     res.json({ ok: true, data: {
-      desglose,                       // composición Comida/Bebida/Insumos (Compras)
+      desglose,                       // Comida/Bebida (Compras) + Insumos (Movimientos)
       cmvMovimientos,                 // total fiel (Movimientos)
       ingresos,
       pctCMV: ingresos > 0 ? Math.round((cmvMovimientos / ingresos) * 1000) / 10 : 0,
-      nota: 'El total del CMV sale de Movimientos (P&L real). La composición Comida/Bebida/Insumos sale de la hoja Compras y puede no sumar exactamente igual.',
+      nota: 'CMV total e Insumos salen de Movimientos (P&L real). Comida y Bebida se desagregan desde la hoja Compras.',
     } });
   } catch (err) {
     console.error('Error /api/cmv-desglose:', err.message);
@@ -989,8 +1002,8 @@ app.get('/api/calculadora/defaults', authMiddleware, adminOnly, async (req, res)
 // ─── Proyección del MES en curso (real acumulado + forecast a fin de mes) ──────
 app.get('/api/proyeccion-mes', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const movimientos = await getMovimientos();
-    res.json({ ok: true, data: proyeccionMes({ movimientos }) });
+    const [movimientos, variables] = await Promise.all([getMovimientos(), leerVariables().catch(() => [])]);
+    res.json({ ok: true, data: proyeccionMes({ movimientos, variables }) });
   } catch (err) {
     console.error('Error /api/proyeccion-mes:', err.message);
     res.status(500).json({ ok: false, error: err.message });

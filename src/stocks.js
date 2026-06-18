@@ -16,6 +16,7 @@
 const prov = require('./proveedores');
 const cats = require('./proveedores-categorias');
 const fudo = require('./fudo');
+let costosMod = null; try { costosMod = require('./costos'); } catch(e){}
 
 // Categorías que se venden "tal cual" en FUDO (match directo confiable).
 const CATEGORIAS_DIRECTAS = new Set(['Bebidas y Alcohol']);
@@ -177,4 +178,44 @@ async function getSerieStock({ producto, categoria, desde, hasta } = {}) {
   };
 }
 
-module.exports = { getProductosStock, getSerieStock, setMatchOverride, similitud };
+// ─── Serie agregada de TODA una categoría (compras vs ventas Fudo) ──────────────
+// Para la vista de Stocks cuando el usuario elige una categoría pero no un producto:
+// suma ingresos (compras de esa categoría) y ventas (productos Fudo mapeados a ella).
+async function getSerieCategoria({ categoria, desde, hasta } = {}) {
+  if (!categoria) return { categoria: '', compras: [], ventas: [], totalIngreso: 0, totalVendido: 0 };
+
+  // Compras de la categoría
+  const todas = await prov.getCompras();
+  const compras = todas
+    .filter(c => cats.normalizarCategoria(c.categoria).categoria === categoria)
+    .filter(c => (!desde || !c.fecha || c.fecha >= desde) && (!hasta || !c.fecha || c.fecha <= hasta))
+    .map(c => ({ fecha: c.fecha, cantidad: c.cantidad, proveedor: c.proveedor, producto: c.producto, unidad: c.unidad }))
+    .sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
+
+  // Ventas Fudo: productos cuya categoría de costo mapeada == categoria elegida
+  let detalles = [];
+  try { detalles = await fudo.getDetallesTodos({ desde, hasta }); } catch (e) { detalles = []; }
+  const ventas = [];
+  for (const dia of detalles) {
+    for (const cat of (dia.categorias || [])) {
+      for (const p of (cat.productos || [])) {
+        const catCosto = costosMod ? costosMod.clasificarProducto(p.nombre, cat.categoria) : null;
+        if (catCosto === categoria) {
+          ventas.push({ fecha: dia.fecha, unidades: p.unidades, nombre: p.nombre, monto: p.monto });
+        }
+      }
+    }
+  }
+  ventas.sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
+
+  const totalIngreso = compras.reduce((s, c) => s + (Number(c.cantidad) || 0), 0);
+  const totalVendido = ventas.reduce((s, v) => s + (Number(v.unidades) || 0), 0);
+  return {
+    categoria, compras, ventas,
+    totalIngreso: Math.round(totalIngreso * 100) / 100,
+    totalVendido: Math.round(totalVendido * 100) / 100,
+    esCategoria: true,
+  };
+}
+
+module.exports = { getProductosStock, getSerieStock, getSerieCategoria, setMatchOverride, similitud };

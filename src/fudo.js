@@ -238,13 +238,14 @@ async function loadRaw() {
 
 // ─── Monto de un ítem ───────────────────────────────────────────────────────────
 function montoItem(item, producto) {
+  // IMPORTANTE: en la API de Fudo, item.price es el TOTAL de la línea (ya
+  // multiplicado por la cantidad), NO el precio unitario. Por eso el monto de la
+  // línea es item.price tal cual. Solo si la línea no trae price caemos al precio
+  // de lista del producto × cantidad como estimación.
   const q = (item.attributes && item.attributes.quantity) || 0;
   const ip = item.attributes ? item.attributes.price : null;
-  let unit;
-  if (ip === 0) unit = 0;
-  else if (typeof ip === 'number' && ip > 0) unit = ip;
-  else unit = producto ? producto.price : 0;
-  return unit * q;
+  if (typeof ip === 'number' && ip >= 0) return ip;          // total de la línea
+  return (producto ? producto.price : 0) * q;                // fallback estimado
 }
 
 // ─── Ventas computables ─────────────────────────────────────────────────────────
@@ -673,6 +674,44 @@ async function getAgregadoProductos({ desde, hasta } = {}) {
   };
 }
 
+// ─── Diagnóstico por producto: cada línea de venta con quantity y price crudos ──
+// Para auditar de dónde sale el ingreso de un producto. nombre = substring (case-insensitive).
+async function getProductoDebug(nombre, { desde, hasta } = {}) {
+  const raw = await loadRaw();
+  const { sales, prod, itemsBySale } = raw;
+  const needle = (nombre || '').toLowerCase();
+  const lineas = [];
+  let totalUnidades = 0, totalMonto = 0;
+  for (const s of sales) {
+    const a = s.attributes || {};
+    if (!ventaComputable(a)) continue;
+    const fecha = fechaServicio(a.closedAt);
+    if (desde && fecha < desde) continue;
+    if (hasta && fecha > hasta) continue;
+    for (const it of (itemsBySale[s.id] || [])) {
+      if (it.attributes && it.attributes.canceled) continue;
+      const pRel = it.relationships && it.relationships.product && it.relationships.product.data;
+      const producto = pRel ? prod[pRel.id] : null;
+      const pname = producto ? producto.name : 'Producto';
+      if (needle && !pname.toLowerCase().includes(needle)) continue;
+      const q = (it.attributes && it.attributes.quantity) || 0;
+      const priceLinea = it.attributes ? it.attributes.price : null;
+      const monto = montoItem(it, producto);
+      totalUnidades += q; totalMonto += monto;
+      lineas.push({
+        fecha, ventaId: s.id, producto: pname,
+        precioListaProducto: producto ? producto.price : null,
+        quantity: q,
+        priceLineaFudo: priceLinea,            // lo que trae Fudo en item.price
+        montoComputado: monto,                 // lo que usamos como ingreso
+        unitarioImplicito: q > 0 ? Math.round((monto / q) * 100) / 100 : null,
+      });
+    }
+  }
+  lineas.sort((a, b) => (a.fecha||'').localeCompare(b.fecha||''));
+  return { nombre, desde: desde||null, hasta: hasta||null, totalUnidades, totalMonto: Math.round(totalMonto), lineas };
+}
+
 function clearFudoCache() {
   cache.del('fudo_raw');
   cache.del('fudo_hist');
@@ -680,6 +719,6 @@ function clearFudoCache() {
 
 module.exports = {
   getServicios, getServicioDetalle, getServicioDebug, resnapshotDia,
-  getDetallesTodos, getAgregadoProductos,
+  getDetallesTodos, getAgregadoProductos, getProductoDebug,
   clearFudoCache, grupoDeCategoria, fechaServicio, fechaServicioHoy,
 };

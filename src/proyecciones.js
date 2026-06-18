@@ -263,7 +263,7 @@ function calcularCalculadora(input = {}) {
 // y proyecta linealmente hasta fin de mes según el ritmo diario observado, sumando
 // además los costos fijos del mes (alquiler, personal, servicios) que quizá aún no
 // se registraron. Devuelve series diarias para el gráfico acumulado.
-function proyeccionMes({ movimientos, hoy = new Date() }) {
+function proyeccionMes({ movimientos, variables = [], hoy = new Date() }) {
   const anio = hoy.getFullYear();
   const mesIdx = hoy.getMonth();
   const mesNombre = ORDEN_MESES[mesIdx];
@@ -302,9 +302,19 @@ function proyeccionMes({ movimientos, hoy = new Date() }) {
   const gastoDiario = diaHoy > 0 ? gastoReal / diaHoy : 0;
   const diasRestantes = diasMes - diaHoy;
 
-  // Forecast simple: continuar el ritmo diario hasta fin de mes
-  const ingresoForecast = ingresoReal + ingresoDiario * diasRestantes;
-  const gastoForecast = gastoReal + gastoDiario * diasRestantes;
+  // Variables personalizadas que aplican al mes en curso (monto mensual completo).
+  let varIngresoMes = 0, varGastoMes = 0;
+  const varDetalle = [];
+  for (const v of (variables || [])) {
+    if (!Array.isArray(v.meses) || !v.meses.includes(mesNombre)) continue;
+    const monto = Number(v.monto) || 0;
+    if (v.tipo === 'ingreso') varIngresoMes += monto; else varGastoMes += monto;
+    varDetalle.push({ nombre: v.nombre, tipo: v.tipo, monto });
+  }
+
+  // Forecast: ritmo diario hasta fin de mes + variables del mes (monto completo).
+  const ingresoForecast = ingresoReal + ingresoDiario * diasRestantes + varIngresoMes;
+  const gastoForecast = gastoReal + gastoDiario * diasRestantes + varGastoMes;
 
   // Series acumuladas para el gráfico
   const serie = [];
@@ -317,8 +327,8 @@ function proyeccionMes({ movimientos, hoy = new Date() }) {
       fecha: `${anio}-${String(mesIdx+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`,
       ingresoReal: esFuturo ? null : Math.round(accIng),
       gastoReal: esFuturo ? null : Math.round(accGas),
-      ingresoForecast: esFuturo ? Math.round(ingresoReal + ingresoDiario * (d - diaHoy)) : Math.round(accIng),
-      gastoForecast: esFuturo ? Math.round(gastoReal + gastoDiario * (d - diaHoy)) : Math.round(accGas),
+      ingresoForecast: esFuturo ? Math.round(ingresoReal + ingresoDiario * (d - diaHoy) + (diasRestantes>0 ? varIngresoMes * ((d - diaHoy)/diasRestantes) : 0)) : Math.round(accIng),
+      gastoForecast: esFuturo ? Math.round(gastoReal + gastoDiario * (d - diaHoy) + (diasRestantes>0 ? varGastoMes * ((d - diaHoy)/diasRestantes) : 0)) : Math.round(accGas),
     });
   }
 
@@ -333,6 +343,7 @@ function proyeccionMes({ movimientos, hoy = new Date() }) {
     resultadoForecast: Math.round(ingresoForecast - gastoForecast),
     ingresoDiario: Math.round(ingresoDiario),
     gastoDiario: Math.round(gastoDiario),
+    variablesMes: varDetalle,
     serie,
   };
 }
