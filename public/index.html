@@ -529,6 +529,7 @@
   <button class="tab-btn" id="tab-btn-cajas" onclick="switchGroup('cajas', this)">🏦 Cajas</button>
   <button class="tab-btn" id="tab-btn-servicios" onclick="switchGroup('servicios', this)">🍽️ Servicios</button>
   <button class="tab-btn" id="tab-btn-stocks" onclick="switchGroup('stocks', this)">📦 Stocks <span id="prov-badge" class="prov-badge" style="display:none">0</span></button>
+  <button class="tab-btn" id="tab-btn-costos" onclick="switchGroup('costos', this)">🧮 Costos</button>
   <button class="tab-btn" id="tab-btn-proyecciones" onclick="switchGroup('proyecciones', this)">📈 Proyecciones</button>
 </div>
 
@@ -714,8 +715,16 @@
 </div>
 
 <!-- ═══ PROYECCIONES TAB ═══ -->
-<div id="tab-proyecciones" class="tab-panel">
+<div id="tab-proymes" class="tab-panel">
   <main>
+    <div class="kpi-grid" id="proymes-kpis"><div class="loading"><div class="spinner"></div> Calculando el mes...</div></div>
+    <div class="card">
+      <div class="card-title">Mes en curso − acumulado real + proyección a fin de mes
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">linea solida = real, punteada = forecast</span>
+      </div>
+      <div class="chart-container" style="height:320px"><canvas id="chart-proymes"></canvas></div>
+    </div>
+    <div style="margin-top:18px;font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Proyección a 3 meses (tendencia)</div>
     <div class="kpi-grid" id="proy-kpis"><div class="loading"><div class="spinner"></div> Calculando proyección...</div></div>
 
     <div class="card">
@@ -759,7 +768,72 @@
   </main>
 </div>
 
+<!-- CALCULADORA sub-tab -->
+<div id="tab-calculadora" class="tab-panel">
+  <main>
+    <div class="card">
+      <div class="card-title">Calculadora P&L mensual (regimen)
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">ajusta las variables y recalcula al instante</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
+        <div class="form-group"><label>Servicios por mes (noches)</label><input type="number" id="calc-servicios" oninput="recalcCalc()"></div>
+        <div class="form-group"><label>Ingreso por noche (ARS)</label><input type="number" id="calc-ingreso-noche" oninput="recalcCalc()"></div>
+        <div class="form-group"><label>% CMV (sobre ingresos)</label><input type="number" id="calc-cmv" step="0.1" oninput="recalcCalc()"></div>
+        <div class="form-group"><label>Costo personal (ARS/mes)</label><input type="number" id="calc-personal" oninput="recalcCalc()"></div>
+        <div class="form-group"><label>Alquiler (ARS/mes)</label><input type="number" id="calc-alquiler" oninput="recalcCalc()"></div>
+        <div class="form-group"><label>Fijos operativos (ARS/mes)</label><input type="number" id="calc-fijos" oninput="recalcCalc()"></div>
+        <div class="form-group"><label>Costos extraordinarios (ARS/mes)</label><input type="number" id="calc-extra" oninput="recalcCalc()"></div>
+        <div class="form-group"><label>Costos financieros (ARS/mes)</label><input type="number" id="calc-fin" oninput="recalcCalc()"></div>
+        <div class="form-group"><label>Costos fiscales (ARS/mes)</label><input type="number" id="calc-fiscal" oninput="recalcCalc()"></div>
+        <div class="form-group"><label>Inversion total (ARS)</label><input type="number" id="calc-inversion" oninput="recalcCalc()"></div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px"><button class="btn" onclick="resetCalc()">Volver a los datos reales</button></div>
+    </div>
+    <div class="kpi-grid" id="calc-kpis"></div>
+    <div class="card">
+      <div class="card-title">Detalle del calculo</div>
+      <div class="table-wrap"><table class="prov-resumen-table" style="width:100%">
+        <thead><tr><th style="text-align:left">Concepto</th><th style="text-align:right">ARS / mes</th><th style="text-align:right">% Ingresos</th></tr></thead>
+        <tbody id="calc-body"><tr><td colspan="3" class="prov-empty">-</td></tr></tbody>
+      </table></div>
+    </div>
+  </main>
+</div>
+
+<!-- COSTOS TAB -->
+<div id="tab-costos" class="tab-panel">
+  <div class="filters-bar">
+    <span class="filter-label">Desde</span>
+    <input type="date" id="costos-desde" onchange="loadCostos()" />
+    <span class="filter-label">Hasta</span>
+    <input type="date" id="costos-hasta" onchange="loadCostos()" />
+    <button class="btn" style="padding:6px 12px;font-size:12px" onclick="loadCostos()">Actualizar</button>
+  </div>
+  <main>
+    <div class="kpi-grid" id="costos-kpis">
+      <div class="kpi-card red"><div class="kpi-label">Costo total (Compras)</div><div class="kpi-value" id="costos-kpi-costo">-</div><div class="kpi-sub">facturas de proveedores</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Ingreso asignado (Fudo)</div><div class="kpi-value" id="costos-kpi-ingreso">-</div><div class="kpi-sub" id="costos-kpi-ingreso-sub"></div></div>
+      <div class="kpi-card accent"><div class="kpi-label">Food cost global</div><div class="kpi-value" id="costos-kpi-ratio">-</div><div class="kpi-sub">costo / ingreso</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Costo (por ingrediente) vs Ingreso (por plato Fudo) por categoria
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">clic en una fila para ver los productos</span>
+      </div>
+      <div class="chart-container" style="height:340px"><canvas id="chart-costos"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Detalle por categoria</div>
+      <div class="table-wrap"><table class="prov-resumen-table" style="width:100%">
+        <thead><tr><th style="text-align:left">Categoria</th><th>Grupo</th><th style="text-align:right">Costo</th><th style="text-align:right">Ingreso</th><th style="text-align:right">Food cost</th><th style="text-align:right">Margen</th></tr></thead>
+        <tbody id="costos-body"><tr><td colspan="6" class="prov-empty">-</td></tr></tbody>
+      </table></div>
+      <div id="costos-nota" style="font-size:11px;color:var(--text-muted);margin-top:8px"></div>
+    </div>
+  </main>
+</div>
+
 <!-- ═══ PAGOS TAB ═══ -->
+
 <div id="tab-pagos" class="tab-panel">
   <div class="pagos-filters">
     <span class="filter-label">Ordenar por</span>
@@ -1010,6 +1084,22 @@
       <div class="loading"><div class="spinner"></div></div>
     </div>
 
+    <div class="card">
+      <div class="card-title">Productos vendidos en el período (todos los días)
+        <button class="btn" style="float:right;font-size:12px;padding:6px 12px" onclick="toggleServAgg()" id="servagg-toggle">Ver agregado de productos</button>
+      </div>
+      <div id="servagg-wrap" style="display:none">
+        <div class="filters-bar" style="margin:0 0 12px">
+          <span class="filter-label">Desde</span>
+          <input type="date" id="servagg-desde" onchange="loadServiciosAgregado()" />
+          <span class="filter-label">Hasta</span>
+          <input type="date" id="servagg-hasta" onchange="loadServiciosAgregado()" />
+          <button class="btn" style="padding:6px 12px;font-size:12px" onclick="loadServiciosAgregado()">Actualizar</button>
+        </div>
+        <div id="servagg-content"><div style="color:var(--text-muted);font-size:13px">Elegí un rango (o dejalo vacío para todo) y actualizá.</div></div>
+      </div>
+    </div>
+
     <div class="card" style="padding:0;overflow:hidden">
       <div class="card-title" style="padding:20px 24px 0;margin-bottom:0">
         Servicios
@@ -1203,6 +1293,16 @@
   </div>
 </div>
 
+<div id="detalle-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:850;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:680px;width:100%;max-height:86vh;overflow:auto;padding:24px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h3 id="detalle-modal-title" style="margin:0">Detalle</h3>
+      <button class="btn" style="padding:4px 12px" onclick="closeDetalleModal()">X</button>
+    </div>
+    <div id="detalle-modal-body" style="font-size:13px;line-height:1.6"></div>
+  </div>
+</div>
+
 <!-- Modal vencidos -->
 <div id="vencidos-modal-overlay">
   <div id="vencidos-modal">
@@ -1296,14 +1396,14 @@ function onLoginSuccess(rol, nombre) {
     document.getElementById('last-updated').style.display = '';
     document.getElementById('btn-refresh').style.display = '';
     // Todas las tabs padre visibles
-    ['tab-btn-dashboard','tab-btn-pagos','tab-btn-cajas','tab-btn-servicios','tab-btn-stocks','tab-btn-proyecciones'].forEach(id => {
+    ['tab-btn-dashboard','tab-btn-pagos','tab-btn-cajas','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-proyecciones'].forEach(id => {
       const el = document.getElementById(id); if (el) el.style.display = '';
     });
     init(); // carga dashboard
     refreshProvBadge(); // badge de pendientes de proveedores
   } else {
     // Encargado: solo la tab Cajas (con submenús Cajas / Arqueo)
-    ['tab-btn-dashboard','tab-btn-pagos','tab-btn-servicios','tab-btn-stocks','tab-btn-proyecciones'].forEach(id => {
+    ['tab-btn-dashboard','tab-btn-pagos','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-proyecciones'].forEach(id => {
       const el = document.getElementById(id); if (el) el.style.display = 'none';
     });
     document.getElementById('tab-btn-cajas').style.display = '';
@@ -1399,7 +1499,11 @@ const TAB_GROUPS = {
   dashboard:    { subs: null },
   pagos:        { subs: null },
   servicios:    { subs: null },
-  proyecciones: { subs: null },
+  costos:       { subs: null },
+  proyecciones: { subs: [
+    { id: 'calculadora', label: '🧮 Calculadora' },
+    { id: 'proymes',     label: '📅 Proyección Mes' },
+  ] },
   cajas:  { subs: [
     { id: 'cajas',  label: '🏦 Cajas' },
     { id: 'arqueo', label: '🗃️ Arqueo de Caja' },
@@ -1418,7 +1522,9 @@ function cargarPanel(tab) {
   else if (tab === 'servicios') loadServicios();
   else if (tab === 'proveedores') loadProveedores();
   else if (tab === 'comportamiento') loadComportamiento();
-  else if (tab === 'proyecciones') loadProyecciones();
+  else if (tab === 'costos') loadCostos();
+  else if (tab === 'calculadora') loadCalculadora();
+  else if (tab === 'proymes') loadProyeccionMes();
 }
 
 // Activa un panel concreto (oculta el resto). No toca la barra superior.
@@ -1954,13 +2060,13 @@ function renderKPIs(resumen, diasSemana, esMensual) {
         <span>📦 Inversión: <strong style="color:var(--text-muted)">${fmt(gastoInversion)}</strong></span>
       </div>
     </div>
-    <div class="kpi-card ${resultado >= 0 ? 'green' : 'red'}">
-      <div class="kpi-label">Resultado Neto</div>
+    <div class="kpi-card ${resultado >= 0 ? 'green' : 'red'}" style="cursor:pointer" onclick="openResultadoNetoModal()" title="Ver detalle">
+      <div class="kpi-label">Resultado Neto (ver)</div>
       <div class="kpi-value">${fmt(resultado)}</div>
-      <div class="kpi-sub">Ingresos − Gastos</div>
+      <div class="kpi-sub">${totalIngresos>0 ? pct((resultado/totalIngresos)*100)+' sobre ingresos' : 'Ingresos − Gastos'}</div>
     </div>
-    <div class="kpi-card accent">
-      <div class="kpi-label">Merc + Insumos / Ing</div>
+    <div class="kpi-card accent" style="cursor:pointer" onclick="openCmvModal()" title="Ver desglose">
+      <div class="kpi-label">Merc + Insumos / Ing (ver)</div>
       <div class="kpi-value">${pct(pctMI)}</div>
       <div class="kpi-sub">${fmt(mercaderia + insumos)} sobre ingresos</div>
     </div>
@@ -1989,23 +2095,25 @@ function renderTablaResumen(resumen) {
   head.innerHTML = `<tr><th style="text-align:left">Concepto</th>${meses.map(m => `<th>${m}</th>`).join('')}${multi ? '<th>Total</th>' : ''}</tr>`;
 
   const cols = meses.length + (multi ? 2 : 1);
-  const row = (label, vals, cls = '', colorFn = null) => {
+  const row = (label, vals, cls = '', colorFn = null, clickGroup = null) => {
     const t = vals.reduce((a, b) => a + b, 0);
     const cells = vals.map(v => `<td class="${colorFn ? colorFn(v) : ''}">${fmt(v)}</td>`);
     const totalCell = multi ? `<td class="${colorFn ? colorFn(t) : ''}" style="font-weight:600">${fmt(t)}</td>` : '';
-    return `<tr class="${cls}"><td>${label}</td>${cells.join('')}${totalCell}</tr>`;
+    const ck = clickGroup ? ` style="cursor:pointer" onclick="openConceptoModal('${clickGroup}')" title="Ver detalle"` : '';
+    const lbl = clickGroup ? label + ' (ver)' : label;
+    return `<tr class="${cls}"${ck}><td>${lbl}</td>${cells.join('')}${totalCell}</tr>`;
   };
   const section = label => `<tr class="row-header"><td colspan="${cols}">${label}</td></tr>`;
 
   body.innerHTML = [
     section('GASTOS'),
-    row('Mercadería', resumen.map(m => m.gastos.Mercaderia)),
-    row('Insumos', resumen.map(m => m.gastos.Insumos)),
-    row('Equipamiento', resumen.map(m => m.gastos.Equipamiento)),
-    row('Operativos', resumen.map(m => m.gastos.Operativos)),
-    row('Impuestos', resumen.map(m => m.gastos.Impuestos)),
-    row('Personal', resumen.map(m => m.gastos.Personal)),
-    row('Otros', resumen.map(m => m.gastos.Otros || 0)),
+    row('Mercadería', resumen.map(m => m.gastos.Mercaderia), '', null, 'Mercaderia'),
+    row('Insumos', resumen.map(m => m.gastos.Insumos), '', null, 'Insumos'),
+    row('Equipamiento', resumen.map(m => m.gastos.Equipamiento), '', null, 'Equipamiento'),
+    row('Operativos', resumen.map(m => m.gastos.Operativos), '', null, 'Operativos'),
+    row('Impuestos', resumen.map(m => m.gastos.Impuestos), '', null, 'Impuestos'),
+    row('Personal', resumen.map(m => m.gastos.Personal), '', null, 'Personal'),
+    row('Otros', resumen.map(m => m.gastos.Otros || 0), '', null, 'Otros'),
     row('Total Gastos', resumen.map(m => m.gastos.total), 'row-total'),
     section('INGRESOS'),
     row('Efectivo', resumen.map(m => m.ingresos.Efectivo || 0)),
@@ -2116,7 +2224,7 @@ async function loadCajas() {
     let totalUSD = 0;
 
     cajas.forEach(c => {
-      const saldo = c.saldoReal !== undefined && c.saldoReal !== 0 ? c.saldoReal : c.saldoCalculado;
+      const saldo = c.saldoCalculado;
       if (c.moneda === 'USD') {
         totalUSD += saldo;
         totalARS += saldo * TC;
@@ -2147,21 +2255,25 @@ async function loadCajas() {
 
     // Render cards individuales
     const esAdmin = getRol() === 'admin';
+    const fmtMon = (v, mon) => mon === 'USD' ? `USD ${Number(v).toLocaleString('es-AR', { minimumFractionDigits: 0 })}` : fmt(v);
     container.innerHTML = cajas.map(c => {
-      const saldo = c.saldoReal !== undefined && c.saldoReal !== 0 ? c.saldoReal : c.saldoCalculado;
-      const isNeg = saldo < 0;
-      const saldoFmt = c.moneda === 'USD'
-        ? `USD ${saldo.toLocaleString('es-AR', { minimumFractionDigits: 0 })}`
-        : fmt(saldo);
+      // INVERTIDO: numero grande = saldo CALCULADO; REAL contado abajo en chico.
+      const saldoCalc = c.saldoCalculado;
+      const saldoReal = (c.saldoReal !== undefined && c.saldoReal !== 0) ? c.saldoReal : null;
+      const isNeg = saldoCalc < 0;
+      const saldoFmt = fmtMon(saldoCalc, c.moneda);
       const equiv = c.moneda === 'USD'
-        ? `≈ ${fmt(saldo * TC)} ARS`
-        : `≈ USD ${Math.round(saldo / TC).toLocaleString('es-AR')}`;
+        ? `≈ ${fmt(saldoCalc * TC)} ARS`
+        : `≈ USD ${Math.round(saldoCalc / TC).toLocaleString('es-AR')}`;
+      const realLine = saldoReal !== null
+        ? `<div class="caja-row" style="font-size:12px"><span style="color:var(--text-muted)">Saldo real contado</span><span style="font-weight:600">${fmtMon(saldoReal, c.moneda)}</span></div>`
+        : `<div class="caja-row" style="font-size:11px;color:var(--text-muted)"><span>Sin saldo real cargado</span></div>`;
       if (!esAdmin) {
-        // Vista encargado: solo nombre y saldo
         return `
           <div class="caja-card">
             <div class="caja-nombre">${c.caja}</div>
             <div class="caja-saldo ${isNeg ? 'neg' : ''}" style="margin-top:12px;font-size:26px">${saldoFmt}</div>
+            ${realLine}
           </div>`;
       }
       return `
@@ -2170,7 +2282,8 @@ async function loadCajas() {
           <div class="caja-alias">${c.alias || ''}</div>
           <span class="caja-moneda">${c.moneda || 'ARS'}</span>
           <div class="caja-saldo ${isNeg ? 'neg' : ''}">${saldoFmt}</div>
-          <div class="caja-row" style="color:var(--text-muted);font-size:11px"><span>${equiv}</span></div>
+          <div class="caja-row" style="color:var(--text-muted);font-size:11px"><span>calculado · ${equiv}</span></div>
+          ${realLine}
           <div class="caja-row"><span>Entradas</span><span>${c.moneda === 'USD' ? 'USD ' + c.entradas : fmt(c.entradas)}</span></div>
           <div class="caja-row"><span>Salidas</span><span>${c.moneda === 'USD' ? 'USD ' + c.salidas : fmt(c.salidas)}</span></div>
           ${c.cobroPendiente ? `<div class="caja-row"><span>Pendiente cobro</span><span style="color:#e0c95c;font-weight:600">${fmt(c.cobroPendiente)}</span></div>` : ''}
@@ -3701,6 +3814,221 @@ function fechaCorta(iso) {
   if (!iso) return '—';
   const [y,m,d] = iso.split('-');
   return `${d}/${m}/${y.slice(-2)}`;
+}
+
+function openDetalleModal(t,h){document.getElementById('detalle-modal-title').innerHTML=t;document.getElementById('detalle-modal-body').innerHTML=h;document.getElementById('detalle-modal-overlay').style.display='flex';}
+function closeDetalleModal(){document.getElementById('detalle-modal-overlay').style.display='none';}
+document.addEventListener('DOMContentLoaded',function(){var o=document.getElementById('detalle-modal-overlay');if(o)o.addEventListener('click',function(e){if(e.target===o)closeDetalleModal();});});
+function miniTabla(cols,rows){return '<table class="prov-resumen-table" style="width:100%"><thead><tr>'+cols.map(function(c){return '<th style="text-align:'+(c.align||'left')+'">'+c.label+'</th>';}).join('')+'</tr></thead><tbody>'+(rows.length?rows.map(function(r){return '<tr>'+r.map(function(cell,i){return '<td style="text-align:'+(cols[i].align||'left')+'">'+cell+'</td>';}).join('')+'</tr>';}).join(''):'<tr><td colspan="'+cols.length+'" style="text-align:center;color:var(--text-muted);padding:14px">Sin datos</td></tr>')+'</tbody></table>';}
+function toggleServAgg(){var w=document.getElementById('servagg-wrap');var btn=document.getElementById('servagg-toggle');if(w.style.display==='none'){w.style.display='block';btn.textContent='Ocultar agregado';if(!w.dataset.loaded){loadServiciosAgregado();w.dataset.loaded='1';}}else{w.style.display='none';btn.textContent='Ver agregado de productos';}}
+
+function openResultadoNetoModal() {
+  const r = state.resumen || [];
+  const ing = r.reduce((s,m)=>s+m.ingresos.total,0);
+  const gas = r.reduce((s,m)=>s+m.gastos.total,0);
+  const neto = ing - gas;
+  const grupos = ['Mercaderia','Insumos','Equipamiento','Operativos','Impuestos','Personal','Otros'];
+  const rowsG = grupos.map(g => { const v = r.reduce((s,m)=>s+(m.gastos[g]||0),0); return [g, fmt(v), ing>0?pct((v/ing)*100):'-']; }).filter(x => x[1] !== '$0');
+  const body = '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:16px">'
+    + '<div><div style="font-size:11px;color:var(--text-muted)">Ingresos</div><div style="font-size:20px;font-weight:700;color:var(--green)">'+fmt(ing)+'</div></div>'
+    + '<div><div style="font-size:11px;color:var(--text-muted)">Gastos</div><div style="font-size:20px;font-weight:700;color:var(--red)">'+fmt(gas)+'</div></div>'
+    + '<div><div style="font-size:11px;color:var(--text-muted)">Resultado neto</div><div style="font-size:20px;font-weight:700;color:'+(neto>=0?'var(--green)':'var(--red)')+'">'+fmt(neto)+' <span style="font-size:13px;color:var(--text-muted)">('+(ing>0?pct((neto/ing)*100):'-')+')</span></div></div></div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Gastos por grupo</div>'
+    + miniTabla([{label:'Grupo'},{label:'Monto',align:'right'},{label:'% Ingresos',align:'right'}], rowsG);
+  openDetalleModal('Resultado Neto', body);
+}
+
+async function openCmvModal() {
+  openDetalleModal('CMV - Comida / Bebida / Insumos', '<div class="loading"><div class="spinner"></div> Cargando desglose...</div>');
+  let data;
+  try { ({ data } = await api('/api/cmv-desglose' + buildQS())); }
+  catch (e) { document.getElementById('detalle-modal-body').innerHTML = 'Error: ' + escapeHtml(e.message); return; }
+  const g = data.desglose.grupos, det = data.desglose.detalle, totalComp = data.desglose.total || 0;
+  const linea = (nombre, color) => {
+    const val = g[nombre] || 0;
+    const p = totalComp > 0 ? (val/totalComp)*100 : 0;
+    const cs = (det[nombre]||[]).map(c => escapeHtml(c.categoria)+' '+fmt(c.costo)).join(' / ');
+    return '<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between"><strong style="color:'+color+'">'+nombre+'</strong><span>'+fmt(val)+' <span style="color:var(--text-muted)">('+pct(p)+')</span></span></div>'
+      + '<div style="height:8px;background:var(--surface2);border-radius:4px;overflow:hidden;margin:3px 0"><div style="height:100%;width:'+p+'%;background:'+color+'"></div></div>'
+      + '<div style="font-size:11px;color:var(--text-muted)">'+(cs||'sin compras en el periodo')+'</div></div>';
+  };
+  const body = '<div style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px"><div>CMV total (P&L real, Movimientos): <strong>'+fmt(data.cmvMovimientos)+'</strong> - '+pct(data.pctCMV)+' de ingresos</div></div>'
+    + linea('Comida', '#e0a85c') + linea('Bebida', '#5c9ae0') + linea('Insumos', '#9b6fc0') + (g.Otros? linea('Otros', '#888') : '')
+    + '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;border-top:1px solid var(--border);padding-top:8px">'+escapeHtml(data.nota||'')+'</div>';
+  openDetalleModal('CMV - Comida / Bebida / Insumos', body);
+}
+
+async function openConceptoModal(grupo) {
+  openDetalleModal('Gasto - ' + grupo, '<div class="loading"><div class="spinner"></div> Cargando...</div>');
+  let res;
+  try { res = await api('/api/movimientos/grupo/' + encodeURIComponent(grupo) + buildQS()); }
+  catch (e) { document.getElementById('detalle-modal-body').innerHTML = 'Error: ' + escapeHtml(e.message); return; }
+  const data = res.data || [], porCat = res.porCategoria || {};
+  const rowsCat = Object.entries(porCat).sort((a,b)=>b[1]-a[1]).map(([c,v]) => [escapeHtml(c), fmt(v)]);
+  const rowsMov = data.slice(0,60).map(m => [fechaCorta(m.fecha), escapeHtml(m.proveedor||'-'), escapeHtml(m.descripcion||m.categoria||''), fmt(m.monto)]);
+  const body = '<div style="font-size:18px;font-weight:700;margin-bottom:12px">Total: '+fmt(res.total||0)+'</div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Por categoria</div>'
+    + miniTabla([{label:'Categoria'},{label:'Monto',align:'right'}], rowsCat)
+    + '<div style="font-size:12px;color:var(--text-muted);margin:14px 0 6px">Movimientos ('+data.length+')</div>'
+    + miniTabla([{label:'Fecha'},{label:'Proveedor'},{label:'Detalle'},{label:'Monto',align:'right'}], rowsMov);
+  openDetalleModal('Gasto - ' + grupo, body);
+}
+
+let _costosData = null;
+async function loadCostos() {
+  const desde = document.getElementById('costos-desde').value;
+  const hasta = document.getElementById('costos-hasta').value;
+  const qs = new URLSearchParams();
+  if (desde) qs.set('desde', desde);
+  if (hasta) qs.set('hasta', hasta);
+  document.getElementById('costos-body').innerHTML = '<tr><td colspan="6" class="prov-empty">Cargando...</td></tr>';
+  let data;
+  try { ({ data } = await api('/api/costos' + (qs.toString()?'?'+qs.toString():''))); }
+  catch (e) { showToast('Error costos: ' + e.message); return; }
+  _costosData = data;
+  const t = data.totales;
+  document.getElementById('costos-kpi-costo').textContent = fmt(t.costo);
+  document.getElementById('costos-kpi-ingreso').textContent = fmt(t.ingresoAsignado);
+  document.getElementById('costos-kpi-ingreso-sub').textContent = t.ingresoSinAsignar>0 ? fmt(t.ingresoSinAsignar)+' sin asignar' : 'todo asignado';
+  document.getElementById('costos-kpi-ratio').textContent = t.ingresoAsignado>0 ? pct((t.costo/t.ingresoAsignado)*100) : '-';
+  const filas = data.filas || [];
+  const body = document.getElementById('costos-body');
+  body.innerHTML = filas.length ? filas.map((f,i) =>
+    '<tr style="cursor:pointer" onclick="openCostoCategoriaModal('+i+')" title="Ver productos">'
+    + '<td style="text-align:left">'+escapeHtml(f.categoria)+' (ver)</td>'
+    + '<td style="font-size:11px;color:var(--text-muted)">'+f.grupoCMV+'</td>'
+    + '<td style="text-align:right;color:var(--red)">'+fmt(f.costo)+'</td>'
+    + '<td style="text-align:right;color:var(--green)">'+fmt(f.ingreso)+'</td>'
+    + '<td style="text-align:right">'+(f.ratioCostoIngreso!=null?pct(f.ratioCostoIngreso):'-')+'</td>'
+    + '<td style="text-align:right;color:'+(f.margen>=0?'var(--green)':'var(--red)')+'">'+fmt(f.margen)+'</td></tr>'
+  ).join('') : '<tr><td colspan="6" class="prov-empty">Sin datos en el periodo.</td></tr>';
+  document.getElementById('costos-nota').textContent = (data.sinAsignar && data.sinAsignar.ingreso>0)
+    ? fmt(data.sinAsignar.ingreso)+' de ingresos no se pudieron asignar a una categoria de costo (productos sin clasificar).'
+    : 'El costo sale de la hoja Compras (por ingrediente); el ingreso de FUDO, mapeando cada producto a su categoria de costo dominante.';
+  const top = filas.slice(0, 10);
+  if (state.charts['costos']) state.charts['costos'].destroy();
+  state.charts['costos'] = new Chart(document.getElementById('chart-costos').getContext('2d'), {
+    type: 'bar',
+    data: { labels: top.map(f => f.categoria), datasets: [
+      { label: 'Costo (compras)', data: top.map(f => f.costo), backgroundColor: '#e07a7a' },
+      { label: 'Ingreso (Fudo)', data: top.map(f => f.ingreso), backgroundColor: '#4caf82' } ] },
+    options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+      plugins: { legend: { labels: { color: '#e8e8f0', usePointStyle: true } } },
+      scales: { x: { ticks: { color: '#7878a0' }, grid: { color: 'rgba(46,46,62,.4)' }, beginAtZero: true }, y: { ticks: { color: '#7878a0' }, grid: { color: 'rgba(46,46,62,.4)' } } } },
+  });
+}
+function openCostoCategoriaModal(i) {
+  const f = (_costosData && _costosData.filas) ? _costosData.filas[i] : null;
+  if (!f) return;
+  const rows = (f.topProductos||[]).map(p => [escapeHtml(p.nombre), p.unidades, fmt(p.ingreso)]);
+  const body = '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:14px">'
+    + '<div><div style="font-size:11px;color:var(--text-muted)">Costo</div><div style="font-size:18px;font-weight:700;color:var(--red)">'+fmt(f.costo)+'</div></div>'
+    + '<div><div style="font-size:11px;color:var(--text-muted)">Ingreso</div><div style="font-size:18px;font-weight:700;color:var(--green)">'+fmt(f.ingreso)+'</div></div>'
+    + '<div><div style="font-size:11px;color:var(--text-muted)">Food cost</div><div style="font-size:18px;font-weight:700">'+(f.ratioCostoIngreso!=null?pct(f.ratioCostoIngreso):'-')+'</div></div>'
+    + '<div><div style="font-size:11px;color:var(--text-muted)">Margen</div><div style="font-size:18px;font-weight:700;color:'+(f.margen>=0?'var(--green)':'var(--red)')+'">'+fmt(f.margen)+'</div></div></div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Productos Fudo de esta categoria (top por ingreso)</div>'
+    + miniTabla([{label:'Producto'},{label:'Unid.',align:'right'},{label:'Ingreso',align:'right'}], rows)
+    + ((f.proveedores&&f.proveedores.length)?'<div style="font-size:11px;color:var(--text-muted);margin-top:10px">Proveedores: '+f.proveedores.map(escapeHtml).join(', ')+'</div>':'');
+  openDetalleModal('Costos - ' + f.categoria, body);
+}
+
+let _calcDefaults = null;
+async function loadCalculadora() {
+  if (!_calcDefaults) {
+    try { const r = await api('/api/calculadora/defaults'); _calcDefaults = r.data || {}; }
+    catch (e) { _calcDefaults = {}; }
+  }
+  const d = _calcDefaults;
+  const setIf = (id, val) => { const el = document.getElementById(id); if (el && (el.value === '' || el.value == null)) el.value = Math.round(val); };
+  setIf('calc-servicios', d.diasServicioMes ? Math.round(d.diasServicioMes) : 21);
+  setIf('calc-ingreso-noche', d.ingresoPorDiaServicio || 1650000);
+  setIf('calc-cmv', d.pctCostoVariable ? Math.round(d.pctCostoVariable*1000)/10 : 38);
+  setIf('calc-personal', d.personalMensual || 11300000);
+  setIf('calc-alquiler', d.alquilerMensual || 930000);
+  setIf('calc-fijos', 1030000);
+  setIf('calc-extra', 1500000);
+  setIf('calc-fin', 1178100);
+  setIf('calc-fiscal', 0);
+  setIf('calc-inversion', 89400000);
+  recalcCalc();
+}
+function resetCalc() {
+  ['calc-servicios','calc-ingreso-noche','calc-cmv','calc-personal','calc-alquiler','calc-fijos','calc-extra','calc-fin','calc-fiscal','calc-inversion'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  loadCalculadora();
+}
+async function recalcCalc() {
+  const v = id => Number(document.getElementById(id).value) || 0;
+  const payload = { serviciosPorMes: v('calc-servicios'), ingresoPorNoche: v('calc-ingreso-noche'), pctCMV: v('calc-cmv'), costoPersonal: v('calc-personal'), alquiler: v('calc-alquiler'), fijosOperativos: { total: v('calc-fijos') }, costosExtraordinarios: v('calc-extra'), costosFinancieros: v('calc-fin'), costosFiscales: v('calc-fiscal'), inversionTotalARS: v('calc-inversion') };
+  let data;
+  try { const r = await api('/api/calculadora', { method:'POST', body: JSON.stringify(payload) }); data = r.data; }
+  catch (e) { showToast('Error calculadora: ' + e.message); return; }
+  document.getElementById('calc-kpis').innerHTML =
+    '<div class="kpi-card green"><div class="kpi-label">Ingreso mensual</div><div class="kpi-value">'+fmt(data.ingresoMensual)+'</div></div>'
+    + '<div class="kpi-card red"><div class="kpi-label">Total costos</div><div class="kpi-value">'+fmt(data.totalCostos)+'</div><div class="kpi-sub">'+pct(data.pctTotalCostos)+' de ingresos</div></div>'
+    + '<div class="kpi-card '+(data.resultadoNeto>=0?'green':'red')+'"><div class="kpi-label">Resultado neto</div><div class="kpi-value">'+fmt(data.resultadoNeto)+'</div><div class="kpi-sub">'+pct(data.pctResultadoNeto)+' margen</div></div>'
+    + '<div class="kpi-card blue"><div class="kpi-label">Payback</div><div class="kpi-value">'+(data.paybackMeses!=null?data.paybackMeses+' meses':'-')+'</div><div class="kpi-sub">recupero inversion</div></div>';
+  const row = (lbl, val, p, cls) => '<tr class="'+(cls||'')+'"><td style="text-align:left">'+lbl+'</td><td style="text-align:right">'+fmt(val)+'</td><td style="text-align:right">'+(p!=null?pct(p):'')+'</td></tr>';
+  document.getElementById('calc-body').innerHTML = [
+    row('Ingreso mensual', data.ingresoMensual, 100, 'row-total'),
+    row('CMV (costos variables)', data.costosVariables.cmv, data.costosVariables.pct),
+    row('Personal', data.costosFijos.personal, data.costosFijos.pctPersonal),
+    row('Alquiler', data.costosFijos.alquiler, data.costosFijos.pctAlquiler),
+    row('Fijos operativos', data.costosFijos.subtotalOperativos, data.costosFijos.pctOperativos),
+    row('Extraordinarios/Financieros/Fiscales', data.extraordinarios.subtotal, data.extraordinarios.pct),
+    row('TOTAL COSTOS', data.totalCostos, data.pctTotalCostos, 'row-total'),
+    row('RESULTADO NETO', data.resultadoNeto, data.pctResultadoNeto, 'row-resultado'),
+  ].join('');
+}
+
+async function loadProyeccionMes() {
+  let data;
+  try { const r = await api('/api/proyeccion-mes'); data = r.data; }
+  catch (e) { document.getElementById('proymes-kpis').innerHTML = '<div style="color:var(--red)">Error: '+escapeHtml(e.message)+'</div>'; return; }
+  document.getElementById('proymes-kpis').innerHTML =
+    '<div class="kpi-card green"><div class="kpi-label">Ingreso real (al dia '+data.diaHoy+')</div><div class="kpi-value">'+fmt(data.ingresoReal)+'</div><div class="kpi-sub">'+data.diasConServicio+' servicios</div></div>'
+    + '<div class="kpi-card red"><div class="kpi-label">Gasto real</div><div class="kpi-value">'+fmt(data.gastoReal)+'</div><div class="kpi-sub">resultado '+fmt(data.resultadoReal)+'</div></div>'
+    + '<div class="kpi-card blue"><div class="kpi-label">Proyeccion ingreso fin de '+data.mes+'</div><div class="kpi-value">'+fmt(data.ingresoForecast)+'</div><div class="kpi-sub">'+data.diasRestantes+' dias restantes</div></div>'
+    + '<div class="kpi-card '+(data.resultadoForecast>=0?'green':'red')+'"><div class="kpi-label">Resultado proyectado</div><div class="kpi-value">'+fmt(data.resultadoForecast)+'</div><div class="kpi-sub">gasto proy. '+fmt(data.gastoForecast)+'</div></div>';
+  const serie = data.serie || [];
+  const labels = serie.map(p => p.dia);
+  if (state.charts['proymes']) state.charts['proymes'].destroy();
+  state.charts['proymes'] = new Chart(document.getElementById('chart-proymes').getContext('2d'), {
+    type: 'line',
+    data: { labels, datasets: [
+      { label: 'Ingreso real (acum)', data: serie.map(p => p.ingresoReal), borderColor: '#4caf82', backgroundColor: 'rgba(76,175,130,0.15)', fill: true, tension: 0.1, spanGaps: false },
+      { label: 'Ingreso forecast', data: serie.map(p => p.ingresoForecast), borderColor: '#4caf82', borderDash: [6,4], fill: false, tension: 0.1, pointRadius: 0 },
+      { label: 'Gasto real (acum)', data: serie.map(p => p.gastoReal), borderColor: '#e07a7a', backgroundColor: 'rgba(224,122,122,0.10)', fill: true, tension: 0.1, spanGaps: false },
+      { label: 'Gasto forecast', data: serie.map(p => p.gastoForecast), borderColor: '#e07a7a', borderDash: [6,4], fill: false, tension: 0.1, pointRadius: 0 } ] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#e8e8f0', usePointStyle: true } } },
+      scales: { x: { ticks: { color: '#7878a0' }, grid: { color: 'rgba(46,46,62,.4)' } }, y: { ticks: { color: '#7878a0' }, grid: { color: 'rgba(46,46,62,.4)' }, beginAtZero: true } } },
+  });
+  if (typeof loadProyecciones === 'function') loadProyecciones();
+}
+
+async function loadServiciosAgregado() {
+  const desde = document.getElementById('servagg-desde') ? document.getElementById('servagg-desde').value : '';
+  const hasta = document.getElementById('servagg-hasta') ? document.getElementById('servagg-hasta').value : '';
+  const qs = new URLSearchParams();
+  if (desde) qs.set('desde', desde);
+  if (hasta) qs.set('hasta', hasta);
+  const cont = document.getElementById('servagg-content');
+  if (cont) cont.innerHTML = '<div class="loading"><div class="spinner"></div> Agregando productos del periodo...</div>';
+  let data;
+  try { const r = await api('/api/servicios/agregado' + (qs.toString()?'?'+qs.toString():'')); data = r.data; }
+  catch (e) { if (cont) cont.innerHTML = '<div style="color:var(--red)">Error: '+escapeHtml(e.message)+'</div>'; return; }
+  const cats = data.categorias || [];
+  const catRows = cats.map(c => [escapeHtml(c.categoria), c.grupo, c.unidades, fmt(c.monto)]);
+  const topRows = (data.topProductos||[]).slice(0,30).map(p => [escapeHtml(p.nombre), escapeHtml(p.categoria), p.unidades, fmt(p.monto)]);
+  if (cont) cont.innerHTML =
+    '<div class="kpi-grid">'
+    + '<div class="kpi-card blue"><div class="kpi-label">Dias con ventas</div><div class="kpi-value">'+data.diasConVentas+'</div></div>'
+    + '<div class="kpi-card green"><div class="kpi-label">Total vendido</div><div class="kpi-value">'+fmt(data.totalMonto)+'</div><div class="kpi-sub">'+data.totalUnidades+' unidades</div></div>'
+    + '<div class="kpi-card accent"><div class="kpi-label">Comida vs Bebida</div><div class="kpi-value">'+pct(data.pctComida)+' / '+pct(data.pctBebida)+'</div><div class="kpi-sub">comida / bebida</div></div></div>'
+    + '<div class="card"><div class="card-title">Por categoria (todo el periodo)</div>'
+    + miniTabla([{label:'Categoria'},{label:'Grupo'},{label:'Unid.',align:'right'},{label:'Monto',align:'right'}], catRows) + '</div>'
+    + '<div class="card"><div class="card-title">Top productos del periodo</div>'
+    + miniTabla([{label:'Producto'},{label:'Categoria'},{label:'Unid.',align:'right'},{label:'Monto',align:'right'}], topRows) + '</div>';
 }
 
 // Arrancar: verificar token guardado o mostrar login
