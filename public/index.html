@@ -3976,6 +3976,7 @@ async function openConceptoModal(grupo) {
 
 let _costosData = null;
 async function loadCostos() {
+  if (!_costosCategorias.length) { try { const cr = await api('/api/costos/categorias'); _costosCategorias = cr.data || []; } catch(e){} }
   const desde = document.getElementById('costos-desde').value;
   const hasta = document.getElementById('costos-hasta').value;
   const qs = new URLSearchParams();
@@ -4056,11 +4057,13 @@ function openCostoCategoriaModal(i) {
     + '<th style="text-align:left">Producto</th><th style="text-align:right">Unid.</th>'
     + '<th style="text-align:right">Precio prom.</th><th style="text-align:right">Ingreso</th></tr></thead><tbody>';
   _costoCatProductos.forEach((p, idx) => {
-    tabla += '<tr style="cursor:pointer" onclick="toggleProductoPrecios('+idx+')" title="Ver desglose de precios">'
-      + '<td style="text-align:left">'+escapeHtml(p.nombre)+'</td>'
-      + '<td style="text-align:right">'+p.unidades+'</td>'
-      + '<td style="text-align:right">'+fmt(p.precioPromedio||0)+'</td>'
-      + '<td style="text-align:right">'+fmt(p.ingreso)+'</td></tr>';
+    tabla += '<tr>'
+      + '<td style="text-align:left"><span style="cursor:pointer" onclick="toggleProductoPrecios('+idx+')" title="Ver desglose de precios">'+escapeHtml(p.nombre)+'</span> '
+          + '<button class="btn" style="padding:1px 7px;font-size:12px;margin-left:6px" title="Recategorizar" onclick="event.stopPropagation();recategDropdown('+idx+')">\u270e</button>'
+          + '<span id="recateg-'+idx+'"></span></td>'
+      + '<td style="text-align:right;cursor:pointer" onclick="toggleProductoPrecios('+idx+')">'+p.unidades+'</td>'
+      + '<td style="text-align:right;cursor:pointer" onclick="toggleProductoPrecios('+idx+')">'+fmt(p.precioPromedio||0)+'</td>'
+      + '<td style="text-align:right;cursor:pointer" onclick="toggleProductoPrecios('+idx+')">'+fmt(p.ingreso)+'</td></tr>';
     // fila oculta con el desglose de precios
     const dp = p.desglosePrecios || [];
     let det = '<tr id="pp-det-'+idx+'" style="display:none"><td colspan="4" style="padding:0 0 8px 16px">';
@@ -4086,6 +4089,29 @@ function openCostoCategoriaModal(i) {
 function toggleProductoPrecios(idx) {
   const el = document.getElementById('pp-det-'+idx);
   if (el) el.style.display = (el.style.display==='none') ? 'table-row' : 'none';
+}
+var _costosCategorias = [];
+function recategDropdown(idx){
+  const cont = document.getElementById('recateg-'+idx);
+  if (!cont) return;
+  if (cont.dataset.open === '1') { cont.innerHTML=''; cont.dataset.open=''; return; }
+  const prod = (_costoCatProductos[idx]||{}).nombre || '';
+  const opts = _costosCategorias.map(c => '<option value="'+escAttr2(c)+'">'+escapeHtml(c)+'</option>').join('');
+  cont.dataset.open = '1';
+  cont.innerHTML = ' <select id="recateg-sel-'+idx+'" style="font-size:12px" onchange="aplicarRecateg('+idx+')">'
+    + '<option value="">mover a...</option>' + opts + '</select>';
+}
+async function aplicarRecateg(idx){
+  const sel = document.getElementById('recateg-sel-'+idx);
+  const prod = (_costoCatProductos[idx]||{}).nombre;
+  if (!sel || !sel.value || !prod) return;
+  const categoria = sel.value;
+  try {
+    await api('/api/costos/override', { method:'POST', body: JSON.stringify({ producto: prod, categoria }) });
+    showToast('\u2713 '+prod+' \u2192 '+categoria);
+    closeDetalleModal();
+    loadCostos();
+  } catch(e) { showToast('Error: '+e.message); }
 }
 function openFoodCostModal() {
   const d = _costosData; if (!d) return;
