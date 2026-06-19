@@ -57,9 +57,14 @@ async function leerConfig() {
   const idxNombre = 0;
   const idxPlazo = header.findIndex(h => h.includes('plazo'));
   const idxMedio = header.findIndex(h => h.includes('medio') || h.includes('forma'));
-  let idxIva = header.findIndex(h => h === 'iva' || h.includes('iva'));
+  let idxIva = header.findIndex(h => h === 'iva' || (h.includes('iva') && !h.includes('deducible') && !h.includes('incluido')));
+  // Columnas fiscales nuevas (memoria por proveedor)
+  const idxDeducible = header.findIndex(h => h.includes('deducible'));
+  const idxDescIncl = header.findIndex(h => h.includes('descuento') && h.includes('incluido'));
+  const idxIvaIncl  = header.findIndex(h => h.includes('iva') && h.includes('incluido'));
 
   const ivaColLetter = idxIva >= 0 ? colLetter(idxIva) : null;
+  const boolSN = v => { const x = norm(v); if (!x) return null; return (x.startsWith('s')||x==='si'||x==='sí'||x==='true') ? true : (x.startsWith('n')||x==='false' ? false : null); };
 
   const byNombre = {};
   for (let i = hIdx + 1; i < rows.length; i++) {
@@ -77,11 +82,14 @@ async function leerConfig() {
       plazoDias: Number.isFinite(plazoRaw) ? plazoRaw : null,
       medioPago: idxMedio >= 0 ? (r[idxMedio] || '').toString().trim() : '',
       iva,
+      ivaDeducible: idxDeducible >= 0 ? boolSN(r[idxDeducible]) : null,
+      descuentoIncluido: idxDescIncl >= 0 ? boolSN(r[idxDescIncl]) : null,
+      ivaIncluido: idxIvaIncl >= 0 ? boolSN(r[idxIvaIncl]) : null,
       rowIndex: i + 1,
     };
   }
 
-  const out = { byNombre, ivaColLetter, idxIva, headerRow: hIdx + 1, headerLen: header.length };
+  const out = { byNombre, ivaColLetter, idxIva, idxDeducible, idxDescIncl, idxIvaIncl, headerRow: hIdx + 1, headerLen: header.length };
   cache.set('prov_config', out);
   return out;
 }
@@ -145,6 +153,52 @@ async function setIvaProveedor(nombre, iva) {
   cache.del('prov_config');
 }
 
+// Setea un atributo arbitrario de un proveedor por NOMBRE DE COLUMNA (header).
+// Si la columna no existe, la crea al final del header. Si el proveedor no existe
+// como fila, agrega una nueva. Devuelve sin romper si no hay GESTION_SHEET_ID.
+async function setAtributoProveedor(nombre, headerNombre, valor) {
+  if (!GESTION_SHEET_ID) return;
+  const api = sheets();
+  let cfg = await leerConfig();
+  // Buscar la columna por header (case/acentos-insensible)
+  const res0 = await api.spreadsheets.values.get({ spreadsheetId: GESTION_SHEET_ID, range: `${PROVEEDORES_HOJA}!A:Z` });
+  const rows0 = res0.data.values || [];
+  let hIdx = rows0.findIndex(r => norm(r && r[0]) === 'proveedor'); if (hIdx === -1) hIdx = 0;
+  const header = (rows0[hIdx] || []).map(norm);
+  let colIdx = header.findIndex(h => h === norm(headerNombre));
+  if (colIdx === -1) {
+    colIdx = (rows0[hIdx] || []).length;  // primera columna libre del header
+    await api.spreadsheets.values.update({
+      spreadsheetId: GESTION_SHEET_ID,
+      range: `${PROVEEDORES_HOJA}!${colLetter(colIdx)}${hIdx + 1}`,
+      valueInputOption: 'RAW', requestBody: { values: [[headerNombre]] },
+    });
+  }
+  const colL = colLetter(colIdx);
+  const existente = cfg.byNombre[norm(nombre)];
+  if (existente) {
+    await api.spreadsheets.values.update({
+      spreadsheetId: GESTION_SHEET_ID,
+      range: `${PROVEEDORES_HOJA}!${colL}${existente.rowIndex}`,
+      valueInputOption: 'RAW', requestBody: { values: [[valor]] },
+    });
+  } else {
+    const row = []; row[0] = nombre; row[colIdx] = valor;
+    for (let k = 0; k < row.length; k++) if (row[k] === undefined) row[k] = '';
+    await api.spreadsheets.values.append({
+      spreadsheetId: GESTION_SHEET_ID, range: `${PROVEEDORES_HOJA}!A:Z`,
+      valueInputOption: 'RAW', requestBody: { values: [row] },
+    });
+  }
+  cache.del('prov_config');
+}
+
+// Helpers fiscales: guardan S/N por proveedor.
+const _sn = b => b ? 'S' : 'N';
+async function setIvaDeducible(nombre, b)       { return setAtributoProveedor(nombre, 'IVA Deducible', _sn(b)); }
+async function setDescuentoIncluido(nombre, b)  { return setAtributoProveedor(nombre, 'Descuento Incluido', _sn(b)); }
+async function setIvaIncluido(nombre, b)        { return setAtributoProveedor(nombre, 'IVA Incluido', _sn(b)); }
+
 function clearConfigCache() { cache.flushAll(); }
 
-module.exports = { leerConfig, getProveedor, setIvaProveedor, clearConfigCache, norm };
+module.exports = { leerConfig, getProveedor, setIvaProveedor, setAtributoProveedor, setIvaDeducible, setDescuentoIncluido, setIvaIncluido, clearConfigCache, norm };
