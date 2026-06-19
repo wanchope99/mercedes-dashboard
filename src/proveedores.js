@@ -23,20 +23,25 @@ const cache = new NodeCache({ stdTTL: 120 });
 const PROV_SHEET_ID = process.env.PROVEEDORES_SHEET_ID || process.env.SPREADSHEET_ID;
 const COMPRAS_SHEET = process.env.PROVEEDORES_COMPRAS_SHEET || 'Compras';
 
-// Columnas de la hoja Compras (A:S):
+// Columnas de la hoja Compras (A:W):
 // A Fecha · B Proveedor · C Categoría · D Producto · E Cantidad · F Unidad
-// G Precio Unit. ($) · H Subtotal (=E*G) · I Descuento (%) · J Total ($) (=H*(1-I/100))
-// K % IVA · L Total con IVA (=J*(1+K/100)) · M Forma de Pago · N Días de Crédito
-// O Entrega OK? · P Notas
+// G Precio Unit. ($) · H Subtotal (=E*G) · I Descuento (%) · J Descuento Incluido (S/N)
+// K Total ($) · L % IVA · M IVA Incluido (S/N) · N Total con IVA · O Otro Impuesto ($)
+// P Total Final (=N+O) · Q Forma de Pago · R Días de Crédito · S Entrega OK? · T Notas
 // --- Normalización de unidades (la unidad de venta/FUDO es la BASE; ej: Botella) ---
-// E/F/G se guardan YA NORMALIZADOS a la unidad base. Estas columnas preservan lo
-// que decía la factura, para trazabilidad:
-// Q Cantidad Original · R Unidad Original · S Factor (unidades base por empaque)
+// U Cantidad Original · V Unidad Original · W Factor (unidades base por empaque)
+//
+// Booleans (S/N):
+//  · Descuento Incluido (J): si el precio de lista YA tiene el descuento aplicado
+//    → NO se vuelve a restar el % en el Total.
+//  · IVA Incluido (M): si el precio YA tiene IVA → NO se vuelve a sumar el % al Total con IVA.
+// Otro Impuesto (O): monto ARS absoluto (ej: IMP INT). Total Final = Total con IVA + Otro Impuesto.
 const COL = { fecha:0, proveedor:1, categoria:2, producto:3, cantidad:4, unidad:5,
-  precioUnit:6, subtotal:7, descuento:8, total:9, ivaPct:10, totalConIva:11,
-  formaPago:12, diasCredito:13, entregaOk:14, notas:15,
-  cantidadOriginal:16, unidadOriginal:17, factor:18 };
-const RANGE_COMPRAS = 'A:S';
+  precioUnit:6, subtotal:7, descuento:8, descIncluido:9, total:10, ivaPct:11,
+  ivaIncluido:12, totalConIva:13, otroImpuesto:14, totalFinal:15,
+  formaPago:16, diasCredito:17, entregaOk:18, notas:19,
+  cantidadOriginal:20, unidadOriginal:21, factor:22 };
+const RANGE_COMPRAS = 'A:W';
 
 function getAuthRW() {
   const credentials = process.env.GOOGLE_CREDENTIALS_JSON
@@ -97,7 +102,7 @@ async function getComprasRaw() {
   const sheets = sheetsClient();
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: PROV_SHEET_ID,
-    range: `${COMPRAS_SHEET}!A:S`,
+    range: `${COMPRAS_SHEET}!A:W`,
   });
   const rows = res.data.values || [];
   cache.set('compras_raw', rows);
@@ -150,13 +155,17 @@ async function getCompras() {
       subtotal,
       descuento,
       total,
+      descIncluido: (r[COL.descIncluido] || '').toString().trim(),
       ivaPct: parseNum(r[COL.ivaPct]),
+      ivaIncluido: (r[COL.ivaIncluido] || '').toString().trim(),
       totalConIva: parseNum(r[COL.totalConIva]),
+      otroImpuesto: parseNum(r[COL.otroImpuesto]),
+      totalFinal: parseNum(r[COL.totalFinal]),
       formaPago: (r[COL.formaPago] || '').toString().trim(),
       diasCredito: parseNum(r[COL.diasCredito]),
       entregaOk: (r[COL.entregaOk] || '').toString().trim(),
       notas: (r[COL.notas] || '').toString().trim(),
-      // Trazabilidad de normalización de unidades (columnas Q/R/S)
+      // Trazabilidad de normalización de unidades (columnas U/V/W)
       cantidadOriginal: parseNum(r[COL.cantidadOriginal]),
       unidadOriginal: (r[COL.unidadOriginal] || '').toString().trim(),
       factor: parseNum(r[COL.factor]),
@@ -197,16 +206,18 @@ async function appendCompras(items) {
     const fila = nextRow++;
     const cant = it.cantidad ?? '';
     const pu = it.precioUnit ?? '';
-    // Descuento en % (0 si no hay).
     const descuento = (it.descuento != null && it.descuento !== '') ? it.descuento : '';
-    // H Subtotal = E*G (cantidad * precio unitario).
+    const descIncl = (it.descIncluido === true || /^s/i.test(String(it.descIncluido||''))) ? 'S' : 'N';
     const subtotal = (cant !== '' && pu !== '') ? `=E${fila}*G${fila}` : '';
-    // J Total ($) = Subtotal con descuento aplicado: =H*(1-I/100). Si Subtotal vacío, vacío.
-    const total = subtotal ? `=H${fila}*(1-N(I${fila})/100)` : '';
-    // K % IVA: lo que leyó el extractor (21, 10.5, 0) o vacío.
+    // K Total: si Descuento Incluido = "S" no se resta el %; si "N" se aplica.
+    const total = subtotal ? `=IF(J${fila}="S",H${fila},H${fila}*(1-N(I${fila})/100))` : '';
     const ivaPct = (it.ivaPct != null && it.ivaPct !== '') ? it.ivaPct : '';
-    // L Total con IVA = Total * (1 + IVA%/100). Si no hay IVA, igual al Total.
-    const totalConIva = total ? `=J${fila}*(1+N(K${fila})/100)` : '';
+    const ivaIncl = (it.ivaIncluido === true || /^s/i.test(String(it.ivaIncluido||''))) ? 'S' : 'N';
+    // N Total con IVA: si IVA Incluido = "S" no se suma el %; si "N" se aplica.
+    const totalConIva = total ? `=IF(M${fila}="S",K${fila},K${fila}*(1+N(L${fila})/100))` : '';
+    const otroImpuesto = (it.otroImpuesto != null && it.otroImpuesto !== '') ? it.otroImpuesto : '';
+    // P Total Final = Total con IVA + Otro Impuesto.
+    const totalFinal = totalConIva ? `=N${fila}+N(O${fila})` : '';
     return [
       it.fecha || new Date().toISOString().slice(0, 10),  // A Fecha
       it.proveedor || '',                                  // B Proveedor
@@ -217,22 +228,26 @@ async function appendCompras(items) {
       pu,                                                  // G Precio Unit.
       subtotal,                                            // H Subtotal (=E*G)
       descuento,                                           // I Descuento (%)
-      total,                                               // J Total (=H*(1-I/100))
-      ivaPct,                                              // K % IVA
-      totalConIva,                                         // L Total con IVA (=J*(1+K/100))
-      cats.normalizarMedioPago(it.formaPago) || it.formaPago || '', // M Forma de Pago
-      it.diasCredito ?? 0,                                 // N Días de Crédito
-      it.entregaOk || 'Sí',                                // O Entrega OK?
-      it.notas || '',                                      // P Notas
-      it.normalizada ? (it.cantidadOriginal ?? '') : '',   // Q Cantidad Original
-      it.normalizada ? (it.unidadOriginal || '') : '',     // R Unidad Original
-      it.normalizada ? (it.factorConversion ?? '') : '',   // S Factor (base/empaque)
+      descIncl,                                            // J Descuento Incluido (S/N)
+      total,                                               // K Total
+      ivaPct,                                              // L % IVA
+      ivaIncl,                                             // M IVA Incluido (S/N)
+      totalConIva,                                         // N Total con IVA
+      otroImpuesto,                                        // O Otro Impuesto ($)
+      totalFinal,                                          // P Total Final (=N+O)
+      cats.normalizarMedioPago(it.formaPago) || it.formaPago || '', // Q Forma de Pago
+      it.diasCredito ?? 0,                                 // R Días de Crédito
+      it.entregaOk || 'Sí',                                // S Entrega OK?
+      it.notas || '',                                      // T Notas
+      it.normalizada ? (it.cantidadOriginal ?? '') : '',   // U Cantidad Original
+      it.normalizada ? (it.unidadOriginal || '') : '',     // V Unidad Original
+      it.normalizada ? (it.factorConversion ?? '') : '',   // W Factor (base/empaque)
     ];
   });
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: PROV_SHEET_ID,
-    range: `${COMPRAS_SHEET}!A:S`,
+    range: `${COMPRAS_SHEET}!A:W`,
     valueInputOption: 'USER_ENTERED',
     insertDataOption: 'INSERT_ROWS',
     requestBody: { values },
@@ -469,6 +484,9 @@ function crearPendiente({ origen = {}, imagenInfo = {}, items, factura = {} }) {
       proveedor: factura.proveedor || (items[0] && items[0].proveedor) || '',
       medioPago: factura.medioPago || '',
       iva: factura.iva || null,
+      ivaDeducible: factura.ivaDeducible != null ? factura.ivaDeducible : null,
+      descuentoIncluido: factura.descuentoIncluido != null ? factura.descuentoIncluido : null,
+      ivaIncluido: factura.ivaIncluido != null ? factura.ivaIncluido : null,
       dudas: factura.dudas || [],
     },
     items: items.map((it, i) => ({ idx: i, ...it })),
@@ -495,9 +513,17 @@ function aplicarResoluciones(id, resoluciones = {}) {
   if (rf) {
     if (rf.medioPago) reg.factura.medioPago = rf.medioPago;
     if (rf.iva) reg.factura.iva = rf.iva;
+    // Atributos fiscales: aceptar "si"/"no"/true/false.
+    const aBool = v => { const x = String(v).trim().toLowerCase(); if (x==='si'||x==='sí'||x==='s'||x==='true') return true; if (x==='no'||x==='n'||x==='false') return false; return null; };
+    if (rf.ivaDeducible != null && rf.ivaDeducible !== '') reg.factura.ivaDeducible = aBool(rf.ivaDeducible);
+    if (rf.descuentoIncluido != null && rf.descuentoIncluido !== '') reg.factura.descuentoIncluido = aBool(rf.descuentoIncluido);
+    if (rf.ivaIncluido != null && rf.ivaIncluido !== '') reg.factura.ivaIncluido = aBool(rf.ivaIncluido);
     reg.factura.dudas = (reg.factura.dudas || []).filter(d => {
       if (d.campo === 'medioPago') return !reg.factura.medioPago || !cats.MEDIOS_PAGO.includes(cats.normalizarMedioPago(reg.factura.medioPago));
       if (d.campo === 'iva') return !reg.factura.iva;
+      if (d.campo === 'ivaDeducible') return reg.factura.ivaDeducible == null;
+      if (d.campo === 'descuentoIncluido') return reg.factura.descuentoIncluido == null;
+      if (d.campo === 'ivaIncluido') return reg.factura.ivaIncluido == null;
       return false;
     });
   }

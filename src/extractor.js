@@ -43,6 +43,7 @@ producto). Devolvé un OBJETO JSON con esta forma EXACTA, sin texto adicional:
       "precio_unitario": 350,
       "descuento_porcentaje": 0,
       "iva_porcentaje": 21,
+      "otro_impuesto": 0,
       "total_linea": 3500,
       "notas": "",
       "confianza": { "categoria": 0.0, "producto": 0.0, "precio_unitario": 0.0, "iva_porcentaje": 0.0, "unidades_por_paquete": 0.0 }
@@ -70,6 +71,8 @@ Reglas IMPORTANTES:
 - descuento_porcentaje = el % de descuento de esa línea si la factura tiene una
   columna "% Dto", "Dcto", "Descuento" o similar (ej. 50 = 50%). Si no hay, 0.
   OJO: el precio_unitario es el de lista (sin descuento); el descuento se aplica aparte.
+- otro_impuesto = monto ARS ABSOLUTO de otros impuestos de esa línea que NO sean IVA
+  (ej: "IMP INT", impuestos internos). Si no hay, 0. Es un MONTO en pesos, no un %.
 - total_linea = el total de esa línea tal como figura en la factura (para control).
 - total_factura = el TOTAL final de la factura (con impuestos), para control.
 - "confianza" 0 a 1. Si no podés leer algo, poné tu mejor estimación con confianza
@@ -129,6 +132,7 @@ async function extraerDeImagen({ base64, mime = 'image/jpeg' }) {
     precio_unitario: l.precio_unitario ?? l.precioUnit ?? null,
     descuento_porcentaje: l.descuento_porcentaje ?? l.descuento ?? l.dcto ?? null,
     iva_porcentaje: l.iva_porcentaje ?? l.iva ?? null,
+    otro_impuesto: l.otro_impuesto ?? l.imp_int ?? null,
     total_linea: l.total_linea ?? l.total ?? null,
     forma_de_pago: factura.forma_de_pago || l.forma_de_pago || '',
     dias_credito: factura.dias_credito ?? l.dias_credito ?? 0,
