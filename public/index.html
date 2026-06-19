@@ -4041,19 +4041,51 @@ function renderCostosBody(){
   ).join('') : '<tr><td colspan="6" class="prov-empty">Sin datos en el periodo.</td></tr>';
 }
 
+var _costoCatProductos = [];
 function openCostoCategoriaModal(i) {
   const f = (_costosData && _costosData.filas) ? _costosData.filas[i] : null;
   if (!f) return;
-  const rows = (f.topProductos||[]).map(p => [escapeHtml(p.nombre), p.unidades, fmt(p.ingreso)]);
-  const body = '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:14px">'
+  _costoCatProductos = f.topProductos || [];
+  const kpis = '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:14px">'
     + '<div><div style="font-size:11px;color:var(--text-muted)">Costo</div><div style="font-size:18px;font-weight:700;color:var(--red)">'+fmt(f.costo)+'</div></div>'
     + '<div><div style="font-size:11px;color:var(--text-muted)">Ingreso</div><div style="font-size:18px;font-weight:700;color:var(--green)">'+fmt(f.ingreso)+'</div></div>'
     + '<div><div style="font-size:11px;color:var(--text-muted)">Food cost</div><div style="font-size:18px;font-weight:700">'+(f.ratioCostoIngreso!=null?pct(f.ratioCostoIngreso):'-')+'</div></div>'
-    + '<div><div style="font-size:11px;color:var(--text-muted)">Margen</div><div style="font-size:18px;font-weight:700;color:'+(f.margen>=0?'var(--green)':'var(--red)')+'">'+fmt(f.margen)+'</div></div></div>'
-    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Productos Fudo de esta categoria (top por ingreso)</div>'
-    + miniTabla([{label:'Producto'},{label:'Unid.',align:'right'},{label:'Ingreso',align:'right'}], rows)
-    + ((f.proveedores&&f.proveedores.length)?'<div style="font-size:11px;color:var(--text-muted);margin-top:10px">Proveedores: '+f.proveedores.map(escapeHtml).join(', ')+'</div>':'');
-  openDetalleModal('Costos - ' + f.categoria, body);
+    + '<div><div style="font-size:11px;color:var(--text-muted)">Margen</div><div style="font-size:18px;font-weight:700;color:'+(f.margen>=0?'var(--green)':'var(--red)')+'">'+fmt(f.margen)+'</div></div></div>';
+  let tabla = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Productos Fudo (clic en uno para ver a qué precio se vendió)</div>';
+  tabla += '<table class="prov-resumen-table" style="width:100%"><thead><tr>'
+    + '<th style="text-align:left">Producto</th><th style="text-align:right">Unid.</th>'
+    + '<th style="text-align:right">Precio prom.</th><th style="text-align:right">Ingreso</th></tr></thead><tbody>';
+  _costoCatProductos.forEach((p, idx) => {
+    tabla += '<tr style="cursor:pointer" onclick="toggleProductoPrecios('+idx+')" title="Ver desglose de precios">'
+      + '<td style="text-align:left">'+escapeHtml(p.nombre)+'</td>'
+      + '<td style="text-align:right">'+p.unidades+'</td>'
+      + '<td style="text-align:right">'+fmt(p.precioPromedio||0)+'</td>'
+      + '<td style="text-align:right">'+fmt(p.ingreso)+'</td></tr>';
+    // fila oculta con el desglose de precios
+    const dp = p.desglosePrecios || [];
+    let det = '<tr id="pp-det-'+idx+'" style="display:none"><td colspan="4" style="padding:0 0 8px 16px">';
+    if (dp.length) {
+      det += '<div style="font-size:11px;color:var(--text-muted);margin:4px 0">A qué precio se vendió:</div>';
+      det += '<table style="width:100%;font-size:12px">';
+      dp.forEach(d => {
+        const cero = d.precio === 0;
+        det += '<tr><td style="text-align:left;color:'+(cero?'var(--red)':'inherit')+'">'+d.unidades+' u. × '+fmt(d.precio)+(cero?' (cortesía / sin precio)':'')+'</td>'
+          + '<td style="text-align:right">'+fmt(d.subtotal)+'</td></tr>';
+      });
+      det += '</table>';
+    } else {
+      det += '<div style="font-size:11px;color:var(--text-muted)">Sin desglose disponible.</div>';
+    }
+    det += '</td></tr>';
+    tabla += det;
+  });
+  tabla += '</tbody></table>';
+  const provs = (f.proveedores&&f.proveedores.length)?'<div style="font-size:11px;color:var(--text-muted);margin-top:10px">Proveedores: '+f.proveedores.map(escapeHtml).join(', ')+'</div>':'';
+  openDetalleModal('Costos - ' + f.categoria, kpis + tabla + provs);
+}
+function toggleProductoPrecios(idx) {
+  const el = document.getElementById('pp-det-'+idx);
+  if (el) el.style.display = (el.style.display==='none') ? 'table-row' : 'none';
 }
 function openFoodCostModal() {
   const d = _costosData; if (!d) return;
