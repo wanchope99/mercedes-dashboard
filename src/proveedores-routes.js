@@ -57,6 +57,7 @@ function procesarItems(itemsCrudos, indice) {
       precioUnit: Number(raw.precio_unitario) || null,
       descuento: raw.descuento_porcentaje != null && raw.descuento_porcentaje !== '' ? Number(raw.descuento_porcentaje) : null,
       total_linea: raw.total_linea != null ? Number(raw.total_linea) : null,
+      otroImpuesto: (raw.otro_impuesto != null && raw.otro_impuesto !== '') ? Number(raw.otro_impuesto) : null,
       ivaPct: raw.iva_porcentaje != null && raw.iva_porcentaje !== '' ? Number(raw.iva_porcentaje) : null,
       diasCredito: raw.dias_credito ?? 0,
       entregaOk: raw.entrega_ok || 'Sí',
@@ -116,7 +117,27 @@ async function procesarFactura(factura, items) {
     dudas.push({ campo: 'iva', sugerido: '', fuente: 'ninguna', opciones: ['con', 'sin'] });
   }
 
-  return { proveedor, medioPago, iva, dudas };
+  // ── Atributos fiscales del proveedor (se preguntan 1 vez y se recuerdan) ──
+  // 1) ¿La factura sirve para descontar IVA? (deducible / pasar a Responsable Inscripto)
+  // 2) ¿El descuento ya viene INCLUIDO en el precio de lista? (S → no se resta)
+  // 3) ¿El IVA ya viene INCLUIDO en el precio? (S → no se suma)
+  const ivaDeducible      = (cfg && cfg.ivaDeducible      != null) ? cfg.ivaDeducible      : null;
+  const descuentoIncluido = (cfg && cfg.descuentoIncluido != null) ? cfg.descuentoIncluido : null;
+  const ivaIncluido       = (cfg && cfg.ivaIncluido       != null) ? cfg.ivaIncluido       : null;
+  if (ivaDeducible === null) {
+    dudas.push({ campo: 'ivaDeducible', sugerido: '', fuente: 'ninguna', opciones: ['si', 'no'],
+      pregunta: '¿Esta factura sirve para descontar IVA (es deducible)?' });
+  }
+  if (descuentoIncluido === null) {
+    dudas.push({ campo: 'descuentoIncluido', sugerido: '', fuente: 'ninguna', opciones: ['si', 'no'],
+      pregunta: '¿El descuento ya viene incluido en el precio de lista?' });
+  }
+  if (ivaIncluido === null) {
+    dudas.push({ campo: 'ivaIncluido', sugerido: '', fuente: 'ninguna', opciones: ['si', 'no'],
+      pregunta: '¿El IVA ya viene incluido en el precio?' });
+  }
+
+  return { proveedor, medioPago, iva, ivaDeducible, descuentoIncluido, ivaIncluido, dudas };
 }
 
 module.exports = function ({ authMiddleware, adminOnly } = {}) {
@@ -165,6 +186,12 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
 
       // Propagar el medio de pago (de la factura) a todos los items.
       if (fact.medioPago) items.forEach(it => { it.formaPago = fact.medioPago; });
+      // Propagar atributos fiscales (booleans) a cada item para appendCompras.
+      const _aplicarFiscales = (lista, fk) => lista.forEach(it => {
+        if (fk.descuentoIncluido != null) it.descIncluido = fk.descuentoIncluido;
+        if (fk.ivaIncluido != null) it.ivaIncluido = fk.ivaIncluido;
+      });
+      _aplicarFiscales(items, fact);
       // Control E*G vs total leído: si difiere, anotarlo en notas (no bloquea).
       for (const it of items) {
         const chk = prov.chequearTotalLinea(it);
@@ -239,9 +266,12 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
       // Aplicar el IVA del proveedor (con/sin) a los items según la resolución.
       const reg = prov.getPendiente(req.params.id);
       const ivaProv = reg && reg.factura && reg.factura.iva;  // 'con' | 'sin'
+      const fk = (reg && reg.factura) || {};
       // Si es "sin IVA", la columna % IVA queda 0; si "con", se respeta lo leído.
       for (const it of out.listoParaEscribir) {
         if (ivaProv === 'sin') it.ivaPct = 0;
+        if (fk.descuentoIncluido != null) it.descIncluido = fk.descuentoIncluido;
+        if (fk.ivaIncluido != null) it.ivaIncluido = fk.ivaIncluido;
       }
       const n = await prov.appendCompras(out.listoParaEscribir);
       prov.marcarResuelto(req.params.id);
@@ -250,6 +280,14 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
       if (ivaProv && reg.factura.proveedor) {
         try { await provCfg.setIvaProveedor(reg.factura.proveedor, ivaProv); }
         catch (e) { console.warn('No se pudo guardar IVA del proveedor:', e.message); }
+      }
+      // Recordar atributos fiscales del proveedor (deducible / incluidos).
+      if (reg.factura.proveedor) {
+        try {
+          if (fk.ivaDeducible != null) await provCfg.setIvaDeducible(reg.factura.proveedor, fk.ivaDeducible);
+          if (fk.descuentoIncluido != null) await provCfg.setDescuentoIncluido(reg.factura.proveedor, fk.descuentoIncluido);
+          if (fk.ivaIncluido != null) await provCfg.setIvaIncluido(reg.factura.proveedor, fk.ivaIncluido);
+        } catch (e) { console.warn('No se pudo guardar atributos fiscales:', e.message); }
       }
 
       res.json({
