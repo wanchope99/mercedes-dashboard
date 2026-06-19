@@ -923,6 +923,7 @@ app.get('/api/costos/producto-debug', authMiddleware, adminOnly, async (req, res
 app.get('/api/costos', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { desde, hasta } = req.query;
+    await costos.cargarOverrides().catch(() => {});
     const [compras, detallesFudo] = await Promise.all([
       prov.getCompras().catch(() => []),
       getDetallesFrescos({ desde, hasta }).catch(() => []),
@@ -934,12 +935,20 @@ app.get('/api/costos', authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
-// Override manual del mapeo producto FUDO → categoría de costo
-app.post('/api/costos/override', authMiddleware, adminOnly, (req, res) => {
-  const { producto, categoria } = req.body || {};
-  if (!producto || !categoria) return res.status(400).json({ ok: false, error: 'Faltan producto y categoría' });
-  costos.setOverrideProducto(producto, categoria);
-  res.json({ ok: true, message: 'Mapeo actualizado', overrides: costos.getOverrides() });
+// Override manual del mapeo producto FUDO → categoría de costo (persiste en Sheets)
+app.post('/api/costos/override', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { producto, categoria } = req.body || {};
+    if (!producto || !categoria) return res.status(400).json({ ok: false, error: 'Faltan producto y categoría' });
+    if (!costos.CATEGORIAS_COSTO.includes(categoria)) return res.status(400).json({ ok: false, error: 'Categoría no válida' });
+    await costos.setOverrideProducto(producto, categoria);
+    res.json({ ok: true, message: `"${producto}" reasignado a ${categoria}` });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Lista de categorías de costo disponibles (para el dropdown de recategorizar)
+app.get('/api/costos/categorias', authMiddleware, adminOnly, (req, res) => {
+  res.json({ ok: true, data: costos.CATEGORIAS_COSTO });
 });
 
 // ─── CMV desagregado Comida / Bebida / Insumos (composición desde Compras) ─────

@@ -22,6 +22,68 @@
 //       - Comida  = el resto de categorías de ingrediente (carnes, pescados, etc.).
 
 const cats = require('./proveedores-categorias');
+const { google } = require('googleapis');
+
+// ─── Persistencia de overrides de categoría en hoja Sheets ──────────────────────
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+const OVERRIDE_SHEET = process.env.COSTOS_OVERRIDE_SHEET || 'Producto Categorias';
+function _sheetsClient() {
+  const credentials = process.env.GOOGLE_CREDENTIALS_JSON
+    ? JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON)
+    : require('../../credentials.json');
+  const auth = new google.auth.GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
+  return google.sheets({ version: 'v4', auth });
+}
+async function _ensureOverrideSheet(api) {
+  try {
+    await api.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { requests: [{ addSheet: { properties: { title: OVERRIDE_SHEET } } }] },
+    });
+    await api.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID, range: `${OVERRIDE_SHEET}!A1:B1`, valueInputOption: 'RAW',
+      requestBody: { values: [['Producto', 'Categoria']] },
+    });
+  } catch (e) { if (!String(e.message||'').toLowerCase().includes('already exists')) throw e; }
+}
+let _overridesCargados = false;
+// Carga los overrides desde la hoja al Map (una vez por arranque; refrescable).
+async function cargarOverrides({ force = false } = {}) {
+  if (_overridesCargados && !force) return;
+  if (!SPREADSHEET_ID) { _overridesCargados = true; return; }
+  try {
+    const api = _sheetsClient();
+    let rows = [];
+    try {
+      const res = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${OVERRIDE_SHEET}!A:B` });
+      rows = res.data.values || [];
+    } catch (e) { await _ensureOverrideSheet(api); rows = []; }
+    overrides.clear();
+    for (let i = 1; i < rows.length; i++) {
+      const prod = (rows[i][0] || '').toString().trim();
+      const cat = (rows[i][1] || '').toString().trim();
+      if (prod && cat) overrides.set(cats.norm(prod), cat);
+    }
+    _overridesCargados = true;
+  } catch (e) { console.warn('Overrides categoria: no se pudo cargar', e.message); _overridesCargados = true; }
+}
+// Persiste (upsert) un override en la hoja.
+async function _persistOverride(nombreProducto, categoria) {
+  if (!SPREADSHEET_ID) return;
+  const api = _sheetsClient();
+  await _ensureOverrideSheet(api);
+  const res = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${OVERRIDE_SHEET}!A:B` });
+  const rows = res.data.values || [];
+  const nrm = cats.norm(nombreProducto);
+  let rowIndex = -1;
+  for (let i = 1; i < rows.length; i++) { if (cats.norm(rows[i][0] || '') === nrm) { rowIndex = i + 1; break; } }
+  const fila = [nombreProducto, categoria];
+  if (rowIndex > 0) {
+    await api.spreadsheets.values.update({ spreadsheetId: SPREADSHEET_ID, range: `${OVERRIDE_SHEET}!A${rowIndex}:B${rowIndex}`, valueInputOption: 'RAW', requestBody: { values: [fila] } });
+  } else {
+    await api.spreadsheets.values.append({ spreadsheetId: SPREADSHEET_ID, range: `${OVERRIDE_SHEET}!A:B`, valueInputOption: 'RAW', requestBody: { values: [fila] } });
+  }
+}
 
 // ─── Categorías de COSTO canónicas (mismas que Compras) ─────────────────────────
 const CATEGORIAS_COSTO = cats.CATEGORIAS; // incluye Insumos / Otro
@@ -38,9 +100,11 @@ function grupoCMV(categoriaCosto) {
 // ─── Clasificación producto FUDO → categoría de costo ───────────────────────────
 // Overrides manuales (en memoria; se pueden persistir luego en una hoja).
 const overrides = new Map(); // norm(nombreProducto) -> categoriaCosto
-function setOverrideProducto(nombreProducto, categoriaCosto) {
+async function setOverrideProducto(nombreProducto, categoriaCosto) {
   if (!nombreProducto || !categoriaCosto) return;
   overrides.set(cats.norm(nombreProducto), categoriaCosto);
+  try { await _persistOverride(nombreProducto, categoriaCosto); }
+  catch (e) { console.warn('No se pudo persistir override', nombreProducto, e.message); }
 }
 function getOverrides() {
   return [...overrides.entries()].map(([k, v]) => ({ producto: k, categoria: v }));
@@ -278,7 +342,7 @@ function costosVsIngresos({ compras, detallesFudo, desde, hasta } = {}) {
 
 module.exports = {
   CATEGORIAS_COSTO, grupoCMV,
-  clasificarProducto, setOverrideProducto, getOverrides, REGLAS_MENU,
+  clasificarProducto, setOverrideProducto, getOverrides, cargarOverrides, REGLAS_MENU,
   ingresosPorCategoriaCosto, costosPorCategoria, cmvDesglose, costosVsIngresos,
   montoCompra,
 };
