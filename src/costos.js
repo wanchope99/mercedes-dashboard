@@ -163,9 +163,13 @@ function ingresosPorCategoriaCosto(detalles) {
         bucket.ingreso += p.monto || 0;
         bucket.unidades += p.unidades || 0;
         const pn = p.nombre || 'Producto';
-        const pp = bucket.productos[pn] = bucket.productos[pn] || { nombre: pn, ingreso: 0, unidades: 0, categoriaFudo: cat.categoria };
+        const pp = bucket.productos[pn] = bucket.productos[pn] || { nombre: pn, ingreso: 0, unidades: 0, categoriaFudo: cat.categoria, precios: {} };
         pp.ingreso += p.monto || 0;
         pp.unidades += p.unidades || 0;
+        // Merge del desglose de precios { precioUnit: unidades } a lo largo de los días
+        for (const [precio, u] of Object.entries(p.precios || {})) {
+          pp.precios[precio] = (pp.precios[precio] || 0) + u;
+        }
       }
     }
   }
@@ -173,7 +177,16 @@ function ingresosPorCategoriaCosto(detalles) {
   const flat = (b) => ({
     ingreso: Math.round(b.ingreso),
     unidades: b.unidades,
-    productos: Object.values(b.productos).sort((a, c) => c.ingreso - a.ingreso),
+    productos: Object.values(b.productos)
+      .map(p => ({
+        ...p,
+        // desglose de precios ordenado por precio desc: [{ precio, unidades, subtotal }]
+        desglosePrecios: Object.entries(p.precios || {})
+          .map(([precio, u]) => ({ precio: Number(precio), unidades: u, subtotal: Math.round(Number(precio) * u) }))
+          .sort((a, c) => c.precio - a.precio),
+        precioPromedio: p.unidades > 0 ? Math.round((p.ingreso / p.unidades) * 100) / 100 : 0,
+      }))
+      .sort((a, c) => c.ingreso - a.ingreso),
   });
   const porCategoriaCosto = {};
   for (const [k, v] of Object.entries(acc)) porCategoriaCosto[k] = flat(v);
@@ -244,7 +257,7 @@ function costosVsIngresos({ compras, detallesFudo, desde, hasta } = {}) {
       // ratio costo/ingreso (food cost teórico de la categoría)
       ratioCostoIngreso: ing.ingreso > 0 ? Math.round((costo / ing.ingreso) * 1000) / 10 : null,
       margen: ing.ingreso - costo,
-      topProductos: (ing.productos || []).slice(0, 8),
+      topProductos: (ing.productos || []).slice(0, 30),
       proveedores: (costos.find(c => c.categoria === cat) || {}).proveedores || [],
     });
   }

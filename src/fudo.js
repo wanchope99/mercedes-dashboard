@@ -301,7 +301,12 @@ function buildDetalles(raw) {
       dia.porCategoria[cat].monto += monto;
       dia.porCategoria[cat].unidades += q;
       const pname = producto ? producto.name : 'Producto';
-      if (!dia.porCategoria[cat].productos[pname]) dia.porCategoria[cat].productos[pname] = { nombre: pname, unidades: 0, monto: 0 };
+      if (!dia.porCategoria[cat].productos[pname]) dia.porCategoria[cat].productos[pname] = { nombre: pname, unidades: 0, monto: 0, precios: {} };
+      // Desglose por precio unitario real: { precioUnit: unidades }. Permite ver a qué
+      // precio se vendió cada unidad (descuentos, cortesías, cambios de precio).
+      const unit = q > 0 ? Math.round((monto / q) * 100) / 100 : 0;
+      const pp0 = dia.porCategoria[cat].productos[pname];
+      pp0.precios[unit] = (pp0.precios[unit] || 0) + q;
       dia.porCategoria[cat].productos[pname].unidades += q;
       dia.porCategoria[cat].productos[pname].monto += monto;
     }
