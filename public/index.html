@@ -711,6 +711,28 @@
         </table>
       </div>
     </div>
+
+    <div class="card">
+      <div class="card-title">Consumo de Insumos
+        <button class="btn btn-accent" style="float:right;font-size:12px;padding:6px 12px" onclick="toggleConsumoForm()">➕ Agregar regla</button>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· cuánto se consume de cada insumo por día/semana (no se registra en Fudo)</span>
+      </div>
+      <div id="consumo-form" style="display:none;background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:12px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+          <div class="form-group" style="flex:2;min-width:200px"><label>Producto (insumo)</label><input id="cons-producto" placeholder="Ej: Bobina papel"></div>
+          <div class="form-group" style="width:110px"><label>Cantidad</label><input id="cons-cantidad" type="number" min="0" step="0.1" placeholder="0"></div>
+          <div class="form-group" style="width:130px"><label>Cada</label><select id="cons-periodo"><option value="semana">Semana</option><option value="dia">Día</option></select></div>
+          <button class="btn btn-accent" onclick="guardarConsumo()">Guardar</button>
+          <button class="btn" onclick="toggleConsumoForm()">Cancelar</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="prov-resumen-table" style="width:100%">
+          <thead><tr><th style="text-align:left">Insumo</th><th style="text-align:right">Consumo</th><th style="text-align:right">Por día</th><th style="text-align:right">Ingresado</th><th style="text-align:right">Cobertura</th><th></th></tr></thead>
+          <tbody id="consumo-body"><tr><td colspan="6" class="prov-empty">Sin reglas de consumo. Agregá una para empezar a medir.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -829,6 +851,13 @@
         <tbody id="costos-body"><tr><td colspan="6" class="prov-empty">-</td></tr></tbody>
       </table></div>
       <div id="costos-nota" style="font-size:11px;color:var(--text-muted);margin-top:8px"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Detalle por plato (producto FUDO)
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· clic en una categoría para ver sus platos · ✎ edita la composición %</span>
+      </div>
+      <div id="costos-platos"><div style="color:var(--text-muted);font-size:13px;padding:8px 0">Cargá los datos de Costos para ver el detalle por plato.</div></div>
     </div>
   </main>
 </div>
@@ -3665,6 +3694,7 @@ let _stkInit = false;
 let _stkProductos = [], _stkCategorias = [];
 
 async function loadComportamiento() {
+  loadConsumo();
   if (!_stkInit) {
     try {
       const { data } = await api('/api/stocks/productos');
@@ -3751,6 +3781,57 @@ async function loadStkCategoria() {
   (data.ventas||[]).forEach(v => movs.push({ fecha: v.fecha, tipo: 'Venta', cant: v.unidades, detalle: v.nombre||'' }));
   movs.sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
   bodyEl.innerHTML = movs.length ? movs.slice(0,100).map(m => '<tr><td>'+fechaCorta(m.fecha)+'</td><td style="color:'+(m.tipo==='Ingreso'?'var(--green)':'var(--orange)')+'">'+m.tipo+'</td><td>'+(m.cant!=null?m.cant:'')+'</td><td style="text-align:left">'+escapeHtml(m.detalle)+'</td></tr>').join('') : '<tr><td colspan="4" class="prov-empty">Sin movimientos.</td></tr>';
+}
+
+var _consumoData = [];
+async function loadConsumo() {
+  let data;
+  try { ({ data } = await api('/api/consumo')); } catch (e) { return; }
+  _consumoData = data || [];
+  renderConsumo();
+}
+function renderConsumo() {
+  const body = document.getElementById('consumo-body');
+  if (!body) return;
+  if (!_consumoData.length) { body.innerHTML = '<tr><td colspan="6" class="prov-empty">Sin reglas de consumo. Agregá una para empezar a medir.</td></tr>'; return; }
+  body.innerHTML = _consumoData.map(r => {
+    const cob = r.diasCobertura != null ? (r.diasCobertura + ' días') : '—';
+    const cobColor = r.diasCobertura != null && r.diasCobertura < 14 ? 'var(--red)' : 'inherit';
+    return '<tr>'
+      + '<td style="text-align:left">' + escapeHtml(r.producto) + '</td>'
+      + '<td style="text-align:right">' + r.cantidad + ' / ' + r.periodo + '</td>'
+      + '<td style="text-align:right">' + r.porDia + '</td>'
+      + '<td style="text-align:right">' + (r.ingresado || 0) + '</td>'
+      + '<td style="text-align:right;color:' + cobColor + '">' + cob + '</td>'
+      + '<td style="text-align:right"><button class="btn" style="padding:1px 8px;font-size:12px" title="Eliminar" onclick="eliminarConsumo(' + "'" + escAttr2(r.producto) + "'" + ')">🗑</button></td>'
+      + '</tr>';
+  }).join('');
+}
+function toggleConsumoForm() {
+  const fm = document.getElementById('consumo-form');
+  fm.style.display = fm.style.display === 'none' ? 'block' : 'none';
+}
+async function guardarConsumo() {
+  const producto = document.getElementById('cons-producto').value.trim();
+  const cantidad = Number(document.getElementById('cons-cantidad').value);
+  const periodo = document.getElementById('cons-periodo').value;
+  if (!producto || !(cantidad > 0)) { showToast('Completá producto y cantidad'); return; }
+  try {
+    await api('/api/consumo', { method: 'POST', body: JSON.stringify({ producto, cantidad, periodo }) });
+    showToast('✓ Consumo guardado');
+    document.getElementById('cons-producto').value = '';
+    document.getElementById('cons-cantidad').value = '';
+    toggleConsumoForm();
+    loadConsumo();
+  } catch (e) { showToast('Error: ' + e.message); }
+}
+async function eliminarConsumo(producto) {
+  if (!confirm('¿Eliminar la regla de consumo de "' + producto + '"?')) return;
+  try {
+    await api('/api/consumo?producto=' + encodeURIComponent(producto), { method: 'DELETE' });
+    showToast('Regla eliminada');
+    loadConsumo();
+  } catch (e) { showToast('Error: ' + e.message); }
 }
 
 async function loadStkProducto() {
@@ -3994,6 +4075,7 @@ async function loadCostos() {
   document.getElementById('costos-kpi-ratio').textContent = t.ingresoAsignado>0 ? pct((t.costo/t.ingresoAsignado)*100) : '-';
   const filas = data.filas || [];
   renderCostosBody();
+  renderPlatos();
   document.getElementById('costos-nota').textContent = (data.sinAsignar && data.sinAsignar.ingreso>0)
     ? fmt(data.sinAsignar.ingreso)+' de ingresos no se pudieron asignar a una categoria de costo (productos sin clasificar).'
     : 'El costo sale de la hoja Compras (por ingrediente); el ingreso de FUDO, mapeando cada producto a su categoria de costo dominante.';
@@ -4043,6 +4125,83 @@ function renderCostosBody(){
 }
 
 var _costoCatProductos = [];
+var _platosData = [];
+function renderPlatos() {
+  _platosData = (_costosData && _costosData.porPlato) ? _costosData.porPlato : [];
+  const cont = document.getElementById('costos-platos');
+  if (!cont) return;
+  if (!_platosData.length) { cont.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0">Sin datos en el período.</div>'; return; }
+  cont.innerHTML = _platosData.map((c, ci) =>
+    '<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden">'
+    + '<div style="cursor:pointer;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;background:var(--surface2)" onclick="togglePlatoCat(' + ci + ')">'
+    +   '<div><strong>' + escapeHtml(c.categoria) + '</strong> <span style="font-size:11px;color:var(--text-muted)">· ' + c.unidades + ' u.</span></div>'
+    +   '<div style="font-size:13px"><span style="color:var(--green)">' + fmt(c.ingreso) + '</span> <span style="color:var(--text-muted)">ing.</span> · '
+    +     '<span style="color:var(--red)">' + fmt(c.costoEstimado) + '</span> <span style="color:var(--text-muted)">costo est.</span> · '
+    +     (c.foodCost != null ? pct(c.foodCost) : '-') + '</div>'
+    + '</div>'
+    + '<div id="platocat-' + ci + '" style="display:none;padding:0 14px 10px">'
+    +   '<table class="prov-resumen-table" style="width:100%"><thead><tr>'
+    +     '<th style="text-align:left">Plato</th><th style="text-align:right">Unid.</th>'
+    +     '<th style="text-align:right">Ingreso</th><th style="text-align:right">Costo est.</th>'
+    +     '<th style="text-align:right">Food cost</th><th style="text-align:left">Composición</th></tr></thead><tbody>'
+    +     c.platos.map((p, pi) =>
+    '<tr><td style="text-align:left">' + escapeHtml(p.nombre)
+    +   ' <button class="btn" style="padding:1px 7px;font-size:12px" title="Editar composición" onclick="event.stopPropagation();editarComposicion(' + ci + ',' + pi + ')">✎</button>'
+    +   '<span id="comp-edit-' + ci + '-' + pi + '"></span></td>'
+    + '<td style="text-align:right">' + p.unidades + '</td>'
+    + '<td style="text-align:right;color:var(--green)">' + fmt(p.ingreso) + '</td>'
+    + '<td style="text-align:right;color:var(--red)">' + fmt(p.costoEstimado) + '</td>'
+    + '<td style="text-align:right">' + (p.foodCost != null ? pct(p.foodCost) : '-') + '</td>'
+    + '<td style="text-align:left;font-size:11px;color:var(--text-muted)">' + (p.composicion || []).map(x => escapeHtml(x.categoria) + ' ' + x.pct + '%').join(' · ') + '</td></tr>'
+    ).join('')
+    +   '</tbody></table>'
+    + '</div></div>'
+  ).join('');
+}
+function togglePlatoCat(ci) {
+  const el = document.getElementById('platocat-' + ci);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+function editarComposicion(ci, pi) {
+  const cont = document.getElementById('comp-edit-' + ci + '-' + pi);
+  if (!cont) return;
+  if (cont.dataset.open === '1') { cont.innerHTML = ''; cont.dataset.open = ''; return; }
+  cont.dataset.open = '1';
+  const plato = _platosData[ci].platos[pi];
+  const comp = (plato.composicion && plato.composicion.length) ? plato.composicion : [];
+  const cats = _costosCategorias || [];
+  // Hasta 4 filas categoría+% ; precargar lo existente
+  let html = '<div style="margin:8px 0;padding:8px;background:var(--surface2);border-radius:6px">';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Composición de "' + escapeHtml(plato.nombre) + '" (debe sumar 100%)</div>';
+  for (let k = 0; k < 4; k++) {
+    const ex = comp[k] || { categoria: '', pct: '' };
+    const opts = '<option value="">—</option>' + cats.map(c => '<option value="' + escAttr2(c) + '"' + (c === ex.categoria ? ' selected' : '') + '>' + escapeHtml(c) + '</option>').join('');
+    html += '<div style="display:flex;gap:6px;margin-bottom:4px">'
+      + '<select id="cmp-' + ci + '-' + pi + '-' + k + '-cat" style="flex:1;font-size:12px">' + opts + '</select>'
+      + '<input id="cmp-' + ci + '-' + pi + '-' + k + '-pct" type="number" min="0" max="100" placeholder="%" value="' + (ex.pct !== '' ? ex.pct : '') + '" style="width:70px;font-size:12px">'
+      + '</div>';
+  }
+  html += '<button class="btn btn-accent" style="font-size:12px;padding:4px 12px;margin-top:4px" onclick="guardarComposicion(' + ci + ',' + pi + ')">Guardar</button>';
+  html += '</div>';
+  cont.innerHTML = html;
+}
+async function guardarComposicion(ci, pi) {
+  const plato = _platosData[ci].platos[pi];
+  const partes = [];
+  for (let k = 0; k < 4; k++) {
+    const cat = document.getElementById('cmp-' + ci + '-' + pi + '-' + k + '-cat').value;
+    const pctv = Number(document.getElementById('cmp-' + ci + '-' + pi + '-' + k + '-pct').value);
+    if (cat && pctv > 0) partes.push({ categoria: cat, pct: pctv });
+  }
+  const suma = partes.reduce((a, p) => a + p.pct, 0);
+  if (Math.abs(suma - 100) > 1) { showToast('Los % deben sumar 100 (suman ' + suma + ')'); return; }
+  try {
+    await api('/api/costos/composicion', { method: 'POST', body: JSON.stringify({ plato: plato.nombre, partes }) });
+    showToast('✓ Composición de ' + plato.nombre + ' guardada');
+    loadCostos();
+  } catch (e) { showToast('Error: ' + e.message); }
+}
+
 function openCostoCategoriaModal(i) {
   const f = (_costosData && _costosData.filas) ? _costosData.filas[i] : null;
   if (!f) return;
