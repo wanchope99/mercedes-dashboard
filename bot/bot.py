@@ -111,6 +111,10 @@ CAMPO_LABEL = {
     "iva": "¿se paga con o sin IVA?",
     "producto": "nombre del producto",
     "precio_unitario": "precio unitario",
+    "ivaDeducible": "¿Esta factura sirve para descontar IVA?",
+    "descuentoIncluido": "¿El descuento ya viene incluido en el precio?",
+    "ivaIncluido": "¿El IVA ya viene incluido en el precio?",
+    "ivaPct": "% de IVA a imputar",
 }
 
 # Índice especial para las dudas de FACTURA (medio de pago, IVA): -1.
@@ -189,10 +193,15 @@ async def preguntar_siguiente(update_or_query, context):
         "proveedor-config": " (medio habitual de este proveedor)",
     }.get(fuente, "")
 
-    texto = (
-        f"🧾 *{prov}* — {prod}\n"
-        f"Necesito confirmar la *{label}*.{sug_txt}{fuente_txt}"
-    )
+    # Si la app mandó una "pregunta" explícita, usarla tal cual (más clara).
+    pregunta = d.get("pregunta")
+    if pregunta:
+        texto = f"🧾 *{prov}*\n{pregunta}{sug_txt}{fuente_txt}"
+    else:
+        texto = (
+            f"🧾 *{prov}* — {prod}\n"
+            f"Necesito confirmar la *{label}*.{sug_txt}{fuente_txt}"
+        )
 
     opciones = d.get("opciones", [])
     chat = _chat(update_or_query)
