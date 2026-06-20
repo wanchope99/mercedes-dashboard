@@ -40,8 +40,8 @@ const COL = { fecha:0, proveedor:1, categoria:2, producto:3, cantidad:4, unidad:
   precioUnit:6, subtotal:7, descuento:8, descIncluido:9, total:10, ivaPct:11,
   ivaIncluido:12, totalConIva:13, otroImpuesto:14, totalFinal:15,
   formaPago:16, diasCredito:17, entregaOk:18, notas:19,
-  cantidadOriginal:20, unidadOriginal:21, factor:22 };
-const RANGE_COMPRAS = 'A:W';
+  cantidadOriginal:20, unidadOriginal:21, factor:22, nombreMostrar:23 };
+const RANGE_COMPRAS = 'A:X';
 
 function getAuthRW() {
   const credentials = process.env.GOOGLE_CREDENTIALS_JSON
@@ -102,7 +102,7 @@ async function getComprasRaw() {
   const sheets = sheetsClient();
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: PROV_SHEET_ID,
-    range: `${COMPRAS_SHEET}!A:W`,
+    range: `${COMPRAS_SHEET}!A:X`,
   });
   const rows = res.data.values || [];
   cache.set('compras_raw', rows);
@@ -169,6 +169,7 @@ async function getCompras() {
       cantidadOriginal: parseNum(r[COL.cantidadOriginal]),
       unidadOriginal: (r[COL.unidadOriginal] || '').toString().trim(),
       factor: parseNum(r[COL.factor]),
+      nombreMostrar: (r[COL.nombreMostrar] || '').toString().trim(),
     });
   }
   return out;
@@ -247,7 +248,7 @@ async function appendCompras(items) {
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: PROV_SHEET_ID,
-    range: `${COMPRAS_SHEET}!A:W`,
+    range: `${COMPRAS_SHEET}!A:X`,
     valueInputOption: 'USER_ENTERED',
     insertDataOption: 'INSERT_ROWS',
     requestBody: { values },
@@ -304,6 +305,14 @@ async function normalizarHistoricoCategorias({ dryRun = true } = {}) {
 }
 
 // ─── Dashboard: lista de productos y categorías ─────────────────────────────────
+// Nombre canónico VISIBLE de una compra: si tiene "Nombre a Mostrar" cargado en la
+// planilla, se usa ese (agrupa variantes que el usuario mapeó a un mismo producto);
+// si no, el nombre canónico automático (sin sufijos de IVA/remito).
+function nombreVisible(compra) {
+  const nm = (compra && compra.nombreMostrar || '').toString().trim();
+  return nm || cats.nombreCanonico(compra ? compra.producto : '');
+}
+
 async function getProductosYCategorias() {
   const compras = await getCompras();
   const productos = new Map(); // nombreNorm -> { nombre, categoria, proveedores:Set, compras }
@@ -312,8 +321,8 @@ async function getProductosYCategorias() {
     if (!c.producto) continue;
     const cat = cats.normalizarCategoria(c.categoria).categoria || c.categoria;
     if (cat) categorias.add(cat);
-    // Agrupar productos equivalentes bajo su nombre canónico (sin sufijos de IVA/remito).
-    const canon = cats.nombreCanonico(c.producto);
+    // Agrupar por "Nombre a Mostrar" (si existe) o por nombre canónico.
+    const canon = nombreVisible(c);
     const key = cats.norm(canon);
     if (!productos.has(key)) {
       productos.set(key, { nombre: canon, categoria: cat, proveedores: new Set(), compras: 0 });
@@ -337,9 +346,10 @@ async function getProductosYCategorias() {
 //            resumen: [{ proveedor, ultimoPrecio, precioPromedio, minPrecio, maxPrecio, compras }] }
 async function getSerieProducto({ producto, categoria, desde, hasta } = {}) {
   const compras = await getCompras();
-  // El producto que llega del selector es el NOMBRE CANÓNICO; matcheamos contra
-  // el canónico de cada compra para juntar variantes (+IVA, en Remito, etc.).
-  const pn = cats.norm(cats.nombreCanonico(producto));
+  // El producto que llega del selector es el NOMBRE VISIBLE (Nombre a Mostrar o
+  // canónico). Matcheamos contra el nombre visible de cada compra para juntar
+  // variantes (+IVA, en Remito, o mapeadas a un mismo "Nombre a Mostrar").
+  const pn = cats.norm(producto);
 
   // Config de IVA por proveedor: para "con IVA" comparamos el precio CON IVA;
   // para "sin IVA" o desconocido, el precio tal cual figura.
@@ -362,7 +372,7 @@ async function getSerieProducto({ producto, categoria, desde, hasta } = {}) {
   };
 
   const filtradas = compras.filter(c => {
-    if (!c.producto || cats.norm(cats.nombreCanonico(c.producto)) !== pn) return false;
+    if (!c.producto || cats.norm(nombreVisible(c)) !== pn) return false;
     if (c.precioUnit == null) return false;
     if (categoria && cats.normalizarCategoria(c.categoria).categoria !== categoria) return false;
     if (desde && c.fecha && c.fecha < desde) return false;
@@ -585,7 +595,7 @@ function clearProvCache() { cache.flushAll(); }
 module.exports = {
   getCompras, getIndiceInferencia, appendCompras,
   normalizarHistoricoCategorias,
-  getProductosYCategorias, getSerieProducto,
+  getProductosYCategorias, getSerieProducto, nombreVisible,
   crearPendiente, getPendiente, listPendientes, countPendientes,
   aplicarResoluciones, marcarResuelto, descartarPendiente,
   cargarPendientesPersistidos,

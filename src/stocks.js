@@ -88,13 +88,13 @@ async function ventasDeProducto(productoCanon, { desde, hasta } = {}) {
 
 // ─── Análisis completo de un producto ───────────────────────────────────────────
 async function getSerieStock({ producto, categoria, desde, hasta } = {}) {
-  const canon = cats.nombreCanonico(producto);
+  const canon = producto; // ya es el nombre visible del selector
 
   // Compras (ingresos) de ese producto canónico
   const todas = await prov.getCompras();
   const pn = cats.norm(canon);
   const compras = todas
-    .filter(c => c.producto && cats.norm(cats.nombreCanonico(c.producto)) === pn)
+    .filter(c => c.producto && cats.norm(prov.nombreVisible(c)) === pn)
     .filter(c => !categoria || cats.normalizarCategoria(c.categoria).categoria === categoria)
     .filter(c => (!desde || !c.fecha || c.fecha >= desde) && (!hasta || !c.fecha || c.fecha <= hasta))
     .map(c => ({
@@ -107,7 +107,7 @@ async function getSerieStock({ producto, categoria, desde, hasta } = {}) {
 
   // Categoría del producto (para decidir match directo/indirecto)
   const catProd = compras.length ? (cats.normalizarCategoria(
-    (todas.find(c => cats.norm(cats.nombreCanonico(c.producto)) === pn) || {}).categoria).categoria) : (categoria || '');
+    (todas.find(c => cats.norm(prov.nombreVisible(c)) === pn) || {}).categoria).categoria) : (categoria || '');
   const directo = CATEGORIAS_DIRECTAS.has(catProd);
 
   // Ventas FUDO
