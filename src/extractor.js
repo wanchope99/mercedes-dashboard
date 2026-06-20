@@ -30,6 +30,9 @@ producto). Devolvé un OBJETO JSON con esta forma EXACTA, sin texto adicional:
     "forma_de_pago": "Efectivo | Mercado Pago | Galicia | Echeq | Contado | \\"\\"",
     "vendedor": "Nombre del vendedor si figura en la factura, o \\"\\"",
     "dias_credito": 0,
+    "subtotal_factura": 0,
+    "iva_monto": 0,
+    "otros_impuestos_monto": 0,
     "total_factura": 0,
     "confianza": { "proveedor": 0.0, "fecha": 0.0, "forma_de_pago": 0.0, "total_factura": 0.0 }
   },
@@ -74,6 +77,11 @@ Reglas IMPORTANTES:
 - otro_impuesto = monto ARS ABSOLUTO de otros impuestos de esa línea que NO sean IVA
   (ej: "IMP INT", impuestos internos). Si no hay, 0. Es un MONTO en pesos, no un %.
 - total_linea = el total de esa línea tal como figura en la factura (para control).
+- subtotal_factura = el SUBTOTAL de la factura ANTES de IVA e impuestos (suma de líneas).
+- iva_monto = el MONTO de IVA en pesos que figura en el pie de la factura (ej: "IVA: $21.420").
+  Si la factura solo muestra el monto de IVA (no el %), igual ponelo acá; el sistema deduce el %.
+- otros_impuestos_monto = el MONTO en pesos de impuestos que NO son IVA, del pie de la
+  factura (ej: "Impuestos Imp. Int.: $8.874"). Si no hay, 0.
 - total_factura = el TOTAL final de la factura (con impuestos), para control.
 - "confianza" 0 a 1. Si no podés leer algo, poné tu mejor estimación con confianza
   BAJA (< 0.6) o "" / 0 si es ilegible. NO inventes. Es mejor que un humano confirme.
@@ -118,6 +126,9 @@ async function extraerDeImagen({ base64, mime = 'image/jpeg' }) {
   }
 
   factura.vendedor = factura.vendedor || '';
+  factura.subtotal_factura = factura.subtotal_factura ?? null;
+  factura.iva_monto = factura.iva_monto ?? null;
+  factura.otros_impuestos_monto = factura.otros_impuestos_monto ?? null;
   const fconf = factura.confianza || {};
   // Aplanar: cada línea hereda los datos de cabecera de la factura. Así el resto
   // del pipeline (resolverItem, etc.) sigue trabajando con items planos.

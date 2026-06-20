@@ -518,12 +518,21 @@ function aplicarResoluciones(id, resoluciones = {}) {
     if (rf.ivaDeducible != null && rf.ivaDeducible !== '') reg.factura.ivaDeducible = aBool(rf.ivaDeducible);
     if (rf.descuentoIncluido != null && rf.descuentoIncluido !== '') reg.factura.descuentoIncluido = aBool(rf.descuentoIncluido);
     if (rf.ivaIncluido != null && rf.ivaIncluido !== '') reg.factura.ivaIncluido = aBool(rf.ivaIncluido);
+    // % IVA confirmado (deducido del monto): aplicarlo a todas las líneas sin IVA propio.
+    if (rf.ivaPct != null && rf.ivaPct !== '') {
+      const p = Number(rf.ivaPct);
+      if (Number.isFinite(p) && p >= 0) {
+        reg.factura.ivaPct = p;
+        for (const it of reg.items) { if (!(Number(it.ivaPct) > 0)) it.ivaPct = p; }
+      }
+    }
     reg.factura.dudas = (reg.factura.dudas || []).filter(d => {
       if (d.campo === 'medioPago') return !reg.factura.medioPago || !cats.MEDIOS_PAGO.includes(cats.normalizarMedioPago(reg.factura.medioPago));
       if (d.campo === 'iva') return !reg.factura.iva;
       if (d.campo === 'ivaDeducible') return reg.factura.ivaDeducible == null;
       if (d.campo === 'descuentoIncluido') return reg.factura.descuentoIncluido == null;
       if (d.campo === 'ivaIncluido') return reg.factura.ivaIncluido == null;
+      if (d.campo === 'ivaPct') return reg.factura.ivaPct == null;
       return false;
     });
   }
