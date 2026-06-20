@@ -85,6 +85,100 @@ async function _persistOverride(nombreProducto, categoria) {
   }
 }
 
+// ─── Composición % por plato (persistente en hoja Sheets) ───────────────────────
+// Cada plato FUDO puede tener una composición de categorías de costo, ej:
+//   Ojo de Bife → { 'Carnes y Embutidos': 90, 'Frutas y Verduras': 5, 'Otro': 5 }
+// Si un plato NO tiene composición cargada, se asume 100% en su categoría dominante
+// (clasificarProducto). Persistido en hoja 'Plato Composicion' (Plato | Categoria | Pct).
+const COMPOSICION_SHEET = process.env.COSTOS_COMPOSICION_SHEET || 'Plato Composicion';
+const composiciones = new Map(); // norm(plato) -> { nombre, partes: [{categoria, pct}] }
+let _compCargadas = false;
+
+async function _ensureCompSheet(api) {
+  try {
+    await api.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { requests: [{ addSheet: { properties: { title: COMPOSICION_SHEET } } }] },
+    });
+    await api.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID, range: COMPOSICION_SHEET + '!A1:C1', valueInputOption: 'RAW',
+      requestBody: { values: [['Plato', 'Categoria', 'Pct']] },
+    });
+  } catch (e) { if (!String(e.message||'').toLowerCase().includes('already exists')) throw e; }
+}
+
+async function cargarComposiciones({ force = false } = {}) {
+  if (_compCargadas && !force) return;
+  if (!SPREADSHEET_ID) { _compCargadas = true; return; }
+  try {
+    const api = _sheetsClient();
+    let rows = [];
+    try {
+      const res = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: COMPOSICION_SHEET + '!A:C' });
+      rows = res.data.values || [];
+    } catch (e) { await _ensureCompSheet(api); rows = []; }
+    composiciones.clear();
+    for (let i = 1; i < rows.length; i++) {
+      const plato = (rows[i][0] || '').toString().trim();
+      const cat = (rows[i][1] || '').toString().trim();
+      const pct = parseFloat(String(rows[i][2] || '').replace(/[^0-9.,-]/g, '').replace(',', '.'));
+      if (!plato || !cat || !Number.isFinite(pct)) continue;
+      const key = cats.norm(plato);
+      const e = composiciones.get(key) || { nombre: plato, partes: [] };
+      e.partes.push({ categoria: cat, pct });
+      composiciones.set(key, e);
+    }
+    _compCargadas = true;
+  } catch (e) { console.warn('Composiciones: no se pudo cargar', e.message); _compCargadas = true; }
+}
+
+// Devuelve el reparto de categorías para un plato: [{categoria, pct(0..1)}].
+// Si tiene composición cargada (y suma > 0) usa esa; si no, 100% a la dominante.
+function repartoCategorias(nombrePlato, categoriaFudo) {
+  const comp = composiciones.get(cats.norm(nombrePlato));
+  if (comp && comp.partes && comp.partes.length) {
+    const suma = comp.partes.reduce((a, p) => a + (Number(p.pct) || 0), 0);
+    if (suma > 0) return comp.partes.map(p => ({ categoria: p.categoria, pct: (Number(p.pct) || 0) / suma }));
+  }
+  const dom = clasificarProducto(nombrePlato, categoriaFudo);
+  return dom ? [{ categoria: dom, pct: 1 }] : [];
+}
+
+function getComposicion(nombrePlato) {
+  const c = composiciones.get(cats.norm(nombrePlato));
+  return c ? c.partes.map(p => ({ categoria: p.categoria, pct: p.pct })) : null;
+}
+function listComposiciones() {
+  return [...composiciones.values()].map(c => ({ plato: c.nombre, partes: c.partes }));
+}
+
+// Guarda (reemplaza) la composición de un plato. partes: [{categoria, pct}].
+async function setComposicion(nombrePlato, partes) {
+  if (!nombrePlato || !Array.isArray(partes)) return;
+  const limpias = partes
+    .filter(p => p && p.categoria && Number(p.pct) > 0)
+    .map(p => ({ categoria: p.categoria, pct: Number(p.pct) }));
+  composiciones.set(cats.norm(nombrePlato), { nombre: nombrePlato, partes: limpias });
+  if (!SPREADSHEET_ID) return;
+  try {
+    const api = _sheetsClient();
+    await _ensureCompSheet(api);
+    // Releer y reescribir todas las filas de este plato (borrar viejas, poner nuevas).
+    const res = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: COMPOSICION_SHEET + '!A:C' });
+    const rows = res.data.values || [];
+    const nrm = cats.norm(nombrePlato);
+    const conservar = rows.filter((r, i) => i === 0 || cats.norm(r[0] || '') !== nrm); // header + otros platos
+    const nuevas = limpias.map(p => [nombrePlato, p.categoria, p.pct]);
+    const final = conservar.concat(nuevas);
+    // Limpiar la hoja y reescribir (la tabla es chica)
+    await api.spreadsheets.values.clear({ spreadsheetId: SPREADSHEET_ID, range: COMPOSICION_SHEET + '!A:C' });
+    await api.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID, range: COMPOSICION_SHEET + '!A1', valueInputOption: 'RAW',
+      requestBody: { values: final.length ? final : [['Plato', 'Categoria', 'Pct']] },
+    });
+  } catch (e) { console.warn('Composiciones: no se pudo persistir', nombrePlato, e.message); }
+}
+
 // ─── Categorías de COSTO canónicas (mismas que Compras) ─────────────────────────
 const CATEGORIAS_COSTO = cats.CATEGORIAS; // incluye Insumos / Otro
 
@@ -220,19 +314,25 @@ function ingresosPorCategoriaCosto(detalles) {
   for (const dia of (detalles || [])) {
     for (const cat of (dia.categorias || [])) {
       for (const p of (cat.productos || [])) {
-        const catCosto = clasificarProducto(p.nombre, cat.categoria);
-        const bucket = catCosto
-          ? (acc[catCosto] = acc[catCosto] || { ingreso: 0, unidades: 0, productos: {} })
-          : sinAsignar;
-        bucket.ingreso += p.monto || 0;
-        bucket.unidades += p.unidades || 0;
+        const reparto = repartoCategorias(p.nombre, cat.categoria); // [{categoria, pct}]
         const pn = p.nombre || 'Producto';
-        const pp = bucket.productos[pn] = bucket.productos[pn] || { nombre: pn, ingreso: 0, unidades: 0, categoriaFudo: cat.categoria, precios: {} };
-        pp.ingreso += p.monto || 0;
-        pp.unidades += p.unidades || 0;
-        // Merge del desglose de precios { precioUnit: unidades } a lo largo de los días
-        for (const [precio, u] of Object.entries(p.precios || {})) {
-          pp.precios[precio] = (pp.precios[precio] || 0) + u;
+        if (!reparto.length) {
+          sinAsignar.ingreso += p.monto || 0;
+          sinAsignar.unidades += p.unidades || 0;
+          const pp = sinAsignar.productos[pn] = sinAsignar.productos[pn] || { nombre: pn, ingreso: 0, unidades: 0, categoriaFudo: cat.categoria, precios: {} };
+          pp.ingreso += p.monto || 0; pp.unidades += p.unidades || 0;
+          for (const [precio, u] of Object.entries(p.precios || {})) pp.precios[precio] = (pp.precios[precio] || 0) + u;
+          continue;
+        }
+        // Repartir el INGRESO (y unidades, proporcional) entre las categorías del plato.
+        for (const part of reparto) {
+          const bucket = acc[part.categoria] = acc[part.categoria] || { ingreso: 0, unidades: 0, productos: {} };
+          bucket.ingreso += (p.monto || 0) * part.pct;
+          bucket.unidades += (p.unidades || 0) * part.pct;
+          const pp = bucket.productos[pn] = bucket.productos[pn] || { nombre: pn, ingreso: 0, unidades: 0, categoriaFudo: cat.categoria, precios: {}, pctEnCategoria: part.pct };
+          pp.ingreso += (p.monto || 0) * part.pct;
+          pp.unidades += (p.unidades || 0) * part.pct;
+          for (const [precio, u] of Object.entries(p.precios || {})) pp.precios[precio] = (pp.precios[precio] || 0) + u * part.pct;
         }
       }
     }
@@ -340,9 +440,53 @@ function costosVsIngresos({ compras, detallesFudo, desde, hasta } = {}) {
   };
 }
 
+// ─── Detalle por PLATO (vista inversa: categoría FUDO → platos) ─────────────────
+// Agrupa por categoría de venta de FUDO (PARA PICAR, PARA COMER, Postres, etc.) y
+// dentro lista cada plato con su ingreso, unidades, composición % y costo estimado.
+// Costo estimado del plato = suma sobre sus categorías de (ingreso × pct × foodCost(cat)),
+// donde foodCost(cat) = costoCompras(cat) / ingresoCategoria(cat).
+function detallePorPlato({ detallesFudo, foodCostPorCategoria } = {}) {
+  const fc = foodCostPorCategoria || {}; // { categoria: ratio 0..1 }
+  const cats_ = {}; // categoriaFudo -> { categoria, grupo, ingreso, unidades, costoEstimado, platos:{} }
+  for (const dia of (detallesFudo || [])) {
+    for (const cat of (dia.categorias || [])) {
+      const cf = cat.categoria || 'Sin categoría';
+      const c = cats_[cf] = cats_[cf] || { categoria: cf, grupo: cat.grupo || 'otros', ingreso: 0, unidades: 0, costoEstimado: 0, platos: {} };
+      for (const p of (cat.productos || [])) {
+        const reparto = repartoCategorias(p.nombre, cf);
+        // costo estimado del plato = ingreso × Σ(pct × foodCost de esa categoría de costo)
+        let fcPlato = 0;
+        for (const part of reparto) fcPlato += part.pct * (fc[part.categoria] || 0);
+        const costoEst = (p.monto || 0) * fcPlato;
+        const pn = p.nombre || 'Producto';
+        const pp = c.platos[pn] = c.platos[pn] || { nombre: pn, ingreso: 0, unidades: 0, costoEstimado: 0, composicion: reparto.map(r => ({ categoria: r.categoria, pct: Math.round(r.pct * 1000) / 10 })) };
+        pp.ingreso += p.monto || 0; pp.unidades += p.unidades || 0; pp.costoEstimado += costoEst;
+        c.ingreso += p.monto || 0; c.unidades += p.unidades || 0; c.costoEstimado += costoEst;
+      }
+    }
+  }
+  return Object.values(cats_)
+    .map(c => ({
+      categoria: c.categoria, grupo: c.grupo,
+      ingreso: Math.round(c.ingreso), unidades: c.unidades,
+      costoEstimado: Math.round(c.costoEstimado),
+      foodCost: c.ingreso > 0 ? Math.round((c.costoEstimado / c.ingreso) * 1000) / 10 : null,
+      platos: Object.values(c.platos).map(p => ({
+        ...p, ingreso: Math.round(p.ingreso), costoEstimado: Math.round(p.costoEstimado),
+        margen: Math.round(p.ingreso - p.costoEstimado),
+        foodCost: p.ingreso > 0 ? Math.round((p.costoEstimado / p.ingreso) * 1000) / 10 : null,
+      })).sort((a, b) => b.ingreso - a.ingreso),
+    }))
+    .sort((a, b) => {
+      const ord = { comida: 0, bebida: 1, otros: 2 };
+      return (ord[a.grupo] - ord[b.grupo]) || (b.ingreso - a.ingreso);
+    });
+}
+
 module.exports = {
   CATEGORIAS_COSTO, grupoCMV,
   clasificarProducto, setOverrideProducto, getOverrides, cargarOverrides, REGLAS_MENU,
+  cargarComposiciones, getComposicion, setComposicion, listComposiciones, repartoCategorias, detallePorPlato,
   ingresosPorCategoriaCosto, costosPorCategoria, cmvDesglose, costosVsIngresos,
   montoCompra,
 };

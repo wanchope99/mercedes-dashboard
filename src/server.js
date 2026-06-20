@@ -15,6 +15,7 @@ const { proyectar, calcularCalculadora, proyeccionMes } = require('./proyeccione
 const proveedoresRoutes = require('./proveedores-routes');
 const prov = require('./proveedores');
 const costos = require('./costos');
+const consumo = require('./consumo');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -924,11 +925,20 @@ app.get('/api/costos', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { desde, hasta } = req.query;
     await costos.cargarOverrides().catch(() => {});
+    await costos.cargarComposiciones().catch(() => {});
     const [compras, detallesFudo] = await Promise.all([
       prov.getCompras().catch(() => []),
       getDetallesFrescos({ desde, hasta }).catch(() => []),
     ]);
-    res.json({ ok: true, data: costos.costosVsIngresos({ compras, detallesFudo, desde, hasta }) });
+    const data = costos.costosVsIngresos({ compras, detallesFudo, desde, hasta });
+    // Food cost por categoría (ratio 0..1) para estimar costo de cada plato.
+    const fcPorCat = {};
+    for (const fila of data.filas) {
+      if (fila.ingreso > 0) fcPorCat[fila.categoria] = fila.costo / fila.ingreso;
+    }
+    data.porPlato = costos.detallePorPlato({ detallesFudo, foodCostPorCategoria: fcPorCat });
+    data.composiciones = costos.listComposiciones();
+    res.json({ ok: true, data });
   } catch (err) {
     console.error('Error /api/costos:', err.message);
     res.status(500).json({ ok: false, error: err.message });
@@ -949,6 +959,68 @@ app.post('/api/costos/override', authMiddleware, adminOnly, async (req, res) => 
 // Lista de categorías de costo disponibles (para el dropdown de recategorizar)
 app.get('/api/costos/categorias', authMiddleware, adminOnly, (req, res) => {
   res.json({ ok: true, data: costos.CATEGORIAS_COSTO });
+});
+
+// Composición % de un plato (qué categorías de costo lo componen)
+app.get('/api/costos/composicion', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    await costos.cargarComposiciones().catch(() => {});
+    const { plato } = req.query;
+    if (plato) return res.json({ ok: true, data: costos.getComposicion(plato) || [] });
+    res.json({ ok: true, data: costos.listComposiciones() });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+app.post('/api/costos/composicion', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { plato, partes } = req.body || {};
+    if (!plato || !Array.isArray(partes)) return res.status(400).json({ ok: false, error: 'Faltan plato y partes' });
+    // Validar categorías y que sume ~100
+    for (const p of partes) {
+      if (!costos.CATEGORIAS_COSTO.includes(p.categoria)) return res.status(400).json({ ok: false, error: `Categoría no válida: ${p.categoria}` });
+    }
+    const suma = partes.reduce((a, p) => a + (Number(p.pct) || 0), 0);
+    if (Math.abs(suma - 100) > 1) return res.status(400).json({ ok: false, error: `Los % deben sumar 100 (suman ${suma})` });
+    await costos.setComposicion(plato, partes);
+    res.json({ ok: true, message: `Composición de "${plato}" guardada` });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─── Reglas de consumo de INSUMOS (persistente) ───────────────────────────────
+// Lista las reglas + cobertura estimada cruzando con compras de insumos.
+app.get('/api/consumo', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [reglas, compras] = await Promise.all([
+      consumo.listConsumo().catch(() => []),
+      prov.getCompras().catch(() => []),
+    ]);
+    // Agregar compras por producto (solo categoría Insumos), en su unidad de compra.
+    const porProd = {};
+    for (const c of compras) {
+      if (!c.producto) continue;
+      const norm = consumo.norm(c.producto);
+      const e = porProd[norm] = porProd[norm] || { ingresado: 0, ultimaCompra: null };
+      e.ingresado += Number(c.cantidad) || 0;
+      if (c.fecha && (!e.ultimaCompra || c.fecha > e.ultimaCompra)) e.ultimaCompra = c.fecha;
+    }
+    const data = consumo.calcularCobertura(reglas, porProd);
+    res.json({ ok: true, data });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+app.post('/api/consumo', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { producto, cantidad, periodo } = req.body || {};
+    if (!producto || cantidad == null) return res.status(400).json({ ok: false, error: 'Faltan producto y cantidad' });
+    await consumo.setConsumo(producto, Number(cantidad), periodo || 'semana');
+    res.json({ ok: true, message: `Consumo de "${producto}" guardado` });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+app.delete('/api/consumo', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const producto = req.query.producto || (req.body && req.body.producto);
+    if (!producto) return res.status(400).json({ ok: false, error: 'Falta producto' });
+    await consumo.deleteConsumo(producto);
+    res.json({ ok: true, message: 'Regla eliminada' });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 // ─── CMV desagregado Comida / Bebida / Insumos (composición desde Compras) ─────
