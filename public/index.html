@@ -719,7 +719,7 @@
       </div>
       <div id="consumo-form" style="display:none;background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:12px">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
-          <div class="form-group" style="flex:2;min-width:200px"><label>Producto (insumo)</label><input id="cons-producto" placeholder="Ej: Bobina papel"></div>
+          <div class="form-group" style="flex:2;min-width:200px"><label>Producto (insumo)</label><select id="cons-producto"><option value="">Elegí un insumo…</option></select></div>
           <div class="form-group" style="width:110px"><label>Cantidad</label><input id="cons-cantidad" type="number" min="0" step="0.1" placeholder="0"></div>
           <div class="form-group" style="width:130px"><label>Cada</label><select id="cons-periodo"><option value="semana">Semana</option><option value="dia">Día</option></select></div>
           <button class="btn btn-accent" onclick="guardarConsumo()">Guardar</button>
@@ -3694,7 +3694,6 @@ let _stkInit = false;
 let _stkProductos = [], _stkCategorias = [];
 
 async function loadComportamiento() {
-  loadConsumo();
   if (!_stkInit) {
     try {
       const { data } = await api('/api/stocks/productos');
@@ -3707,6 +3706,7 @@ async function loadComportamiento() {
       _stkInit = true;
     } catch (e) { showToast('Error cargando stocks: ' + e.message); }
   }
+  loadConsumo();  // después de tener _stkProductos para poblar el select de insumos
 }
 
 function renderStkProductoOptions(categoria) {
@@ -3788,7 +3788,20 @@ async function loadConsumo() {
   let data;
   try { ({ data } = await api('/api/consumo')); } catch (e) { return; }
   _consumoData = data || [];
+  poblarSelectInsumos();
   renderConsumo();
+}
+function poblarSelectInsumos() {
+  const sel = document.getElementById('cons-producto');
+  if (!sel) return;
+  // Insumos disponibles del stock (categoría "Insumos"). Si _stkProductos aún no
+  // cargó, dejar la opción vacía; se repuebla al reabrir.
+  const insumos = (_stkProductos || []).filter(p => p.categoria === 'Insumos')
+    .map(p => p.nombre).sort((a, b) => a.localeCompare(b));
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">Elegí un insumo…</option>' +
+    insumos.map(nm => '<option value="' + escAttr2(nm) + '">' + escapeHtml(nm) + '</option>').join('');
+  if (insumos.includes(prev)) sel.value = prev;
 }
 function renderConsumo() {
   const body = document.getElementById('consumo-body');
@@ -3810,6 +3823,7 @@ function renderConsumo() {
 function toggleConsumoForm() {
   const fm = document.getElementById('consumo-form');
   fm.style.display = fm.style.display === 'none' ? 'block' : 'none';
+  if (fm.style.display === 'block') poblarSelectInsumos();
 }
 async function guardarConsumo() {
   const producto = document.getElementById('cons-producto').value.trim();
