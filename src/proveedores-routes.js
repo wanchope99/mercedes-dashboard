@@ -26,6 +26,24 @@ const provCfg = require('./proveedores-config');
 const UMBRAL = parseFloat(process.env.PROVEEDORES_UMBRAL_CONFIANZA || '0.6');
 
 // Construye, para cada item extraído, la versión resuelta + dudas detectadas.
+// Prorratea un monto de "Otro Impuesto" (de la factura) entre las líneas, en
+// proporción al subtotal de cada una (cantidad × precioUnit). El total se conserva.
+function aplicarOtroImpuesto(items, montoTotal) {
+  const monto = Number(montoTotal) || 0;
+  if (!monto || !items.length) return;
+  const base = items.map(it => (Number(it.cantidad) || 0) * (Number(it.precioUnit) || 0));
+  const suma = base.reduce((s, x) => s + x, 0);
+  if (suma <= 0) { items[0].otroImpuesto = (items[0].otroImpuesto || 0) + monto; return; }
+  let acum = 0;
+  items.forEach((it, i) => {
+    let parte = (i === items.length - 1)
+      ? monto - acum                                  // última: el resto exacto
+      : Math.round((base[i] / suma) * monto * 100) / 100;
+    acum += parte;
+    it.otroImpuesto = (Number(it.otroImpuesto) || 0) + parte;
+  });
+}
+
 function procesarItems(itemsCrudos, indice) {
   return itemsCrudos.map(raw => {
     const resuelto = cats.resolverItem(raw, indice);
@@ -137,7 +155,31 @@ async function procesarFactura(factura, items) {
       pregunta: '¿El IVA ya viene incluido en el precio?' });
   }
 
-  return { proveedor, medioPago, iva, ivaDeducible, descuentoIncluido, ivaIncluido, dudas };
+  // ── IVA en MONTO (pie de factura) → deducir el % y confirmar con el usuario ──
+  // Si la factura trae el monto de IVA pero las líneas no tienen % (ej: Strange),
+  // deducimos iva% = iva_monto / subtotal × 100 y sugerimos el valor para confirmar.
+  const ivaMonto = Number(factura.iva_monto) || 0;
+  const subtotalFact = Number(factura.subtotal_factura) || 0;
+  const lineasSinIva = items.every(it => !(Number(it.ivaPct) > 0));
+  let ivaPctSugerido = null;
+  if (ivaMonto > 0 && subtotalFact > 0 && lineasSinIva) {
+    const pct = (ivaMonto / subtotalFact) * 100;
+    // Redondear a alícuota conocida si está cerca (21, 10.5, 27, 5, 2.5); si no, 1 decimal.
+    const conocidas = [27, 21, 10.5, 5, 2.5];
+    const cerca = conocidas.find(a => Math.abs(a - pct) <= 0.6);
+    ivaPctSugerido = cerca != null ? cerca : Math.round(pct * 10) / 10;
+    dudas.push({
+      campo: 'ivaPct',
+      sugerido: ivaPctSugerido,
+      fuente: 'deducido-de-monto',
+      opciones: [],
+      pregunta: `La factura tiene IVA de $${Math.round(ivaMonto).toLocaleString('es-AR')} sobre un subtotal de $${Math.round(subtotalFact).toLocaleString('es-AR')}. ¿Confirmás un IVA del ${ivaPctSugerido}%?`,
+    });
+  }
+
+  const otrosImpuestos = Number(factura.otros_impuestos_monto) || 0;
+  return { proveedor, medioPago, iva, ivaDeducible, descuentoIncluido, ivaIncluido,
+    ivaPctSugerido, otrosImpuestos, subtotalFact, dudas };
 }
 
 module.exports = function ({ authMiddleware, adminOnly } = {}) {
@@ -192,6 +234,13 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
         if (fk.ivaIncluido != null) it.ivaIncluido = fk.ivaIncluido;
       });
       _aplicarFiscales(items, fact);
+      // Prorratear "Otro Impuesto" (monto de factura) por el subtotal de cada línea.
+      aplicarOtroImpuesto(items, fact.otrosImpuestos);
+      // Si la factura traía IVA en monto y no hay duda pendiente de ivaPct, aplicar el %.
+      const _hayDudaIva = (fact.dudas || []).some(d => d.campo === 'ivaPct');
+      if (fact.ivaPctSugerido != null && !_hayDudaIva) {
+        items.forEach(it => { if (!(Number(it.ivaPct) > 0)) it.ivaPct = fact.ivaPctSugerido; });
+      }
       // Control E*G vs total leído: si difiere, anotarlo en notas (no bloquea).
       for (const it of items) {
         const chk = prov.chequearTotalLinea(it);
