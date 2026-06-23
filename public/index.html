@@ -4057,9 +4057,37 @@ async function openCmvModal() {
   };
   const body = '<div style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px"><div>CMV total (P&L real, Movimientos): <strong>'+fmt(data.cmvMovimientos)+'</strong> - '+pct(data.pctCMV)+' de ingresos</div></div>'
     + linea('Comida', '#e0a85c') + linea('Bebida', '#5c9ae0') + linea('Insumos', '#9b6fc0')
-    + ((g.Otros>0) ? linea('Otros', '#888', { onClick: "openConceptoModal('Mercaderia')" }) : '')
+    + ((g.Otros>0) ? linea('Otros', '#888', { onClick: "openCmvOtrosModal()" }) : '')
     + '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;border-top:1px solid var(--border);padding-top:8px">'+escapeHtml(data.nota||'')+' Otros = Mercaderia (Movimientos) no atribuida a Comida/Bebida.</div>';
   openDetalleModal('CMV - Comida / Bebida / Insumos', body);
+}
+
+// Detalle accionable de "Otros" del CMV: conciliacion Movimientos vs Compras.
+async function openCmvOtrosModal() {
+  openDetalleModal('CMV - Otros (Mercaderia no clasificada)', '<div class="loading"><div class="spinner"></div> Cargando conciliacion...</div>');
+  let data;
+  try { ({ data } = await api('/api/cmv-otros-detalle' + buildQS())); }
+  catch (e) { document.getElementById('detalle-modal-body').innerHTML = 'Error: ' + escapeHtml(e.message); return; }
+
+  const filaConcil = (label, val, signo, fuerte) => '<div style="display:flex;justify-content:space-between;padding:6px 0'+(fuerte?';border-top:1px solid var(--border);margin-top:4px;font-weight:700':'')+'">'
+    + '<span style="color:var(--text-muted)">'+(signo?signo+' ':'')+escapeHtml(label)+'</span><span>'+fmt(val)+'</span></div>';
+
+  const concil = '<div style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:14px;font-size:13px">'
+    + filaConcil('Mercaderia (Movimientos, P&L real)', data.mercaderiaMovimientos, '')
+    + filaConcil('Comida (clasificada en Compras)', data.comidaCompras, '−')
+    + filaConcil('Bebida (clasificada en Compras)', data.bebidaCompras, '−')
+    + filaConcil('Otros (sin clasificar)', data.otros, '=', true)
+    + '</div>';
+
+  const rows = (data.catsClasificadas || []).map(c => [escapeHtml(c.grupo), escapeHtml(c.categoria), fmt(c.costo)]);
+  const ref = rows.length
+    ? '<div style="font-size:12px;color:var(--text-muted);margin:6px 0">Categorias que SI se clasificaron desde Compras (referencia):</div>'
+      + miniTabla([{label:'Grupo'},{label:'Categoria'},{label:'Monto',align:'right'}], rows)
+    : '';
+
+  const body = concil + ref
+    + '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;border-top:1px solid var(--border);padding-top:8px">'+escapeHtml(data.nota||'')+'</div>';
+  openDetalleModal('CMV - Otros (Mercaderia no clasificada)', body);
 }
 
 async function openConceptoModal(grupo) {
