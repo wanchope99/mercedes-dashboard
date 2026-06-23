@@ -4064,40 +4064,50 @@ async function openCmvModal() {
 
 // Detalle accionable de "Otros" del CMV: conciliacion Movimientos vs Compras.
 async function openCmvOtrosModal() {
-  openDetalleModal('CMV - Otros (Mercaderia sin detallar en Compras)', '<div class="loading"><div class="spinner"></div> Cruzando Movimientos vs Compras...</div>');
+  openDetalleModal('CMV - Otros (Mercaderia sin clasificar)', '<div class="loading"><div class="spinner"></div> Cruzando Movimientos vs Compras...</div>');
   let data;
   try { ({ data } = await api('/api/cmv-otros-detalle' + buildQS())); }
   catch (e) { document.getElementById('detalle-modal-body').innerHTML = 'Error: ' + escapeHtml(e.message); return; }
 
-  // Resumen arriba
   const resumen = '<div style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:14px;font-size:13px">'
     + '<div style="display:flex;justify-content:space-between;padding:4px 0"><span style="color:var(--text-muted)">Mercaderia (Movimientos)</span><span>'+fmt(data.mercaderiaMovimientos)+'</span></div>'
-    + '<div style="display:flex;justify-content:space-between;padding:4px 0"><span style="color:var(--text-muted)">Detallado en Compras (Comida+Bebida)</span><span>'+fmt(data.enComprasTotal)+'</span></div>'
-    + '<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border);margin-top:4px;font-weight:700"><span>Otros (sin detallar)</span><span>'+fmt(data.otros)+'</span></div>'
+    + '<div style="display:flex;justify-content:space-between;padding:4px 0"><span style="color:var(--text-muted)">Detallado en Compras</span><span>'+fmt(data.enComprasTotal)+'</span></div>'
+    + '<div style="display:flex;justify-content:space-between;padding:4px 0"><span style="color:var(--text-muted)">Asignado por regla de proveedor</span><span>'+fmt(data.porReglaTotal||0)+'</span></div>'
+    + '<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border);margin-top:4px;font-weight:700"><span>Otros (sin regla)</span><span>'+fmt(data.otros)+'</span></div>'
     + '</div>';
 
-  // Tabla por proveedor: solo los que tienen saldo sin clasificar > 0 arriba; el resto despues.
   const filas = (data.filas || []);
-  const rows = filas.map(f => [
-    escapeHtml(f.proveedor),
-    fmt(f.montoMov),
-    fmt(f.enCompras),
-    fmt(f.sinClasificar),
-  ]);
+  const rows = filas.map(f => {
+    const estado = f.sinClasificar > 0
+      ? '<span style="color:#e0a85c">Falta regla</span>'
+      : (f.grupoRegla ? '<span style="color:var(--text-muted)">'+escapeHtml(f.grupoRegla)+' (regla)</span>'
+                      : '<span style="color:var(--text-muted)">Compras</span>');
+    return [
+      escapeHtml(f.proveedor),
+      fmt(f.montoMov),
+      fmt(f.enCompras),
+      fmt(f.porRegla||0),
+      fmt(f.sinClasificar),
+      estado,
+    ];
+  });
   const tabla = rows.length
-    ? '<div style="font-size:12px;color:var(--text-muted);margin:6px 0">Por proveedor (ordenado por lo que falta detallar):</div>'
+    ? '<div style="font-size:12px;color:var(--text-muted);margin:6px 0">Por proveedor (los de arriba son los que faltan clasificar):</div>'
       + miniTabla([
           {label:'Proveedor'},
-          {label:'En Movimientos',align:'right'},
-          {label:'En Compras',align:'right'},
+          {label:'Movimientos',align:'right'},
+          {label:'Compras',align:'right'},
+          {label:'Por regla',align:'right'},
           {label:'Sin clasificar',align:'right'},
+          {label:'Estado'},
         ], rows)
     : '<div style="color:var(--text-muted);font-size:13px">No hay movimientos de Mercaderia en este periodo.</div>';
 
   const body = resumen + tabla
     + '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;border-top:1px solid var(--border);padding-top:8px">'+escapeHtml(data.nota||'')+'</div>';
-  openDetalleModal('CMV - Otros (Mercaderia sin detallar en Compras)', body);
+  openDetalleModal('CMV - Otros (Mercaderia sin clasificar)', body);
 }
+
 
 
 async function openConceptoModal(grupo) {
