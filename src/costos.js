@@ -85,6 +85,92 @@ async function _persistOverride(nombreProducto, categoria) {
   }
 }
 
+// ─── Mapa Proveedor → Grupo CMV (persistente en hoja Sheets) ────────────────────
+// Regla de respaldo: si una compra NO esta detallada en la hoja Compras, el grupo
+// (Comida/Bebida/Insumos) del gasto se decide por el PROVEEDOR. Editable desde la
+// hoja 'Proveedor Grupo CMV' (Proveedor | Grupo) sin redeployar.
+const PROV_GRUPO_SHEET = process.env.COSTOS_PROV_GRUPO_SHEET || 'Proveedor Grupo CMV';
+const provGrupo = new Map(); // norm(proveedor) -> 'Comida' | 'Bebida' | 'Insumos'
+let _provGrupoCargado = false;
+
+// Seed inicial (se escribe la primera vez que la hoja se crea vacia).
+const PROV_GRUPO_SEED = [
+  ['Aurea', 'Bebida'],
+  ['Yerson', 'Comida'],
+  ['El Criollo', 'Comida'],
+  ['Vinandina', 'Bebida'],
+  ['Pao Beleza', 'Bebida'],
+  ['Femsa Coca-Cola', 'Bebida'],
+  ['Nicju', 'Comida'],
+  ['San Cipriano', 'Comida'],
+  ['Flor Bengolea', 'Bebida'],
+  ['Vermuciraptor', 'Bebida'],
+  ['Culpable', 'Bebida'],
+  ['Acequia', 'Comida'],
+  ['Huevos Cosmicos', 'Comida'],
+  ['Strange Brewing', 'Bebida'],
+];
+
+function _normGrupo(g) {
+  const n = cats.norm(g);
+  if (n === 'bebida' || n === 'bebidas') return 'Bebida';
+  if (n === 'insumo' || n === 'insumos') return 'Insumos';
+  if (n === 'comida' || n === 'comidas') return 'Comida';
+  return ''; // desconocido -> no mapea (queda en Otros)
+}
+
+async function _ensureProvGrupoSheet(api) {
+  try {
+    await api.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { requests: [{ addSheet: { properties: { title: PROV_GRUPO_SHEET } } }] },
+    });
+    await api.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID, range: PROV_GRUPO_SHEET + '!A1:B1', valueInputOption: 'RAW',
+      requestBody: { values: [['Proveedor', 'Grupo']] },
+    });
+    if (PROV_GRUPO_SEED.length) {
+      await api.spreadsheets.values.append({
+        spreadsheetId: SPREADSHEET_ID, range: PROV_GRUPO_SHEET + '!A:B', valueInputOption: 'RAW',
+        requestBody: { values: PROV_GRUPO_SEED },
+      });
+    }
+  } catch (e) { if (!String(e.message||'').toLowerCase().includes('already exists')) throw e; }
+}
+
+async function cargarProveedorGrupoCMV({ force = false } = {}) {
+  if (_provGrupoCargado && !force) return;
+  if (!SPREADSHEET_ID) { _provGrupoCargado = true; return; }
+  try {
+    const api = _sheetsClient();
+    let rows = [];
+    try {
+      const res = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: PROV_GRUPO_SHEET + '!A:B' });
+      rows = res.data.values || [];
+    } catch (e) { await _ensureProvGrupoSheet(api);
+      const res2 = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: PROV_GRUPO_SHEET + '!A:B' }).catch(() => ({ data: {} }));
+      rows = (res2.data && res2.data.values) || [];
+    }
+    provGrupo.clear();
+    for (let i = 1; i < rows.length; i++) {
+      const prov = (rows[i][0] || '').toString().trim();
+      const grupo = _normGrupo(rows[i][1] || '');
+      if (prov && grupo) provGrupo.set(cats.norm(prov), grupo);
+    }
+    _provGrupoCargado = true;
+  } catch (e) { console.warn('Proveedor Grupo CMV: no se pudo cargar', e.message); _provGrupoCargado = true; }
+}
+
+// Devuelve 'Comida' | 'Bebida' | 'Insumos' | '' (vacio = no mapeado -> Otros)
+function grupoCMVPorProveedor(proveedor) {
+  if (!proveedor) return '';
+  return provGrupo.get(cats.norm(proveedor)) || '';
+}
+
+function getProveedorGrupoMap() {
+  return [...provGrupo.entries()].map(([k, v]) => ({ proveedor: k, grupo: v }));
+}
+
 // ─── Composición % por plato (persistente en hoja Sheets) ───────────────────────
 // Cada plato FUDO puede tener una composición de categorías de costo, ej:
 //   Ojo de Bife → { 'Carnes y Embutidos': 90, 'Frutas y Verduras': 5, 'Otro': 5 }
@@ -489,4 +575,5 @@ module.exports = {
   cargarComposiciones, getComposicion, setComposicion, listComposiciones, repartoCategorias, detallePorPlato,
   ingresosPorCategoriaCosto, costosPorCategoria, cmvDesglose, costosVsIngresos,
   montoCompra,
+  cargarProveedorGrupoCMV, grupoCMVPorProveedor, getProveedorGrupoMap,
 };
