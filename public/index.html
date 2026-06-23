@@ -4041,15 +4041,24 @@ async function openCmvModal() {
   try { ({ data } = await api('/api/cmv-desglose' + buildQS())); }
   catch (e) { document.getElementById('detalle-modal-body').innerHTML = 'Error: ' + escapeHtml(e.message); return; }
   const g = data.desglose.grupos, det = data.desglose.detalle, totalComp = data.desglose.total || 0;
-  const linea = (nombre, color) => {
+  const ingresosCmv = data.ingresos || 0;
+  const linea = (nombre, color, opts) => {
+    opts = opts || {};
     const val = g[nombre] || 0;
-    const p = totalComp > 0 ? (val/totalComp)*100 : 0;
-    return '<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between"><strong style="color:'+color+'">'+nombre+'</strong><span>'+fmt(val)+' <span style="color:var(--text-muted)">('+pct(p)+')</span></span></div>'
-      + '<div style="height:8px;background:var(--surface2);border-radius:4px;overflow:hidden;margin:3px 0"><div style="height:100%;width:'+p+'%;background:'+color+'"></div></div></div>';
+    // % sobre el TOTAL de ingresos (no relativo al CMV). Las 4 categorias suman el pctCMV global (ej. 38.4%).
+    const p = ingresosCmv > 0 ? (val/ingresosCmv)*100 : 0;
+    // Ancho de barra relativo al CMV para que siga siendo legible con %s chicos.
+    const wBar = totalComp > 0 ? (val/totalComp)*100 : 0;
+    const estilo = 'margin-bottom:10px' + (opts.onClick ? ';cursor:pointer' : '');
+    const attrs = opts.onClick ? ' onclick="'+opts.onClick+'" title="Ver detalle de movimientos"' : '';
+    const flecha = opts.onClick ? ' <span style="color:var(--text-muted);font-size:11px">&rsaquo;</span>' : '';
+    return '<div style="'+estilo+'"'+attrs+'><div style="display:flex;justify-content:space-between"><strong style="color:'+color+'">'+nombre+flecha+'</strong><span>'+fmt(val)+' <span style="color:var(--text-muted)">('+pct(p)+')</span></span></div>'
+      + '<div style="height:8px;background:var(--surface2);border-radius:4px;overflow:hidden;margin:3px 0"><div style="height:100%;width:'+wBar+'%;background:'+color+'"></div></div></div>';
   };
   const body = '<div style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px"><div>CMV total (P&L real, Movimientos): <strong>'+fmt(data.cmvMovimientos)+'</strong> - '+pct(data.pctCMV)+' de ingresos</div></div>'
-    + linea('Comida', '#e0a85c') + linea('Bebida', '#5c9ae0') + linea('Insumos', '#9b6fc0') + (g.Otros? linea('Otros', '#888') : '')
-    + '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;border-top:1px solid var(--border);padding-top:8px">'+escapeHtml(data.nota||'')+'</div>';
+    + linea('Comida', '#e0a85c') + linea('Bebida', '#5c9ae0') + linea('Insumos', '#9b6fc0')
+    + ((g.Otros>0) ? linea('Otros', '#888', { onClick: "openConceptoModal('Mercaderia')" }) : '')
+    + '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;border-top:1px solid var(--border);padding-top:8px">'+escapeHtml(data.nota||'')+' Otros = Mercaderia (Movimientos) no atribuida a Comida/Bebida.</div>';
   openDetalleModal('CMV - Comida / Bebida / Insumos', body);
 }
 
