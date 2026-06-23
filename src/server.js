@@ -1042,8 +1042,15 @@ app.get('/api/cmv-desglose', authMiddleware, adminOnly, async (req, res) => {
     // Insumos viene de MOVIMIENTOS (no de Compras): pisar el grupo y su detalle.
     desglose.grupos.Insumos = insumosMovimientos;
     desglose.detalle.Insumos = [{ categoria: 'Insumos (Movimientos)', costo: insumosMovimientos }];
-    // Recalcular total de composición con el Insumos de Movimientos
-    desglose.total = (desglose.grupos.Comida||0) + (desglose.grupos.Bebida||0) + (desglose.grupos.Insumos||0) + (desglose.grupos.Otros||0);
+    // "Otros" = CMV real (Movimientos) - lo desagregado (Comida+Bebida de Compras + Insumos).
+    // Captura la Mercaderia de Movimientos que NO se pudo atribuir a Comida/Bebida desde Compras.
+    // Asi las 4 categorias suman exactamente el CMV total (pctCMV global).
+    const desagregadoCB = (desglose.grupos.Comida||0) + (desglose.grupos.Bebida||0);
+    const otros = Math.max(0, Math.round((cmvMovimientos - desagregadoCB - insumosMovimientos) * 100) / 100);
+    desglose.grupos.Otros = otros;
+    desglose.detalle.Otros = [{ categoria: 'Mercaderia no clasificada (Movimientos)', costo: otros }];
+    // El total ahora es fiel al CMV real de Movimientos.
+    desglose.total = cmvMovimientos;
     res.json({ ok: true, data: {
       desglose,                       // Comida/Bebida (Compras) + Insumos (Movimientos)
       cmvMovimientos,                 // total fiel (Movimientos)
