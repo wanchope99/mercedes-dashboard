@@ -199,6 +199,25 @@ async function setIvaDeducible(nombre, b)       { return setAtributoProveedor(no
 async function setDescuentoIncluido(nombre, b)  { return setAtributoProveedor(nombre, 'Descuento Incluido', _sn(b)); }
 async function setIvaIncluido(nombre, b)        { return setAtributoProveedor(nombre, 'IVA Incluido', _sn(b)); }
 
+// Guarda el MEDIO DE PAGO habitual de un proveedor para no volver a preguntarlo.
+// Escribe en la columna de medio existente (header con "medio" o "forma"); si no
+// existe, crea "Medio de Pago". Reutiliza setAtributoProveedor para crear/actualizar.
+async function setMedioProveedor(nombre, medio) {
+  if (!GESTION_SHEET_ID || !nombre || !medio) return;
+  // Detectar el header real del medio para que leerConfig() lo lea despues.
+  let headerMedio = 'Medio de Pago';
+  try {
+    const api = sheets();
+    const res0 = await api.spreadsheets.values.get({ spreadsheetId: GESTION_SHEET_ID, range: `${PROVEEDORES_HOJA}!A:Z` });
+    const rows0 = res0.data.values || [];
+    let hIdx = rows0.findIndex(r => norm(r && r[0]) === 'proveedor'); if (hIdx === -1) hIdx = 0;
+    const headerRaw = rows0[hIdx] || [];
+    const idx = headerRaw.findIndex(h => { const n = norm(h); return n.includes('medio') || n.includes('forma'); });
+    if (idx >= 0) headerMedio = headerRaw[idx];  // usar el header existente tal cual
+  } catch (e) { /* si falla la deteccion, usar el default */ }
+  return setAtributoProveedor(nombre, headerMedio, medio);
+}
+
 function clearConfigCache() { cache.flushAll(); }
 
-module.exports = { leerConfig, getProveedor, setIvaProveedor, setAtributoProveedor, setIvaDeducible, setDescuentoIncluido, setIvaIncluido, clearConfigCache, norm };
+module.exports = { leerConfig, getProveedor, setIvaProveedor, setMedioProveedor, setAtributoProveedor, setIvaDeducible, setDescuentoIncluido, setIvaIncluido, clearConfigCache, norm };

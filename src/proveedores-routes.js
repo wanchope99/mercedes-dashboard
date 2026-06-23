@@ -330,6 +330,14 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
         try { await provCfg.setIvaProveedor(reg.factura.proveedor, ivaProv); }
         catch (e) { console.warn('No se pudo guardar IVA del proveedor:', e.message); }
       }
+      // Recordar el MEDIO DE PAGO del proveedor para no volver a preguntarlo.
+      // (Antes solo se guardaba el IVA; por eso una factura "Contado" preguntaba
+      //  el medio en cada carga aunque ya se hubiera respondido.)
+      const medioProv = cats.normalizarMedioPago(reg.factura.medioPago);
+      if (reg.factura.proveedor && medioProv && cats.MEDIOS_PAGO.includes(medioProv)) {
+        try { await provCfg.setMedioProveedor(reg.factura.proveedor, medioProv); }
+        catch (e) { console.warn('No se pudo guardar medio de pago del proveedor:', e.message); }
+      }
       // Recordar atributos fiscales del proveedor (deducible / incluidos).
       if (reg.factura.proveedor) {
         try {
