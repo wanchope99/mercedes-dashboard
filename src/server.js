@@ -687,7 +687,29 @@ app.post('/api/pagos/pagar', authMiddleware, adminOnly, async (req, res) => {
       requestBody: { valueInputOption: 'USER_ENTERED', data },
     });
     clearCache();
-    res.json({ ok: true, message: `${m.proveedor} marcado como Pagado`, proveedor: m.proveedor, monto: m.salidaARS, medio });
+
+    // Si la caja esta ABIERTA, este dinero YA salio de una caja arqueada al pagar
+    // la cuenta pendiente. Se anota en la sesion para descontarlo del esperado en el
+    // cierre (igual que /api/gastos-rapidos). Asi NO aparece como faltante en el arqueo.
+    // Caso real: pagar a un proveedor "A pagar" con MP estando la caja abierta.
+    let registradoEnSesion = false;
+    const medioEfectivoPago = (medio || m.medioPago || '').toLowerCase();
+    const montoSalida = Number(m.salidaTotal || m.salidaARS || 0);
+    if (estadoCaja.abierta && montoSalida > 0) {
+      const bucket = medioEfectivoPago.includes('efectivo local') ? 'efectivo'
+        : medioEfectivoPago.includes('mercado pago') ? 'mp' : null;
+      if (bucket) {
+        estadoCaja.gastosSesion = estadoCaja.gastosSesion || [];
+        estadoCaja.gastosSesion.push({
+          bucket, monto: montoSalida,
+          descripcion: `Pago pendiente: ${m.proveedor}`,
+          ts: new Date().toISOString(),
+          usuario: req.user.nombre,
+        });
+        registradoEnSesion = true;
+      }
+    }
+    res.json({ ok: true, message: `${m.proveedor} marcado como Pagado`, proveedor: m.proveedor, monto: m.salidaARS, medio, registradoEnSesion });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
@@ -1051,15 +1073,61 @@ app.get('/api/cmv-desglose', authMiddleware, adminOnly, async (req, res) => {
     desglose.detalle.Otros = [{ categoria: 'Mercaderia no clasificada (Movimientos)', costo: otros }];
     // El total ahora es fiel al CMV real de Movimientos.
     desglose.total = cmvMovimientos;
+    const mercaderiaMovimientos = r.gastos?.Mercaderia || 0;
     res.json({ ok: true, data: {
       desglose,                       // Comida/Bebida (Compras) + Insumos (Movimientos)
       cmvMovimientos,                 // total fiel (Movimientos)
+      mercaderiaMovimientos,          // Mercaderia real (Movimientos) = Comida+Bebida(Compras) + Otros
+      comidaCompras: desglose.grupos.Comida || 0,
+      bebidaCompras: desglose.grupos.Bebida || 0,
+      insumosMovimientos,
       ingresos,
       pctCMV: ingresos > 0 ? Math.round((cmvMovimientos / ingresos) * 1000) / 10 : 0,
       nota: 'CMV total e Insumos salen de Movimientos (P&L real). Comida y Bebida se desagregan desde la hoja Compras.',
     } });
   } catch (err) {
     console.error('Error /api/cmv-desglose:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── Detalle de "Otros" del CMV (conciliacion Movimientos vs Compras) ──────────
+// "Otros" = Mercaderia (Movimientos) - Comida (Compras) - Bebida (Compras).
+// Es la mercaderia real que la hoja Compras no logro atribuir a Comida ni Bebida.
+// No existe como filas sueltas: es la BRECHA entre dos fuentes. Este endpoint la explica
+// y devuelve, como referencia, las categorias de Compras que SI se clasificaron.
+app.get('/api/cmv-otros-detalle', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const filtro = parseFiltro(req.query);
+    const desde = filtro.fechaDesde ? filtro.fechaDesde.toISOString().slice(0,10) : undefined;
+    const hasta = filtro.fechaHasta ? filtro.fechaHasta.toISOString().slice(0,10) : undefined;
+    const [compras, resumenArr] = await Promise.all([
+      prov.getCompras().catch(() => []),
+      getResumenMensual(filtro).catch(() => []),
+    ]);
+    const desglose = costos.cmvDesglose(compras, { desde, hasta });
+    const r = resumenArr[0] || { gastos: {} };
+    const mercaderiaMovimientos = r.gastos?.Mercaderia || 0;
+    const comidaCompras = desglose.grupos.Comida || 0;
+    const bebidaCompras = desglose.grupos.Bebida || 0;
+    const otros = Math.max(0, Math.round((mercaderiaMovimientos - comidaCompras - bebidaCompras) * 100) / 100);
+    // Categorias de Compras que componen Comida y Bebida (referencia de lo SI clasificado)
+    const catsClasificadas = []
+      .concat((desglose.detalle.Comida || []).map(c => ({ ...c, grupo: 'Comida' })))
+      .concat((desglose.detalle.Bebida || []).map(c => ({ ...c, grupo: 'Bebida' })))
+      .sort((a, b) => b.costo - a.costo);
+    res.json({ ok: true, data: {
+      mercaderiaMovimientos,
+      comidaCompras,
+      bebidaCompras,
+      desagregadoCompras: comidaCompras + bebidaCompras,
+      otros,
+      catsClasificadas,
+      nota: 'Otros = Mercaderia (Movimientos) menos lo que Compras atribuyo a Comida y Bebida. ' +
+            'Para reducir "Otros", clasifica esas compras en la hoja Compras (Comida/Bebida/Insumos).',
+    } });
+  } catch (err) {
+    console.error('Error /api/cmv-otros-detalle:', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
