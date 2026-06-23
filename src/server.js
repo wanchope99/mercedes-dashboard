@@ -15,6 +15,7 @@ const { proyectar, calcularCalculadora, proyeccionMes } = require('./proyeccione
 const proveedoresRoutes = require('./proveedores-routes');
 const prov = require('./proveedores');
 const costos = require('./costos');
+const cats = require('./proveedores-categorias');
 const consumo = require('./consumo');
 
 const app = express();
@@ -1101,30 +1102,57 @@ app.get('/api/cmv-otros-detalle', authMiddleware, adminOnly, async (req, res) =>
     const filtro = parseFiltro(req.query);
     const desde = filtro.fechaDesde ? filtro.fechaDesde.toISOString().slice(0,10) : undefined;
     const hasta = filtro.fechaHasta ? filtro.fechaHasta.toISOString().slice(0,10) : undefined;
-    const [compras, resumenArr] = await Promise.all([
+    const [compras, movimientos] = await Promise.all([
       prov.getCompras().catch(() => []),
-      getResumenMensual(filtro).catch(() => []),
+      getMovimientos().catch(() => []),
     ]);
-    const desglose = costos.cmvDesglose(compras, { desde, hasta });
-    const r = resumenArr[0] || { gastos: {} };
-    const mercaderiaMovimientos = r.gastos?.Mercaderia || 0;
-    const comidaCompras = desglose.grupos.Comida || 0;
-    const bebidaCompras = desglose.grupos.Bebida || 0;
-    const otros = Math.max(0, Math.round((mercaderiaMovimientos - comidaCompras - bebidaCompras) * 100) / 100);
-    // Categorias de Compras que componen Comida y Bebida (referencia de lo SI clasificado)
-    const catsClasificadas = []
-      .concat((desglose.detalle.Comida || []).map(c => ({ ...c, grupo: 'Comida' })))
-      .concat((desglose.detalle.Bebida || []).map(c => ({ ...c, grupo: 'Bebida' })))
-      .sort((a, b) => b.costo - a.costo);
+
+    // --- Lado MOVIMIENTOS: gastos del grupo Mercaderia (mismo filtro que el dashboard) ---
+    let movsMerc = movimientos.filter(m => m.tipo === 'Gasto' && !m.esCambio && !m.esFondeo && !m.esCuota);
+    if (filtro.mes) movsMerc = movsMerc.filter(m => m.mes === filtro.mes);
+    if (filtro.fechaDesde) movsMerc = movsMerc.filter(m => m.fecha >= filtro.fechaDesde && m.fecha <= filtro.fechaHasta);
+    movsMerc = movsMerc.filter(m => m.grupo === 'Mercaderia');
+
+    const normProv = (x) => (x || '').toString().trim().toLowerCase();
+    const porProvMov = {};   // proveedor -> { proveedor, montoMov }
+    for (const m of movsMerc) {
+      const k = normProv(m.proveedor) || '(sin proveedor)';
+      const e = porProvMov[k] = porProvMov[k] || { proveedor: m.proveedor || '(sin proveedor)', montoMov: 0, movimientos: 0 };
+      e.montoMov += m.salidaTotal;
+      e.movimientos++;
+    }
+
+    // --- Lado COMPRAS: solo las que mapean a Comida o Bebida (las que el CMV ya desagrega) ---
+    const porProvCompra = {};  // proveedor -> montoCompras (Comida+Bebida)
+    for (const c of (compras || [])) {
+      if (desde && c.fecha && c.fecha < desde) continue;
+      if (hasta && c.fecha && c.fecha > hasta) continue;
+      const g = costos.grupoCMV(cats.normalizarCategoria(c.categoria).categoria || c.categoria);
+      if (g !== 'Comida' && g !== 'Bebida') continue;   // Insumos / Otro no cuentan aca
+      const k = normProv(c.proveedor) || '(sin proveedor)';
+      porProvCompra[k] = (porProvCompra[k] || 0) + costos.montoCompra(c);
+    }
+
+    // --- Cruce por proveedor: cuanto de Movimientos NO esta cubierto por Compras ---
+    const filas = Object.entries(porProvMov).map(([k, e]) => {
+      const enCompras = Math.round(porProvCompra[k] || 0);
+      const montoMov = Math.round(e.montoMov);
+      const sinClasificar = Math.max(0, montoMov - enCompras);
+      return { proveedor: e.proveedor, movimientos: e.movimientos, montoMov, enCompras, sinClasificar };
+    }).sort((a, b) => b.sinClasificar - a.sinClasificar);
+
+    const mercaderiaMovimientos = Math.round(movsMerc.reduce((s, m) => s + m.salidaTotal, 0));
+    const enComprasTotal = filas.reduce((s, f) => s + f.enCompras, 0);
+    const otros = filas.reduce((s, f) => s + f.sinClasificar, 0);
+
     res.json({ ok: true, data: {
       mercaderiaMovimientos,
-      comidaCompras,
-      bebidaCompras,
-      desagregadoCompras: comidaCompras + bebidaCompras,
+      enComprasTotal,
       otros,
-      catsClasificadas,
-      nota: 'Otros = Mercaderia (Movimientos) menos lo que Compras atribuyo a Comida y Bebida. ' +
-            'Para reducir "Otros", clasifica esas compras en la hoja Compras (Comida/Bebida/Insumos).',
+      filas,   // por proveedor: montoMov, enCompras, sinClasificar
+      nota: 'Otros = Mercaderia (Movimientos) que NO esta detallada en la hoja Compras. ' +
+            'Cada fila cruza lo pagado a ese proveedor (Movimientos) contra lo cargado en Compras. ' +
+            'Para que Otros baje a cero, carga en Compras el detalle de los proveedores con saldo "Sin clasificar".',
     } });
   } catch (err) {
     console.error('Error /api/cmv-otros-detalle:', err.message);
