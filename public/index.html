@@ -4064,31 +4064,41 @@ async function openCmvModal() {
 
 // Detalle accionable de "Otros" del CMV: conciliacion Movimientos vs Compras.
 async function openCmvOtrosModal() {
-  openDetalleModal('CMV - Otros (Mercaderia no clasificada)', '<div class="loading"><div class="spinner"></div> Cargando conciliacion...</div>');
+  openDetalleModal('CMV - Otros (Mercaderia sin detallar en Compras)', '<div class="loading"><div class="spinner"></div> Cruzando Movimientos vs Compras...</div>');
   let data;
   try { ({ data } = await api('/api/cmv-otros-detalle' + buildQS())); }
   catch (e) { document.getElementById('detalle-modal-body').innerHTML = 'Error: ' + escapeHtml(e.message); return; }
 
-  const filaConcil = (label, val, signo, fuerte) => '<div style="display:flex;justify-content:space-between;padding:6px 0'+(fuerte?';border-top:1px solid var(--border);margin-top:4px;font-weight:700':'')+'">'
-    + '<span style="color:var(--text-muted)">'+(signo?signo+' ':'')+escapeHtml(label)+'</span><span>'+fmt(val)+'</span></div>';
-
-  const concil = '<div style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:14px;font-size:13px">'
-    + filaConcil('Mercaderia (Movimientos, P&L real)', data.mercaderiaMovimientos, '')
-    + filaConcil('Comida (clasificada en Compras)', data.comidaCompras, '−')
-    + filaConcil('Bebida (clasificada en Compras)', data.bebidaCompras, '−')
-    + filaConcil('Otros (sin clasificar)', data.otros, '=', true)
+  // Resumen arriba
+  const resumen = '<div style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:14px;font-size:13px">'
+    + '<div style="display:flex;justify-content:space-between;padding:4px 0"><span style="color:var(--text-muted)">Mercaderia (Movimientos)</span><span>'+fmt(data.mercaderiaMovimientos)+'</span></div>'
+    + '<div style="display:flex;justify-content:space-between;padding:4px 0"><span style="color:var(--text-muted)">Detallado en Compras (Comida+Bebida)</span><span>'+fmt(data.enComprasTotal)+'</span></div>'
+    + '<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border);margin-top:4px;font-weight:700"><span>Otros (sin detallar)</span><span>'+fmt(data.otros)+'</span></div>'
     + '</div>';
 
-  const rows = (data.catsClasificadas || []).map(c => [escapeHtml(c.grupo), escapeHtml(c.categoria), fmt(c.costo)]);
-  const ref = rows.length
-    ? '<div style="font-size:12px;color:var(--text-muted);margin:6px 0">Categorias que SI se clasificaron desde Compras (referencia):</div>'
-      + miniTabla([{label:'Grupo'},{label:'Categoria'},{label:'Monto',align:'right'}], rows)
-    : '';
+  // Tabla por proveedor: solo los que tienen saldo sin clasificar > 0 arriba; el resto despues.
+  const filas = (data.filas || []);
+  const rows = filas.map(f => [
+    escapeHtml(f.proveedor),
+    fmt(f.montoMov),
+    fmt(f.enCompras),
+    fmt(f.sinClasificar),
+  ]);
+  const tabla = rows.length
+    ? '<div style="font-size:12px;color:var(--text-muted);margin:6px 0">Por proveedor (ordenado por lo que falta detallar):</div>'
+      + miniTabla([
+          {label:'Proveedor'},
+          {label:'En Movimientos',align:'right'},
+          {label:'En Compras',align:'right'},
+          {label:'Sin clasificar',align:'right'},
+        ], rows)
+    : '<div style="color:var(--text-muted);font-size:13px">No hay movimientos de Mercaderia en este periodo.</div>';
 
-  const body = concil + ref
+  const body = resumen + tabla
     + '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;border-top:1px solid var(--border);padding-top:8px">'+escapeHtml(data.nota||'')+'</div>';
-  openDetalleModal('CMV - Otros (Mercaderia no clasificada)', body);
+  openDetalleModal('CMV - Otros (Mercaderia sin detallar en Compras)', body);
 }
+
 
 async function openConceptoModal(grupo) {
   openDetalleModal('Gasto - ' + grupo, '<div class="loading"><div class="spinner"></div> Cargando...</div>');
