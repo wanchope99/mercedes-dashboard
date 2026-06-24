@@ -17,6 +17,7 @@ const prov = require('./proveedores');
 const costos = require('./costos');
 const cats = require('./proveedores-categorias');
 const consumo = require('./consumo');
+const cierres = require('./cierres');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -457,6 +458,45 @@ app.get('/api/categorias', authMiddleware, adminOnly, async (req, res) => {
 app.get('/api/resumen', authMiddleware, adminOnly, async (req, res) => {
   try { res.json({ ok: true, data: await getResumenMensual(parseFiltro(req.query)) }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─── Cierres mensuales (ARS + USD) ────────────────────────────────────────────
+// Histórico de cómo cerró cada mes en pesos y en dólares (TC fijo del período).
+
+app.get('/api/cierres', authMiddleware, adminOnly, async (req, res) => {
+  try { res.json({ ok: true, data: await cierres.listCierres() }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post('/api/cierres/cerrar', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { mes, tcUsd, nota } = req.body || {};
+    if (!mes) return res.status(400).json({ ok: false, error: 'Falta el mes' });
+    const resumen = await getResumenMensual({ mes });
+    const m = (resumen || [])[0];
+    if (!m) return res.status(404).json({ ok: false, error: 'No hay datos para el mes ' + mes });
+    const data = await cierres.cerrarMes({
+      mes,
+      tcUsd: Number(tcUsd) || undefined,
+      ingresosARS: m.ingresos.total,
+      gastosARS: m.gastos.total,
+      resultadoARS: m.resultadoNeto,
+      nota,
+    });
+    res.json({ ok: true, data });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.put('/api/cierres/tc', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { mes, tcUsd } = req.body || {};
+    const data = await cierres.ajustarTC({ mes, tcUsd: Number(tcUsd) });
+    res.json({ ok: true, data });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get('/api/cierres/tc-default', authMiddleware, adminOnly, (req, res) => {
+  res.json({ ok: true, data: { tcDefault: cierres.TC_DEFAULT } });
 });
 
 app.get('/api/actividad-diaria', authMiddleware, adminOnly, async (req, res) => {
