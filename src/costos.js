@@ -582,7 +582,7 @@ const _PROV_STOPWORDS = new Set([
   'la','el','los','las','don','dona','grupo','establecimiento','establecimientos',
 ]);
 function _provTokens(nombre) {
-  const n = norm(nombre)
+  const n = cats.norm(nombre)
     .replace(/[.\-_/,;:()]/g, ' ')
     .replace(/\bs\s*a\b/g, ' ')
     .replace(/\s+/g, ' ')
