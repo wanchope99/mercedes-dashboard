@@ -290,7 +290,7 @@ async function getResumenMensual({ mes, fechaDesde, fechaHasta } = {}) {
     if (!meses[key]) {
       meses[key] = {
         mes: key,
-        gastos: { Mercaderia: 0, Insumos: 0, Equipamiento: 0, Operativos: 0, Impuestos: 0, Personal: 0, Otros: 0, total: 0 },
+        gastos: { Mercaderia: 0, Insumos: 0, Equipamiento: 0, Operativos: 0, Impuestos: 0, ImpuestosFiscales: 0, ImpuestosComisiones: 0, Personal: 0, Otros: 0, total: 0 },
         ingresos: { Efectivo: 0, 'Mercado Pago': 0, Galicia: 0, Otros: 0, total: 0 },
         gastosPorCategoria: {},
         ingresosPorMedioPago: {},
@@ -317,6 +317,13 @@ async function getResumenMensual({ mes, fechaDesde, fechaHasta } = {}) {
       const grupo = m.grupo;
       entry.gastos[grupo] = (entry.gastos[grupo] || 0) + m.salidaTotal;
       entry.gastos.total += m.salidaTotal;
+      // Sub-discriminacion de Impuestos: proveedor "Servicio" = Comisiones (Nave),
+      // el resto (ARCA, etc.) = Fiscales (impuestos reales a pagar).
+      if (grupo === 'Impuestos') {
+        const esComision = (m.proveedor || '').trim().toLowerCase() === 'servicio';
+        if (esComision) entry.gastos.ImpuestosComisiones += m.salidaTotal;
+        else entry.gastos.ImpuestosFiscales += m.salidaTotal;
+      }
       const cat = m.categoria || 'Sin categoría';
       entry.gastosPorCategoria[cat] = (entry.gastosPorCategoria[cat] || 0) + m.salidaTotal;
       // Una compra en cuotas se considera "pagada" en el estado de resultados
