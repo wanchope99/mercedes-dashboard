@@ -569,6 +569,40 @@ function detallePorPlato({ detallesFudo, foodCostPorCategoria } = {}) {
     });
 }
 
+// ─── Matching flexible de nombres de proveedor ─────────────────────────────────
+// El mismo proveedor puede escribirse distinto en Movimientos y en Compras
+// (ej. "Zuccardi" vs "Familia Zuccardi - La Agricola S.A."). Para cruzarlos:
+//  1) Normaliza (sin tildes/puntuacion/sufijos societarios).
+//  2) Matchea si uno contiene al otro, o si comparten un token DISTINTIVO (>=4
+//     letras y no generico).
+const _PROV_STOPWORDS = new Set([
+  'familia','agricola','agropecuaria','vinos','vino','bodega','bodegas','hnos','hermanos',
+  'sociedad','anonima','comercial','industrial','distribuidora','distribuciones',
+  'sa','srl','sas','sca','srls','saci','saic','ltda','cia','company','co','the','de','del',
+  'la','el','los','las','don','dona','grupo','establecimiento','establecimientos',
+]);
+function _provTokens(nombre) {
+  const n = norm(nombre)
+    .replace(/[.\-_/,;:()]/g, ' ')
+    .replace(/\bs\s*a\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return { norm: n, tokens: n.split(' ').filter(t => t.length >= 4 && !_PROV_STOPWORDS.has(t)) };
+}
+function mismoProveedor(a, b) {
+  if (!a || !b) return false;
+  const A = _provTokens(a), B = _provTokens(b);
+  if (!A.norm || !B.norm) return false;
+  if (A.norm === B.norm) return true;
+  if ((' ' + A.norm + ' ').includes(' ' + B.norm + ' ') ||
+      (' ' + B.norm + ' ').includes(' ' + A.norm + ' ')) return true;
+  if (A.tokens.length && B.tokens.length) {
+    const setB = new Set(B.tokens);
+    if (A.tokens.some(t => setB.has(t))) return true;
+  }
+  return false;
+}
+
 module.exports = {
   CATEGORIAS_COSTO, grupoCMV,
   clasificarProducto, setOverrideProducto, getOverrides, cargarOverrides, REGLAS_MENU,
@@ -576,4 +610,5 @@ module.exports = {
   ingresosPorCategoriaCosto, costosPorCategoria, cmvDesglose, costosVsIngresos,
   montoCompra,
   cargarProveedorGrupoCMV, grupoCMVPorProveedor, getProveedorGrupoMap,
+  mismoProveedor,
 };
