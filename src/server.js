@@ -1089,23 +1089,30 @@ app.get('/api/cmv-desglose', authMiddleware, adminOnly, async (req, res) => {
       const e = movPorProv[k] = movPorProv[k] || { nombre: m.proveedor || '(sin proveedor)', monto: 0 };
       e.monto += m.salidaTotal;
     }
-    const compPorProv = {};  // key cats.norm -> monto Comida+Bebida
+    const compPorProvList = {};  // key cats.norm -> { nombre, monto }
     for (const c of (compras || [])) {
       if (desde && c.fecha && c.fecha < desde) continue;
       if (hasta && c.fecha && c.fecha > hasta) continue;
       const g = costos.grupoCMV(cats.normalizarCategoria(c.categoria).categoria || c.categoria);
       if (g !== 'Comida' && g !== 'Bebida') continue;
       const k = cats.norm(c.proveedor || '') || '(sin proveedor)';
-      compPorProv[k] = (compPorProv[k] || 0) + costos.montoCompra(c);
+      const e = compPorProvList[k] = compPorProvList[k] || { nombre: c.proveedor || '(sin proveedor)', monto: 0 };
+      e.monto += costos.montoCompra(c);
     }
+    const comprasArr = Object.values(compPorProvList);
+    const comprasDe = (nombreMov) => {
+      let tot = 0;
+      for (const c of comprasArr) if (costos.mismoProveedor(nombreMov, c.nombre)) tot += c.monto;
+      return tot;
+    };
 
     let comidaRegla = 0, bebidaRegla = 0, insumosRegla = 0, otros = 0;
     for (const [k, e] of Object.entries(movPorProv)) {
       const montoMov = e.monto;
-      const enCompras = Math.min(montoMov, compPorProv[k] || 0);
+      const enCompras = Math.min(montoMov, comprasDe(e.nombre));
       const resto = Math.max(0, montoMov - enCompras);
       if (resto <= 0) continue;
-      const grupoRegla = costos.grupoCMVPorProveedor(e.nombre);  // usa nombre real -> cats.norm interno
+      const grupoRegla = costos.grupoCMVPorProveedor(e.nombre);
       if (grupoRegla === 'Comida') comidaRegla += resto;
       else if (grupoRegla === 'Bebida') bebidaRegla += resto;
       else if (grupoRegla === 'Insumos') insumosRegla += resto;
@@ -1169,23 +1176,28 @@ app.get('/api/cmv-otros-detalle', authMiddleware, adminOnly, async (req, res) =>
     }
 
     // --- Lado COMPRAS: lo detallado por proveedor que mapea a Comida o Bebida ---
-    const porProvCompra = {};  // proveedor -> montoCompras (Comida+Bebida)
+    // Agrupado por proveedor REAL para cruzar por nombre flexible (Zuccardi vs Familia Zuccardi SA).
+    const compPorProvList = {};  // key cats.norm -> { nombre, monto }
     for (const c of (compras || [])) {
       if (desde && c.fecha && c.fecha < desde) continue;
       if (hasta && c.fecha && c.fecha > hasta) continue;
       const g = costos.grupoCMV(cats.normalizarCategoria(c.categoria).categoria || c.categoria);
       if (g !== 'Comida' && g !== 'Bebida') continue;
-      const k = normProv(c.proveedor) || '(sin proveedor)';
-      porProvCompra[k] = (porProvCompra[k] || 0) + costos.montoCompra(c);
+      const k = cats.norm(c.proveedor || '') || '(sin proveedor)';
+      const e = compPorProvList[k] = compPorProvList[k] || { nombre: c.proveedor || '(sin proveedor)', monto: 0 };
+      e.monto += costos.montoCompra(c);
     }
+    const comprasArr = Object.values(compPorProvList);
+    const comprasDe = (nombreMov) => {
+      let tot = 0;
+      for (const c of comprasArr) if (costos.mismoProveedor(nombreMov, c.nombre)) tot += c.monto;
+      return tot;
+    };
 
     // --- Cascada por proveedor: Compras primero, luego regla por proveedor, sino Otros ---
-    // enCompras  = lo detallado en Compras (Comida/Bebida)
-    // porRegla   = el resto, SI el proveedor esta mapeado en la hoja Proveedor Grupo CMV
-    // sinClasificar = el resto, si el proveedor NO esta mapeado -> queda en Otros
     const filas = Object.entries(porProvMov).map(([k, e]) => {
       const montoMov = Math.round(e.montoMov);
-      const enCompras = Math.min(montoMov, Math.round(porProvCompra[k] || 0));
+      const enCompras = Math.min(montoMov, Math.round(comprasDe(e.proveedor)));
       const resto = Math.max(0, montoMov - enCompras);
       const grupoRegla = costos.grupoCMVPorProveedor(e.proveedor); // '', 'Comida', 'Bebida', 'Insumos'
       const porRegla = grupoRegla ? resto : 0;
@@ -1224,7 +1236,17 @@ app.get('/api/movimientos/grupo/:grupo', authMiddleware, adminOnly, async (req, 
     movs = movs.filter(m => m.tipo === 'Gasto' && !m.esCambio && !m.esFondeo && !m.esCuota);
     if (filtro.mes) movs = movs.filter(m => m.mes === filtro.mes);
     if (filtro.fechaDesde) movs = movs.filter(m => m.fecha >= filtro.fechaDesde && m.fecha <= filtro.fechaHasta);
-    movs = movs.filter(m => m.grupo === grupo);
+
+    // Sub-grupos virtuales de Impuestos: proveedor "Servicio" = Comisiones (Nave);
+    // el resto = Fiscales. Permiten que el dashboard muestre 2 filas clickeables.
+    const esComisionImp = (m) => (m.proveedor || '').trim().toLowerCase() === 'servicio';
+    if (grupo === 'ImpuestosFiscales') {
+      movs = movs.filter(m => m.grupo === 'Impuestos' && !esComisionImp(m));
+    } else if (grupo === 'ImpuestosComisiones') {
+      movs = movs.filter(m => m.grupo === 'Impuestos' && esComisionImp(m));
+    } else {
+      movs = movs.filter(m => m.grupo === grupo);
+    }
     // Desglose por categoría dentro del grupo + filas
     const porCategoria = {};
     for (const m of movs) {
