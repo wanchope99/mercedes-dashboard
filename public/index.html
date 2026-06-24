@@ -568,6 +568,18 @@
       </div>
     </div>
 
+    <div class="card" id="cierre-card" style="display:none">
+      <div class="card-title">Cierre del mes <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· congela ARS y USD del período</span></div>
+      <div id="cierre-mes-body" style="padding:4px 2px"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Histórico de cierres <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· ARS y USD del período</span></div>
+      <div class="table-wrap">
+        <table class="prov-resumen-table" style="width:100%"><thead id="cierres-hist-head"></thead><tbody id="cierres-hist-body"><tr><td style="color:var(--text-muted);padding:14px">Cargando...</td></tr></tbody></table>
+      </div>
+    </div>
+
     <div class="charts-row">
       <div class="card">
         <div class="card-title">Ingresos vs Gastos</div>
@@ -2048,6 +2060,8 @@ async function loadAll() {
   const esMensual = state.modo === 'mes' && state.mes;
   renderKPIs(state.resumen, state.diasSemana, esMensual);
   renderTablaResumen(state.resumen);
+  renderCierreMes();
+  loadCierres();
   renderCharts(state.resumen);
   renderDiasSemana(state.diasSemana);
   renderActividadDiaria(state.diasData);
@@ -2114,6 +2128,111 @@ function renderKPIs(resumen, diasSemana, esMensual) {
   `;
 }
 
+// ─── Cierres mensuales (ARS + USD) ────────────────────────────────────────────
+let _cierresCache = [];
+
+// Muestra el panel de cierre solo cuando estamos viendo UN mes puntual.
+function renderCierreMes() {
+  const card = document.getElementById('cierre-card');
+  const body = document.getElementById('cierre-mes-body');
+  if (!card || !body) return;
+  const esMensual = state.modo === 'mes' && state.mes && state.resumen && state.resumen.length === 1;
+  if (!esMensual) { card.style.display = 'none'; return; }
+  card.style.display = '';
+
+  const m = state.resumen[0];
+  const yaCerrado = _cierresCache.find(c => normMes(c.mes) === normMes(state.mes));
+  const ing = m.ingresos.total, gas = m.gastos.total, res = m.resultadoNeto;
+
+  if (yaCerrado) {
+    const tc = yaCerrado.tcUsd;
+    const pend = yaCerrado.estado === 'pendiente_tc';
+    body.innerHTML =
+      '<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center">' +
+        '<div><div style="font-size:11px;color:var(--text-muted)">Estado</div><div style="font-weight:600;color:' + (pend ? 'var(--orange,#e08a5c)' : 'var(--green)') + '">' + (pend ? 'Cerrado (TC provisorio)' : 'Cerrado') + '</div></div>' +
+        '<div><div style="font-size:11px;color:var(--text-muted)">TC usado</div><div style="font-weight:600">$' + tc.toLocaleString('es-AR') + '/USD</div></div>' +
+        '<div><div style="font-size:11px;color:var(--text-muted)">Resultado</div><div style="font-weight:600;color:' + (res>=0?'var(--green)':'var(--red)') + '">' + fmt(res) + ' · US$' + Math.round(res/tc).toLocaleString('es-AR') + '</div></div>' +
+      '</div>' +
+      '<div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<span style="font-size:12px;color:var(--text-muted)">Ajustar TC:</span>' +
+        '<input type="number" id="cierre-tc-input" value="' + tc + '" step="1" style="width:120px">' +
+        '<button class="btn" onclick="ajustarTCCierre()">Recalcular USD</button>' +
+        '<button class="btn" onclick="cerrarMesActual(true)" title="Volver a tomar los totales actuales">Re-cerrar con datos actuales</button>' +
+      '</div>';
+  } else {
+    body.innerHTML =
+      '<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center">' +
+        '<div><div style="font-size:11px;color:var(--text-muted)">Ingresos</div><div style="font-weight:600">' + fmt(ing) + '</div></div>' +
+        '<div><div style="font-size:11px;color:var(--text-muted)">Gastos</div><div style="font-weight:600">' + fmt(gas) + '</div></div>' +
+        '<div><div style="font-size:11px;color:var(--text-muted)">Resultado</div><div style="font-weight:600;color:' + (res>=0?'var(--green)':'var(--red)') + '">' + fmt(res) + '</div></div>' +
+      '</div>' +
+      '<div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<span style="font-size:12px;color:var(--text-muted)">TC USD del período:</span>' +
+        '<input type="number" id="cierre-tc-input" placeholder="cargando..." step="1" style="width:120px">' +
+        '<button class="btn btn-primary" onclick="cerrarMesActual(false)">Cerrar ' + state.mes + '</button>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:8px">Al cerrar se congelan los valores en ARS y en USD con este tipo de cambio. Podés ajustar el TC después.</div>';
+    // Prellenar con el TC default
+    api('/api/cierres/tc-default').then(r => {
+      const el = document.getElementById('cierre-tc-input');
+      if (el && !el.value) el.value = r.data.tcDefault;
+    }).catch(()=>{});
+  }
+}
+
+function normMes(s) { return (s||'').toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim(); }
+
+async function cerrarMesActual(reCerrar) {
+  const el = document.getElementById('cierre-tc-input');
+  const tc = el ? Number(el.value) : 0;
+  if (!tc || tc <= 0) { alert('Cargá un tipo de cambio válido'); return; }
+  try {
+    await api('/api/cierres/cerrar', { method: 'POST', body: JSON.stringify({ mes: state.mes, tcUsd: tc }) });
+    await loadCierres();
+    renderCierreMes();
+  } catch (e) { alert('Error al cerrar: ' + e.message); }
+}
+
+async function ajustarTCCierre() {
+  const el = document.getElementById('cierre-tc-input');
+  const tc = el ? Number(el.value) : 0;
+  if (!tc || tc <= 0) { alert('TC inválido'); return; }
+  try {
+    await api('/api/cierres/tc', { method: 'PUT', body: JSON.stringify({ mes: state.mes, tcUsd: tc }) });
+    await loadCierres();
+    renderCierreMes();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function loadCierres() {
+  try {
+    const r = await api('/api/cierres');
+    _cierresCache = r.data || [];
+  } catch (e) { _cierresCache = []; }
+  renderHistoricoCierres();
+}
+
+function renderHistoricoCierres() {
+  const head = document.getElementById('cierres-hist-head');
+  const body = document.getElementById('cierres-hist-body');
+  if (!head || !body) return;
+  head.innerHTML = '<tr><th style="text-align:left">Mes</th><th>TC</th><th>Result. ARS</th><th>Result. USD</th><th>Ingresos USD</th><th>Gastos USD</th><th>Estado</th></tr>';
+  if (!_cierresCache.length) { body.innerHTML = '<tr><td colspan="7" style="color:var(--text-muted);padding:14px">Todavía no cerraste ningún mes.</td></tr>'; return; }
+  body.innerHTML = _cierresCache.map(c => {
+    const pend = c.estado === 'pendiente_tc';
+    const resCls = c.resultadoARS >= 0 ? 'val-pos' : 'val-neg';
+    return '<tr>' +
+      '<td style="text-align:left;font-weight:600">' + c.mes + '</td>' +
+      '<td>$' + c.tcUsd.toLocaleString('es-AR') + '</td>' +
+      '<td class="' + resCls + '">' + fmt(c.resultadoARS) + '</td>' +
+      '<td class="' + resCls + '">US$' + c.resultadoUSD.toLocaleString('es-AR') + '</td>' +
+      '<td>US$' + c.ingresosUSD.toLocaleString('es-AR') + '</td>' +
+      '<td>US$' + c.gastosUSD.toLocaleString('es-AR') + '</td>' +
+      '<td style="color:' + (pend ? 'var(--orange,#e08a5c)' : 'var(--green)') + ';font-size:12px">' + (pend ? 'TC provisorio' : 'Cerrado') + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
 // ─── Tabla resumen ────────────────────────────────────────────────────────────
 function renderTablaResumen(resumen) {
   const head = document.getElementById('tabla-resumen-head');
@@ -2122,6 +2241,10 @@ function renderTablaResumen(resumen) {
 
   const meses = resumen.map(m => m.mes);
   const multi = meses.length > 1;
+
+  // Single-mes: columna extra con % sobre Total Ingresos, gastos/ingresos de mayor a menor.
+  if (!multi) { renderTablaResumenSingle(resumen[0], head, body); return; }
+
   head.innerHTML = `<tr><th style="text-align:left">Concepto</th>${meses.map(m => `<th>${m}</th>`).join('')}${multi ? '<th>Total</th>' : ''}</tr>`;
 
   const cols = meses.length + (multi ? 2 : 1);
@@ -2135,27 +2258,83 @@ function renderTablaResumen(resumen) {
   };
   const section = label => `<tr class="row-header"><td colspan="${cols}">${label}</td></tr>`;
 
+  // Gastos e ingresos ordenados de mayor a menor por su TOTAL (suma de todos los meses).
+  const sum = vals => vals.reduce((a, b) => a + b, 0);
+  const gastosDefs = [
+    { label: 'Mercadería', vals: resumen.map(m => m.gastos.Mercaderia || 0), group: 'Mercaderia' },
+    { label: 'Insumos', vals: resumen.map(m => m.gastos.Insumos || 0), group: 'Insumos' },
+    { label: 'Equipamiento', vals: resumen.map(m => m.gastos.Equipamiento || 0), group: 'Equipamiento' },
+    { label: 'Operativos', vals: resumen.map(m => m.gastos.Operativos || 0), group: 'Operativos' },
+    { label: 'Fiscales', vals: resumen.map(m => m.gastos.ImpuestosFiscales || 0), group: 'ImpuestosFiscales' },
+    { label: 'Comisiones', vals: resumen.map(m => m.gastos.ImpuestosComisiones || 0), group: 'ImpuestosComisiones' },
+    { label: 'Personal', vals: resumen.map(m => m.gastos.Personal || 0), group: 'Personal' },
+    { label: 'Otros', vals: resumen.map(m => m.gastos.Otros || 0), group: 'Otros' },
+  ].sort((a, b) => sum(b.vals) - sum(a.vals));
+
+  const ingresosDefs = [
+    { label: 'Efectivo', vals: resumen.map(m => m.ingresos.Efectivo || 0) },
+    { label: 'Mercado Pago', vals: resumen.map(m => m.ingresos['Mercado Pago'] || 0) },
+    { label: 'Galicia', vals: resumen.map(m => m.ingresos.Galicia || 0) },
+    { label: 'Otros ingresos', vals: resumen.map(m => m.ingresos.Otros || 0) },
+  ].sort((a, b) => sum(b.vals) - sum(a.vals));
+
   body.innerHTML = [
     section('GASTOS'),
-    row('Mercadería', resumen.map(m => m.gastos.Mercaderia), '', null, 'Mercaderia'),
-    row('Insumos', resumen.map(m => m.gastos.Insumos), '', null, 'Insumos'),
-    row('Equipamiento', resumen.map(m => m.gastos.Equipamiento), '', null, 'Equipamiento'),
-    row('Operativos', resumen.map(m => m.gastos.Operativos), '', null, 'Operativos'),
-    row('Fiscales', resumen.map(m => m.gastos.ImpuestosFiscales || 0), '', null, 'ImpuestosFiscales'),
-    row('Comisiones', resumen.map(m => m.gastos.ImpuestosComisiones || 0), '', null, 'ImpuestosComisiones'),
-    row('Personal', resumen.map(m => m.gastos.Personal), '', null, 'Personal'),
-    row('Otros', resumen.map(m => m.gastos.Otros || 0), '', null, 'Otros'),
+    ...gastosDefs.map(g => row(g.label, g.vals, '', null, g.group)),
     row('Total Gastos', resumen.map(m => m.gastos.total), 'row-total'),
     section('INGRESOS'),
-    row('Efectivo', resumen.map(m => m.ingresos.Efectivo || 0)),
-    row('Mercado Pago', resumen.map(m => m.ingresos['Mercado Pago'] || 0)),
-    row('Galicia', resumen.map(m => m.ingresos.Galicia || 0)),
-    row('Otros ingresos', resumen.map(m => m.ingresos.Otros || 0)),
+    ...ingresosDefs.map(i => row(i.label, i.vals)),
     row('Total Ingresos', resumen.map(m => m.ingresos.total), 'row-total'),
     section('RESULTADO'),
     row('Resultado Neto', resumen.map(m => m.resultadoNeto), 'row-resultado', v => v >= 0 ? 'val-pos' : 'val-neg'),
     `<tr><td>Merc+Ins / Ingresos</td>${resumen.map(m => `<td class="val-accent">${pct(m.pctMercInsumos)}</td>`).join('')}${multi ? '<td class="val-accent">—</td>' : ''}</tr>`,
     `<tr><td>Personal / Ingresos</td>${resumen.map(m => `<td class="val-accent">${pct(m.pctPersonal)}</td>`).join('')}${multi ? '<td class="val-accent">—</td>' : ''}</tr>`,
+  ].join('');
+}
+
+// Render single-mes: valor absoluto + columna "% s/ing" sobre Total Ingresos,
+// con gastos e ingresos ordenados de mayor a menor.
+function renderTablaResumenSingle(m, head, body) {
+  const ingTotal = m.ingresos.total || 0;
+  const pctIng = v => ingTotal > 0 ? pct((v / ingTotal) * 100) : '—';
+
+  head.innerHTML = `<tr><th style="text-align:left">Concepto</th><th>${m.mes}</th><th style="white-space:nowrap">% s/ing</th></tr>`;
+
+  const row = (label, val, cls = '', colorFn = null, clickGroup = null, showPct = true) => {
+    const ck = clickGroup ? ` style="cursor:pointer" onclick="openConceptoModal('${clickGroup}')" title="Ver detalle"` : '';
+    const valCls = colorFn ? colorFn(val) : '';
+    const pctCell = showPct ? `<td class="val-accent">${pctIng(val)}</td>` : '<td></td>';
+    return `<tr class="${cls}"${ck}><td>${label}</td><td class="${valCls}">${fmt(val)}</td>${pctCell}</tr>`;
+  };
+  const section = label => `<tr class="row-header"><td colspan="3">${label}</td></tr>`;
+
+  const gastosItems = [
+    { label: 'Mercadería', val: m.gastos.Mercaderia || 0, group: 'Mercaderia' },
+    { label: 'Insumos', val: m.gastos.Insumos || 0, group: 'Insumos' },
+    { label: 'Equipamiento', val: m.gastos.Equipamiento || 0, group: 'Equipamiento' },
+    { label: 'Operativos', val: m.gastos.Operativos || 0, group: 'Operativos' },
+    { label: 'Fiscales', val: m.gastos.ImpuestosFiscales || 0, group: 'ImpuestosFiscales' },
+    { label: 'Comisiones', val: m.gastos.ImpuestosComisiones || 0, group: 'ImpuestosComisiones' },
+    { label: 'Personal', val: m.gastos.Personal || 0, group: 'Personal' },
+    { label: 'Otros', val: m.gastos.Otros || 0, group: 'Otros' },
+  ].sort((a, b) => b.val - a.val);
+
+  const ingItems = [
+    { label: 'Efectivo', val: m.ingresos.Efectivo || 0 },
+    { label: 'Mercado Pago', val: m.ingresos['Mercado Pago'] || 0 },
+    { label: 'Galicia', val: m.ingresos.Galicia || 0 },
+    { label: 'Otros ingresos', val: m.ingresos.Otros || 0 },
+  ].sort((a, b) => b.val - a.val);
+
+  body.innerHTML = [
+    section('GASTOS'),
+    ...gastosItems.map(g => row(g.label, g.val, '', null, g.group)),
+    row('Total Gastos', m.gastos.total, 'row-total'),
+    section('INGRESOS'),
+    ...ingItems.map(i => row(i.label, i.val)),
+    row('Total Ingresos', m.ingresos.total, 'row-total'),
+    section('RESULTADO'),
+    row('Resultado Neto', m.resultadoNeto, 'row-resultado', v => v >= 0 ? 'val-pos' : 'val-neg'),
   ].join('');
 }
 
