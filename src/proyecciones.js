@@ -19,8 +19,16 @@
 
 const ORDEN_MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
-const AGUINALDO_JUNIO_PCT = parseFloat(process.env.AGUINALDO_JUNIO_PCT || '0.5');
-const AGUINALDO_DICIEMBRE_PCT = parseFloat(process.env.AGUINALDO_DICIEMBRE_PCT || '0.5');
+// Aguinaldo: MONTO FIJO en ARS por mes (no un % del personal). Lo que efectivamente
+// se paga de SAC ese mes. Configurable por env.
+const AGUINALDO_JUNIO_ARS = parseFloat(process.env.AGUINALDO_JUNIO_ARS || '1000000');
+const AGUINALDO_DICIEMBRE_ARS = parseFloat(process.env.AGUINALDO_DICIEMBRE_ARS || '1000000');
+
+// Personal esperado de un mes completo. Si el mes de referencia (el anterior con
+// sueldos) queda por debajo del UMBRAL, se asume incompleto y se usa el DEFAULT.
+// Ambos configurables por env.
+const PERSONAL_MENSUAL_DEFAULT = parseFloat(process.env.PERSONAL_MENSUAL_DEFAULT || '11300000');
+const PERSONAL_UMBRAL_MIN = parseFloat(process.env.PERSONAL_UMBRAL_MIN || '10000000');
 
 const DIA_MS = 86_400_000;
 const DIAS_VENTANA = 28;          // ventana de observación para los baselines
@@ -65,16 +73,20 @@ function calcularBaselines(movimientos, hoy = new Date()) {
       personalPorMes[m.mes] = (personalPorMes[m.mes] || 0) + m.salidaTotal;
     }
   }
-  let personalMensual = 0;
-  for (let i = ORDEN_MESES.length - 1; i >= 0; i--) {
-    const mes = ORDEN_MESES[i];
-    // tomar el último mes cuya masa salarial sea "completa" (>= 60% del máximo)
-    if (personalPorMes[mes]) {
-      const max = Math.max(...Object.values(personalPorMes));
-      if (personalPorMes[mes] >= max * 0.6) { personalMensual = personalPorMes[mes]; break; }
-    }
+  // Referencia: la masa salarial del mes ANTERIOR al actual (último mes cerrado).
+  // Si ese valor está por debajo del umbral (mes incompleto o sin cargar los sueldos
+  // grandes), se asume que falta data y se usa el personal esperado por defecto.
+  const mesActualIdx0 = hoy.getMonth();
+  let personalRef = 0;
+  for (let k = 1; k <= ORDEN_MESES.length; k++) {
+    const idx = (mesActualIdx0 - k + 12) % 12;
+    const mes = ORDEN_MESES[idx];
+    if (personalPorMes[mes]) { personalRef = personalPorMes[mes]; break; }
   }
-  if (!personalMensual) personalMensual = Math.max(0, ...Object.values(personalPorMes));
+  // Fallback: si no hubo ningún mes anterior con personal, tomar el máximo cargado.
+  if (!personalRef) personalRef = Math.max(0, ...Object.values(personalPorMes));
+  // Piso: si la referencia es baja, defaultear al personal esperado de un mes completo.
+  const personalMensual = personalRef < PERSONAL_UMBRAL_MIN ? PERSONAL_MENSUAL_DEFAULT : personalRef;
 
   // Alquiler: último registrado
   let alquilerMensual = 0, alquilerFecha = null;
@@ -127,8 +139,8 @@ function proyectar({ movimientos, resumen, variables = [], hoy = new Date(), hor
     const operativos = base.operativosMensual;
 
     let aguinaldo = 0;
-    if (mesNombre === 'Junio') aguinaldo = personal * AGUINALDO_JUNIO_PCT;
-    if (mesNombre === 'Diciembre') aguinaldo = personal * AGUINALDO_DICIEMBRE_PCT;
+    if (mesNombre === 'Junio') aguinaldo = AGUINALDO_JUNIO_ARS;
+    if (mesNombre === 'Diciembre') aguinaldo = AGUINALDO_DICIEMBRE_ARS;
 
     // Variables personalizadas
     let varGastos = 0, varIngresos = 0;
@@ -164,8 +176,8 @@ function proyectar({ movimientos, resumen, variables = [], hoy = new Date(), hor
     proyeccion,
     supuestos: {
       ...base,
-      aguinaldoJunioPct: AGUINALDO_JUNIO_PCT,
-      aguinaldoDiciembrePct: AGUINALDO_DICIEMBRE_PCT,
+      aguinaldoJunioARS: AGUINALDO_JUNIO_ARS,
+      aguinaldoDiciembreARS: AGUINALDO_DICIEMBRE_ARS,
       generado: hoy.toISOString(),
     },
   };
@@ -359,8 +371,8 @@ function proyeccionMes({ movimientos, variables = [], hoy = new Date() }) {
 
   // Aguinaldo (Junio/Diciembre) sobre el objetivo de personal.
   let aguinaldo = 0;
-  if (mesNombre === 'Junio') aguinaldo = objetivoPersonal * AGUINALDO_JUNIO_PCT;
-  if (mesNombre === 'Diciembre') aguinaldo = objetivoPersonal * AGUINALDO_DICIEMBRE_PCT;
+  if (mesNombre === 'Junio') aguinaldo = AGUINALDO_JUNIO_ARS;
+  if (mesNombre === 'Diciembre') aguinaldo = AGUINALDO_DICIEMBRE_ARS;
 
   // ── Totales forecast ──
   const ingresoForecast = ingresoReal + ingresoFuturoServicios + varIngresoMes;
