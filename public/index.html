@@ -758,6 +758,15 @@
       </div>
       <div class="chart-container" style="height:340px"><canvas id="chart-proymes"></canvas></div>
     </div>
+    <!-- Desglose auditable del forecast -->
+    <div class="card" id="proymes-desglose-card" style="margin-top:0;display:none">
+      <div class="card-title">Cómo se compone la proyección
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· real + lo que falta del mes, sin duplicar costos fijos</span>
+      </div>
+      <div class="table-wrap">
+        <table class="prov-resumen-table" style="width:100%"><tbody id="proymes-desglose-body"></tbody></table>
+      </div>
+    </div>
     <!-- Zócalo de variables, inmediatamente bajo el gráfico -->
     <div class="card" style="margin-top:0">
       <div class="card-title">Variables (simulación)
@@ -4590,6 +4599,42 @@ async function recalcCalc() {
   ].join('');
 }
 
+// Desglose auditable de la proyeccion del mes: muestra lo REAL ya registrado +
+// lo que falta proyectar, dejando claro que los costos fijos no se duplican.
+function renderProymesDesglose(data) {
+  const card = document.getElementById('proymes-desglose-card');
+  const body = document.getElementById('proymes-desglose-body');
+  if (!card || !body) return;
+  const d = data.forecastDetalle || {};
+  card.style.display = '';
+
+  const fila = (label, val, opts) => {
+    opts = opts || {};
+    const cls = opts.cls || '';
+    const sub = opts.sub ? ' <span style="color:var(--text-muted);font-size:11px">'+opts.sub+'</span>' : '';
+    const valStr = (val == null) ? '—' : fmt(val);
+    return '<tr class="'+cls+'"><td>'+label+sub+'</td><td style="text-align:right">'+valStr+'</td></tr>';
+  };
+  const sec = label => '<tr class="row-header"><td colspan="2">'+label+'</td></tr>';
+
+  body.innerHTML = [
+    sec('INGRESOS'),
+    fila('Ingreso real (al día '+data.diaHoy+')', data.ingresoReal),
+    fila('+ Servicios que faltan', d.ingresoFuturoServicios, { sub: '~'+(data.diasServicioRestantes!=null?data.diasServicioRestantes:'?')+' servicios × '+fmt(data.ingresoPorServicio||0) }),
+    fila('Ingreso proyectado fin de mes', data.ingresoForecast, { cls: 'row-total' }),
+    sec('GASTOS'),
+    fila('Gasto real (al día '+data.diaHoy+')', data.gastoReal),
+    fila('+ Costo variable futuro', d.costoVarFuturo, { sub: 'mercadería/insumos de lo que falta' }),
+    fila('+ Operativos futuros', d.operativosFuturo),
+    fila('+ Personal faltante', d.personalFaltante, { sub: (d.personalRegistrado>0 ? fmt(d.personalRegistrado)+' ya registrado · no se duplica' : 'aún no registrado este mes') }),
+    fila('+ Alquiler faltante', d.alquilerFaltante, { sub: (d.alquilerRegistrado>0 ? 'ya registrado · no se duplica' : '') }),
+    fila('+ Aguinaldo', d.aguinaldo),
+    fila('Gasto proyectado fin de mes', data.gastoForecast, { cls: 'row-total' }),
+    sec('RESULTADO'),
+    fila('Resultado proyectado', data.resultadoForecast, { cls: 'row-resultado' }),
+  ].join('');
+}
+
 async function loadProyeccionMes() {
   let data;
   try { const r = await api('/api/proyeccion-mes'); data = r.data; }
@@ -4599,6 +4644,7 @@ async function loadProyeccionMes() {
     + '<div class="kpi-card red"><div class="kpi-label">Gasto real</div><div class="kpi-value">'+fmt(data.gastoReal)+'</div><div class="kpi-sub">resultado '+fmt(data.resultadoReal)+'</div></div>'
     + '<div class="kpi-card blue"><div class="kpi-label">Proyeccion ingreso fin de '+data.mes+'</div><div class="kpi-value">'+fmt(data.ingresoForecast)+'</div><div class="kpi-sub">'+data.diasRestantes+' dias restantes</div></div>'
     + '<div class="kpi-card '+(data.resultadoForecast>=0?'green':'red')+'"><div class="kpi-label">Resultado proyectado</div><div class="kpi-value">'+fmt(data.resultadoForecast)+'</div><div class="kpi-sub">gasto proy. '+fmt(data.gastoForecast)+'</div></div>';
+  renderProymesDesglose(data);
   const serie = data.serie || [];
   const labels = serie.map(p => p.dia);
   if (state.charts['proymes']) state.charts['proymes'].destroy();
