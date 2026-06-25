@@ -286,17 +286,22 @@ function proyeccionMes({ movimientos, variables = [], hoy = new Date() }) {
   const ultimoDia = new Date(anio, mesIdx + 1, 0);
   const diasMes = ultimoDia.getDate();
   const diaHoy = hoy.getDate();
+  const diasRestantes = Math.max(0, diasMes - diaHoy);
+
+  // Baseline estable de los ultimos 28 dias (ingreso por dia de servicio, % costo
+  // variable, operativos, personal, alquiler). Esto NO se sesga por el dia del mes.
+  const base = calcularBaselines(movimientos, hoy);
 
   const delMes = (movimientos || []).filter(m =>
     !m.esCambio && !m.esFondeo && !m.esCuota &&
     m.fecha >= primerDia && m.fecha <= hoy);
 
-  // Acumulados diarios reales
+  // Acumulados diarios reales + deteccion de costos fijos YA registrados este mes.
   const ingresoPorDia = new Array(diasMes + 1).fill(0);
   const gastoPorDia = new Array(diasMes + 1).fill(0);
   let ingresoReal = 0, gastoReal = 0;
   let diasConServicio = new Set();
-  let fijosYaRegistrados = 0;
+  let personalRegistrado = 0, alquilerRegistrado = 0, costoVarRegistrado = 0;
 
   for (const m of delMes) {
     const d = m.fecha.getDate();
@@ -304,34 +309,72 @@ function proyeccionMes({ movimientos, variables = [], hoy = new Date() }) {
       ingresoPorDia[d] += m.entradaTotal; ingresoReal += m.entradaTotal;
       if (m.proveedor === 'Servicio') diasConServicio.add(d);
     } else if (m.tipo === 'Gasto') {
-      const monto = (m.pagado || m.esCompraEnCuotas) ? m.salidaTotal : m.salidaTotal;
+      const monto = m.salidaTotal;
       gastoPorDia[d] += monto; gastoReal += monto;
-      if (m.grupo === 'Personal' || m.categoria === 'Alquiler' || m.grupo === 'Operativos') {
-        fijosYaRegistrados += monto;
-      }
+      if (m.grupo === 'Personal') personalRegistrado += monto;
+      else if (m.categoria === 'Alquiler') alquilerRegistrado += monto;
+      if (m.grupo === 'Mercaderia' || m.grupo === 'Insumos') costoVarRegistrado += monto;
     }
   }
 
-  // Ritmo diario observado (sobre días transcurridos)
-  const ingresoDiario = diaHoy > 0 ? ingresoReal / diaHoy : 0;
-  const gastoDiario = diaHoy > 0 ? gastoReal / diaHoy : 0;
-  const diasRestantes = diasMes - diaHoy;
+  // ── Forecast de los dias que faltan, POR DIAS DE SERVICIO (no por ritmo diario) ──
+  // Cuantos dias de servicio quedan: frecuencia observada (dias serv / dia del mes)
+  // aplicada a los dias restantes. Cada dia de servicio aporta el ingreso promedio
+  // por servicio de los ultimos 28 dias, y su costo variable asociado.
+  const frecServicio = diaHoy > 0 ? (diasConServicio.size / diaHoy) : (base.diasServicioMes / DIAS_MES_PROM);
+  const diasServicioRestantes = frecServicio * diasRestantes;
+  const ingresoPorServicio = base.ingresoPorDiaServicio || 0;
 
-  // Variables personalizadas que aplican al mes en curso (monto mensual completo).
-  let varIngresoMes = 0, varGastoMes = 0;
+  const ingresoFuturoServicios = diasServicioRestantes * ingresoPorServicio;
+  const costoVarFuturo = ingresoFuturoServicios * base.pctCostoVariable;
+  // Operativos (no alquiler): prorratea el baseline mensual por los dias que faltan.
+  const operativosFuturo = (base.operativosMensual / DIAS_MES_PROM) * diasRestantes;
+
+  // ── Costos fijos del mes SIN doble conteo ──
+  // Si el fijo ya esta registrado en lo real, NO se vuelve a sumar. Si falta, se
+  // completa con la variable custom que matchee por nombre, o con el baseline.
+  const norm = s => (s || '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const esPersonalVar = n => /sueldo|personal|salario|nomina|jornal/.test(norm(n));
+  const esAlquilerVar = n => /alquiler|renta|locacion/.test(norm(n));
+
+  // Variables custom del mes, separadas por tipo y por si "reemplazan" un fijo.
+  let varIngresoMes = 0, varGastoOtros = 0;
+  let varPersonal = 0, varAlquiler = 0;
   const varDetalle = [];
   for (const v of (variables || [])) {
     if (!Array.isArray(v.meses) || !v.meses.includes(mesNombre)) continue;
     const monto = Number(v.monto) || 0;
-    if (v.tipo === 'ingreso') varIngresoMes += monto; else varGastoMes += monto;
-    varDetalle.push({ nombre: v.nombre, tipo: v.tipo, monto });
+    if (v.tipo === 'ingreso') { varIngresoMes += monto; varDetalle.push({ nombre: v.nombre, tipo: 'ingreso', monto }); continue; }
+    if (esPersonalVar(v.nombre)) { varPersonal += monto; varDetalle.push({ nombre: v.nombre, tipo: 'gasto', concepto: 'personal', monto }); }
+    else if (esAlquilerVar(v.nombre)) { varAlquiler += monto; varDetalle.push({ nombre: v.nombre, tipo: 'gasto', concepto: 'alquiler', monto }); }
+    else { varGastoOtros += monto; varDetalle.push({ nombre: v.nombre, tipo: 'gasto', monto }); }
   }
 
-  // Forecast: ritmo diario hasta fin de mes + variables del mes (monto completo).
-  const ingresoForecast = ingresoReal + ingresoDiario * diasRestantes + varIngresoMes;
-  const gastoForecast = gastoReal + gastoDiario * diasRestantes + varGastoMes;
+  // Personal del mes: lo ya registrado + lo que falte para llegar al objetivo
+  // (variable custom si existe; si no, baseline). Nunca menos que lo ya pagado.
+  const objetivoPersonal = varPersonal > 0 ? varPersonal : base.personalMensual;
+  const personalFaltante = Math.max(0, objetivoPersonal - personalRegistrado);
+  const objetivoAlquiler = varAlquiler > 0 ? varAlquiler : base.alquilerMensual;
+  const alquilerFaltante = Math.max(0, objetivoAlquiler - alquilerRegistrado);
 
-  // Series acumuladas para el gráfico
+  // Aguinaldo (Junio/Diciembre) sobre el objetivo de personal.
+  let aguinaldo = 0;
+  if (mesNombre === 'Junio') aguinaldo = objetivoPersonal * AGUINALDO_JUNIO_PCT;
+  if (mesNombre === 'Diciembre') aguinaldo = objetivoPersonal * AGUINALDO_DICIEMBRE_PCT;
+
+  // ── Totales forecast ──
+  const ingresoForecast = ingresoReal + ingresoFuturoServicios + varIngresoMes;
+  const gastoForecast = gastoReal
+    + costoVarFuturo + operativosFuturo
+    + personalFaltante + alquilerFaltante + aguinaldo + varGastoOtros;
+
+  // Reparto del gasto futuro por dia (para la serie del grafico): el gasto que falta
+  // se distribuye parejo en los dias restantes (visualmente suave, sin saltos).
+  const gastoFuturoTotal = costoVarFuturo + operativosFuturo + personalFaltante + alquilerFaltante + aguinaldo + varGastoOtros;
+  const ingresoFuturoTotal = ingresoFuturoServicios + varIngresoMes;
+  const gastoFuturoPorDia = diasRestantes > 0 ? gastoFuturoTotal / diasRestantes : 0;
+  const ingresoFuturoPorDia = diasRestantes > 0 ? ingresoFuturoTotal / diasRestantes : 0;
+
   const serie = [];
   let accIng = 0, accGas = 0;
   for (let d = 1; d <= diasMes; d++) {
@@ -342,23 +385,38 @@ function proyeccionMes({ movimientos, variables = [], hoy = new Date() }) {
       fecha: `${anio}-${String(mesIdx+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`,
       ingresoReal: esFuturo ? null : Math.round(accIng),
       gastoReal: esFuturo ? null : Math.round(accGas),
-      ingresoForecast: esFuturo ? Math.round(ingresoReal + ingresoDiario * (d - diaHoy) + (diasRestantes>0 ? varIngresoMes * ((d - diaHoy)/diasRestantes) : 0)) : Math.round(accIng),
-      gastoForecast: esFuturo ? Math.round(gastoReal + gastoDiario * (d - diaHoy) + (diasRestantes>0 ? varGastoMes * ((d - diaHoy)/diasRestantes) : 0)) : Math.round(accGas),
+      ingresoForecast: esFuturo ? Math.round(ingresoReal + ingresoFuturoPorDia * (d - diaHoy)) : Math.round(accIng),
+      gastoForecast: esFuturo ? Math.round(gastoReal + gastoFuturoPorDia * (d - diaHoy)) : Math.round(accGas),
     });
   }
 
   return {
     mes: mesNombre, anio, diasMes, diaHoy, diasRestantes,
     diasConServicio: diasConServicio.size,
+    diasServicioRestantes: Math.round(diasServicioRestantes * 10) / 10,
     ingresoReal: Math.round(ingresoReal),
     gastoReal: Math.round(gastoReal),
     resultadoReal: Math.round(ingresoReal - gastoReal),
     ingresoForecast: Math.round(ingresoForecast),
     gastoForecast: Math.round(gastoForecast),
     resultadoForecast: Math.round(ingresoForecast - gastoForecast),
-    ingresoDiario: Math.round(ingresoDiario),
-    gastoDiario: Math.round(gastoDiario),
+    ingresoDiario: Math.round(diaHoy > 0 ? ingresoReal / diaHoy : 0),
+    gastoDiario: Math.round(diaHoy > 0 ? gastoReal / diaHoy : 0),
+    ingresoPorServicio: Math.round(ingresoPorServicio),
     variablesMes: varDetalle,
+    // Transparencia: de donde sale el forecast
+    forecastDetalle: {
+      personalRegistrado: Math.round(personalRegistrado),
+      personalFaltante: Math.round(personalFaltante),
+      objetivoPersonal: Math.round(objetivoPersonal),
+      alquilerRegistrado: Math.round(alquilerRegistrado),
+      alquilerFaltante: Math.round(alquilerFaltante),
+      costoVarRegistrado: Math.round(costoVarRegistrado),
+      costoVarFuturo: Math.round(costoVarFuturo),
+      operativosFuturo: Math.round(operativosFuturo),
+      ingresoFuturoServicios: Math.round(ingresoFuturoServicios),
+      aguinaldo: Math.round(aguinaldo),
+    },
     serie,
   };
 }
