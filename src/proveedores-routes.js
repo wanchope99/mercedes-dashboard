@@ -407,6 +407,7 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
     try {
       const { producto, categoria, desde, hasta } = req.query;
       if (!producto) return res.status(400).json({ ok: false, error: 'Falta el parámetro producto' });
+      await stocks.cargarMatchOverrides().catch(() => {});
       res.json({ ok: true, data: await stocks.getSerieStock({ producto, categoria, desde, hasta }) });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
@@ -418,12 +419,27 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
       res.json({ ok: true, data: await stocks.getSerieCategoria({ categoria, desde, hasta }) });
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
-  // Corrección manual del match producto↔venta FUDO
-  router.post('/api/stocks/match', authMiddleware, soloAdmin, (req, res) => {
-    const { producto, nombreFudo } = req.body || {};
-    if (!producto || !nombreFudo) return res.status(400).json({ ok: false, error: 'Faltan producto y nombreFudo' });
-    stocks.setMatchOverride(producto, nombreFudo);
-    res.json({ ok: true, message: 'Match actualizado' });
+  // Lista de productos FUDO del periodo + el override actual de un insumo (para la UI).
+  router.get('/api/stocks/fudo-productos', authMiddleware, soloAdmin, async (req, res) => {
+    try {
+      const { desde, hasta, producto } = req.query;
+      await stocks.cargarMatchOverrides().catch(() => {});
+      const fudoProductos = await stocks.listarProductosFudo({ desde, hasta });
+      const actual = producto ? stocks.getMatchOverride(producto) : [];
+      res.json({ ok: true, data: { fudoProductos, actual } });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Corrección manual del match insumo↔venta(s) FUDO. Acepta uno o varios nombres.
+  // Body: { producto, nombresFudo: [..] }  (nombreFudo string sigue soportado).
+  router.post('/api/stocks/match', authMiddleware, soloAdmin, async (req, res) => {
+    try {
+      const { producto, nombresFudo, nombreFudo } = req.body || {};
+      const lista = Array.isArray(nombresFudo) ? nombresFudo : (nombreFudo ? [nombreFudo] : []);
+      if (!producto) return res.status(400).json({ ok: false, error: 'Falta el producto' });
+      await stocks.setMatchOverride(producto, lista);
+      res.json({ ok: true, message: lista.length ? 'Match actualizado' : 'Match eliminado' });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
   return router;
