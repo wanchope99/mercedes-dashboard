@@ -709,6 +709,16 @@
     <div class="card">
       <div class="card-title">Ingresos (compras) vs Ventas en el tiempo
         <span id="stk-match-info" style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"></span>
+        <button id="stk-match-btn" class="btn" style="float:right;font-size:12px;padding:5px 12px;display:none" onclick="abrirMatchPanel()">🔧 Corregir match de ventas</button>
+      </div>
+      <div id="stk-match-panel" style="display:none;background:var(--surface2);border-radius:8px;padding:14px;margin-bottom:12px">
+        <div style="font-size:13px;margin-bottom:8px">Vincular <strong id="stk-match-producto"></strong> a sus ventas en FUDO <span style="color:var(--text-muted);font-size:11px">· elegí uno o varios platos/productos donde se usa este insumo</span></div>
+        <div id="stk-match-checks" style="max-height:240px;overflow:auto;display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;margin-bottom:10px"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="stk-match-buscar" placeholder="Filtrar productos FUDO..." style="flex:1" oninput="filtrarMatchChecks()">
+          <button class="btn btn-primary" onclick="guardarMatch()">Guardar</button>
+          <button class="btn" onclick="cerrarMatchPanel()">Cancelar</button>
+        </div>
       </div>
       <div class="chart-container" style="height:340px"><canvas id="chart-stk"></canvas></div>
       <div id="stk-empty" class="prov-empty" style="display:none">Elegí un producto para ver cuándo entra y cuándo se vende.</div>
@@ -4037,6 +4047,80 @@ async function eliminarConsumo(producto) {
   } catch (e) { showToast('Error: ' + e.message); }
 }
 
+// ─── Corregir match insumo ↔ ventas FUDO (multi-plato) ───────────────────────
+let _fudoProductos = [];   // lista de nombres FUDO del periodo
+let _matchActual = [];     // nombres ya mapeados al insumo actual
+
+function _stkQS() {
+  const qs = new URLSearchParams();
+  const desde = document.getElementById('stk-desde') && document.getElementById('stk-desde').value;
+  const hasta = document.getElementById('stk-hasta') && document.getElementById('stk-hasta').value;
+  if (desde) qs.set('desde', desde);
+  if (hasta) qs.set('hasta', hasta);
+  return qs;
+}
+
+async function abrirMatchPanel() {
+  const producto = document.getElementById('stk-filter-producto').value;
+  if (!producto) { showToast('Elegí un producto primero'); return; }
+  document.getElementById('stk-match-producto').textContent = producto;
+  const panel = document.getElementById('stk-match-panel');
+  panel.style.display = '';
+  document.getElementById('stk-match-checks').innerHTML = '<div style="color:var(--text-muted);font-size:12px">Cargando productos de FUDO...</div>';
+
+  const qs = _stkQS(); qs.set('producto', producto);
+  try {
+    const { data } = await api('/api/stocks/fudo-productos?' + qs.toString());
+    _fudoProductos = data.fudoProductos || [];
+    _matchActual = (data.actual || []).map(x => x.toLowerCase());
+  } catch (e) { document.getElementById('stk-match-checks').innerHTML = '<div style="color:var(--red)">Error: '+escapeHtml(e.message)+'</div>'; return; }
+  renderMatchChecks();
+}
+
+function renderMatchChecks() {
+  const cont = document.getElementById('stk-match-checks');
+  const filtro = (document.getElementById('stk-match-buscar').value || '').toLowerCase();
+  const lista = _fudoProductos.filter(n => !filtro || n.toLowerCase().includes(filtro));
+  if (!lista.length) { cont.innerHTML = '<div style="color:var(--text-muted);font-size:12px">Sin productos FUDO en el período.</div>'; return; }
+  cont.innerHTML = lista.map(n => {
+    const checked = _matchActual.includes(n.toLowerCase()) ? 'checked' : '';
+    const id = 'mck_' + btoa(unescape(encodeURIComponent(n))).replace(/[^a-zA-Z0-9]/g,'');
+    return '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" value="'+escapeHtml(n)+'" '+checked+'> '+escapeHtml(n)+'</label>';
+  }).join('');
+}
+
+function filtrarMatchChecks() {
+  // Preservar selección actual antes de re-renderizar
+  document.querySelectorAll('#stk-match-checks input[type=checkbox]').forEach(ch => {
+    const v = ch.value.toLowerCase();
+    if (ch.checked && !_matchActual.includes(v)) _matchActual.push(v);
+    if (!ch.checked) _matchActual = _matchActual.filter(x => x !== v);
+  });
+  renderMatchChecks();
+}
+
+function cerrarMatchPanel() {
+  const panel = document.getElementById('stk-match-panel');
+  if (panel) panel.style.display = 'none';
+}
+
+async function guardarMatch() {
+  const producto = document.getElementById('stk-filter-producto').value;
+  // Tomar selección final
+  const seleccion = [];
+  document.querySelectorAll('#stk-match-checks input[type=checkbox]').forEach(ch => { if (ch.checked) seleccion.push(ch.value); });
+  // Sumar los que estaban marcados pero filtrados fuera de vista
+  _matchActual.forEach(v => { if (!seleccion.some(x => x.toLowerCase()===v)) {
+    const orig = _fudoProductos.find(n => n.toLowerCase()===v); if (orig) seleccion.push(orig);
+  }});
+  try {
+    await api('/api/stocks/match', { method: 'POST', body: JSON.stringify({ producto, nombresFudo: seleccion }) });
+    showToast(seleccion.length ? 'Match guardado ('+seleccion.length+' productos)' : 'Match eliminado');
+    cerrarMatchPanel();
+    loadStkProducto(); // recargar la serie con el nuevo match
+  } catch (e) { showToast('Error: ' + e.message); }
+}
+
 async function loadStkProducto() {
   const producto = document.getElementById('stk-filter-producto').value;
   const categoria = document.getElementById('stk-filter-categoria').value;
@@ -4067,6 +4151,10 @@ async function loadStkProducto() {
 
   // Info del tipo de match (directo para bebidas, indirecto para insumos)
   document.getElementById('stk-match-info').textContent = data.matchInfo || '';
+  // Mostrar boton para corregir el match (solo con un producto elegido)
+  const _mbtn = document.getElementById('stk-match-btn');
+  if (_mbtn) _mbtn.style.display = '';
+  cerrarMatchPanel();
 
   // KPIs
   document.getElementById('stk-kpi-dias').textContent =
