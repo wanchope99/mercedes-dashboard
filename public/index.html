@@ -1138,8 +1138,8 @@
         <button class="btn" style="float:right;font-size:12px;padding:6px 12px" onclick="loadHistorialArqueos()">↻ Actualizar</button>
       </div>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.6">
-        <b>Continuidad</b>: efectivo con que se ABRIÓ un turno vs con el que CERRÓ el anterior. Si no coinciden, se movió plata entre turnos (retiro legítimo o error).<br>
-        <b>Dif. apertura</b>: lo contado al abrir vs lo esperado del sheet. Los días con diferencia + nota están resaltados.
+        <b>Diferencia</b> = Efectivo cierre − (Efectivo inicial + Ingreso Fudo − gastos del turno). Si da ✓, la caja cerró bien. Si faltan/sobran, hay una diferencia a revisar.<br>
+        Las filas con diferencia se resaltan; en naranja si tienen nota (explicada), en rojo si falta explicar. Los arqueos viejos no tienen el dato de Fudo y muestran "—".
       </div>
       <div id="hist-arqueos-kpis" class="kpi-grid" style="margin-bottom:14px"></div>
       <div class="table-wrap">
@@ -1415,6 +1415,12 @@ const state = {
   timerInterval: null,
 };
 
+// ─── Zona horaria: toda la app muestra horarios en Buenos Aires, Argentina ──────
+const TZ_AR = 'America/Argentina/Buenos_Aires';
+const fechaAR = (d = new Date(), opts = {}) => new Date(d).toLocaleDateString('es-AR', { timeZone: TZ_AR, ...opts });
+const horaAR = (d = new Date(), opts = {}) => new Date(d).toLocaleTimeString('es-AR', { timeZone: TZ_AR, ...opts });
+const fechaHoraAR = (d = new Date(), opts = {}) => new Date(d).toLocaleString('es-AR', { timeZone: TZ_AR, ...opts });
+
 const fmt = n => `$${Math.round(n).toLocaleString('es-AR')}`;
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -1673,7 +1679,7 @@ function switchTab(tab, btn) {
 async function initArqueo() {
   const hoy = new Date();
   document.getElementById('arqueo-fecha-header').textContent =
-    hoy.toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    fechaAR(hoy, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
   try {
     const { data } = await api('/api/arqueo/estado');
@@ -1912,18 +1918,21 @@ async function loadHistorialArqueos() {
   catch (e) { if (body) body.innerHTML = '<tr><td style="color:var(--red);padding:14px">Error: '+escapeHtml(e.message)+'</td></tr>'; return; }
 
   const TOL = 1; // tolerancia $ para considerar "cierra"
-  const conDif = data.filter(a => Math.abs(a.diffContinuidadEfectivo || 0) > TOL).length;
+  // Solo cuentan para el KPI los arqueos que tienen el dato nuevo (dif del turno).
+  const conDato = data.filter(a => a.difEfectivoTurno != null);
+  const conDif = conDato.filter(a => Math.abs(a.difEfectivoTurno) > TOL).length;
   const conNota = data.filter(a => a.nota).length;
   if (kpis) kpis.innerHTML =
     '<div class="kpi-card blue"><div class="kpi-label">Arqueos registrados</div><div class="kpi-value">'+data.length+'</div></div>'
-    + '<div class="kpi-card '+(conDif>0?'red':'green')+'"><div class="kpi-label">Con dif. de continuidad</div><div class="kpi-value">'+conDif+'</div><div class="kpi-sub">efectivo entre turnos</div></div>'
+    + '<div class="kpi-card '+(conDif>0?'red':'green')+'"><div class="kpi-label">Con diferencia</div><div class="kpi-value">'+conDif+'</div><div class="kpi-sub">efectivo vs Fudo</div></div>'
     + '<div class="kpi-card accent"><div class="kpi-label">Con nota</div><div class="kpi-value">'+conNota+'</div><div class="kpi-sub">explicaciones cargadas</div></div>';
 
   head.innerHTML = '<tr>'
     + '<th style="text-align:left">Fecha</th><th>Apertura</th><th>Cierre</th>'
-    + '<th style="text-align:right">Efvo inicial</th><th style="text-align:right">Efvo final</th>'
-    + '<th style="text-align:right" title="Efvo abierto vs cierre del turno previo">Continuidad efvo</th>'
-    + '<th style="text-align:right" title="Contado al abrir vs esperado del sheet">Dif. apertura</th>'
+    + '<th style="text-align:right">Efectivo inicial</th>'
+    + '<th style="text-align:right">Efectivo cierre</th>'
+    + '<th style="text-align:right">Ingreso Fudo</th>'
+    + '<th style="text-align:right">Diferencia</th>'
     + '<th style="text-align:left">Nota</th></tr>';
 
   if (!data.length) { body.innerHTML = '<tr><td colspan="8" style="color:var(--text-muted);padding:14px">Sin arqueos registrados.</td></tr>'; return; }
@@ -1932,12 +1941,12 @@ async function loadHistorialArqueos() {
     if (v == null) return '<td style="text-align:right;color:var(--text-muted)">—</td>';
     const ok = Math.abs(v) <= TOL;
     const col = ok ? 'var(--green)' : 'var(--red)';
-    const txt = ok ? '✓' : (v > 0 ? '+' : '') + fmt(v);
+    const txt = ok ? '✓ Cierra' : (v > 0 ? 'Sobran ' : 'Faltan ') + fmt(Math.abs(v));
     return '<td style="text-align:right;color:'+col+';font-weight:600">'+txt+'</td>';
   };
 
   body.innerHTML = data.map(a => {
-    const tieneDif = Math.abs(a.diffContinuidadEfectivo || 0) > TOL || Math.abs(a.diffAperturaEfectivo || 0) > TOL;
+    const tieneDif = a.difEfectivoTurno != null && Math.abs(a.difEfectivoTurno) > TOL;
     const bg = (tieneDif && a.nota) ? 'background:rgba(224,138,92,0.10)' : (tieneDif ? 'background:rgba(224,92,92,0.06)' : '');
     return '<tr style="'+bg+'">'
       + '<td style="text-align:left;font-weight:600">'+escapeHtml(a.fecha)+'</td>'
@@ -1945,13 +1954,12 @@ async function loadHistorialArqueos() {
       + '<td>'+escapeHtml(a.cierre)+'</td>'
       + '<td style="text-align:right">'+fmt(a.efectivoInicial)+'</td>'
       + '<td style="text-align:right">'+fmt(a.efectivoFinal)+'</td>'
-      + celdaDif(a.diffContinuidadEfectivo)
-      + celdaDif(a.diffAperturaEfectivo)
+      + '<td style="text-align:right">'+(a.ingresoFudoEfectivo != null ? fmt(a.ingresoFudoEfectivo) : '<span style=\'color:var(--text-muted)\'>—</span>')+'</td>'
+      + celdaDif(a.difEfectivoTurno)
       + '<td style="text-align:left;color:var(--text-muted);max-width:240px;white-space:normal">'+escapeHtml(a.nota || '')+'</td>'
       + '</tr>';
   }).join('');
 }
-
 async function cerrarCaja() {
   const efectivo    = parseFloat(document.getElementById('ci-efectivo').value) || 0;
   const mp          = parseFloat(document.getElementById('ci-mp').value) || 0;
@@ -2164,7 +2172,7 @@ async function loadAll() {
   renderCharts(state.resumen);
   renderDiasSemana(state.diasSemana);
   renderActividadDiaria(state.diasData);
-  document.getElementById('last-updated').textContent = `Actualizado: ${new Date().toLocaleTimeString('es-AR')}`;
+  document.getElementById('last-updated').textContent = `Actualizado: ${horaAR(new Date(), { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
 }
 
 // ─── KPIs ─────────────────────────────────────────────────────────────────────
@@ -3891,7 +3899,7 @@ function renderDudaControl(domId, d) {
 }
 
 function renderPendCard(reg) {
-  const fecha = new Date(reg.creado).toLocaleString('es-AR');
+  const fecha = fechaHoraAR(reg.creado);
   const origen = reg.origen && reg.origen.usuario ? `de ${escapeHtml(reg.origen.usuario)}` : '';
 
   // Dudas a nivel FACTURA (medio de pago, IVA): se confirman una vez.
