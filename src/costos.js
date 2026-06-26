@@ -25,7 +25,9 @@ const cats = require('./proveedores-categorias');
 const { google } = require('googleapis');
 
 // ─── Persistencia de overrides de categoría en hoja Sheets ──────────────────────
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+// Datos de COSTOS/STOCKS viven en la planilla de Comparación Proveedores
+// (PROVEEDORES_SHEET_ID). Gestión Mercedes (SPREADSHEET_ID) queda como master financiero.
+const SPREADSHEET_ID = process.env.PROVEEDORES_SHEET_ID || process.env.SPREADSHEET_ID;
 const OVERRIDE_SHEET = process.env.COSTOS_OVERRIDE_SHEET || 'Producto Categorias';
 function _sheetsClient() {
   const credentials = process.env.GOOGLE_CREDENTIALS_JSON
