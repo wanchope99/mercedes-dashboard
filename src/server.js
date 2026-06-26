@@ -163,6 +163,68 @@ app.get('/api/arqueo/estado', authMiddleware, (req, res) => {
   res.json({ ok: true, data: estadoCaja });
 });
 
+// GET /api/arqueo/historial — log de todos los arqueos para troubleshooting.
+// Lee la hoja "Arqueo de Cajas" y calcula, con foco en EFECTIVO:
+//   · diffAperturaEfectivo: lo contado al abrir vs lo esperado (col K, ya guardado).
+//   · diffContinuidadEfectivo: efectivo con que CERRÓ un turno vs con el que se ABRIÓ
+//     el siguiente. Si no coinciden, faltó/sobró plata entre turnos.
+app.get('/api/arqueo/historial', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+    const r = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Arqueo de Cajas!A:M',
+    });
+    const rows = r.data.values || [];
+    const num = v => {
+      if (v == null || v === '') return 0;
+      const n = parseFloat(String(v).replace(/[^0-9.,-]/g, '').replace(/\.(?=\d{3}\b)/g, '').replace(',', '.'));
+      return Number.isFinite(n) ? n : 0;
+    };
+    // Detectar header (fila con "Fecha" en A) y arrancar después.
+    let start = 0;
+    if (rows.length && String(rows[0][0] || '').trim().toLowerCase() === 'fecha') start = 1;
+
+    const arqueos = [];
+    for (let i = start; i < rows.length; i++) {
+      const row = rows[i] || [];
+      if (!row[0]) continue;
+      arqueos.push({
+        rowIndex: i + 1,
+        fecha: (row[0] || '').toString().trim(),
+        apertura: (row[1] || '').toString().trim(),
+        cierre: (row[2] || '').toString().trim(),
+        duracion: (row[3] || '').toString().trim(),
+        efectivoInicial: num(row[4]),
+        mpInicial: num(row[5]),
+        efectivoFinal: num(row[7]),
+        mpFinal: num(row[8]),
+        galiciaFinal: num(row[9]),
+        diffAperturaEfectivo: num(row[10]), // K
+        diffAperturaMP: num(row[11]),       // L
+        nota: (row[12] || '').toString().trim(), // M
+      });
+    }
+
+    // Continuidad: el efectivo con que se ABRE un turno debería ser el efectivo con
+    // que CERRÓ el turno anterior. La diferencia revela movimientos entre turnos.
+    for (let i = 0; i < arqueos.length; i++) {
+      if (i === 0) { arqueos[i].diffContinuidadEfectivo = null; arqueos[i].diffContinuidadMP = null; continue; }
+      const prev = arqueos[i - 1], cur = arqueos[i];
+      arqueos[i].diffContinuidadEfectivo = Math.round((cur.efectivoInicial - prev.efectivoFinal) * 100) / 100;
+      arqueos[i].diffContinuidadMP = Math.round((cur.mpInicial - prev.mpFinal) * 100) / 100;
+    }
+
+    // Más recientes primero
+    arqueos.reverse();
+    res.json({ ok: true, data: arqueos });
+  } catch (err) {
+    console.error('Error /api/arqueo/historial:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // GET /api/arqueo/saldos-iniciales — lee saldos esperados de la hoja Cajas
 // Efectivo Local = F8, Mercado Pago = F2
 app.get('/api/arqueo/saldos-iniciales', authMiddleware, async (req, res) => {
@@ -225,7 +287,7 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   // galicia = Total Bruto; galiciaNeto = Total Neto Acreditado
   // impuestos se calcula como Bruto - Neto
   // fudo = ingresos del día según Fudo { encontrado, efectivo, mercadoPago, galicia }
-  const { efectivo, mercadoPago, galicia, galiciaNeto, fudo } = req.body;
+  const { efectivo, mercadoPago, galicia, galiciaNeto, fudo, nota } = req.body;
   if (efectivo === undefined || mercadoPago === undefined || galicia === undefined) {
     estadoCaja.cerrando = false;
     return res.status(400).json({ ok: false, error: 'Faltan valores de saldo final' });
@@ -284,10 +346,11 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
       galiciaBruto,
       estadoCaja.diffEfectivoInicial || 0,   // K: Diff Efectivo Local Inicial
       estadoCaja.diffMPInicial || 0,         // L: Diff Mercado Pago Inicial
+      (nota || '').toString().trim(),        // M: Nota de cierre (cuando no cierra)
     ];
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Arqueo de Cajas!A:L',
+      range: 'Arqueo de Cajas!A:M',
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [rowArqueo] },
     });
