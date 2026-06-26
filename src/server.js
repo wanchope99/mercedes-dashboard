@@ -113,6 +113,21 @@ app.get('/api/me', authMiddleware, (req, res) => {
 //    van como Gasto · Fiscales. El neto queda como resultado, discriminado.
 // gastosEfectivoSesion / gastosMPSesion: gastos YA registrados en Movimientos con la
 // caja abierta (ej: hielo). Reducen el esperado y NO deben generar fila delta duplicada.
+// ─── Zona horaria: TODA la app muestra horarios en Buenos Aires, Argentina ──────
+const TZ_AR = 'America/Argentina/Buenos_Aires';
+// Fecha local AR (dd/mm/aaaa) de un Date.
+function fechaAR(d = new Date()) {
+  return d.toLocaleDateString('es-AR', { timeZone: TZ_AR });
+}
+// Hora local AR (HH:MM) de un Date.
+function horaAR(d = new Date()) {
+  return d.toLocaleTimeString('es-AR', { timeZone: TZ_AR, hour: '2-digit', minute: '2-digit' });
+}
+// Fecha+hora local AR de un Date.
+function fechaHoraAR(d = new Date()) {
+  return d.toLocaleString('es-AR', { timeZone: TZ_AR });
+}
+
 function buildFilasCierreServicio({ fechaServicio, mesServicio, descripcionServicio, deltaEfectivo, deltaMP, galiciaBruto, impuestos, fudo, gastosEfectivoSesion = 0, gastosMPSesion = 0 }) {
   const ingreso = (medio, monto, desc) => [
     fechaServicio, mesServicio, 'Ingreso', 'Pagado', '', '', '',
@@ -174,7 +189,7 @@ app.get('/api/arqueo/historial', authMiddleware, adminOnly, async (req, res) => 
     const sheets = google.sheets({ version: 'v4', auth });
     const r = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Arqueo de Cajas!A:M',
+      range: 'Arqueo de Cajas!A:O',
     });
     const rows = r.data.values || [];
     const num = v => {
@@ -204,6 +219,8 @@ app.get('/api/arqueo/historial', authMiddleware, adminOnly, async (req, res) => 
         diffAperturaEfectivo: num(row[10]), // K
         diffAperturaMP: num(row[11]),       // L
         nota: (row[12] || '').toString().trim(), // M
+        ingresoFudoEfectivo: (row[13] != null && row[13] !== '') ? num(row[13]) : null, // N
+        difEfectivoTurno: (row[14] != null && row[14] !== '') ? num(row[14]) : null,    // O
       });
     }
 
@@ -314,10 +331,10 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   const mesServicio = mesesNombres[mesServNum - 1];
   const descripcionServicio = `Servicio ${dd}/${mm}`;
 
-  // Fechas para hoja Arqueo de Cajas (formato largo local)
-  const fechaStr = apertura.toLocaleDateString('es-AR');
-  const aperturaStr = apertura.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-  const cierreStr = cierre.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+  // Fechas para hoja Arqueo de Cajas — SIEMPRE en huso horario de Buenos Aires.
+  const fechaStr = fechaAR(apertura);
+  const aperturaStr = horaAR(apertura);
+  const cierreStr = horaAR(cierre);
 
   // Impuestos = diferencia entre Bruto y Neto Acreditado
   const galiciaBruto = Number(galicia) || 0;
@@ -333,6 +350,13 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
     // E:Efectivo Inicial, F:MP Inicial, G:Galicia Inicial (vacío),
     // H:Efectivo Final, I:MP Final, J:Galicia Final,
     // K:Diff Efectivo Local Inicial, L:Diff Mercado Pago Inicial
+    // Diferencia REAL del turno (efectivo): lo contado al cerrar vs lo esperado según
+    // ventas de Fudo. Esperado = inicial + Fudo efectivo − gastos en efectivo del turno.
+    const fudoEfectivo = (fudo && fudo.encontrado) ? (Number(fudo.efectivo) || 0) : 0;
+    const _gastosEfvoTurno = (estadoCaja.gastosSesion || []).filter(g => g.bucket === 'efectivo').reduce((a, g) => a + g.monto, 0);
+    const _esperadoEfvo = (estadoCaja.efectivoInicial || 0) + fudoEfectivo - _gastosEfvoTurno;
+    const difEfectivoTurno = Math.round((Number(efectivo) - _esperadoEfvo) * 100) / 100;
+
     const rowArqueo = [
       fechaStr,
       aperturaStr,
@@ -347,10 +371,12 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
       estadoCaja.diffEfectivoInicial || 0,   // K: Diff Efectivo Local Inicial
       estadoCaja.diffMPInicial || 0,         // L: Diff Mercado Pago Inicial
       (nota || '').toString().trim(),        // M: Nota de cierre (cuando no cierra)
+      fudoEfectivo,                          // N: Ingreso Fudo (efectivo) del turno
+      difEfectivoTurno,                      // O: Diferencia de efectivo del turno
     ];
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Arqueo de Cajas!A:M',
+      range: 'Arqueo de Cajas!A:O',
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [rowArqueo] },
     });
