@@ -21,10 +21,120 @@ let costosMod = null; try { costosMod = require('./costos'); } catch(e){}
 // Categorías que se venden "tal cual" en FUDO (match directo confiable).
 const CATEGORIAS_DIRECTAS = new Set(['Bebidas y Alcohol']);
 
-// Overrides manuales de match: { productoCanonNorm: nombreFudoNorm }. En memoria.
-const overridesMatch = new Map();
-function setMatchOverride(productoCanon, nombreFudo) {
-  overridesMatch.set(cats.norm(productoCanon), cats.norm(nombreFudo));
+// Overrides manuales de match: { productoCanonNorm: Set(nombreFudoNorm, ...) }.
+// Un insumo puede mapear a VARIOS productos/platos de FUDO (ej. Matambre entra en
+// varios platos). Se persiste en la hoja "Stock Match" del Google Sheets.
+const { google } = require('googleapis');
+// Stock Match vive en la planilla de Comparación Proveedores (junto a Compras).
+const SPREADSHEET_ID = process.env.PROVEEDORES_SHEET_ID || process.env.SPREADSHEET_ID;
+const STOCK_MATCH_SHEET = process.env.STOCK_MATCH_SHEET || 'Stock Match';
+
+const overridesMatch = new Map(); // norm(producto) -> { display, fudos: [{display, norm}] }
+let _overridesCargados = false;
+
+function _sheetsClient() {
+  const credentials = process.env.GOOGLE_CREDENTIALS_JSON
+    ? JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON)
+    : require('../../credentials.json');
+  const auth = new google.auth.GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
+  return google.sheets({ version: 'v4', auth });
+}
+
+async function _ensureSheet(api) {
+  try {
+    await api.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { requests: [{ addSheet: { properties: { title: STOCK_MATCH_SHEET } } }] },
+    });
+    await api.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID, range: `${STOCK_MATCH_SHEET}!A1:B1`, valueInputOption: 'RAW',
+      requestBody: { values: [['Insumo (stock)', 'Productos FUDO (separados por ;)']] },
+    });
+  } catch (e) { if (!String(e.message || '').toLowerCase().includes('already exists')) throw e; }
+}
+
+// Carga los overrides desde la hoja (idempotente; cachea tras el primer load).
+async function cargarMatchOverrides() {
+  if (!SPREADSHEET_ID) { _overridesCargados = true; return; }
+  const api = _sheetsClient();
+  let rows = [];
+  try {
+    const r = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${STOCK_MATCH_SHEET}!A:B` });
+    rows = r.data.values || [];
+  } catch (e) { await _ensureSheet(api); _overridesCargados = true; return; }
+  overridesMatch.clear();
+  for (let i = 1; i < rows.length; i++) {
+    const prodDisplay = (rows[i][0] || '').toString().trim();
+    if (!prodDisplay) continue;
+    const fudosRaw = (rows[i][1] || '').toString();
+    const fudos = fudosRaw.split(';').map(x => x.trim()).filter(Boolean)
+      .map(d => ({ display: d, norm: cats.norm(d) }));
+    overridesMatch.set(cats.norm(prodDisplay), { display: prodDisplay, fudos });
+  }
+  _overridesCargados = true;
+}
+
+// Setea (o borra si fudos vacío) el override de un insumo a varios productos FUDO.
+async function setMatchOverride(productoCanon, nombresFudo) {
+  // nombresFudo: array de strings (o un string, por compat con la API vieja).
+  const lista = Array.isArray(nombresFudo) ? nombresFudo : (nombresFudo ? [nombresFudo] : []);
+  const fudos = lista.map(d => String(d).trim()).filter(Boolean).map(d => ({ display: d, norm: cats.norm(d) }));
+  const key = cats.norm(productoCanon);
+  if (fudos.length) overridesMatch.set(key, { display: String(productoCanon).trim(), fudos });
+  else overridesMatch.delete(key);
+
+  // Persistir en Sheets (upsert por insumo).
+  if (!SPREADSHEET_ID) return;
+  const api = _sheetsClient();
+  await _ensureSheet(api);
+  let rows = [];
+  try {
+    const r = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${STOCK_MATCH_SHEET}!A:B` });
+    rows = r.data.values || [];
+  } catch (e) { rows = []; }
+  let rowIndex = -1;
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i] && cats.norm(rows[i][0] || '') === key) { rowIndex = i + 1; break; }
+  }
+  const fila = [String(productoCanon).trim(), fudos.map(f => f.display).join('; ')];
+  if (fudos.length === 0 && rowIndex > 0) {
+    // Vaciar la celda de productos (mantener la fila para no romper indices).
+    await api.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID, range: `${STOCK_MATCH_SHEET}!A${rowIndex}:B${rowIndex}`,
+      valueInputOption: 'RAW', requestBody: { values: [[String(productoCanon).trim(), '']] },
+    });
+  } else if (rowIndex > 0) {
+    await api.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID, range: `${STOCK_MATCH_SHEET}!A${rowIndex}:B${rowIndex}`,
+      valueInputOption: 'RAW', requestBody: { values: [fila] },
+    });
+  } else if (fudos.length) {
+    await api.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID, range: `${STOCK_MATCH_SHEET}!A:B`,
+      valueInputOption: 'RAW', requestBody: { values: [fila] },
+    });
+  }
+}
+
+function getMatchOverride(productoCanon) {
+  const o = overridesMatch.get(cats.norm(productoCanon));
+  return o ? o.fudos.map(f => f.display) : [];
+}
+
+// Lista de nombres de productos FUDO distintos en el periodo (para el selector de la UI).
+async function listarProductosFudo({ desde, hasta } = {}) {
+  let detalles = [];
+  try { detalles = await fudo.getDetallesFrescos({ desde, hasta }); } catch (e) { detalles = []; }
+  const set = new Map(); // norm -> display
+  for (const dia of detalles) {
+    for (const cat of (dia.categorias || [])) {
+      for (const p of (cat.productos || [])) {
+        const n = cats.norm(p.nombre);
+        if (n && !set.has(n)) set.set(n, p.nombre);
+      }
+    }
+  }
+  return Array.from(set.values()).sort((a, b) => a.localeCompare(b));
 }
 
 // ─── Similitud de nombres (tokens compartidos, tipo Jaccard) ────────────────────
@@ -53,7 +163,8 @@ async function ventasDeProducto(productoCanon, { desde, hasta } = {}) {
   try { detalles = await fudo.getDetallesFrescos({ desde, hasta }); }
   catch (e) { detalles = []; }
 
-  const overr = overridesMatch.get(cats.norm(productoCanon));
+  const overr = overridesMatch.get(cats.norm(productoCanon)); // { display, fudos: [{display, norm}] } | undefined
+  const overrSet = overr ? new Set(overr.fudos.map(f => f.norm)) : null;
   const ventas = [];
   const nombresVistos = {}; // nombreFudoNorm -> { nombre, sim }
   const UMBRAL_SIM = 0.5;
@@ -63,8 +174,9 @@ async function ventasDeProducto(productoCanon, { desde, hasta } = {}) {
       for (const p of (cat.productos || [])) {
         const nf = cats.norm(p.nombre);
         let match = false, sim = 0;
-        if (overr) {
-          match = (nf === overr);
+        if (overrSet) {
+          // Override manual: matchea si el producto FUDO está en la lista mapeada.
+          match = overrSet.has(nf);
           sim = match ? 1 : 0;
         } else {
           sim = similitud(productoCanon, p.nombre);
@@ -218,4 +330,4 @@ async function getSerieCategoria({ categoria, desde, hasta } = {}) {
   };
 }
 
-module.exports = { getProductosStock, getSerieStock, getSerieCategoria, setMatchOverride, similitud };
+module.exports = { getProductosStock, getSerieStock, getSerieCategoria, setMatchOverride, getMatchOverride, cargarMatchOverrides, listarProductosFudo, similitud };
