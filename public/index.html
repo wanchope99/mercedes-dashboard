@@ -1129,6 +1129,29 @@
   </main>
 </div>
 
+<!-- ═══ HISTORIAL DE ARQUEOS ═══ -->
+<div id="tab-historial-arqueos" class="tab-panel">
+  <main style="padding-top:24px">
+    <div class="card">
+      <div class="card-title">Historial de arqueos
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· foco en efectivo · rastreá diferencias entre turnos</span>
+        <button class="btn" style="float:right;font-size:12px;padding:6px 12px" onclick="loadHistorialArqueos()">↻ Actualizar</button>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.6">
+        <b>Continuidad</b>: efectivo con que se ABRIÓ un turno vs con el que CERRÓ el anterior. Si no coinciden, se movió plata entre turnos (retiro legítimo o error).<br>
+        <b>Dif. apertura</b>: lo contado al abrir vs lo esperado del sheet. Los días con diferencia + nota están resaltados.
+      </div>
+      <div id="hist-arqueos-kpis" class="kpi-grid" style="margin-bottom:14px"></div>
+      <div class="table-wrap">
+        <table class="prov-resumen-table" style="width:100%;font-size:13px">
+          <thead id="hist-arqueos-head"></thead>
+          <tbody id="hist-arqueos-body"><tr><td style="color:var(--text-muted);padding:14px">Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
 <!-- ═══ SERVICIOS TAB (Fudo) ═══ -->
 <div id="tab-servicios" class="tab-panel">
   <div class="filters-bar">
@@ -1568,6 +1591,7 @@ const TAB_GROUPS = {
   cajas:  { subs: [
     { id: 'cajas',  label: '🏦 Cajas' },
     { id: 'arqueo', label: '🗃️ Arqueo de Caja' },
+    { id: 'historial-arqueos', label: '📋 Historial de Arqueos' },
   ] },
   stocks: { subs: [
     { id: 'proveedores',   label: '🛒 Proveedores' },
@@ -1580,6 +1604,7 @@ function cargarPanel(tab) {
   if (tab === 'pagos') loadPagos();
   else if (tab === 'cajas') loadCajas();
   else if (tab === 'arqueo') initArqueo();
+  else if (tab === 'historial-arqueos') loadHistorialArqueos();
   else if (tab === 'servicios') loadServicios();
   else if (tab === 'proveedores') loadProveedores();
   else if (tab === 'comportamiento') loadComportamiento();
@@ -1876,6 +1901,57 @@ async function saveHielo() {
 // Tolerancia para considerar que una caja "cerró" (diferencias de redondeo)
 const TOLERANCIA_CIERRE = 1000;
 
+// ─── Historial de Arqueos (troubleshooting de diferencias de efectivo) ────────
+async function loadHistorialArqueos() {
+  const body = document.getElementById('hist-arqueos-body');
+  const head = document.getElementById('hist-arqueos-head');
+  const kpis = document.getElementById('hist-arqueos-kpis');
+  if (body) body.innerHTML = '<tr><td style="color:var(--text-muted);padding:14px">Cargando...</td></tr>';
+  let data;
+  try { ({ data } = await api('/api/arqueo/historial')); }
+  catch (e) { if (body) body.innerHTML = '<tr><td style="color:var(--red);padding:14px">Error: '+escapeHtml(e.message)+'</td></tr>'; return; }
+
+  const TOL = 1; // tolerancia $ para considerar "cierra"
+  const conDif = data.filter(a => Math.abs(a.diffContinuidadEfectivo || 0) > TOL).length;
+  const conNota = data.filter(a => a.nota).length;
+  if (kpis) kpis.innerHTML =
+    '<div class="kpi-card blue"><div class="kpi-label">Arqueos registrados</div><div class="kpi-value">'+data.length+'</div></div>'
+    + '<div class="kpi-card '+(conDif>0?'red':'green')+'"><div class="kpi-label">Con dif. de continuidad</div><div class="kpi-value">'+conDif+'</div><div class="kpi-sub">efectivo entre turnos</div></div>'
+    + '<div class="kpi-card accent"><div class="kpi-label">Con nota</div><div class="kpi-value">'+conNota+'</div><div class="kpi-sub">explicaciones cargadas</div></div>';
+
+  head.innerHTML = '<tr>'
+    + '<th style="text-align:left">Fecha</th><th>Apertura</th><th>Cierre</th>'
+    + '<th style="text-align:right">Efvo inicial</th><th style="text-align:right">Efvo final</th>'
+    + '<th style="text-align:right" title="Efvo abierto vs cierre del turno previo">Continuidad efvo</th>'
+    + '<th style="text-align:right" title="Contado al abrir vs esperado del sheet">Dif. apertura</th>'
+    + '<th style="text-align:left">Nota</th></tr>';
+
+  if (!data.length) { body.innerHTML = '<tr><td colspan="8" style="color:var(--text-muted);padding:14px">Sin arqueos registrados.</td></tr>'; return; }
+
+  const celdaDif = v => {
+    if (v == null) return '<td style="text-align:right;color:var(--text-muted)">—</td>';
+    const ok = Math.abs(v) <= TOL;
+    const col = ok ? 'var(--green)' : 'var(--red)';
+    const txt = ok ? '✓' : (v > 0 ? '+' : '') + fmt(v);
+    return '<td style="text-align:right;color:'+col+';font-weight:600">'+txt+'</td>';
+  };
+
+  body.innerHTML = data.map(a => {
+    const tieneDif = Math.abs(a.diffContinuidadEfectivo || 0) > TOL || Math.abs(a.diffAperturaEfectivo || 0) > TOL;
+    const bg = (tieneDif && a.nota) ? 'background:rgba(224,138,92,0.10)' : (tieneDif ? 'background:rgba(224,92,92,0.06)' : '');
+    return '<tr style="'+bg+'">'
+      + '<td style="text-align:left;font-weight:600">'+escapeHtml(a.fecha)+'</td>'
+      + '<td>'+escapeHtml(a.apertura)+'</td>'
+      + '<td>'+escapeHtml(a.cierre)+'</td>'
+      + '<td style="text-align:right">'+fmt(a.efectivoInicial)+'</td>'
+      + '<td style="text-align:right">'+fmt(a.efectivoFinal)+'</td>'
+      + celdaDif(a.diffContinuidadEfectivo)
+      + celdaDif(a.diffAperturaEfectivo)
+      + '<td style="text-align:left;color:var(--text-muted);max-width:240px;white-space:normal">'+escapeHtml(a.nota || '')+'</td>'
+      + '</tr>';
+  }).join('');
+}
+
 async function cerrarCaja() {
   const efectivo    = parseFloat(document.getElementById('ci-efectivo').value) || 0;
   const mp          = parseFloat(document.getElementById('ci-mp').value) || 0;
@@ -1958,7 +2034,8 @@ function renderConfirmCierre(diffs, motivo) {
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Esperado = saldo inicial contado en la apertura + ingresos del día según Fudo. Contado = lo que acabás de contar:</p>
       ${filaCaja('💵', 'Efectivo', diffs.efectivo)}
       ${filaCaja('📱', 'Mercado Pago', diffs.mp)}
-      ${cerro ? '' : `<p style="font-size:12px;color:var(--text-muted);margin-top:10px">Si hubo error al contar, arqueá de nuevo. Si la diferencia es real (pagos en efectivo durante el servicio, propinas, etc.), podés cerrar igual y queda registrada.</p>`}`;
+      ${cerro ? '' : `<p style="font-size:12px;color:var(--text-muted);margin-top:10px">Si hubo error al contar, arqueá de nuevo. Si la diferencia es real (pagos en efectivo durante el servicio, propinas, etc.), podés cerrar igual y queda registrada.</p>`}
+      ${cerro ? '' : `<div style="margin-top:12px"><label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">📝 Nota: ¿por qué no cierra? (ayuda a rastrear el error después)</label><textarea id="cierre-nota" rows="2" style="width:100%;resize:vertical" placeholder="Ej: retiré $50.000 para pagar al verdulero, propinas en efectivo, etc."></textarea></div>`}`;
     actions.innerHTML = `
       <button class="btn" onclick="closeConfirmCierre()">🔄 Arquear nuevamente</button>
       <button class="btn btn-accent" onclick="confirmarCierreDefinitivo()">${cerro ? '✅ Entendido, cerrar caja' : '⚠️ Entiendo la diferencia, cerrar igual'}</button>`;
@@ -1978,10 +2055,13 @@ async function confirmarCierreDefinitivo() {
     // Recién acá se escribe en la planilla (Movimientos + Arqueo de Cajas + Cajas).
     // Se mandan los ingresos según Fudo para registrar el valor de Fudo + fila delta.
     const f = state.fudoCierre;
+    const notaEl = document.getElementById('cierre-nota');
+    const nota = notaEl ? notaEl.value.trim() : '';
     const { data } = await api('/api/arqueo/cerrar', {
       method: 'POST',
       body: JSON.stringify({
         ...state.cierrePendiente,
+        nota,
         fudo: f ? { encontrado: !!f.encontrado, efectivo: f.efectivo || 0, mercadoPago: f.mercadoPago || 0, galicia: f.galicia || 0 } : null,
       }),
     });
