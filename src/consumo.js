@@ -10,7 +10,8 @@
 
 const { google } = require('googleapis');
 
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+// Datos de stock/insumos viven en la planilla de Comparación Proveedores.
+const SPREADSHEET_ID = process.env.PROVEEDORES_SHEET_ID || process.env.SPREADSHEET_ID;
 const CONSUMO_SHEET = process.env.CONSUMO_INSUMOS_SHEET || 'Consumo Insumos';
 
 function _sheetsClient() {
