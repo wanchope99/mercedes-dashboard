@@ -4003,6 +4003,70 @@ let _stkInit = false;
 let _stkProductos = [], _stkCategorias = [];
 
 // ─── Gestión de vinos: inventario + rotación (datos de Fudo) ──────────────────
+let _vinosData = null;
+
+// Modal de detalle al clickear un KPI. tipo: inmovilizado | valor | quiebre | agotarse
+function openVinosModal(tipo) {
+  if (!_vinosData) return;
+  const items = _vinosData.items || [];
+  const t = _vinosData.totales;
+  let titulo, filtrados, cols, totalLinea = '';
+
+  if (tipo === 'inmovilizado') {
+    titulo = '💰 Plata inmovilizada en vinos';
+    filtrados = items.filter(i => (i.valorCosto || 0) > 0).sort((a,b) => (b.valorCosto||0)-(a.valorCosto||0));
+    cols = ['stock','costo','inmovilizado','peso'];
+    totalLinea = 'Total inmovilizado: <b>'+fmt(t.plataInmovilizada)+'</b> en '+t.stockTotal+' botellas. Es la plata que tenés "parada" en stock al costo de compra.';
+  } else if (tipo === 'valor') {
+    titulo = '🏷️ Valor del stock a precio de venta';
+    filtrados = items.filter(i => (i.valorVenta || 0) > 0).sort((a,b) => (b.valorVenta||0)-(a.valorVenta||0));
+    cols = ['stock','precio','valorVenta','margenLinea'];
+    totalLinea = 'Si vendieras TODO el stock al precio actual: <b>'+fmt(t.valorVentaStock)+'</b>, con un margen potencial de <b>'+fmt(t.margenPotencial)+'</b> sobre el costo.';
+  } else if (tipo === 'quiebre') {
+    titulo = '🔴 Vinos en quiebre (reponer)';
+    filtrados = items.filter(i => i.alerta === 'quiebre');
+    cols = ['stock','minStock','vtaSem','precio'];
+    totalLinea = filtrados.length ? '<b>'+filtrados.length+'</b> vinos sin stock o por debajo del mínimo de Fudo. Estos son los que conviene comprar ya.' : 'No hay vinos en quiebre. 👌';
+  } else { // agotarse
+    titulo = '🟠 Vinos por agotarse y sobrestock';
+    filtrados = items.filter(i => i.alerta === 'pronto' || i.alerta === 'sobrestock');
+    cols = ['stock','cobertura','vtaSem','estado'];
+    totalLinea = '🟠 se agotan en ≤7 días (reponer pronto) · 🔵 sobrestock >60 días (plata parada, no comprar).';
+  }
+
+  const th = { stock:'Stock', costo:'Costo', precio:'Precio', inmovilizado:'Inmovilizado', valorVenta:'Valor venta',
+    peso:'% del total', margenLinea:'Margen', minStock:'Mínimo', vtaSem:'Vta/sem', cobertura:'Días cob.', estado:'Estado' };
+  const totalInmov = t.plataInmovilizada || 1;
+
+  const celda = (it, c) => {
+    switch(c) {
+      case 'stock': return '<td style="text-align:right">'+(it.stock==null?'—':it.stock)+'</td>';
+      case 'costo': return '<td style="text-align:right;color:var(--text-muted)">'+(it.cost==null?'—':fmt(it.cost))+'</td>';
+      case 'precio': return '<td style="text-align:right">'+(it.price==null?'—':fmt(it.price))+'</td>';
+      case 'inmovilizado': return '<td style="text-align:right;font-weight:600">'+(it.valorCosto==null?'—':fmt(it.valorCosto))+'</td>';
+      case 'valorVenta': return '<td style="text-align:right;font-weight:600">'+(it.valorVenta==null?'—':fmt(it.valorVenta))+'</td>';
+      case 'peso': return '<td style="text-align:right;color:var(--text-muted)">'+(it.valorCosto?Math.round((it.valorCosto/totalInmov)*100):0)+'%</td>';
+      case 'margenLinea': return '<td style="text-align:right">'+(it.margenPct==null?'—':it.margenPct+'%')+'</td>';
+      case 'minStock': return '<td style="text-align:right;color:var(--text-muted)">'+(it.minStock==null?'—':it.minStock)+'</td>';
+      case 'vtaSem': return '<td style="text-align:right">'+it.porSemana+'</td>';
+      case 'cobertura': return '<td style="text-align:right">'+(it.diasCobertura==null?'—':it.diasCobertura+'d')+'</td>';
+      case 'estado': return '<td style="text-align:left">'+(it.alerta==='pronto'?'🟠 se agota':'🔵 sobrestock')+'</td>';
+      default: return '<td></td>';
+    }
+  };
+
+  let html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.6">'+totalLinea+'</div>';
+  if (!filtrados.length) {
+    html += '<div style="color:var(--text-muted);padding:10px">Sin vinos en esta categoría.</div>';
+  } else {
+    html += '<table class="prov-resumen-table" style="width:100%;font-size:13px"><thead><tr><th style="text-align:left">Vino</th>'
+      + cols.map(c => '<th style="text-align:'+(c==='estado'?'left':'right')+'">'+th[c]+'</th>').join('') + '</tr></thead><tbody>'
+      + filtrados.map(it => '<tr><td style="text-align:left;font-weight:600">'+escapeHtml(it.nombre)+' <span style="color:var(--text-muted);font-size:11px">'+escapeHtml(it.categoria)+'</span></td>'+cols.map(c=>celda(it,c)).join('')+'</tr>').join('')
+      + '</tbody></table>';
+  }
+  openDetalleModal(titulo, html);
+}
+
 async function loadVinos() {
   const head = document.getElementById('vinos-head');
   const body = document.getElementById('vinos-body');
@@ -4013,13 +4077,15 @@ async function loadVinos() {
   let data;
   try { ({ data } = await api('/api/vinos' + (soloVino ? '?soloVino=1' : ''))); }
   catch (e) { body.innerHTML = '<tr><td style="color:var(--red);padding:14px">Error: '+escapeHtml(e.message)+'</td></tr>'; return; }
+  _vinosData = data;
 
   const t = data.totales;
+  const ck = 'cursor:pointer';
   if (kpis) kpis.innerHTML =
-    '<div class="kpi-card blue"><div class="kpi-label">Plata inmovilizada</div><div class="kpi-value">'+fmt(t.plataInmovilizada)+'</div><div class="kpi-sub">'+t.stockTotal+' botellas · '+t.items+' etiquetas</div></div>'
-    + '<div class="kpi-card green"><div class="kpi-label">Valor a precio de venta</div><div class="kpi-value">'+fmt(t.valorVentaStock)+'</div><div class="kpi-sub">margen potencial '+fmt(t.margenPotencial)+'</div></div>'
-    + '<div class="kpi-card '+(t.enQuiebre>0?'red':'green')+'"><div class="kpi-label">En quiebre</div><div class="kpi-value">'+t.enQuiebre+'</div><div class="kpi-sub">sin stock o bajo mínimo</div></div>'
-    + '<div class="kpi-card orange"><div class="kpi-label">Por agotarse</div><div class="kpi-value">'+t.porAgotarse+'</div><div class="kpi-sub">≤ 7 días · '+t.sobrestock+' con sobrestock</div></div>';
+    '<div class="kpi-card blue" style="'+ck+'" onclick="openVinosModal(\'inmovilizado\')" title="Ver detalle"><div class="kpi-label">Plata inmovilizada ›</div><div class="kpi-value">'+fmt(t.plataInmovilizada)+'</div><div class="kpi-sub">'+t.stockTotal+' botellas · '+t.items+' etiquetas</div></div>'
+    + '<div class="kpi-card green" style="'+ck+'" onclick="openVinosModal(\'valor\')" title="Ver detalle"><div class="kpi-label">Valor a precio de venta ›</div><div class="kpi-value">'+fmt(t.valorVentaStock)+'</div><div class="kpi-sub">margen potencial '+fmt(t.margenPotencial)+'</div></div>'
+    + '<div class="kpi-card '+(t.enQuiebre>0?'red':'green')+'" style="'+ck+'" onclick="openVinosModal(\'quiebre\')" title="Ver detalle"><div class="kpi-label">En quiebre ›</div><div class="kpi-value">'+t.enQuiebre+'</div><div class="kpi-sub">sin stock o bajo mínimo</div></div>'
+    + '<div class="kpi-card orange" style="'+ck+'" onclick="openVinosModal(\'agotarse\')" title="Ver detalle"><div class="kpi-label">Por agotarse ›</div><div class="kpi-value">'+t.porAgotarse+'</div><div class="kpi-sub">≤ 7 días · '+t.sobrestock+' con sobrestock</div></div>';
 
   head.innerHTML = '<tr>'
     + '<th style="text-align:left">Vino</th><th style="text-align:left">Categoría</th>'
