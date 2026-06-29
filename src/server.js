@@ -10,7 +10,7 @@ const {
   getComprasEnCuotas,
   getMeses, getCategorias, clearCache,
 } = require('./sheets');
-const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos, getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy } = require('./fudo');
+const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos, getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy, probeStock } = require('./fudo');
 const { proyectar, calcularCalculadora, proyeccionMes } = require('./proyecciones');
 const proveedoresRoutes = require('./proveedores-routes');
 const prov = require('./proveedores');
@@ -115,18 +115,9 @@ app.get('/api/me', authMiddleware, (req, res) => {
 // caja abierta (ej: hielo). Reducen el esperado y NO deben generar fila delta duplicada.
 // ─── Zona horaria: TODA la app muestra horarios en Buenos Aires, Argentina ──────
 const TZ_AR = 'America/Argentina/Buenos_Aires';
-// Fecha local AR (dd/mm/aaaa) de un Date.
-function fechaAR(d = new Date()) {
-  return d.toLocaleDateString('es-AR', { timeZone: TZ_AR });
-}
-// Hora local AR (HH:MM) de un Date.
-function horaAR(d = new Date()) {
-  return d.toLocaleTimeString('es-AR', { timeZone: TZ_AR, hour: '2-digit', minute: '2-digit' });
-}
-// Fecha+hora local AR de un Date.
-function fechaHoraAR(d = new Date()) {
-  return d.toLocaleString('es-AR', { timeZone: TZ_AR });
-}
+function fechaAR(d = new Date()) { return d.toLocaleDateString('es-AR', { timeZone: TZ_AR }); }
+function horaAR(d = new Date()) { return d.toLocaleTimeString('es-AR', { timeZone: TZ_AR, hour: '2-digit', minute: '2-digit' }); }
+function fechaHoraAR(d = new Date()) { return d.toLocaleString('es-AR', { timeZone: TZ_AR }); }
 
 function buildFilasCierreServicio({ fechaServicio, mesServicio, descripcionServicio, deltaEfectivo, deltaMP, galiciaBruto, impuestos, fudo, gastosEfectivoSesion = 0, gastosMPSesion = 0 }) {
   const ingreso = (medio, monto, desc) => [
@@ -179,10 +170,7 @@ app.get('/api/arqueo/estado', authMiddleware, (req, res) => {
 });
 
 // GET /api/arqueo/historial — log de todos los arqueos para troubleshooting.
-// Lee la hoja "Arqueo de Cajas" y calcula, con foco en EFECTIVO:
-//   · diffAperturaEfectivo: lo contado al abrir vs lo esperado (col K, ya guardado).
-//   · diffContinuidadEfectivo: efectivo con que CERRÓ un turno vs con el que se ABRIÓ
-//     el siguiente. Si no coinciden, faltó/sobró plata entre turnos.
+// Foco EFECTIVO. Diferencia del turno = contado al cerrar − (inicial + Fudo efvo − gastos).
 app.get('/api/arqueo/historial', authMiddleware, adminOnly, async (req, res) => {
   try {
     const auth = getAuth();
@@ -197,10 +185,8 @@ app.get('/api/arqueo/historial', authMiddleware, adminOnly, async (req, res) => 
       const n = parseFloat(String(v).replace(/[^0-9.,-]/g, '').replace(/\.(?=\d{3}\b)/g, '').replace(',', '.'));
       return Number.isFinite(n) ? n : 0;
     };
-    // Detectar header (fila con "Fecha" en A) y arrancar después.
     let start = 0;
     if (rows.length && String(rows[0][0] || '').trim().toLowerCase() === 'fecha') start = 1;
-
     const arqueos = [];
     for (let i = start; i < rows.length; i++) {
       const row = rows[i] || [];
@@ -216,24 +202,18 @@ app.get('/api/arqueo/historial', authMiddleware, adminOnly, async (req, res) => 
         efectivoFinal: num(row[7]),
         mpFinal: num(row[8]),
         galiciaFinal: num(row[9]),
-        diffAperturaEfectivo: num(row[10]), // K
-        diffAperturaMP: num(row[11]),       // L
-        nota: (row[12] || '').toString().trim(), // M
-        ingresoFudoEfectivo: (row[13] != null && row[13] !== '') ? num(row[13]) : null, // N
-        difEfectivoTurno: (row[14] != null && row[14] !== '') ? num(row[14]) : null,    // O
+        diffAperturaEfectivo: num(row[10]),
+        diffAperturaMP: num(row[11]),
+        nota: (row[12] || '').toString().trim(),
+        ingresoFudoEfectivo: (row[13] != null && row[13] !== '') ? num(row[13]) : null,
+        difEfectivoTurno: (row[14] != null && row[14] !== '') ? num(row[14]) : null,
       });
     }
-
-    // Continuidad: el efectivo con que se ABRE un turno debería ser el efectivo con
-    // que CERRÓ el turno anterior. La diferencia revela movimientos entre turnos.
+    // Continuidad entre turnos (referencial): efvo abierto vs cerrado el turno previo.
     for (let i = 0; i < arqueos.length; i++) {
-      if (i === 0) { arqueos[i].diffContinuidadEfectivo = null; arqueos[i].diffContinuidadMP = null; continue; }
-      const prev = arqueos[i - 1], cur = arqueos[i];
-      arqueos[i].diffContinuidadEfectivo = Math.round((cur.efectivoInicial - prev.efectivoFinal) * 100) / 100;
-      arqueos[i].diffContinuidadMP = Math.round((cur.mpInicial - prev.mpFinal) * 100) / 100;
+      if (i === 0) { arqueos[i].diffContinuidadEfectivo = null; continue; }
+      arqueos[i].diffContinuidadEfectivo = Math.round((arqueos[i].efectivoInicial - arqueos[i - 1].efectivoFinal) * 100) / 100;
     }
-
-    // Más recientes primero
     arqueos.reverse();
     res.json({ ok: true, data: arqueos });
   } catch (err) {
@@ -521,6 +501,12 @@ app.get('/api/arqueo/fudo-hoy', authMiddleware, async (req, res) => {
 });
 
 // ─── Healthcheck público (para Railway) ──────────────────────────────────────
+// DIAGNÓSTICO temporal: descubrir si Fudo expone el stock. Borrar tras usar.
+app.get('/api/fudo/probe-stock', authMiddleware, adminOnly, async (req, res) => {
+  try { res.json({ ok: true, data: await probeStock() }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 app.get('/api/health', (req, res) => res.json({ ok: true, status: 'ok' }));
 
 // ─── Filtro de fecha ──────────────────────────────────────────────────────────
