@@ -687,28 +687,6 @@
   </div>
 
   <main>
-    <!-- ═══ GESTIÓN DE VINOS / BEBIDA CON ALCOHOL (stock directo de Fudo) ═══ -->
-    <div class="card" id="vinos-card">
-      <div class="card-title">🍷 Gestión de vinos
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· stock, plata inmovilizada y rotación · datos de Fudo</span>
-        <span style="float:right">
-          <label style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0;margin-right:8px"><input type="checkbox" id="vinos-solo-vino" onchange="loadVinos()"> solo vino</label>
-          <button class="btn" style="font-size:12px;padding:5px 12px" onclick="loadVinos()">↻ Actualizar</button>
-        </span>
-      </div>
-      <div id="vinos-kpis" class="kpi-grid" style="margin-bottom:14px"></div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.6">
-        <b>Días cobertura</b> = cuánto dura el stock al ritmo de venta de las últimas 4 semanas.
-        🔴 quiebre (sin stock o bajo mínimo) · 🟠 se agota pronto (≤7 días) · ⚪ sin ventas · 🔵 sobrestock (>60 días, plata parada).
-      </div>
-      <div class="table-wrap">
-        <table class="prov-resumen-table" style="width:100%;font-size:13px">
-          <thead id="vinos-head"></thead>
-          <tbody id="vinos-body"><tr><td style="color:var(--text-muted);padding:14px">Cargando inventario de Fudo...</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
     <div class="kpi-grid" id="stk-kpis">
       <div class="kpi-card blue"><div class="kpi-label">Días promedio en stock</div><div class="kpi-value" id="stk-kpi-dias">—</div><div class="kpi-sub">desde que ingresa hasta que se vende</div></div>
       <div class="kpi-card green"><div class="kpi-label">Última compra</div><div class="kpi-value" id="stk-kpi-compra">—</div><div class="kpi-sub" id="stk-kpi-compra-sub"></div></div>
@@ -781,6 +759,32 @@
 </div>
 
 <!-- ═══ PROYECCIONES TAB ═══ -->
+<!-- ═══ GESTIÓN DE VINOS (subtab propia) ═══ -->
+<div id="tab-vinos" class="tab-panel">
+  <main style="padding-top:24px">
+    <div class="card" id="vinos-card">
+      <div class="card-title">🍷 Gestión de vinos
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· stock, plata inmovilizada y rotación · datos de Fudo</span>
+        <span style="float:right">
+          <label style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0;margin-right:8px"><input type="checkbox" id="vinos-solo-vino" onchange="loadVinos()"> solo vino</label>
+          <button class="btn" style="font-size:12px;padding:5px 12px" onclick="loadVinos()">↻ Actualizar</button>
+        </span>
+      </div>
+      <div id="vinos-kpis" class="kpi-grid" style="margin-bottom:14px"></div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.6">
+        <b>Días cobertura</b> = cuánto dura el stock al ritmo de venta de las últimas 4 semanas.
+        🔴 quiebre (sin stock o bajo mínimo) · 🟠 se agota pronto (≤7 días) · ⚪ sin ventas · 🔵 sobrestock (>60 días, plata parada).
+      </div>
+      <div class="table-wrap">
+        <table class="prov-resumen-table" style="width:100%;font-size:13px">
+          <thead id="vinos-head"></thead>
+          <tbody id="vinos-body"><tr><td style="color:var(--text-muted);padding:14px">Cargando inventario de Fudo...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
 <div id="tab-proymes" class="tab-panel">
   <main>
     <div class="kpi-grid" id="proymes-kpis"><div class="loading"><div class="spinner"></div> Calculando el mes...</div></div>
@@ -1624,6 +1628,7 @@ const TAB_GROUPS = {
   stocks: { subs: [
     { id: 'proveedores',   label: '🛒 Proveedores' },
     { id: 'comportamiento', label: '📈 Comportamiento de Stocks' },
+    { id: 'vinos', label: '🍷 Gestión de Vinos' },
   ] },
 };
 
@@ -1635,7 +1640,8 @@ function cargarPanel(tab) {
   else if (tab === 'historial-arqueos') loadHistorialArqueos();
   else if (tab === 'servicios') loadServicios();
   else if (tab === 'proveedores') loadProveedores();
-  else if (tab === 'comportamiento') { loadComportamiento(); loadVinos(); }
+  else if (tab === 'comportamiento') loadComportamiento();
+  else if (tab === 'vinos') loadVinos();
   else if (tab === 'costos') loadCostos();
   else if (tab === 'calculadora') loadCalculadora();
   else if (tab === 'proymes') loadProyeccionMes();
