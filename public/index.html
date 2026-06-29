@@ -687,6 +687,28 @@
   </div>
 
   <main>
+    <!-- ═══ GESTIÓN DE VINOS / BEBIDA CON ALCOHOL (stock directo de Fudo) ═══ -->
+    <div class="card" id="vinos-card">
+      <div class="card-title">🍷 Gestión de vinos
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· stock, plata inmovilizada y rotación · datos de Fudo</span>
+        <span style="float:right">
+          <label style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0;margin-right:8px"><input type="checkbox" id="vinos-solo-vino" onchange="loadVinos()"> solo vino</label>
+          <button class="btn" style="font-size:12px;padding:5px 12px" onclick="loadVinos()">↻ Actualizar</button>
+        </span>
+      </div>
+      <div id="vinos-kpis" class="kpi-grid" style="margin-bottom:14px"></div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.6">
+        <b>Días cobertura</b> = cuánto dura el stock al ritmo de venta de las últimas 4 semanas.
+        🔴 quiebre (sin stock o bajo mínimo) · 🟠 se agota pronto (≤7 días) · ⚪ sin ventas · 🔵 sobrestock (>60 días, plata parada).
+      </div>
+      <div class="table-wrap">
+        <table class="prov-resumen-table" style="width:100%;font-size:13px">
+          <thead id="vinos-head"></thead>
+          <tbody id="vinos-body"><tr><td style="color:var(--text-muted);padding:14px">Cargando inventario de Fudo...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="kpi-grid" id="stk-kpis">
       <div class="kpi-card blue"><div class="kpi-label">Días promedio en stock</div><div class="kpi-value" id="stk-kpi-dias">—</div><div class="kpi-sub">desde que ingresa hasta que se vende</div></div>
       <div class="kpi-card green"><div class="kpi-label">Última compra</div><div class="kpi-value" id="stk-kpi-compra">—</div><div class="kpi-sub" id="stk-kpi-compra-sub"></div></div>
@@ -1613,7 +1635,7 @@ function cargarPanel(tab) {
   else if (tab === 'historial-arqueos') loadHistorialArqueos();
   else if (tab === 'servicios') loadServicios();
   else if (tab === 'proveedores') loadProveedores();
-  else if (tab === 'comportamiento') loadComportamiento();
+  else if (tab === 'comportamiento') { loadComportamiento(); loadVinos(); }
   else if (tab === 'costos') loadCostos();
   else if (tab === 'calculadora') loadCalculadora();
   else if (tab === 'proymes') loadProyeccionMes();
@@ -3979,6 +4001,65 @@ async function descartarPend(id) {
 const STK_COLORS = { compra: '#4caf82', venta: '#e08a5c' };
 let _stkInit = false;
 let _stkProductos = [], _stkCategorias = [];
+
+// ─── Gestión de vinos: inventario + rotación (datos de Fudo) ──────────────────
+async function loadVinos() {
+  const head = document.getElementById('vinos-head');
+  const body = document.getElementById('vinos-body');
+  const kpis = document.getElementById('vinos-kpis');
+  if (!body) return;
+  body.innerHTML = '<tr><td style="color:var(--text-muted);padding:14px">Cargando inventario de Fudo...</td></tr>';
+  const soloVino = document.getElementById('vinos-solo-vino') && document.getElementById('vinos-solo-vino').checked;
+  let data;
+  try { ({ data } = await api('/api/vinos' + (soloVino ? '?soloVino=1' : ''))); }
+  catch (e) { body.innerHTML = '<tr><td style="color:var(--red);padding:14px">Error: '+escapeHtml(e.message)+'</td></tr>'; return; }
+
+  const t = data.totales;
+  if (kpis) kpis.innerHTML =
+    '<div class="kpi-card blue"><div class="kpi-label">Plata inmovilizada</div><div class="kpi-value">'+fmt(t.plataInmovilizada)+'</div><div class="kpi-sub">'+t.stockTotal+' botellas · '+t.items+' etiquetas</div></div>'
+    + '<div class="kpi-card green"><div class="kpi-label">Valor a precio de venta</div><div class="kpi-value">'+fmt(t.valorVentaStock)+'</div><div class="kpi-sub">margen potencial '+fmt(t.margenPotencial)+'</div></div>'
+    + '<div class="kpi-card '+(t.enQuiebre>0?'red':'green')+'"><div class="kpi-label">En quiebre</div><div class="kpi-value">'+t.enQuiebre+'</div><div class="kpi-sub">sin stock o bajo mínimo</div></div>'
+    + '<div class="kpi-card orange"><div class="kpi-label">Por agotarse</div><div class="kpi-value">'+t.porAgotarse+'</div><div class="kpi-sub">≤ 7 días · '+t.sobrestock+' con sobrestock</div></div>';
+
+  head.innerHTML = '<tr>'
+    + '<th style="text-align:left">Vino</th><th style="text-align:left">Categoría</th>'
+    + '<th style="text-align:right">Stock</th>'
+    + '<th style="text-align:right">Vta/sem</th>'
+    + '<th style="text-align:right">Días cob.</th>'
+    + '<th style="text-align:right">Costo</th><th style="text-align:right">Precio</th><th style="text-align:right">Margen</th>'
+    + '<th style="text-align:right">Inmovilizado</th>'
+    + '<th style="text-align:left">Alerta</th></tr>';
+
+  if (!data.items.length) { body.innerHTML = '<tr><td colspan="10" style="color:var(--text-muted);padding:14px">No se encontraron bebidas con alcohol con stock en Fudo.</td></tr>'; return; }
+
+  const badge = a => {
+    const m = {
+      'quiebre':    ['🔴','Quiebre','var(--red)'],
+      'pronto':     ['🟠','Se agota','var(--orange,#e08a5c)'],
+      'sin-ventas': ['⚪','Sin ventas','var(--text-muted)'],
+      'sobrestock': ['🔵','Sobrestock','var(--blue,#5c8fe0)'],
+      'ok':         ['🟢','OK','var(--green)'],
+    }[a] || ['','',''];
+    return '<span style="color:'+m[2]+';font-weight:600">'+m[0]+' '+m[1]+'</span>';
+  };
+  const bgAlerta = a => a==='quiebre' ? 'background:rgba(224,92,92,0.08)' : (a==='pronto' ? 'background:rgba(224,138,92,0.08)' : '');
+
+  body.innerHTML = data.items.map(it => {
+    const cob = it.diasCobertura == null ? '—' : it.diasCobertura + 'd';
+    return '<tr style="'+bgAlerta(it.alerta)+'">'
+      + '<td style="text-align:left;font-weight:600">'+escapeHtml(it.nombre)+'</td>'
+      + '<td style="text-align:left;color:var(--text-muted);font-size:12px">'+escapeHtml(it.categoria)+'</td>'
+      + '<td style="text-align:right;font-weight:600">'+(it.stock==null?'—':it.stock)+'</td>'
+      + '<td style="text-align:right">'+it.porSemana+'</td>'
+      + '<td style="text-align:right">'+cob+'</td>'
+      + '<td style="text-align:right;color:var(--text-muted)">'+(it.cost==null?'—':fmt(it.cost))+'</td>'
+      + '<td style="text-align:right">'+(it.price==null?'—':fmt(it.price))+'</td>'
+      + '<td style="text-align:right">'+(it.margenPct==null?'—':it.margenPct+'%')+'</td>'
+      + '<td style="text-align:right">'+(it.valorCosto==null?'—':fmt(it.valorCosto))+'</td>'
+      + '<td style="text-align:left">'+badge(it.alerta)+'</td>'
+      + '</tr>';
+  }).join('');
+}
 
 async function loadComportamiento() {
   if (!_stkInit) {
