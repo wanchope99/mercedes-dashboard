@@ -808,8 +808,59 @@ function clearFudoCache() {
   cache.del('fudo_hist');
 }
 
+// ─── DIAGNÓSTICO: ¿la API de Fudo expone el stock? ──────────────────────────────
+// Prueba recursos candidatos y vuelca los attributes crudos de un producto, para
+// descubrir dónde vive el stock/inventario. Solo lectura. Borrar tras diagnosticar.
+async function probeStock() {
+  const token = await getToken();
+  const candidatos = [
+    'stock', 'stocks', 'inventory', 'inventories', 'product-stock', 'product-stocks',
+    'stock-movements', 'stock-movement', 'ingredients', 'ingredient', 'warehouses',
+    'product-ingredients', 'recipes', 'stocks-movements',
+  ];
+  const out = { base: API_BASE, recursos: {}, productoEjemplo: null };
+
+  for (const r of candidatos) {
+    try {
+      const url = `${API_BASE}/${r}?page[size]=2`;
+      const res = await fetchRetry(url, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+      }, { label: `probe ${r}`, tries: 1 });
+      let muestra = null;
+      if (res.ok) {
+        const j = await res.json().catch(() => ({}));
+        const d = (j.data || []);
+        muestra = { count: d.length, primero: d[0] || null };
+      }
+      out.recursos[r] = { status: res.status, ok: res.ok, muestra };
+    } catch (e) {
+      out.recursos[r] = { status: 'error', ok: false, error: String(e.message || e).slice(0, 120) };
+    }
+    await sleep(120);
+  }
+
+  // Volcar TODOS los attributes de unos productos (por si el stock viene embebido ahí).
+  try {
+    const url = `${API_BASE}/products?page[size]=3`;
+    const res = await fetchRetry(url, {
+      headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+    }, { label: 'probe products', tries: 1 });
+    if (res.ok) {
+      const j = await res.json().catch(() => ({}));
+      out.productoEjemplo = (j.data || []).slice(0, 3).map(p => ({
+        id: p.id,
+        attributes: p.attributes || {},
+        relationships: Object.keys(p.relationships || {}),
+      }));
+    }
+  } catch (e) { out.productoEjemploError = String(e.message || e).slice(0, 120); }
+
+  return out;
+}
+
 module.exports = {
   getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos,
   getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo,
   clearFudoCache, grupoDeCategoria, fechaServicio, fechaServicioHoy,
+  probeStock,
 };
