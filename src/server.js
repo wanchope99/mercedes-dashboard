@@ -11,6 +11,7 @@ const {
   getMeses, getCategorias, clearCache,
 } = require('./sheets');
 const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos, getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy, probeStock } = require('./fudo');
+const vinos = require('./vinos');
 const { proyectar, calcularCalculadora, proyeccionMes } = require('./proyecciones');
 const proveedoresRoutes = require('./proveedores-routes');
 const prov = require('./proveedores');
@@ -501,6 +502,18 @@ app.get('/api/arqueo/fudo-hoy', authMiddleware, async (req, res) => {
 });
 
 // ─── Healthcheck público (para Railway) ──────────────────────────────────────
+// ─── Gestión de Vinos / bebida con alcohol: inventario + rotación ──────────────
+app.get('/api/vinos', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { desde, hasta, soloVino } = req.query;
+    const data = await vinos.analizarVinos({ desde, hasta, soloVino: soloVino === '1' || soloVino === 'true' });
+    res.json({ ok: true, data });
+  } catch (err) {
+    console.error('Error /api/vinos:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // DIAGNÓSTICO temporal: descubrir si Fudo expone el stock. Borrar tras usar.
 app.get('/api/fudo/probe-stock', authMiddleware, adminOnly, async (req, res) => {
   try { res.json({ ok: true, data: await probeStock() }); }
