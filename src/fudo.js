@@ -203,9 +203,17 @@ async function loadRaw() {
   const prod = {};
   products.forEach(p => {
     const catRel = p.relationships && p.relationships.productCategory && p.relationships.productCategory.data;
+    const at = p.attributes || {};
     prod[p.id] = {
-      name: (p.attributes && p.attributes.name) || 'Producto',
-      price: (p.attributes && p.attributes.price) || 0,
+      id: p.id,
+      name: at.name || 'Producto',
+      price: at.price || 0,
+      // Campos de inventario (Fudo los expone por producto). Pueden venir null.
+      cost: (typeof at.cost === 'number') ? at.cost : null,
+      stock: (typeof at.stock === 'number') ? at.stock : null,
+      minStock: (typeof at.minStock === 'number') ? at.minStock : null,
+      stockControl: at.stockControl === true,
+      active: at.active !== false,
       categoriaId: catRel ? catRel.id : null,
       categoria: catRel ? (catName[catRel.id] || 'Sin categoría') : 'Sin categoría',
     };
@@ -808,6 +816,50 @@ function clearFudoCache() {
   cache.del('fudo_hist');
 }
 
+// ─── Productos con datos de inventario (stock/cost/price) directo de Fudo ────────
+// Devuelve [{ id, name, price, cost, stock, minStock, stockControl, active,
+//            categoria, categoriaId }]. Lo usa el módulo de vinos.
+async function getProductosConStock() {
+  const raw = await loadRaw();
+  return Object.values(raw.prod || {});
+}
+
+// ─── Ventas por producto a lo largo del tiempo, CON la hora de cada venta ────────
+// Recorre las ventas crudas y devuelve, por cada línea de item vendida:
+//   { fecha (servicio), closedAt (ISO), productoId, nombre, categoria, grupo,
+//     unidades, monto }
+// Permite análisis de demanda por hora y de velocidad de venta por producto.
+async function getVentasItems({ desde, hasta } = {}) {
+  const raw = await loadRaw();
+  const { sales, prod, itemsBySale } = raw;
+  const out = [];
+  for (const sv of sales) {
+    const a = sv.attributes || {};
+    if (!ventaComputable(a)) continue;
+    const fecha = fechaServicio(a.closedAt);
+    if ((desde && fecha < desde) || (hasta && fecha > hasta)) continue;
+    const items = itemsBySale[sv.id] || [];
+    for (const it of items) {
+      if (it.attributes && it.attributes.canceled) continue;
+      const pRel = it.relationships && it.relationships.product && it.relationships.product.data;
+      const producto = pRel ? prod[pRel.id] : null;
+      const q = (it.attributes && it.attributes.quantity) || 0;
+      if (q <= 0) continue;
+      out.push({
+        fecha,
+        closedAt: a.closedAt,
+        productoId: producto ? producto.id : null,
+        nombre: producto ? producto.name : 'Producto',
+        categoria: producto ? producto.categoria : 'Sin categoría',
+        grupo: producto ? grupoDeCategoria(producto.categoria) : 'otros',
+        unidades: q,
+        monto: montoItem(it, producto),
+      });
+    }
+  }
+  return out;
+}
+
 // ─── DIAGNÓSTICO: ¿la API de Fudo expone el stock? ──────────────────────────────
 // Prueba recursos candidatos y vuelca los attributes crudos de un producto, para
 // descubrir dónde vive el stock/inventario. Solo lectura. Borrar tras diagnosticar.
@@ -862,5 +914,5 @@ module.exports = {
   getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos,
   getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo,
   clearFudoCache, grupoDeCategoria, fechaServicio, fechaServicioHoy,
-  probeStock,
+  probeStock, getProductosConStock, getVentasItems,
 };
