@@ -910,9 +910,49 @@ async function probeStock() {
   return out;
 }
 
+// ─── Ventas con costo unitario de Fudo ─────────────────────────────────────────
+// Para cada línea de venta del período devuelve:
+//   { fecha, productoId, nombre, categoria, grupo,
+//     unidades, monto, costoUnit, costoTotal }
+// costoUnit = product.cost de Fudo (lo que cargó Charly). null si no tiene.
+// costoTotal = unidades * costoUnit (null si falta el costo).
+// Sirve para calcular el CMV real de bebida: Σ(vendidasBebida × costoUnit).
+async function getVentasConCosto({ desde, hasta } = {}) {
+  const raw = await loadRaw();
+  const { sales, prod, itemsBySale } = raw;
+  const out = [];
+  for (const sv of sales) {
+    const a = sv.attributes || {};
+    if (!ventaComputable(a)) continue;
+    const fecha = fechaServicio(a.closedAt);
+    if ((desde && fecha < desde) || (hasta && fecha > hasta)) continue;
+    const items = itemsBySale[sv.id] || [];
+    for (const it of items) {
+      if (it.attributes && it.attributes.canceled) continue;
+      const pRel = it.relationships && it.relationships.product && it.relationships.product.data;
+      const producto = pRel ? prod[pRel.id] : null;
+      const q = (it.attributes && it.attributes.quantity) || 0;
+      if (q <= 0) continue;
+      const costoUnit = producto && typeof producto.cost === 'number' ? producto.cost : null;
+      out.push({
+        fecha,
+        productoId: producto ? producto.id : null,
+        nombre: producto ? producto.name : 'Producto',
+        categoria: producto ? producto.categoria : 'Sin categoría',
+        grupo: producto ? grupoDeCategoria(producto.categoria) : 'otros',
+        unidades: q,
+        monto: montoItem(it, producto),
+        costoUnit,
+        costoTotal: costoUnit !== null ? Math.round(costoUnit * q * 100) / 100 : null,
+      });
+    }
+  }
+  return out;
+}
+
 module.exports = {
   getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos,
   getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo,
   clearFudoCache, grupoDeCategoria, fechaServicio, fechaServicioHoy,
-  probeStock, getProductosConStock, getVentasItems,
+  probeStock, getProductosConStock, getVentasItems, getVentasConCosto,
 };

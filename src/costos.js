@@ -605,6 +605,88 @@ function mismoProveedor(a, b) {
   return false;
 }
 
+// ─── Resumen simplificado: Comida y Bebida por Gasto / Ingreso / Costo ──────────
+//
+// DEFINICIONES (acordadas con el usuario):
+//   · GASTO COMIDA   = compras del período cuyo grupoCMV es 'Comida'
+//   · INGRESO COMIDA = ventas Fudo del grupo 'comida'
+//   · GASTO BEBIDA   = compras del período cuyo grupoCMV es 'Bebida'
+//   · INGRESO BEBIDA = ventas Fudo del grupo 'bebida'
+//   · COSTO BEBIDA   = Σ(unidades vendidas × product.cost de Fudo)
+//     → distinción clave: el GASTO es lo que salió por facturas de proveedores;
+//       el COSTO es el valor de la mercadería EFECTIVAMENTE vendida (stock usado).
+//
+// Parámetros:
+//   compras        → array de prov.getCompras()
+//   ventasConCosto → array de fudo.getVentasConCosto({ desde, hasta })
+//   { desde, hasta } → strings YYYY-MM-DD para filtrar compras
+//
+// Devuelve:
+// {
+//   comida: { gasto, ingreso, ratio (gasto/ingreso %) },
+//   bebida: { gasto, ingreso, costoMercaderia, ratioCosto (costo/ingreso %) },
+//   sinCostoUnidades   // unidades bebida que no tienen costo cargado en Fudo
+//   sinCostoNombres    // lista de esos productos (para avisar al usuario)
+//   periodo: { desde, hasta }
+// }
+function resumenCostosSimplificado(compras, ventasConCosto, { desde, hasta } = {}) {
+  // ── Gastos desde Compras ────────────────────────────────────────────────────
+  let gastoComida = 0, gastoBebida = 0;
+  for (const c of (compras || [])) {
+    if (desde && c.fecha && c.fecha < desde) continue;
+    if (hasta && c.fecha && c.fecha > hasta) continue;
+    const g = grupoCMV(
+      (require('./proveedores-categorias').normalizarCategoria(c.categoria || '').categoria) || c.categoria || ''
+    );
+    const monto = montoCompra(c);
+    if (g === 'Comida') gastoComida += monto;
+    else if (g === 'Bebida') gastoBebida += monto;
+  }
+
+  // ── Ingresos y Costo desde ventas Fudo ────────────────────────────────────
+  let ingresoComida = 0, ingresoBebida = 0;
+  let costoMercaderia = 0;           // Σ unidades × costoUnit (solo bebida con costo)
+  let sinCostoUnidades = 0;
+  const sinCostoSet = {};            // nombre → unidades sin costo
+
+  for (const v of (ventasConCosto || [])) {
+    if (v.grupo === 'comida') {
+      ingresoComida += v.monto;
+    } else if (v.grupo === 'bebida') {
+      ingresoBebida += v.monto;
+      if (v.costoTotal !== null) {
+        costoMercaderia += v.costoTotal;
+      } else {
+        sinCostoUnidades += v.unidades;
+        sinCostoSet[v.nombre] = (sinCostoSet[v.nombre] || 0) + v.unidades;
+      }
+    }
+  }
+
+  const r = (num, denom) => denom > 0 ? Math.round((num / denom) * 1000) / 10 : null;
+
+  return {
+    comida: {
+      gasto: Math.round(gastoComida),
+      ingreso: Math.round(ingresoComida),
+      ratio: r(gastoComida, ingresoComida),   // food cost %
+    },
+    bebida: {
+      gasto: Math.round(gastoBebida),
+      ingreso: Math.round(ingresoBebida),
+      costoMercaderia: Math.round(costoMercaderia),
+      ratioCosto: r(costoMercaderia, ingresoBebida),   // CMV bebida %
+      ratioGasto: r(gastoBebida, ingresoBebida),        // gasto/ingreso %
+    },
+    sinCostoUnidades,
+    sinCostoNombres: Object.entries(sinCostoSet)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([nombre, unidades]) => ({ nombre, unidades })),
+    periodo: { desde: desde || null, hasta: hasta || null },
+  };
+}
+
 module.exports = {
   CATEGORIAS_COSTO, grupoCMV,
   clasificarProducto, setOverrideProducto, getOverrides, cargarOverrides, REGLAS_MENU,
@@ -613,4 +695,5 @@ module.exports = {
   montoCompra,
   cargarProveedorGrupoCMV, grupoCMVPorProveedor, getProveedorGrupoMap,
   mismoProveedor,
+  resumenCostosSimplificado,
 };

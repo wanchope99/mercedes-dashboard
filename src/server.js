@@ -10,7 +10,7 @@ const {
   getComprasEnCuotas,
   getMeses, getCategorias, clearCache,
 } = require('./sheets');
-const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos, getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy, probeStock } = require('./fudo');
+const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos, getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy, probeStock, getVentasConCosto } = require('./fudo');
 const vinos = require('./vinos');
 const { proyectar, calcularCalculadora, proyeccionMes } = require('./proyecciones');
 const proveedoresRoutes = require('./proveedores-routes');
@@ -1411,6 +1411,35 @@ app.get('/api/proyeccion-mes', authMiddleware, adminOnly, async (req, res) => {
     res.json({ ok: true, data: proyeccionMes({ movimientos, variables }) });
   } catch (err) {
     console.error('Error /api/proyeccion-mes:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── Resumen simplificado de Costos (Comida / Bebida) ────────────────────────
+// GET /api/costos/resumen?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
+// Si no se pasan fechas, devuelve el mes en curso (1ro del mes actual → hoy).
+// Devuelve: { comida, bebida, sinCostoUnidades, sinCostoNombres, periodo }
+app.get('/api/costos/resumen', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    await costos.cargarProveedorGrupoCMV().catch(() => {});
+
+    // Período: default = mes en curso
+    let { desde, hasta } = req.query;
+    if (!desde || !hasta) {
+      const hoy = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+      if (!desde) desde = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-01`;
+      if (!hasta) hasta = hoy.toISOString().slice(0, 10);
+    }
+
+    const [compras, ventasConCosto] = await Promise.all([
+      prov.getCompras().catch(() => []),
+      getVentasConCosto({ desde, hasta }).catch(() => []),
+    ]);
+
+    const data = costos.resumenCostosSimplificado(compras, ventasConCosto, { desde, hasta });
+    res.json({ ok: true, data });
+  } catch (err) {
+    console.error('Error /api/costos/resumen:', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
