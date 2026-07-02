@@ -10,7 +10,7 @@ const {
   getComprasEnCuotas,
   getMeses, getCategorias, clearCache,
 } = require('./sheets');
-const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos, getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy, probeStock, getVentasItems, getVentasConCosto } = require('./fudo');
+const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos, getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy, probeStock, probeStockMovements, getVentasItems, getVentasConCosto } = require('./fudo');
 const vinos = require('./vinos');
 const { proyectar, calcularCalculadora, proyeccionMes } = require('./proyecciones');
 const proveedoresRoutes = require('./proveedores-routes');
@@ -1494,6 +1494,16 @@ app.post('/api/costos/proveedores', authMiddleware, adminOnly, async (req, res) 
     res.json({ ok: true, guardados: items.length });
   } catch (err) {
     console.error('Error POST /api/costos/proveedores:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── Diagnóstico: shape de stock-movements de Fudo (temporal) ────────────────
+app.get('/api/fudo/probe-stock-movements', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const data = await probeStockMovements();
+    res.json({ ok: true, data });
+  } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
 });

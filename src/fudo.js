@@ -950,9 +950,54 @@ async function getVentasConCosto({ desde, hasta } = {}) {
   return out;
 }
 
+
+// ─── Exploración de movimientos de stock (diagnóstico) ───────────────────────
+// Llama a los endpoints candidatos y devuelve muestras crudas para entender el
+// shape de la API antes de implementar. Solo lectura. Temporal.
+async function probeStockMovements() {
+  const token = await getToken();
+  const out = {};
+
+  // Candidatos más probables para historial de stock
+  const candidatos = ['stock-movements', 'stocks-movements', 'product-stocks',
+    'stock-entries', 'stock-adjustments', 'inventory-movements'];
+
+  for (const r of candidatos) {
+    try {
+      const url = `${API_BASE}/${r}?page[size]=3`;
+      const res = await fetchRetry(url, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+      }, { label: `probe ${r}`, tries: 1 });
+      if (res.ok) {
+        const j = await res.json().catch(() => ({}));
+        out[r] = { ok: true, count: (j.data||[]).length, total: j.meta, primeros: (j.data||[]).slice(0,2) };
+      } else {
+        out[r] = { ok: false, status: res.status };
+      }
+    } catch (e) {
+      out[r] = { ok: false, error: e.message };
+    }
+    await sleep(200);
+  }
+
+  // También probar filtrado por fecha en stock-movements si existe
+  try {
+    const url = `${API_BASE}/stock-movements?page[size]=3&filter[from]=2026-06-01&filter[to]=2026-06-30`;
+    const res = await fetchRetry(url, {
+      headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+    }, { tries: 1 });
+    if (res.ok) {
+      const j = await res.json().catch(() => ({}));
+      out['stock-movements-filtered'] = { ok: true, primeros: (j.data||[]).slice(0,2), meta: j.meta };
+    }
+  } catch(e) { out['stock-movements-filtered'] = { error: e.message }; }
+
+  return out;
+}
+
 module.exports = {
   getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos,
   getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo,
   clearFudoCache, grupoDeCategoria, fechaServicio, fechaServicioHoy,
-  probeStock, getProductosConStock, getVentasItems, getVentasConCosto,
+  probeStock, probeStockMovements, getProductosConStock, getVentasItems, getVentasConCosto,
 };
