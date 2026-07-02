@@ -974,6 +974,54 @@
       </div>
     </div>
 
+    <!-- ── PROVEEDORES SIN CONFIGURAR ── -->
+    <div class="card" id="c-sin-config-card" style="display:none;border-left:3px solid #e0a85c">
+      <div class="card-title" style="color:#e0a85c">
+        &#x26A0;&#xFE0F; Proveedores sin clasificar
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0;font-weight:400">
+          &#x2014; estos gastos no entraron en Comida ni Bebida todav&#xED;a
+        </span>
+      </div>
+      <p style="font-size:13px;color:var(--text-muted);margin:0 0 14px">
+        Asign&#xe1; qu&#xe9; porcentaje de cada proveedor es Comida y cu&#xe1;nto es Bebida (deben sumar 100%).
+        Se guarda autom&#xe1;ticamente y no te volver&#xe1; a preguntar.
+      </p>
+      <div id="c-sin-config-lista"></div>
+      <div style="margin-top:14px;display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary" onclick="guardarConfigProveedores()" id="c-sin-config-guardar">
+          Guardar clasificaci&#xF3;n
+        </button>
+        <span id="c-sin-config-status" style="font-size:12px;color:var(--text-muted)"></span>
+      </div>
+    </div>
+
+    <!-- ── PROVEEDORES CONFIGURADOS ── -->
+    <div class="card" id="c-configurados-card" style="display:none">
+      <div class="card-title">
+        Desglose de gastos por proveedor
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0;font-weight:400">
+          &#x2014; c&#xF3;mo se repartieron los movimientos de Mercanc&#xED;a
+        </span>
+      </div>
+      <div class="table-wrap">
+        <table class="prov-resumen-table" style="width:100%">
+          <thead>
+            <tr>
+              <th style="text-align:left">Proveedor</th>
+              <th style="text-align:right">Total</th>
+              <th style="text-align:right">Comida%</th>
+              <th style="text-align:right">Bebida%</th>
+              <th style="text-align:right">&#x2192; Comida</th>
+              <th style="text-align:right">&#x2192; Bebida</th>
+            </tr>
+          </thead>
+          <tbody id="c-configurados-body">
+            <tr><td colspan="6" class="prov-empty">-</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -4724,11 +4772,10 @@ async function loadCostos() {
   // Limpiar estado previo
   ['c-comida-gasto','c-comida-ingreso','c-comida-ratio',
    'c-bebida-gasto','c-bebida-ingreso','c-bebida-costo','c-bebida-cmv-pct']
-    .forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '…'; });
-  document.getElementById('c-bebida-detalle-card').style.display = 'none';
+    .forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '\u2026'; });
+  ['c-bebida-detalle-card','c-sin-config-card','c-configurados-card']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
   document.getElementById('c-bebida-sin-costo').style.display = 'none';
-  document.getElementById('c-bebida-detalle-body').innerHTML =
-    '<tr><td colspan="6" class="prov-empty">Cargando…</td></tr>';
 
   const qs = new URLSearchParams();
   if (desde) qs.set('desde', desde);
@@ -4743,23 +4790,23 @@ async function loadCostos() {
   }
   _costosResumen = data;
 
-  // Período mostrado
+  // Per\u00edodo mostrado
   const periodoEl = document.getElementById('costos-periodo-label');
   if (periodoEl && data.periodo) {
     const fmtD = s => s ? s.split('-').reverse().join('/') : '';
     periodoEl.textContent = data.periodo.desde && data.periodo.hasta
-      ? fmtD(data.periodo.desde) + ' → ' + fmtD(data.periodo.hasta)
+      ? fmtD(data.periodo.desde) + ' \u2192 ' + fmtD(data.periodo.hasta)
       : '';
   }
 
-  // ── Comida ──
+  // \u2500\u2500 Comida \u2500\u2500
   const co = data.comida || {};
   document.getElementById('c-comida-gasto').textContent   = fmt(co.gasto);
   document.getElementById('c-comida-ingreso').textContent = fmt(co.ingreso);
   document.getElementById('c-comida-ratio').textContent   =
     co.ratio != null ? pct(co.ratio) : '-';
 
-  // ── Bebida ──
+  // \u2500\u2500 Bebida \u2500\u2500
   const be = data.bebida || {};
   document.getElementById('c-bebida-gasto').textContent   = fmt(be.gasto);
   document.getElementById('c-bebida-ingreso').textContent = fmt(be.ingreso);
@@ -4767,53 +4814,134 @@ async function loadCostos() {
   document.getElementById('c-bebida-cmv-pct').textContent =
     be.ratioCosto != null ? pct(be.ratioCosto) : '-';
 
-  // Aviso productos sin costo
+  // Aviso productos sin costo Fudo
   const sinCostoEl = document.getElementById('c-bebida-sin-costo');
   if (data.sinCostoUnidades > 0) {
     const lista = (data.sinCostoNombres || []).map(x => x.nombre).slice(0, 8).join(', ');
     sinCostoEl.style.display = 'block';
     sinCostoEl.innerHTML =
-      '⚠️ <strong>' + data.sinCostoUnidades + ' unidades</strong> vendidas sin costo cargado en Fudo ' +
+      '\u26A0\uFE0F <strong>' + data.sinCostoUnidades + ' unidades</strong> vendidas sin costo cargado en Fudo ' +
       '(no entran en el CMV bebida). Productos: ' + escapeHtml(lista) +
-      (data.sinCostoNombres.length > 8 ? '…' : '') +
-      '. <em>Cargá el costo en Fudo para que sumen.</em>';
+      (data.sinCostoNombres.length > 8 ? '\u2026' : '') +
+      '. <em>Carg\u00e1 el costo en Fudo para que sumen.</em>';
   } else {
     sinCostoEl.style.display = 'none';
   }
 
-  // ── Tabla detalle bebida por producto ──
-  renderCostoBebidaDetalle();
+  // \u2500\u2500 Proveedores sin configurar \u2500\u2500
+  renderSinConfigurar(data.sinConfigurar || []);
+
+  // \u2500\u2500 Tabla de proveedores configurados \u2500\u2500
+  renderConfigurados(data.configurados || []);
 }
 
-async function _cargarDetalleBebida() {
-  // El endpoint principal ya devuelve el resumen; para el desglose por producto
-  // usamos los datos de ventas que el backend calculó. Si se quiere desglose
-  // completo, hacer un endpoint adicional. Por ahora calculamos desde el resumen
-  // que ya tenemos.
-  // Nota: el resumen no trae el desglose por producto (solo totales). Pedir un
-  // endpoint ad-hoc si hace falta. Por ahora mostramos lo que tenemos.
+// Renderiza el formulario de proveedores sin clasificar
+function renderSinConfigurar(lista) {
+  const card = document.getElementById('c-sin-config-card');
+  const cont = document.getElementById('c-sin-config-lista');
+  if (!lista || !lista.length) { card.style.display = 'none'; return; }
+
+  card.style.display = '';
+  document.getElementById('c-sin-config-status').textContent = '';
+
+  let html = '<div style="display:flex;flex-direction:column;gap:10px">';
+  for (const item of lista) {
+    const id = 'prov_' + item.proveedor.replace(/[^a-zA-Z0-9]/g, '_');
+    html += '<div style="display:grid;grid-template-columns:1fr 120px 120px;gap:8px;align-items:center;' +
+      'background:var(--surface2);border-radius:6px;padding:10px 12px">' +
+      '<div>' +
+        '<div style="font-weight:600;font-size:13px">' + escapeHtml(item.proveedor) + '</div>' +
+        '<div style="font-size:11px;color:var(--text-muted)">Monto en el per\u00edodo: <strong>' + fmt(item.monto) + '</strong></div>' +
+      '</div>' +
+      '<div>' +
+        '<label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">Comida %</label>' +
+        '<input type="number" id="' + id + '_comida" min="0" max="100" step="1" value="" ' +
+          'style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:4px;' +
+          'background:var(--surface);color:var(--text);font-size:13px" ' +
+          'oninput="sincronizarPct(this, \'' + id + '_bebida\')" placeholder="0\u201300">' +
+      '</div>' +
+      '<div>' +
+        '<label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">Bebida %</label>' +
+        '<input type="number" id="' + id + '_bebida" min="0" max="100" step="1" value="" ' +
+          'style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:4px;' +
+          'background:var(--surface);color:var(--text);font-size:13px" ' +
+          'oninput="sincronizarPct(this, \'' + id + '_comida\')" placeholder="0\u201300">' +
+      '</div>' +
+      '<input type="hidden" id="' + id + '_nombre" value="' + escAttr2(item.proveedor) + '">' +
+      '</div>';
+  }
+  html += '</div>';
+  cont.innerHTML = html;
 }
 
-function renderCostoBebidaDetalle() {
-  // El endpoint /api/costos/resumen no devuelve el desglose por producto.
-  // Para no agregar complejidad en esta etapa, mostramos un placeholder que
-  // invita a pedir ese nivel de detalle si se necesita.
-  // (Se puede agregar un segundo endpoint /api/costos/bebida-detalle más adelante.)
-  const card  = document.getElementById('c-bebida-detalle-card');
-  const tbody = document.getElementById('c-bebida-detalle-body');
-  if (!_costosResumen || !_costosResumen.bebida) return;
+// Al editar un % calcula el complemento automáticamente
+function sincronizarPct(input, otherId) {
+  const val = Math.max(0, Math.min(100, parseInt(input.value) || 0));
+  const other = document.getElementById(otherId);
+  if (other && document.activeElement === input) {
+    other.value = Math.max(0, 100 - val);
+  }
+}
 
-  const be = _costosResumen.bebida;
-  if (!be.costoMercaderia) {
-    card.style.display = 'none';
+// Guarda la clasificación de los proveedores del formulario
+async function guardarConfigProveedores() {
+  const btn = document.getElementById('c-sin-config-guardar');
+  const status = document.getElementById('c-sin-config-status');
+  const lista = _costosResumen && _costosResumen.sinConfigurar || [];
+  if (!lista.length) return;
+
+  const items = [];
+  const errores = [];
+  for (const item of lista) {
+    const id = 'prov_' + item.proveedor.replace(/[^a-zA-Z0-9]/g, '_');
+    const cp = parseInt(document.getElementById(id + '_comida').value) || 0;
+    const bp = parseInt(document.getElementById(id + '_bebida').value) || 0;
+    if (cp + bp !== 100) {
+      errores.push(item.proveedor + ': Comida% + Bebida% deben sumar 100 (ten\u00e9s ' + (cp+bp) + ')');
+      continue;
+    }
+    items.push({ proveedor: item.proveedor, comidaPct: cp, bebidaPct: bp });
+  }
+
+  if (errores.length) {
+    status.style.color = 'var(--red, #e05c5c)';
+    status.textContent = errores.join(' | ');
     return;
   }
+  if (!items.length) { status.textContent = 'Nada que guardar'; return; }
+
+  btn.disabled = true;
+  status.style.color = 'var(--text-muted)';
+  status.textContent = 'Guardando\u2026';
+  try {
+    await api('/api/costos/proveedores', { method: 'POST', body: JSON.stringify(items) });
+    status.style.color = 'var(--green, #5cb85c)';
+    status.textContent = '\u2713 Guardado. Recargando\u2026';
+    setTimeout(() => loadCostos(), 800);
+  } catch (e) {
+    status.style.color = 'var(--red, #e05c5c)';
+    status.textContent = 'Error: ' + e.message;
+    btn.disabled = false;
+  }
+}
+
+// Tabla de proveedores ya configurados en el período
+function renderConfigurados(lista) {
+  const card  = document.getElementById('c-configurados-card');
+  const tbody = document.getElementById('c-configurados-body');
+  if (!lista || !lista.length) { card.style.display = 'none'; return; }
+
   card.style.display = '';
-  tbody.innerHTML = '<tr><td colspan="6" class="prov-empty" style="font-style:italic;color:var(--text-muted)">' +
-    'Desglose por producto disponible próximamente. ' +
-    'Total costo mercadería: <strong>' + fmt(be.costoMercaderia) + '</strong> ' +
-    '(' + (be.ratioCosto != null ? pct(be.ratioCosto) : '-') + ' del ingreso).' +
-    '</td></tr>';
+  tbody.innerHTML = lista.map(p =>
+    '<tr>' +
+    '<td>' + escapeHtml(p.proveedor) + '</td>' +
+    '<td style="text-align:right">' + fmt(p.monto) + '</td>' +
+    '<td style="text-align:right;color:var(--text-muted)">' + p.comidaPct + '%</td>' +
+    '<td style="text-align:right;color:var(--text-muted)">' + p.bebidaPct + '%</td>' +
+    '<td style="text-align:right">' + fmt(p.comida) + '</td>' +
+    '<td style="text-align:right">' + fmt(p.bebida) + '</td>' +
+    '</tr>'
+  ).join('');
 }
 
 
