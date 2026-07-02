@@ -918,7 +918,7 @@
     <!-- BEBIDA -->
     <div class="card">
       <div class="card-title">&#x1F377; Bebida</div>
-      <div class="kpi-grid" style="grid-template-columns:repeat(2,1fr);margin-bottom:12px">
+      <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
         <div class="kpi-card red">
           <div class="kpi-label">Gasto (Movimientos)</div>
           <div class="kpi-value" id="c-bebida-gasto">-</div>
@@ -929,26 +929,13 @@
           <div class="kpi-value" id="c-bebida-ingreso">-</div>
           <div class="kpi-sub">ventas de bebida</div>
         </div>
-      </div>
-      <div style="border-top:1px solid var(--border);margin:0 0 12px;padding-top:12px">
-        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:8px">
-          Costo de mercandr&#xED;a usada
-          <span style="font-weight:400;text-transform:none;letter-spacing:0"> &#x2014; ventas &times; costo unitario Fudo</span>
-        </div>
-        <div class="kpi-grid" style="grid-template-columns:repeat(2,1fr)">
-          <div class="kpi-card" style="border-left:3px solid #e0a85c">
-            <div class="kpi-label">Costo mercader&#xED;a</div>
-            <div class="kpi-value" id="c-bebida-costo">-</div>
-            <div class="kpi-sub">&#x3A3; unidades vendidas &times; costo Fudo</div>
-          </div>
-          <div class="kpi-card" style="border-left:3px solid #e0a85c">
-            <div class="kpi-label">CMV bebida %</div>
-            <div class="kpi-value" id="c-bebida-cmv-pct">-</div>
-            <div class="kpi-sub">costo mercader&#xED;a / ingreso</div>
-          </div>
+        <div class="kpi-card accent">
+          <div class="kpi-label">Ratio gasto/ingreso</div>
+          <div class="kpi-value" id="c-bebida-ratio">-</div>
+          <div class="kpi-sub">costo bebida %</div>
         </div>
       </div>
-      <div id="c-bebida-sin-costo" style="display:none;background:var(--surface2);border-radius:6px;padding:10px 14px;font-size:12px;color:var(--text-muted);margin-top:4px"></div>
+
     </div>
 
     <!-- DESGLOSE PROVEEDORES (colapsable) -->
@@ -4770,9 +4757,8 @@ async function loadCostos() {
 
   // Reset KPIs
   ['c-comida-gasto','c-comida-ingreso','c-comida-ratio',
-   'c-bebida-gasto','c-bebida-ingreso','c-bebida-costo','c-bebida-cmv-pct']
+   'c-bebida-gasto','c-bebida-ingreso','c-bebida-ratio']
     .forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '\u2026'; });
-  document.getElementById('c-bebida-sin-costo').style.display = 'none';
   document.getElementById('c-configurados-card').style.display = 'none';
 
   const qs = new URLSearchParams();
@@ -4802,36 +4788,27 @@ async function loadCostos() {
   document.getElementById('c-comida-ingreso').textContent = fmt(co.ingreso);
   document.getElementById('c-comida-ratio').textContent   = co.ratio != null ? pct(co.ratio) : '-';
 
-  // Bebida
+  // Bebida — ratio = gasto / ingreso (por categoría, sin costo unitario Fudo)
   const be = data.bebida || {};
   document.getElementById('c-bebida-gasto').textContent   = fmt(be.gasto);
   document.getElementById('c-bebida-ingreso').textContent = fmt(be.ingreso);
-  document.getElementById('c-bebida-costo').textContent   = fmt(be.costoMercaderia);
-  document.getElementById('c-bebida-cmv-pct').textContent = be.ratioCosto != null ? pct(be.ratioCosto) : '-';
+  document.getElementById('c-bebida-ratio').textContent   = be.ratio != null ? pct(be.ratio) : '-';
 
-  // Aviso sin costo Fudo
-  const sinCostoEl = document.getElementById('c-bebida-sin-costo');
-  if (data.sinCostoUnidades > 0) {
-    const lista = (data.sinCostoNombres || []).map(x => x.nombre).slice(0, 8).join(', ');
-    sinCostoEl.style.display = 'block';
-    sinCostoEl.innerHTML = '\u26A0\uFE0F <strong>' + data.sinCostoUnidades +
-      ' unidades</strong> vendidas sin costo cargado en Fudo (no entran en el CMV bebida). Productos: ' +
-      escapeHtml(lista) + (data.sinCostoNombres.length > 8 ? '\u2026' : '') +
-      '. <em>Carg\u00e1 el costo en Fudo para que sumen.</em>';
-  } else {
-    sinCostoEl.style.display = 'none';
-  }
-
-  // Desglose proveedores configurados (colapsable)
+  // Desglose proveedores configurados (colapsable, cerrado por defecto)
   renderConfigurados(data.configurados || []);
 }
 
-// Desglose de proveedores configurados en el per\u00edodo — colapsable
+// Desglose de proveedores en el per\u00edodo — colapsable
 function renderConfigurados(lista) {
   const card = document.getElementById('c-configurados-card');
   const tbody = document.getElementById('c-configurados-body');
+  const wrap  = document.getElementById('c-configurados-body-wrap');
+  const chev  = document.getElementById('c-configurados-chevron');
   if (!lista || !lista.length) { card.style.display = 'none'; return; }
   card.style.display = '';
+  // Siempre cerrado al cargar nuevos datos
+  wrap.style.display = 'none';
+  chev.innerHTML = '&#x25BC;';
   tbody.innerHTML = lista.map(p =>
     '<tr>' +
     '<td>' + escapeHtml(p.proveedor) + '</td>' +
@@ -4844,14 +4821,14 @@ function renderConfigurados(lista) {
   ).join('');
 }
 
-// Toggle del desglose colapsable
+// Toggle del desglose — abre y cierra correctamente
 function toggleConfigurados() {
   const wrap = document.getElementById('c-configurados-body-wrap');
   const chev = document.getElementById('c-configurados-chevron');
   if (!wrap) return;
-  const open = wrap.style.display !== 'none';
-  wrap.style.display = open ? 'none' : '';
-  if (chev) chev.innerHTML = open ? '&#x25BC;' : '&#x25B2;';
+  const isOpen = wrap.style.display !== 'none';
+  wrap.style.display = isOpen ? 'none' : '';
+  if (chev) chev.innerHTML = isOpen ? '&#x25BC;' : '&#x25B2;';
 }
 
 // ── Sub-tab Configuraci\u00f3n ────────────────────────────────────────────────────
@@ -4915,39 +4892,41 @@ function sincronizarPct(input, otherId) {
 }
 
 async function guardarConfigProveedores() {
-  const btn    = document.getElementById('c-sin-config-guardar');
-  const status = document.getElementById('c-sin-config-status');
-  const lista  = _costosResumen && _costosResumen.sinConfigurar || [];
+  const btn   = document.getElementById('c-sin-config-guardar');
+  const lista = _costosResumen && _costosResumen.sinConfigurar || [];
   if (!lista.length) return;
 
   const items = [], errores = [];
   for (const item of lista) {
-    const id = 'prov_' + item.proveedor.replace(/[^a-zA-Z0-9]/g, '_');
-    const cp = parseInt(document.getElementById(id + '_comida') && document.getElementById(id + '_comida').value) || 0;
-    const bp = parseInt(document.getElementById(id + '_bebida') && document.getElementById(id + '_bebida').value) || 0;
+    const id  = 'prov_' + item.proveedor.replace(/[^a-zA-Z0-9]/g, '_');
+    const elC = document.getElementById(id + '_comida');
+    const elB = document.getElementById(id + '_bebida');
+    const cp  = parseInt((elC && elC.value) || '0') || 0;
+    const bp  = parseInt((elB && elB.value) || '0') || 0;
     if (cp + bp !== 100) {
-      errores.push(item.proveedor + ': deben sumar 100 (ten\u00e9s ' + (cp+bp) + ')');
+      errores.push('"' + item.proveedor + '": Comida ' + cp + '% + Bebida ' + bp + '% = ' + (cp+bp) + '% (debe ser 100%)');
       continue;
     }
     items.push({ proveedor: item.proveedor, comidaPct: cp, bebidaPct: bp });
   }
 
   if (errores.length) {
-    if (status) { status.style.color = 'var(--red,#e05c5c)'; status.textContent = errores.join(' | '); }
+    showToast('\u26A0\uFE0F ' + errores.join(' | '));
     return;
   }
-  if (!items.length) { if (status) status.textContent = 'Nada que guardar'; return; }
+  if (!items.length) { showToast('Nada que guardar'); return; }
 
   if (btn) btn.disabled = true;
-  if (status) { status.style.color = 'var(--text-muted)'; status.textContent = 'Guardando\u2026'; }
   try {
     await api('/api/costos/proveedores', { method: 'POST', body: JSON.stringify(items) });
-    if (status) { status.style.color = 'var(--green,#5cb85c)'; status.textContent = '\u2713 Guardado'; }
-    // Recargar resumen en background y refrescar config
-    loadCostos().then(() => renderSinConfigurar(_costosResumen ? (_costosResumen.sinConfigurar || []) : []));
+    showToast('\u2713 Clasificaci\u00f3n guardada');
+    // Recargar resumen y tabla de configurados
+    await loadCostos();
+    renderSinConfigurar(_costosResumen ? (_costosResumen.sinConfigurar || []) : []);
     renderTodosConfig();
   } catch (e) {
-    if (status) { status.style.color = 'var(--red,#e05c5c)'; status.textContent = 'Error: ' + e.message; }
+    showToast('Error al guardar: ' + e.message);
+  } finally {
     if (btn) btn.disabled = false;
   }
 }
