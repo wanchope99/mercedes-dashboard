@@ -1508,6 +1508,52 @@ app.get('/api/fudo/probe-stock-movements', authMiddleware, adminOnly, async (req
   }
 });
 
+// Probe de UN solo recurso — evita el rate limit del probe masivo
+// GET /api/fudo/probe-stock-single?resource=stock-movements&size=5
+app.get('/api/fudo/probe-stock-single', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const resource = req.query.resource || 'stock-movements';
+    const size = parseInt(req.query.size) || 3;
+    const desde = req.query.desde || '';
+    const hasta = req.query.hasta || '';
+    const token = await (require('./fudo').getToken ? require('./fudo') : { getToken: async () => '' });
+
+    // Usar fetchRetry directamente desde fudo no es posible sin exponerla,
+    // así que llamamos probeStockMovements con un solo candidato vía workaround:
+    // Re-implementamos la llamada simple acá.
+    const { default: nodeFetch } = await import('node-fetch').catch(() => ({ default: fetch }));
+    const _fetch = typeof fetch !== 'undefined' ? fetch : nodeFetch;
+    const API_BASE = process.env.FUDO_API_BASE || 'https://api.fu.do/v1alpha1';
+    const AUTH_URL = process.env.FUDO_AUTH_URL || 'https://auth.fu.do/api';
+    const API_KEY = process.env.FUDO_API_KEY;
+    const API_SECRET = process.env.FUDO_API_SECRET;
+
+    // Auth
+    const authRes = await _fetch(AUTH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ apiKey: API_KEY, apiSecret: API_SECRET }),
+    });
+    const authJson = await authRes.json();
+    const fudoToken = authJson.token;
+
+    // Build URL with optional date filters
+    let url = `${API_BASE}/${resource}?page[size]=${size}`;
+    if (desde) url += `&filter[from]=${desde}`;
+    if (hasta) url += `&filter[to]=${hasta}`;
+
+    const r = await _fetch(url, {
+      headers: { 'Authorization': `Bearer ${fudoToken}`, 'Accept': 'application/json' },
+    });
+    const status = r.status;
+    let body = null;
+    try { body = await r.json(); } catch(e) { body = await r.text().catch(() => null); }
+    res.json({ ok: r.ok, status, resource, url, body });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── Módulo Proveedores (ingesta de facturas + dashboard de costos) ───────────
 app.use(proveedoresRoutes({ authMiddleware, adminOnly }));
 
