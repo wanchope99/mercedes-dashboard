@@ -608,52 +608,39 @@ function mismoProveedor(a, b) {
 // ─── Resumen simplificado: Comida y Bebida por Gasto / Ingreso / Costo ──────────
 //
 // DEFINICIONES:
-//   · GASTO COMIDA   = movimientos Mercadería del período asignados a Comida
+//   · GASTO COMIDA   = movimientos Mercadería del período → parte Comida
 //                      (según config proveedor en hoja "Costos Proveedores")
-//   · GASTO BEBIDA   = ídem, asignados a Bebida
+//   · GASTO BEBIDA   = ídem → parte Bebida
 //   · INGRESO COMIDA = ventas Fudo del grupo 'comida'
 //   · INGRESO BEBIDA = ventas Fudo del grupo 'bebida'
-//   · COSTO BEBIDA   = Σ(unidades vendidas × product.cost de Fudo)
-//     → distinción clave: GASTO = facturas pagadas a proveedores;
-//       COSTO = mercadería efectivamente vendida (stock consumido).
+//   · COSTO BEBIDA   = GASTO BEBIDA (lo que se pagó a proveedores de bebida)
+//     El ratio se calcula por CATEGORÍA: gastoBebida / ingresoBebida.
+//     No se necesita el costo unitario de Fudo — el gasto de Movimientos ya
+//     es la fuente de verdad del costo real pagado.
 //
 // Parámetros:
-//   gastos         → resultado de costosProveedores.clasificarMovimientos(movsMercaderia)
-//   ventasConCosto → array de fudo.getVentasConCosto({ desde, hasta })
-//   { desde, hasta } → strings YYYY-MM-DD (solo para armar el campo periodo)
+//   gastos    → resultado de costosProveedores.clasificarMovimientos(movsMercaderia)
+//   ventas    → array de fudo.getVentasItems({ desde, hasta }) (solo necesitamos grupo/monto)
+//   { desde, hasta } → strings YYYY-MM-DD (para armar el campo periodo)
 //
 // Devuelve:
 // {
-//   comida: { gasto, ingreso, ratio },
-//   bebida: { gasto, ingreso, costoMercaderia, ratioCosto, ratioGasto },
-//   sinCostoUnidades, sinCostoNombres,
-//   sinConfigurar: [{ proveedor, monto }],  ← proveedores sin config del período
+//   comida: { gasto, ingreso, ratio (gasto/ingreso %) },
+//   bebida: { gasto, ingreso, ratio (gasto/ingreso %) },
+//   sinConfigurar: [{ proveedor, monto }],
 //   configurados:  [{ proveedor, monto, comidaPct, bebidaPct, comida, bebida }],
 //   periodo: { desde, hasta }
 // }
-function resumenCostosSimplificado(gastos, ventasConCosto, { desde, hasta } = {}) {
-  // ── Gastos desde Movimientos (ya clasificados por costos-proveedores.js) ───
+function resumenCostosSimplificado(gastos, ventas, { desde, hasta } = {}) {
+  // ── Gastos desde Movimientos (ya clasificados) ───────────────────────────
   const gastoComida = (gastos && gastos.gastoComida) || 0;
   const gastoBebida = (gastos && gastos.gastoBebida) || 0;
 
-  // ── Ingresos y Costo desde ventas Fudo ────────────────────────────────────
+  // ── Ingresos desde ventas Fudo (por grupo, sin necesitar costo unitario) ──
   let ingresoComida = 0, ingresoBebida = 0;
-  let costoMercaderia = 0;
-  let sinCostoUnidades = 0;
-  const sinCostoSet = {};
-
-  for (const v of (ventasConCosto || [])) {
-    if (v.grupo === 'comida') {
-      ingresoComida += v.monto;
-    } else if (v.grupo === 'bebida') {
-      ingresoBebida += v.monto;
-      if (v.costoTotal !== null) {
-        costoMercaderia += v.costoTotal;
-      } else {
-        sinCostoUnidades += v.unidades;
-        sinCostoSet[v.nombre] = (sinCostoSet[v.nombre] || 0) + v.unidades;
-      }
-    }
+  for (const v of (ventas || [])) {
+    if (v.grupo === 'comida')      ingresoComida += v.monto;
+    else if (v.grupo === 'bebida') ingresoBebida += v.monto;
   }
 
   const r = (num, denom) => denom > 0 ? Math.round((num / denom) * 1000) / 10 : null;
@@ -667,15 +654,8 @@ function resumenCostosSimplificado(gastos, ventasConCosto, { desde, hasta } = {}
     bebida: {
       gasto: Math.round(gastoBebida),
       ingreso: Math.round(ingresoBebida),
-      costoMercaderia: Math.round(costoMercaderia),
-      ratioCosto: r(costoMercaderia, ingresoBebida),
-      ratioGasto: r(gastoBebida, ingresoBebida),
+      ratio: r(gastoBebida, ingresoBebida),
     },
-    sinCostoUnidades,
-    sinCostoNombres: Object.entries(sinCostoSet)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 20)
-      .map(([nombre, unidades]) => ({ nombre, unidades })),
     sinConfigurar: (gastos && gastos.sinConfigurar) || [],
     configurados:  (gastos && gastos.configurados)  || [],
     periodo: { desde: desde || null, hasta: hasta || null },
