@@ -607,41 +607,59 @@ function mismoProveedor(a, b) {
 
 // ─── Resumen simplificado: Comida y Bebida por Gasto / Ingreso / Costo ──────────
 //
-// DEFINICIONES:
-//   · GASTO COMIDA   = movimientos Mercadería del período → parte Comida
-//                      (según config proveedor en hoja "Costos Proveedores")
-//   · GASTO BEBIDA   = ídem → parte Bebida
-//   · INGRESO COMIDA = ventas Fudo del grupo 'comida'
-//   · INGRESO BEBIDA = ventas Fudo del grupo 'bebida'
-//   · COSTO BEBIDA   = GASTO BEBIDA (lo que se pagó a proveedores de bebida)
-//     El ratio se calcula por CATEGORÍA: gastoBebida / ingresoBebida.
-//     No se necesita el costo unitario de Fudo — el gasto de Movimientos ya
-//     es la fuente de verdad del costo real pagado.
+// TRES CONCEPTOS independientes:
+//   · GASTO   = lo que se pagó a proveedores (fuente: hoja Movimientos)
+//               clasificado por Comida/Bebida según config en "Costos Proveedores"
+//   · INGRESO = lo que se vendió (fuente: Fudo, por grupo comida/bebida)
+//   · COSTO   = mercadería efectivamente usada (fuente: Fudo, ventas × costo unitario)
+//               Solo aplica a BEBIDA — el ratio COSTO/INGRESO es el CMV real de bebida.
+//               Si un producto no tiene costo en Fudo, se acumula en sinCosto[].
 //
 // Parámetros:
-//   gastos    → resultado de costosProveedores.clasificarMovimientos(movsMercaderia)
-//   ventas    → array de fudo.getVentasItems({ desde, hasta }) (solo necesitamos grupo/monto)
-//   { desde, hasta } → strings YYYY-MM-DD (para armar el campo periodo)
+//   gastos         → clasificarMovimientos(movsMercaderia) de costos-proveedores.js
+//   ventasConCosto → fudo.getVentasConCosto({ desde, hasta })
+//   { desde, hasta }
 //
 // Devuelve:
 // {
-//   comida: { gasto, ingreso, ratio (gasto/ingreso %) },
-//   bebida: { gasto, ingreso, ratio (gasto/ingreso %) },
-//   sinConfigurar: [{ proveedor, monto }],
-//   configurados:  [{ proveedor, monto, comidaPct, bebidaPct, comida, bebida }],
-//   periodo: { desde, hasta }
+//   comida: { gasto, ingreso, ratioGasto },
+//   bebida: {
+//     gasto, ingreso, ratioGasto,
+//     costoFudo, ratioCosto,          ← Σ(unidades × costUnit Fudo) / ingreso
+//     sinCosto: [{ nombre, unidades }], sinCostoUnidades, sinCostoMonto (estimado)
+//   },
+//   sinConfigurar, configurados,
+//   periodo
 // }
-function resumenCostosSimplificado(gastos, ventas, { desde, hasta } = {}) {
-  // ── Gastos desde Movimientos (ya clasificados) ───────────────────────────
+function resumenCostosSimplificado(gastos, ventasConCosto, { desde, hasta } = {}) {
+  // ── Gastos desde Movimientos ──────────────────────────────────────────────
   const gastoComida = (gastos && gastos.gastoComida) || 0;
   const gastoBebida = (gastos && gastos.gastoBebida) || 0;
 
-  // ── Ingresos desde ventas Fudo (por grupo, sin necesitar costo unitario) ──
+  // ── Ingresos + Costo Fudo desde ventas ───────────────────────────────────
   let ingresoComida = 0, ingresoBebida = 0;
-  for (const v of (ventas || [])) {
-    if (v.grupo === 'comida')      ingresoComida += v.monto;
-    else if (v.grupo === 'bebida') ingresoBebida += v.monto;
+  let costoFudo = 0;
+  const sinCostoMap = {};   // nombre → { unidades, montoVenta }
+
+  for (const v of (ventasConCosto || [])) {
+    if (v.grupo === 'comida') {
+      ingresoComida += v.monto;
+    } else if (v.grupo === 'bebida') {
+      ingresoBebida += v.monto;
+      if (v.costoTotal !== null) {
+        costoFudo += v.costoTotal;
+      } else {
+        const e = sinCostoMap[v.nombre] = sinCostoMap[v.nombre] || { nombre: v.nombre, unidades: 0, montoVenta: 0 };
+        e.unidades    += v.unidades;
+        e.montoVenta  += v.monto;
+      }
+    }
   }
+
+  const sinCosto = Object.values(sinCostoMap)
+    .sort((a, b) => b.montoVenta - a.montoVenta);
+  const sinCostoUnidades = sinCosto.reduce((s, x) => s + x.unidades, 0);
+  const sinCostoMonto    = Math.round(sinCosto.reduce((s, x) => s + x.montoVenta, 0));
 
   const r = (num, denom) => denom > 0 ? Math.round((num / denom) * 1000) / 10 : null;
 
@@ -649,12 +667,17 @@ function resumenCostosSimplificado(gastos, ventas, { desde, hasta } = {}) {
     comida: {
       gasto: Math.round(gastoComida),
       ingreso: Math.round(ingresoComida),
-      ratio: r(gastoComida, ingresoComida),
+      ratioGasto: r(gastoComida, ingresoComida),
     },
     bebida: {
       gasto: Math.round(gastoBebida),
       ingreso: Math.round(ingresoBebida),
-      ratio: r(gastoBebida, ingresoBebida),
+      ratioGasto: r(gastoBebida, ingresoBebida),
+      costoFudo: Math.round(costoFudo),
+      ratioCosto: r(costoFudo, ingresoBebida),
+      sinCosto,
+      sinCostoUnidades,
+      sinCostoMonto,
     },
     sinConfigurar: (gastos && gastos.sinConfigurar) || [],
     configurados:  (gastos && gastos.configurados)  || [],

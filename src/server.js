@@ -10,7 +10,7 @@ const {
   getComprasEnCuotas,
   getMeses, getCategorias, clearCache,
 } = require('./sheets');
-const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos, getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy, probeStock, getVentasConCosto } = require('./fudo');
+const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos, getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy, probeStock, getVentasItems, getVentasConCosto } = require('./fudo');
 const vinos = require('./vinos');
 const { proyectar, calcularCalculadora, proyeccionMes } = require('./proyecciones');
 const proveedoresRoutes = require('./proveedores-routes');
@@ -1433,6 +1433,7 @@ app.get('/api/costos/resumen', authMiddleware, adminOnly, async (req, res) => {
     }
 
     // Traer movimientos y ventas en paralelo
+    // getVentasConCosto = getVentasItems enriquecido con product.cost de Fudo
     const [todosMovs, ventasConCosto] = await Promise.all([
       getMovimientos().catch(() => []),
       getVentasConCosto({ desde, hasta }).catch(() => []),
