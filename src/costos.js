@@ -607,47 +607,40 @@ function mismoProveedor(a, b) {
 
 // ─── Resumen simplificado: Comida y Bebida por Gasto / Ingreso / Costo ──────────
 //
-// DEFINICIONES (acordadas con el usuario):
-//   · GASTO COMIDA   = compras del período cuyo grupoCMV es 'Comida'
+// DEFINICIONES:
+//   · GASTO COMIDA   = movimientos Mercadería del período asignados a Comida
+//                      (según config proveedor en hoja "Costos Proveedores")
+//   · GASTO BEBIDA   = ídem, asignados a Bebida
 //   · INGRESO COMIDA = ventas Fudo del grupo 'comida'
-//   · GASTO BEBIDA   = compras del período cuyo grupoCMV es 'Bebida'
 //   · INGRESO BEBIDA = ventas Fudo del grupo 'bebida'
 //   · COSTO BEBIDA   = Σ(unidades vendidas × product.cost de Fudo)
-//     → distinción clave: el GASTO es lo que salió por facturas de proveedores;
-//       el COSTO es el valor de la mercadería EFECTIVAMENTE vendida (stock usado).
+//     → distinción clave: GASTO = facturas pagadas a proveedores;
+//       COSTO = mercadería efectivamente vendida (stock consumido).
 //
 // Parámetros:
-//   compras        → array de prov.getCompras()
+//   gastos         → resultado de costosProveedores.clasificarMovimientos(movsMercaderia)
 //   ventasConCosto → array de fudo.getVentasConCosto({ desde, hasta })
-//   { desde, hasta } → strings YYYY-MM-DD para filtrar compras
+//   { desde, hasta } → strings YYYY-MM-DD (solo para armar el campo periodo)
 //
 // Devuelve:
 // {
-//   comida: { gasto, ingreso, ratio (gasto/ingreso %) },
-//   bebida: { gasto, ingreso, costoMercaderia, ratioCosto (costo/ingreso %) },
-//   sinCostoUnidades   // unidades bebida que no tienen costo cargado en Fudo
-//   sinCostoNombres    // lista de esos productos (para avisar al usuario)
+//   comida: { gasto, ingreso, ratio },
+//   bebida: { gasto, ingreso, costoMercaderia, ratioCosto, ratioGasto },
+//   sinCostoUnidades, sinCostoNombres,
+//   sinConfigurar: [{ proveedor, monto }],  ← proveedores sin config del período
+//   configurados:  [{ proveedor, monto, comidaPct, bebidaPct, comida, bebida }],
 //   periodo: { desde, hasta }
 // }
-function resumenCostosSimplificado(compras, ventasConCosto, { desde, hasta } = {}) {
-  // ── Gastos desde Compras ────────────────────────────────────────────────────
-  let gastoComida = 0, gastoBebida = 0;
-  for (const c of (compras || [])) {
-    if (desde && c.fecha && c.fecha < desde) continue;
-    if (hasta && c.fecha && c.fecha > hasta) continue;
-    const g = grupoCMV(
-      (require('./proveedores-categorias').normalizarCategoria(c.categoria || '').categoria) || c.categoria || ''
-    );
-    const monto = montoCompra(c);
-    if (g === 'Comida') gastoComida += monto;
-    else if (g === 'Bebida') gastoBebida += monto;
-  }
+function resumenCostosSimplificado(gastos, ventasConCosto, { desde, hasta } = {}) {
+  // ── Gastos desde Movimientos (ya clasificados por costos-proveedores.js) ───
+  const gastoComida = (gastos && gastos.gastoComida) || 0;
+  const gastoBebida = (gastos && gastos.gastoBebida) || 0;
 
   // ── Ingresos y Costo desde ventas Fudo ────────────────────────────────────
   let ingresoComida = 0, ingresoBebida = 0;
-  let costoMercaderia = 0;           // Σ unidades × costoUnit (solo bebida con costo)
+  let costoMercaderia = 0;
   let sinCostoUnidades = 0;
-  const sinCostoSet = {};            // nombre → unidades sin costo
+  const sinCostoSet = {};
 
   for (const v of (ventasConCosto || [])) {
     if (v.grupo === 'comida') {
@@ -669,20 +662,22 @@ function resumenCostosSimplificado(compras, ventasConCosto, { desde, hasta } = {
     comida: {
       gasto: Math.round(gastoComida),
       ingreso: Math.round(ingresoComida),
-      ratio: r(gastoComida, ingresoComida),   // food cost %
+      ratio: r(gastoComida, ingresoComida),
     },
     bebida: {
       gasto: Math.round(gastoBebida),
       ingreso: Math.round(ingresoBebida),
       costoMercaderia: Math.round(costoMercaderia),
-      ratioCosto: r(costoMercaderia, ingresoBebida),   // CMV bebida %
-      ratioGasto: r(gastoBebida, ingresoBebida),        // gasto/ingreso %
+      ratioCosto: r(costoMercaderia, ingresoBebida),
+      ratioGasto: r(gastoBebida, ingresoBebida),
     },
     sinCostoUnidades,
     sinCostoNombres: Object.entries(sinCostoSet)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 20)
       .map(([nombre, unidades]) => ({ nombre, unidades })),
+    sinConfigurar: (gastos && gastos.sinConfigurar) || [],
+    configurados:  (gastos && gastos.configurados)  || [],
     periodo: { desde: desde || null, hasta: hasta || null },
   };
 }

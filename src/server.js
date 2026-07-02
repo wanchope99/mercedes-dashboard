@@ -16,6 +16,7 @@ const { proyectar, calcularCalculadora, proyeccionMes } = require('./proyeccione
 const proveedoresRoutes = require('./proveedores-routes');
 const prov = require('./proveedores');
 const costos = require('./costos');
+const costosProveedores = require('./costos-proveedores');
 const cats = require('./proveedores-categorias');
 const consumo = require('./consumo');
 const cierres = require('./cierres');
@@ -1416,14 +1417,14 @@ app.get('/api/proyeccion-mes', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // ─── Resumen simplificado de Costos (Comida / Bebida) ────────────────────────
+// ─── Resumen simplificado de Costos (Comida / Bebida) ────────────────────────
 // GET /api/costos/resumen?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
-// Si no se pasan fechas, devuelve el mes en curso (1ro del mes actual → hoy).
-// Devuelve: { comida, bebida, sinCostoUnidades, sinCostoNombres, periodo }
+// Fuente de gastos: Movimientos hoja "Movimientos", grupo "Mercaderia".
+// Clasificación Comida/Bebida: hoja "Costos Proveedores" en Gestión Mercedes.
+// Si no se pasan fechas, defaultea al mes en curso.
 app.get('/api/costos/resumen', authMiddleware, adminOnly, async (req, res) => {
   try {
-    await costos.cargarProveedorGrupoCMV().catch(() => {});
-
-    // Período: default = mes en curso
+    // Período: default = mes en curso (hora Buenos Aires)
     let { desde, hasta } = req.query;
     if (!desde || !hasta) {
       const hoy = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
@@ -1431,15 +1432,67 @@ app.get('/api/costos/resumen', authMiddleware, adminOnly, async (req, res) => {
       if (!hasta) hasta = hoy.toISOString().slice(0, 10);
     }
 
-    const [compras, ventasConCosto] = await Promise.all([
-      prov.getCompras().catch(() => []),
+    // Traer movimientos y ventas en paralelo
+    const [todosMovs, ventasConCosto] = await Promise.all([
+      getMovimientos().catch(() => []),
       getVentasConCosto({ desde, hasta }).catch(() => []),
     ]);
 
-    const data = costos.resumenCostosSimplificado(compras, ventasConCosto, { desde, hasta });
+    // Filtrar: solo Gastos de Mercadería del período, sin cuotas ni cambios
+    const movsMercaderia = todosMovs.filter(m => {
+      if (m.tipo !== 'Gasto') return false;
+      if (m.esCambio || m.esFondeo || m.esCuota) return false;
+      if (m.grupo !== 'Mercaderia') return false;
+      const fechaStr = m.fecha ? m.fecha.toISOString().slice(0, 10) : null;
+      if (!fechaStr) return false;
+      if (desde && fechaStr < desde) return false;
+      if (hasta && fechaStr > hasta) return false;
+      return true;
+    });
+
+    // Clasificar gastos por proveedor (Comida% / Bebida%)
+    const gastos = await costosProveedores.clasificarMovimientos(movsMercaderia);
+
+    const data = costos.resumenCostosSimplificado(gastos, ventasConCosto, { desde, hasta });
     res.json({ ok: true, data });
   } catch (err) {
     console.error('Error /api/costos/resumen:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── Config de proveedores para Costos ────────────────────────────────────────
+// GET /api/costos/proveedores → lista la config completa
+app.get('/api/costos/proveedores', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const data = await costosProveedores.listarConfig();
+    res.json({ ok: true, data });
+  } catch (err) {
+    console.error('Error GET /api/costos/proveedores:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/costos/proveedores → guarda config de uno o varios proveedores
+// Body: [{ proveedor, comidaPct, bebidaPct, notas? }]  (array)
+//    o: { proveedor, comidaPct, bebidaPct, notas? }     (objeto único)
+app.post('/api/costos/proveedores', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const body = req.body;
+    const items = Array.isArray(body) ? body : [body];
+    if (!items.length) return res.status(400).json({ ok: false, error: 'Nada que guardar' });
+    for (const it of items) {
+      if (!it.proveedor) return res.status(400).json({ ok: false, error: 'Falta proveedor en algún item' });
+      const cp = Number(it.comidaPct) || 0;
+      const bp = Number(it.bebidaPct) || 0;
+      if (cp < 0 || cp > 100 || bp < 0 || bp > 100) {
+        return res.status(400).json({ ok: false, error: `Porcentajes inválidos para ${it.proveedor}` });
+      }
+    }
+    await costosProveedores.guardarConfigBatch(items);
+    res.json({ ok: true, guardados: items.length });
+  } catch (err) {
+    console.error('Error POST /api/costos/proveedores:', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
