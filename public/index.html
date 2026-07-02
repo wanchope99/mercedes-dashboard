@@ -881,7 +881,8 @@
 </div>
 
 <!-- COSTOS TAB -->
-<div id="tab-costos" class="tab-panel">
+<!-- ═══ COSTOS — subtab: Costos ═══ -->
+<div id="costos-resumen" class="tab-panel">
   <div class="filters-bar">
     <span class="filter-label">Desde</span>
     <input type="date" id="costos-desde" onchange="loadCostos()" />
@@ -892,12 +893,12 @@
   </div>
   <main>
 
-    <!-- ── COMIDA ── -->
+    <!-- COMIDA -->
     <div class="card">
       <div class="card-title">&#x1F37D;&#xFE0F; Comida</div>
       <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
         <div class="kpi-card red">
-          <div class="kpi-label">Gasto (facturas)</div>
+          <div class="kpi-label">Gasto (Movimientos)</div>
           <div class="kpi-value" id="c-comida-gasto">-</div>
           <div class="kpi-sub">compras a proveedores</div>
         </div>
@@ -914,12 +915,12 @@
       </div>
     </div>
 
-    <!-- ── BEBIDA ── -->
+    <!-- BEBIDA -->
     <div class="card">
       <div class="card-title">&#x1F377; Bebida</div>
       <div class="kpi-grid" style="grid-template-columns:repeat(2,1fr);margin-bottom:12px">
         <div class="kpi-card red">
-          <div class="kpi-label">Gasto (facturas)</div>
+          <div class="kpi-label">Gasto (Movimientos)</div>
           <div class="kpi-value" id="c-bebida-gasto">-</div>
           <div class="kpi-sub">compras a proveedores de bebida</div>
         </div>
@@ -931,7 +932,7 @@
       </div>
       <div style="border-top:1px solid var(--border);margin:0 0 12px;padding-top:12px">
         <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:8px">
-          Costo de mercader&#xED;a usada
+          Costo de mercandr&#xED;a usada
           <span style="font-weight:400;text-transform:none;letter-spacing:0"> &#x2014; ventas &times; costo unitario Fudo</span>
         </div>
         <div class="kpi-grid" style="grid-template-columns:repeat(2,1fr)">
@@ -950,75 +951,67 @@
       <div id="c-bebida-sin-costo" style="display:none;background:var(--surface2);border-radius:6px;padding:10px 14px;font-size:12px;color:var(--text-muted);margin-top:4px"></div>
     </div>
 
-    <!-- ── DESGLOSE COSTO BEBIDA ── -->
-    <div class="card" id="c-bebida-detalle-card" style="display:none">
-      <div class="card-title">Costo de mercader&#xED;a por producto de bebida
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"> &#x2014; solo productos con costo cargado en Fudo</span>
+    <!-- DESGLOSE PROVEEDORES (colapsable) -->
+    <div class="card" id="c-configurados-card" style="display:none">
+      <div class="card-title" style="cursor:pointer;user-select:none" onclick="toggleConfigurados()">
+        Desglose por proveedor
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0;font-weight:400">
+          &#x2014; c&#xF3;mo se repartieron los gastos de Mercader&#xED;a
+        </span>
+        <span id="c-configurados-chevron" style="float:right;font-size:14px;color:var(--text-muted)">&#x25BC;</span>
       </div>
-      <div class="table-wrap">
-        <table class="prov-resumen-table" style="width:100%">
-          <thead>
-            <tr>
-              <th style="text-align:left">Producto</th>
-              <th style="text-align:right">Unidades vendidas</th>
-              <th style="text-align:right">Costo unit. (Fudo)</th>
-              <th style="text-align:right">Costo total</th>
-              <th style="text-align:right">Ingreso</th>
-              <th style="text-align:right">CMV %</th>
-            </tr>
-          </thead>
-          <tbody id="c-bebida-detalle-body">
-            <tr><td colspan="6" class="prov-empty">-</td></tr>
-          </tbody>
-        </table>
+      <div id="c-configurados-body-wrap" style="display:none">
+        <div class="table-wrap" style="margin-top:8px">
+          <table class="prov-resumen-table" style="width:100%">
+            <thead>
+              <tr>
+                <th style="text-align:left">Proveedor</th>
+                <th style="text-align:right">Total mov.</th>
+                <th style="text-align:right">Comida%</th>
+                <th style="text-align:right">Bebida%</th>
+                <th style="text-align:right">&#x2192; Comida</th>
+                <th style="text-align:right">&#x2192; Bebida</th>
+              </tr>
+            </thead>
+            <tbody id="c-configurados-body">
+              <tr><td colspan="6" class="prov-empty">-</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
-    <!-- ── PROVEEDORES SIN CONFIGURAR ── -->
-    <div class="card" id="c-sin-config-card" style="display:none;border-left:3px solid #e0a85c">
+  </main>
+</div>
+
+<!-- ═══ COSTOS — subtab: Configuración ═══ -->
+<div id="costos-config" class="tab-panel">
+  <main>
+
+    <!-- PROVEEDORES SIN CLASIFICAR -->
+    <div class="card" id="c-sin-config-card" style="border-left:3px solid #e0a85c">
       <div class="card-title" style="color:#e0a85c">
         &#x26A0;&#xFE0F; Proveedores sin clasificar
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0;font-weight:400">
           &#x2014; estos gastos no entraron en Comida ni Bebida todav&#xED;a
         </span>
       </div>
-      <p style="font-size:13px;color:var(--text-muted);margin:0 0 14px">
-        Asign&#xe1; qu&#xe9; porcentaje de cada proveedor es Comida y cu&#xe1;nto es Bebida (deben sumar 100%).
-        Se guarda autom&#xe1;ticamente y no te volver&#xe1; a preguntar.
-      </p>
-      <div id="c-sin-config-lista"></div>
-      <div style="margin-top:14px;display:flex;gap:8px;align-items:center">
-        <button class="btn btn-primary" onclick="guardarConfigProveedores()" id="c-sin-config-guardar">
-          Guardar clasificaci&#xF3;n
-        </button>
-        <span id="c-sin-config-status" style="font-size:12px;color:var(--text-muted)"></span>
+      <div id="c-sin-config-wrap">
+        <p style="font-size:13px;color:var(--text-muted);margin:0">
+          No hay proveedores sin clasificar en el per&#xED;odo activo. &#x1F44C;
+        </p>
       </div>
     </div>
 
-    <!-- ── PROVEEDORES CONFIGURADOS ── -->
-    <div class="card" id="c-configurados-card" style="display:none">
-      <div class="card-title">
-        Desglose de gastos por proveedor
+    <!-- TODOS LOS PROVEEDORES CONFIGURADOS -->
+    <div class="card" id="c-todos-config-card">
+      <div class="card-title">Clasificaci&#xF3;n de proveedores
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0;font-weight:400">
-          &#x2014; c&#xF3;mo se repartieron los movimientos de Mercanc&#xED;a
+          &#x2014; configuraci&#xF3;n guardada (editable)
         </span>
       </div>
-      <div class="table-wrap">
-        <table class="prov-resumen-table" style="width:100%">
-          <thead>
-            <tr>
-              <th style="text-align:left">Proveedor</th>
-              <th style="text-align:right">Total</th>
-              <th style="text-align:right">Comida%</th>
-              <th style="text-align:right">Bebida%</th>
-              <th style="text-align:right">&#x2192; Comida</th>
-              <th style="text-align:right">&#x2192; Bebida</th>
-            </tr>
-          </thead>
-          <tbody id="c-configurados-body">
-            <tr><td colspan="6" class="prov-empty">-</td></tr>
-          </tbody>
-        </table>
+      <div id="c-todos-config-body">
+        <div style="color:var(--text-muted);font-size:13px">Carg&#xe1; el tab Costos primero para ver la configuraci&#xF3;n.</div>
       </div>
     </div>
 
@@ -1721,7 +1714,10 @@ const TAB_GROUPS = {
   dashboard:    { subs: null },
   pagos:        { subs: null },
   servicios:    { subs: null },
-  costos:       { subs: null },
+  costos: { subs: [
+    { id: 'costos-resumen', label: '📊 Costos' },
+    { id: 'costos-config',  label: '⚙️ Configuración' },
+  ] },
   proyecciones: { subs: [
     { id: 'calculadora', label: '🧮 Calculadora' },
     { id: 'proymes',     label: '📅 Proyección Mes' },
@@ -1748,8 +1744,8 @@ function cargarPanel(tab) {
   else if (tab === 'proveedores') loadProveedores();
   else if (tab === 'comportamiento') loadComportamiento();
   else if (tab === 'vinos') loadVinos();
-  else if (tab === 'costos') {
-    // Pre-fill período a mes en curso si aún están vacíos
+  else if (tab === 'costos-resumen') {
+    // Pre-fill período a mes en curso si están vacíos
     const desdeEl = document.getElementById('costos-desde');
     const hastaEl = document.getElementById('costos-hasta');
     if (desdeEl && !desdeEl.value) {
@@ -1761,6 +1757,9 @@ function cargarPanel(tab) {
       hastaEl.value = hoy.toISOString().slice(0,10);
     }
     loadCostos();
+  }
+  else if (tab === 'costos-config') {
+    loadCostosConfig();
   }
   else if (tab === 'calculadora') loadCalculadora();
   else if (tab === 'proymes') loadProyeccionMes();
@@ -4769,13 +4768,12 @@ async function loadCostos() {
   const desde = document.getElementById('costos-desde').value;
   const hasta  = document.getElementById('costos-hasta').value;
 
-  // Limpiar estado previo
+  // Reset KPIs
   ['c-comida-gasto','c-comida-ingreso','c-comida-ratio',
    'c-bebida-gasto','c-bebida-ingreso','c-bebida-costo','c-bebida-cmv-pct']
     .forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '\u2026'; });
-  ['c-bebida-detalle-card','c-sin-config-card','c-configurados-card']
-    .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
   document.getElementById('c-bebida-sin-costo').style.display = 'none';
+  document.getElementById('c-configurados-card').style.display = 'none';
 
   const qs = new URLSearchParams();
   if (desde) qs.set('desde', desde);
@@ -4790,147 +4788,49 @@ async function loadCostos() {
   }
   _costosResumen = data;
 
-  // Per\u00edodo mostrado
+  // Per\u00edodo
   const periodoEl = document.getElementById('costos-periodo-label');
   if (periodoEl && data.periodo) {
     const fmtD = s => s ? s.split('-').reverse().join('/') : '';
     periodoEl.textContent = data.periodo.desde && data.periodo.hasta
-      ? fmtD(data.periodo.desde) + ' \u2192 ' + fmtD(data.periodo.hasta)
-      : '';
+      ? fmtD(data.periodo.desde) + ' \u2192 ' + fmtD(data.periodo.hasta) : '';
   }
 
-  // \u2500\u2500 Comida \u2500\u2500
+  // Comida
   const co = data.comida || {};
   document.getElementById('c-comida-gasto').textContent   = fmt(co.gasto);
   document.getElementById('c-comida-ingreso').textContent = fmt(co.ingreso);
-  document.getElementById('c-comida-ratio').textContent   =
-    co.ratio != null ? pct(co.ratio) : '-';
+  document.getElementById('c-comida-ratio').textContent   = co.ratio != null ? pct(co.ratio) : '-';
 
-  // \u2500\u2500 Bebida \u2500\u2500
+  // Bebida
   const be = data.bebida || {};
   document.getElementById('c-bebida-gasto').textContent   = fmt(be.gasto);
   document.getElementById('c-bebida-ingreso').textContent = fmt(be.ingreso);
   document.getElementById('c-bebida-costo').textContent   = fmt(be.costoMercaderia);
-  document.getElementById('c-bebida-cmv-pct').textContent =
-    be.ratioCosto != null ? pct(be.ratioCosto) : '-';
+  document.getElementById('c-bebida-cmv-pct').textContent = be.ratioCosto != null ? pct(be.ratioCosto) : '-';
 
-  // Aviso productos sin costo Fudo
+  // Aviso sin costo Fudo
   const sinCostoEl = document.getElementById('c-bebida-sin-costo');
   if (data.sinCostoUnidades > 0) {
     const lista = (data.sinCostoNombres || []).map(x => x.nombre).slice(0, 8).join(', ');
     sinCostoEl.style.display = 'block';
-    sinCostoEl.innerHTML =
-      '\u26A0\uFE0F <strong>' + data.sinCostoUnidades + ' unidades</strong> vendidas sin costo cargado en Fudo ' +
-      '(no entran en el CMV bebida). Productos: ' + escapeHtml(lista) +
-      (data.sinCostoNombres.length > 8 ? '\u2026' : '') +
+    sinCostoEl.innerHTML = '\u26A0\uFE0F <strong>' + data.sinCostoUnidades +
+      ' unidades</strong> vendidas sin costo cargado en Fudo (no entran en el CMV bebida). Productos: ' +
+      escapeHtml(lista) + (data.sinCostoNombres.length > 8 ? '\u2026' : '') +
       '. <em>Carg\u00e1 el costo en Fudo para que sumen.</em>';
   } else {
     sinCostoEl.style.display = 'none';
   }
 
-  // \u2500\u2500 Proveedores sin configurar \u2500\u2500
-  renderSinConfigurar(data.sinConfigurar || []);
-
-  // \u2500\u2500 Tabla de proveedores configurados \u2500\u2500
+  // Desglose proveedores configurados (colapsable)
   renderConfigurados(data.configurados || []);
 }
 
-// Renderiza el formulario de proveedores sin clasificar
-function renderSinConfigurar(lista) {
-  const card = document.getElementById('c-sin-config-card');
-  const cont = document.getElementById('c-sin-config-lista');
-  if (!lista || !lista.length) { card.style.display = 'none'; return; }
-
-  card.style.display = '';
-  document.getElementById('c-sin-config-status').textContent = '';
-
-  let html = '<div style="display:flex;flex-direction:column;gap:10px">';
-  for (const item of lista) {
-    const id = 'prov_' + item.proveedor.replace(/[^a-zA-Z0-9]/g, '_');
-    html += '<div style="display:grid;grid-template-columns:1fr 120px 120px;gap:8px;align-items:center;' +
-      'background:var(--surface2);border-radius:6px;padding:10px 12px">' +
-      '<div>' +
-        '<div style="font-weight:600;font-size:13px">' + escapeHtml(item.proveedor) + '</div>' +
-        '<div style="font-size:11px;color:var(--text-muted)">Monto en el per\u00edodo: <strong>' + fmt(item.monto) + '</strong></div>' +
-      '</div>' +
-      '<div>' +
-        '<label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">Comida %</label>' +
-        '<input type="number" id="' + id + '_comida" min="0" max="100" step="1" value="" ' +
-          'style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:4px;' +
-          'background:var(--surface);color:var(--text);font-size:13px" ' +
-          'oninput="sincronizarPct(this, \'' + id + '_bebida\')" placeholder="0\u201300">' +
-      '</div>' +
-      '<div>' +
-        '<label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">Bebida %</label>' +
-        '<input type="number" id="' + id + '_bebida" min="0" max="100" step="1" value="" ' +
-          'style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:4px;' +
-          'background:var(--surface);color:var(--text);font-size:13px" ' +
-          'oninput="sincronizarPct(this, \'' + id + '_comida\')" placeholder="0\u201300">' +
-      '</div>' +
-      '<input type="hidden" id="' + id + '_nombre" value="' + escAttr2(item.proveedor) + '">' +
-      '</div>';
-  }
-  html += '</div>';
-  cont.innerHTML = html;
-}
-
-// Al editar un % calcula el complemento automáticamente
-function sincronizarPct(input, otherId) {
-  const val = Math.max(0, Math.min(100, parseInt(input.value) || 0));
-  const other = document.getElementById(otherId);
-  if (other && document.activeElement === input) {
-    other.value = Math.max(0, 100 - val);
-  }
-}
-
-// Guarda la clasificación de los proveedores del formulario
-async function guardarConfigProveedores() {
-  const btn = document.getElementById('c-sin-config-guardar');
-  const status = document.getElementById('c-sin-config-status');
-  const lista = _costosResumen && _costosResumen.sinConfigurar || [];
-  if (!lista.length) return;
-
-  const items = [];
-  const errores = [];
-  for (const item of lista) {
-    const id = 'prov_' + item.proveedor.replace(/[^a-zA-Z0-9]/g, '_');
-    const cp = parseInt(document.getElementById(id + '_comida').value) || 0;
-    const bp = parseInt(document.getElementById(id + '_bebida').value) || 0;
-    if (cp + bp !== 100) {
-      errores.push(item.proveedor + ': Comida% + Bebida% deben sumar 100 (ten\u00e9s ' + (cp+bp) + ')');
-      continue;
-    }
-    items.push({ proveedor: item.proveedor, comidaPct: cp, bebidaPct: bp });
-  }
-
-  if (errores.length) {
-    status.style.color = 'var(--red, #e05c5c)';
-    status.textContent = errores.join(' | ');
-    return;
-  }
-  if (!items.length) { status.textContent = 'Nada que guardar'; return; }
-
-  btn.disabled = true;
-  status.style.color = 'var(--text-muted)';
-  status.textContent = 'Guardando\u2026';
-  try {
-    await api('/api/costos/proveedores', { method: 'POST', body: JSON.stringify(items) });
-    status.style.color = 'var(--green, #5cb85c)';
-    status.textContent = '\u2713 Guardado. Recargando\u2026';
-    setTimeout(() => loadCostos(), 800);
-  } catch (e) {
-    status.style.color = 'var(--red, #e05c5c)';
-    status.textContent = 'Error: ' + e.message;
-    btn.disabled = false;
-  }
-}
-
-// Tabla de proveedores ya configurados en el período
+// Desglose de proveedores configurados en el per\u00edodo — colapsable
 function renderConfigurados(lista) {
-  const card  = document.getElementById('c-configurados-card');
+  const card = document.getElementById('c-configurados-card');
   const tbody = document.getElementById('c-configurados-body');
   if (!lista || !lista.length) { card.style.display = 'none'; return; }
-
   card.style.display = '';
   tbody.innerHTML = lista.map(p =>
     '<tr>' +
@@ -4942,6 +4842,138 @@ function renderConfigurados(lista) {
     '<td style="text-align:right">' + fmt(p.bebida) + '</td>' +
     '</tr>'
   ).join('');
+}
+
+// Toggle del desglose colapsable
+function toggleConfigurados() {
+  const wrap = document.getElementById('c-configurados-body-wrap');
+  const chev = document.getElementById('c-configurados-chevron');
+  if (!wrap) return;
+  const open = wrap.style.display !== 'none';
+  wrap.style.display = open ? 'none' : '';
+  if (chev) chev.innerHTML = open ? '&#x25BC;' : '&#x25B2;';
+}
+
+// ── Sub-tab Configuraci\u00f3n ────────────────────────────────────────────────────
+async function loadCostosConfig() {
+  // Muestra proveedores sin clasificar del \u00faltimo resumen cargado,
+  // m\u00e1s la lista completa de proveedores configurados.
+  renderSinConfigurar(_costosResumen ? (_costosResumen.sinConfigurar || []) : []);
+  await renderTodosConfig();
+}
+
+// Formulario de proveedores sin clasificar (en sub-tab Configuraci\u00f3n)
+function renderSinConfigurar(lista) {
+  const wrap = document.getElementById('c-sin-config-wrap');
+  if (!wrap) return;
+
+  if (!lista || !lista.length) {
+    wrap.innerHTML = '<p style="font-size:13px;color:var(--text-muted);margin:0">' +
+      'No hay proveedores sin clasificar en el per\u00edodo activo. \uD83D\uDC4C</p>';
+    return;
+  }
+
+  let html = '<p style="font-size:13px;color:var(--text-muted);margin:0 0 14px">' +
+    'Asign\u00e1 qu\u00e9 porcentaje de cada proveedor es Comida y cu\u00e1nto es Bebida (deben sumar 100%). ' +
+    'Se guarda autom\u00e1ticamente y no te volver\u00e1 a preguntar.</p>' +
+    '<div style="display:flex;flex-direction:column;gap:10px">';
+
+  for (const item of lista) {
+    const id = 'prov_' + item.proveedor.replace(/[^a-zA-Z0-9]/g, '_');
+    html += '<div style="display:grid;grid-template-columns:1fr 120px 120px;gap:8px;align-items:center;' +
+      'background:var(--surface2);border-radius:6px;padding:10px 12px">' +
+      '<div>' +
+        '<div style="font-weight:600;font-size:13px">' + escapeHtml(item.proveedor) + '</div>' +
+        '<div style="font-size:11px;color:var(--text-muted)">Monto en el per\u00edodo: <strong>' + fmt(item.monto) + '</strong></div>' +
+      '</div>' +
+      '<div>' +
+        '<label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">Comida %</label>' +
+        '<input type="number" id="' + id + '_comida" min="0" max="100" step="1" value="" ' +
+          'style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" ' +
+          'oninput="sincronizarPct(this,\'' + id + '_bebida\')" placeholder="0-100">' +
+      '</div>' +
+      '<div>' +
+        '<label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px">Bebida %</label>' +
+        '<input type="number" id="' + id + '_bebida" min="0" max="100" step="1" value="" ' +
+          'style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" ' +
+          'oninput="sincronizarPct(this,\'' + id + '_comida\')" placeholder="0-100">' +
+      '</div>' +
+      '</div>';
+  }
+  html += '</div>' +
+    '<div style="margin-top:14px;display:flex;gap:8px;align-items:center">' +
+    '<button class="btn btn-primary" onclick="guardarConfigProveedores()" id="c-sin-config-guardar">Guardar clasificaci\u00f3n</button>' +
+    '<span id="c-sin-config-status" style="font-size:12px;color:var(--text-muted)"></span>' +
+    '</div>';
+  wrap.innerHTML = html;
+}
+
+function sincronizarPct(input, otherId) {
+  const val = Math.max(0, Math.min(100, parseInt(input.value) || 0));
+  const other = document.getElementById(otherId);
+  if (other && document.activeElement === input) other.value = Math.max(0, 100 - val);
+}
+
+async function guardarConfigProveedores() {
+  const btn    = document.getElementById('c-sin-config-guardar');
+  const status = document.getElementById('c-sin-config-status');
+  const lista  = _costosResumen && _costosResumen.sinConfigurar || [];
+  if (!lista.length) return;
+
+  const items = [], errores = [];
+  for (const item of lista) {
+    const id = 'prov_' + item.proveedor.replace(/[^a-zA-Z0-9]/g, '_');
+    const cp = parseInt(document.getElementById(id + '_comida') && document.getElementById(id + '_comida').value) || 0;
+    const bp = parseInt(document.getElementById(id + '_bebida') && document.getElementById(id + '_bebida').value) || 0;
+    if (cp + bp !== 100) {
+      errores.push(item.proveedor + ': deben sumar 100 (ten\u00e9s ' + (cp+bp) + ')');
+      continue;
+    }
+    items.push({ proveedor: item.proveedor, comidaPct: cp, bebidaPct: bp });
+  }
+
+  if (errores.length) {
+    if (status) { status.style.color = 'var(--red,#e05c5c)'; status.textContent = errores.join(' | '); }
+    return;
+  }
+  if (!items.length) { if (status) status.textContent = 'Nada que guardar'; return; }
+
+  if (btn) btn.disabled = true;
+  if (status) { status.style.color = 'var(--text-muted)'; status.textContent = 'Guardando\u2026'; }
+  try {
+    await api('/api/costos/proveedores', { method: 'POST', body: JSON.stringify(items) });
+    if (status) { status.style.color = 'var(--green,#5cb85c)'; status.textContent = '\u2713 Guardado'; }
+    // Recargar resumen en background y refrescar config
+    loadCostos().then(() => renderSinConfigurar(_costosResumen ? (_costosResumen.sinConfigurar || []) : []));
+    renderTodosConfig();
+  } catch (e) {
+    if (status) { status.style.color = 'var(--red,#e05c5c)'; status.textContent = 'Error: ' + e.message; }
+    if (btn) btn.disabled = false;
+  }
+}
+
+// Lista completa de proveedores configurados (desde el endpoint, no solo el período)
+async function renderTodosConfig() {
+  const cont = document.getElementById('c-todos-config-body');
+  if (!cont) return;
+  cont.innerHTML = '<div style="color:var(--text-muted);font-size:13px">Cargando\u2026</div>';
+  let todos;
+  try { ({ data: todos } = await api('/api/costos/proveedores')); }
+  catch (e) { cont.innerHTML = '<div style="color:var(--text-muted);font-size:13px">Error: ' + escapeHtml(e.message) + '</div>'; return; }
+
+  if (!todos || !todos.length) {
+    cont.innerHTML = '<div style="color:var(--text-muted);font-size:13px">A\u00fan no hay proveedores configurados.</div>';
+    return;
+  }
+  cont.innerHTML = '<div class="table-wrap"><table class="prov-resumen-table" style="width:100%">' +
+    '<thead><tr><th style="text-align:left">Proveedor</th><th style="text-align:right">Comida %</th>' +
+    '<th style="text-align:right">Bebida %</th><th style="text-align:right">Notas</th></tr></thead>' +
+    '<tbody>' + todos.map(p =>
+      '<tr><td>' + escapeHtml(p.proveedor) + '</td>' +
+      '<td style="text-align:right">' + p.comidaPct + '%</td>' +
+      '<td style="text-align:right">' + p.bebidaPct + '%</td>' +
+      '<td style="text-align:right;color:var(--text-muted);font-size:12px">' + escapeHtml(p.notas || '') + '</td></tr>'
+    ).join('') + '</tbody></table></div>';
 }
 
 
