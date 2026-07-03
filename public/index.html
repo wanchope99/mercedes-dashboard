@@ -948,11 +948,16 @@
         Costo de mercader&#xED;a &#x2014;
         <span style="font-weight:400;text-transform:none;letter-spacing:0">ventas &#xD7; costo unitario Fudo</span>
       </div>
-      <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
+      <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
         <div class="kpi-card" style="border-left:3px solid #e0a85c">
           <div class="kpi-label">Costo (Fudo)</div>
           <div class="kpi-value" id="c-bebida-costo-fudo">-</div>
           <div class="kpi-sub">&#x3A3; unidades &#xD7; costo unitario</div>
+        </div>
+        <div class="kpi-card" style="border-left:3px solid #5c8fe0;cursor:pointer" onclick="openDetalleStockModal()" title="Ver detalle">
+          <div class="kpi-label">Costo (Stock real)</div>
+          <div class="kpi-value" id="c-bebida-costo-stock">-</div>
+          <div class="kpi-sub" id="c-bebida-costo-stock-sub">inicio + comprado &#x2212; fin</div>
         </div>
         <div class="kpi-card" style="border-left:3px solid #e0a85c">
           <div class="kpi-label">Ingreso bebida</div>
@@ -972,6 +977,14 @@
            cursor:pointer;user-select:none" onclick="openSinCostoModal()">
         <span id="c-sin-costo-texto" style="font-size:12px;color:var(--text-muted)"></span>
         <span style="font-size:11px;color:#e0a85c;margin-left:8px;font-weight:600">Ver detalle &#x2192;</span>
+      </div>
+
+      <!-- Disclaimer accionable: productos de bebida sin snapshot de stock -->
+      <div id="c-sin-snapshot-bar" style="display:none;margin-top:8px;padding:9px 14px;
+           background:var(--surface2);border-radius:6px;border-left:3px solid #5c8fe0;
+           cursor:pointer;user-select:none" onclick="openDetalleStockModal()">
+        <span id="c-sin-snapshot-texto" style="font-size:12px;color:var(--text-muted)"></span>
+        <span style="font-size:11px;color:#5c8fe0;margin-left:8px;font-weight:600">Ver detalle &#x2192;</span>
       </div>
     </div>
 
@@ -4881,10 +4894,11 @@ async function loadCostos() {
   // Reset KPIs
   ['c-comida-gasto','c-comida-ingreso','c-comida-ratio',
    'c-bebida-gasto','c-bebida-ingreso','c-bebida-ratio',
-   'c-bebida-costo-fudo','c-bebida-ingreso2','c-bebida-cmv-pct']
+   'c-bebida-costo-fudo','c-bebida-ingreso2','c-bebida-cmv-pct','c-bebida-costo-stock']
     .forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '\u2026'; });
   document.getElementById('c-configurados-card').style.display = 'none';
   document.getElementById('c-sin-costo-bar').style.display = 'none';
+  document.getElementById('c-sin-snapshot-bar').style.display = 'none';
 
   const qs = new URLSearchParams();
   if (desde) qs.set('desde', desde);
@@ -4924,6 +4938,19 @@ async function loadCostos() {
   document.getElementById('c-bebida-ingreso2').textContent   = fmt(be.ingreso);
   document.getElementById('c-bebida-cmv-pct').textContent    = be.ratioCosto != null ? pct(be.ratioCosto) : '-';
 
+  // Bebida — costo real medido por stock (inicio + comprado - fin)
+  const costoStockEl = document.getElementById('c-bebida-costo-stock');
+  const costoStockSub = document.getElementById('c-bebida-costo-stock-sub');
+  if (be.costoStock != null) {
+    costoStockEl.textContent = fmt(be.costoStock);
+    const rr = be.rangoRealStock;
+    const fmtD = s => s ? s.split('-').reverse().join('/') : '';
+    costoStockSub.textContent = (rr && rr.desde) ? ('medido ' + fmtD(rr.desde) + ' -> ' + fmtD(rr.hasta)) : 'inicio + comprado - fin';
+  } else {
+    costoStockEl.textContent = '-';
+    costoStockSub.textContent = 'sin snapshots de stock aun';
+  }
+
   // Disclaimer sin costo — accionable
   const bar  = document.getElementById('c-sin-costo-bar');
   const txt  = document.getElementById('c-sin-costo-texto');
@@ -4934,6 +4961,18 @@ async function loadCostos() {
     bar.style.display = 'block';
   } else {
     bar.style.display = 'none';
+  }
+
+  // Disclaimer productos de bebida sin snapshot de stock — accionable
+  const barSnap = document.getElementById('c-sin-snapshot-bar');
+  const txtSnap = document.getElementById('c-sin-snapshot-texto');
+  if ((be.productosSinSnapshot || []).length > 0) {
+    const ejemplosSnap = be.productosSinSnapshot.slice(0, 3).map(x => x.name).join(', ');
+    txtSnap.textContent = be.productosSinSnapshot.length + ' producto(s) de bebida sin snapshot de stock en el periodo ' +
+      '(no suman al Costo Stock real). Ej: ' + ejemplosSnap + (be.productosSinSnapshot.length > 3 ? '...' : '');
+    barSnap.style.display = 'block';
+  } else {
+    barSnap.style.display = 'none';
   }
 
   // Desglose proveedores (colapsable)
@@ -4971,6 +5010,52 @@ function openSinCostoModal() {
     '</p>';
 
   openDetalleModal('Bebida sin costo en Fudo (' + be.sinCostoUnidades + ' unidades)', body);
+}
+
+// Modal: detalle de consumo real de bebida (snapshots de stock) por producto
+function openDetalleStockModal() {
+  const be = _costosResumen && _costosResumen.bebida;
+  if (!be) return;
+
+  const filas = (be.detalleStock || []).map(x =>
+    '<tr' + (x.anomalia ? ' style="color:#e05c5c"' : '') + '>' +
+    '<td>' + escapeHtml(x.name) + (x.anomalia ? ' [!]' : '') + '</td>' +
+    '<td style="text-align:right">' + x.start + '</td>' +
+    '<td style="text-align:right">' + x.acquired + '</td>' +
+    '<td style="text-align:right">' + x.end + '</td>' +
+    '<td style="text-align:right">' + x.consumo + '</td>' +
+    '<td style="text-align:right;color:var(--text-muted)">' + fmt(x.costoItem) + '</td>' +
+    '</tr>'
+  ).join('');
+
+  const sinSnapshotRows = (be.productosSinSnapshot || []).map(x => '<li>' + escapeHtml(x.name) + '</li>').join('');
+
+  const rr = be.rangoRealStock;
+  const fmtD = s => s ? s.split('-').reverse().join('/') : '-';
+  const rangoTexto = (rr && rr.desde) ? (fmtD(rr.desde) + ' -> ' + fmtD(rr.hasta)) : 'sin datos';
+
+  const body =
+    '<p style="font-size:13px;color:var(--text-muted);margin:0 0 14px">' +
+    'Consumo real medido con snapshots diarios de stock de Fudo: <strong>inicio + comprado - fin</strong>. ' +
+    'Rango realmente medido: <strong>' + rangoTexto + '</strong> (puede ser mas angosto que el periodo elegido si recien empezamos a tomar snapshots).' +
+    '</p>' +
+    '<div class="table-wrap"><table class="prov-resumen-table" style="width:100%">' +
+    '<thead><tr>' +
+    '<th style="text-align:left">Producto</th>' +
+    '<th style="text-align:right">Inicio</th>' +
+    '<th style="text-align:right">Comprado</th>' +
+    '<th style="text-align:right">Fin</th>' +
+    '<th style="text-align:right">Consumo</th>' +
+    '<th style="text-align:right">Costo</th>' +
+    '</tr></thead>' +
+    '<tbody>' + (filas || '<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">Sin datos aun</td></tr>') + '</tbody>' +
+    '</table></div>' +
+    (sinSnapshotRows ?
+      '<p style="font-size:12px;color:var(--text-muted);margin:14px 0 4px">Productos de bebida activos sin ningun snapshot en este periodo (no suman arriba):</p>' +
+      '<ul style="font-size:12px;color:var(--text-muted);margin:0 0 8px;padding-left:18px">' + sinSnapshotRows + '</ul>'
+      : '');
+
+  openDetalleModal('Bebida - consumo real (stock)', body);
 }
 
 // Desglose de proveedores en el per\u00edodo — colapsable
