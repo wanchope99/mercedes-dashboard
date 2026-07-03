@@ -206,6 +206,8 @@
     .group-rows-hidden { display: none; }
     .group-header .group-badge { display: inline-flex; align-items: center; gap: 5px; background: var(--blue-dim); color: var(--blue); border: 1px solid rgba(92,143,224,0.3); padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
     .group-header.group-proveedores .group-badge { background: rgba(201,168,76,0.15); color: #c9a84c; border-color: rgba(201,168,76,0.4); }
+    .gastos-chevron { font-size: 10px; transition: transform 0.2s; display: inline-block; margin-right: 6px; }
+    .gastos-chevron.collapsed { transform: rotate(-90deg); }
     .group-total { margin-left: auto; font-size: 12px; color: var(--text-muted); font-weight: 500; }
     .proveedor-link { cursor: pointer; color: var(--text); text-decoration: none; border-bottom: 1px dashed rgba(232,232,240,0.3); transition: color 0.15s, border-color 0.15s; }
     .proveedor-link:hover { color: var(--accent); border-bottom-color: var(--accent); }
@@ -2351,13 +2353,14 @@ function renderKPIs(resumen, diasSemana, esMensual) {
   const mercaderia = resumen.reduce((s, m) => s + m.gastos.Mercaderia, 0);
   const insumos = resumen.reduce((s, m) => s + m.gastos.Insumos, 0);
   const personal = resumen.reduce((s, m) => s + m.gastos.Personal, 0);
-  const operativos = resumen.reduce((s, m) => s + m.gastos.Operativos, 0);
+  const fijosRecurrentes = resumen.reduce((s, m) =>
+    s + (m.gastos.Alquiler || 0) + (m.gastos.Servicios || 0) + (m.gastos.Fiscales || 0) + (m.gastos.Financieros || 0), 0);
 
   // Operativo = gastos recurrentes del negocio en marcha
-  const gastoOperativo = mercaderia + insumos + personal + operativos;
-  // Inversión = gastos de setup / una vez
+  const gastoOperativo = mercaderia + insumos + personal + fijosRecurrentes;
+  // Inversión = gastos de setup / una vez / extraordinarios
   const gastoInversion = resumen.reduce((s, m) =>
-    s + (m.gastos.Equipamiento || 0) + (m.gastos.Impuestos || 0) + (m.gastos.Otros || 0), 0);
+    s + (m.gastos.Equipamiento || 0) + (m.gastos.Otros || 0) + (m.gastos.Extraordinarios || 0), 0);
 
   const pctMI = totalIngresos > 0 ? ((mercaderia + insumos) / totalIngresos) * 100 : 0;
   const pctPersonal = totalIngresos > 0 ? (personal / totalIngresos) * 100 : 0;
@@ -2523,28 +2526,55 @@ function renderTablaResumen(resumen) {
   head.innerHTML = `<tr><th style="text-align:left">Concepto</th>${meses.map(m => `<th>${m}</th>`).join('')}${multi ? '<th>Total</th>' : ''}</tr>`;
 
   const cols = meses.length + (multi ? 2 : 1);
-  const row = (label, vals, cls = '', colorFn = null, clickGroup = null) => {
-    const t = vals.reduce((a, b) => a + b, 0);
+  const sum = vals => vals.reduce((a, b) => a + b, 0);
+  const val = key => resumen.map(m => m.gastos[key] || 0);
+
+  const row = (label, vals, cls = '', colorFn = null, opts = {}) => {
+    const t = sum(vals);
     const cells = vals.map(v => `<td class="${colorFn ? colorFn(v) : ''}">${fmt(v)}</td>`);
     const totalCell = multi ? `<td class="${colorFn ? colorFn(t) : ''}" style="font-weight:600">${fmt(t)}</td>` : '';
-    const ck = clickGroup ? ` style="cursor:pointer" onclick="openConceptoModal('${clickGroup}')" title="Ver detalle"` : '';
-    const lbl = label;
-    return `<tr class="${cls}"${ck}><td>${lbl}</td>${cells.join('')}${totalCell}</tr>`;
+    const onClick = gastosRowOnClick(opts);
+    const ck = onClick ? ` style="cursor:pointer" onclick="${escapeHtml(onClick)}" title="Ver detalle"` : '';
+    const { toggleId, depth = 0, rowClasses = '' } = opts;
+    const chevron = toggleId ? `<span class="gastos-chevron collapsed" id="gastos-chev-${toggleId}">▾</span>` : '';
+    const padStyle = depth > 0 ? ` style="padding-left:${14 + depth * 18}px"` : '';
+    return `<tr class="${cls} ${rowClasses}"${ck}><td${padStyle}>${chevron}${escapeHtml(label)}</td>${cells.join('')}${totalCell}</tr>`;
   };
   const section = label => `<tr class="row-header"><td colspan="${cols}">${label}</td></tr>`;
 
-  // Gastos e ingresos ordenados de mayor a menor por su TOTAL (suma de todos los meses).
-  const sum = vals => vals.reduce((a, b) => a + b, 0);
-  const gastosDefs = [
-    { label: 'Mercadería', vals: resumen.map(m => m.gastos.Mercaderia || 0), group: 'Mercaderia' },
-    { label: 'Insumos', vals: resumen.map(m => m.gastos.Insumos || 0), group: 'Insumos' },
-    { label: 'Equipamiento', vals: resumen.map(m => m.gastos.Equipamiento || 0), group: 'Equipamiento' },
-    { label: 'Operativos', vals: resumen.map(m => m.gastos.Operativos || 0), group: 'Operativos' },
-    { label: 'Fiscales', vals: resumen.map(m => m.gastos.ImpuestosFiscales || 0), group: 'ImpuestosFiscales' },
-    { label: 'Comisiones', vals: resumen.map(m => m.gastos.ImpuestosComisiones || 0), group: 'ImpuestosComisiones' },
-    { label: 'Personal', vals: resumen.map(m => m.gastos.Personal || 0), group: 'Personal' },
-    { label: 'Otros', vals: resumen.map(m => m.gastos.Otros || 0), group: 'Otros' },
+  // Gastos ordenados de mayor a menor por su TOTAL. Variables/Fijos/Extraordinarios
+  // se expanden inline (acordeón); el resto abre el modal de detalle directamente.
+  const gastosTop = [
+    { label: 'Gastos Variables', vals: val('Variables'), opts: { toggleId: 'variables' } },
+    { label: 'Personal', vals: val('Personal'), opts: { clickGroup: 'Personal' } },
+    { label: 'Fijos', vals: val('Fijos'), opts: { toggleId: 'fijos' } },
+    { label: 'Fiscales', vals: val('Fiscales'), opts: { clickGroup: 'Fiscales' } },
+    { label: 'Financieros', vals: val('Financieros'), opts: { clickGroup: 'Financieros' } },
+    { label: 'Extraordinarios', vals: val('Extraordinarios'), opts: { toggleId: 'extraordinarios' } },
+    { label: 'Equipamiento', vals: val('Equipamiento'), opts: { clickGroup: 'Equipamiento' } },
+    { label: 'Otros', vals: val('Otros'), opts: { clickGroup: 'Otros' } },
   ].sort((a, b) => sum(b.vals) - sum(a.vals));
+
+  const gastosRows = [];
+  for (const g of gastosTop) {
+    gastosRows.push(row(g.label, g.vals, '', null, g.opts));
+    if (g.opts.toggleId === 'variables') {
+      gastosRows.push(row('Mercadería', val('Mercaderia'), 'group-rows-hidden', null, { clickGroup: 'Mercaderia', depth: 1, rowClasses: 'gastos-grp-variables' }));
+      gastosRows.push(row('Insumos', val('Insumos'), 'group-rows-hidden', null, { clickGroup: 'Insumos', depth: 1, rowClasses: 'gastos-grp-variables' }));
+    }
+    if (g.opts.toggleId === 'fijos') {
+      gastosRows.push(row('Alquiler', val('Alquiler'), 'group-rows-hidden', null, { clickGroup: 'Alquiler', depth: 1, rowClasses: 'gastos-grp-fijos' }));
+      gastosRows.push(row('Servicios', val('Servicios'), 'group-rows-hidden', null, { toggleId: 'servicios', depth: 1, rowClasses: 'gastos-grp-fijos' }));
+      gastosSubRows(resumen, 'serviciosPorProveedor').forEach(s => {
+        gastosRows.push(row(s.name, s.vals, 'group-rows-hidden', null, { clickGroup: 'Servicios', extra: { proveedor: s.name }, depth: 2, rowClasses: 'gastos-grp-fijos gastos-grp-servicios' }));
+      });
+    }
+    if (g.opts.toggleId === 'extraordinarios') {
+      gastosSubRows(resumen, 'extraordinariosPorCategoria').forEach(s => {
+        gastosRows.push(row(s.name, s.vals, 'group-rows-hidden', null, { clickGroup: 'Extraordinarios', extra: { categoria: s.name }, depth: 1, rowClasses: 'gastos-grp-extraordinarios' }));
+      });
+    }
+  }
 
   const ingresosDefs = [
     { label: 'Efectivo', vals: resumen.map(m => m.ingresos.Efectivo || 0) },
@@ -2555,7 +2585,7 @@ function renderTablaResumen(resumen) {
 
   body.innerHTML = [
     section('GASTOS'),
-    ...gastosDefs.map(g => row(g.label, g.vals, '', null, g.group)),
+    ...gastosRows,
     row('Total Gastos', resumen.map(m => m.gastos.total), 'row-total'),
     section('INGRESOS'),
     ...ingresosDefs.map(i => row(i.label, i.vals)),
@@ -2567,6 +2597,34 @@ function renderTablaResumen(resumen) {
   ].join('');
 }
 
+// Helpers compartidos por renderTablaResumen / renderTablaResumenSingle para el
+// acordeón de Gastos (Variables/Fijos/Extraordinarios se expanden inline).
+function gastosRowOnClick(opts) {
+  const { toggleId, clickGroup, extra } = opts || {};
+  if (toggleId) return `toggleGastosGroup('${toggleId}')`;
+  if (clickGroup) {
+    const extraStr = extra ? `, {${Object.entries(extra).map(([k, v]) => `${k}:'${String(v).replace(/\\/g,'\\\\').replace(/'/g,"\\'")}'`).join(',')}}` : '';
+    return `openConceptoModal('${clickGroup}'${extraStr})`;
+  }
+  return null;
+}
+// Sub-filas dinámicas (proveedores dentro de Servicios, categorías dentro de
+// Extraordinarios): unión de nombres presentes en cualquier mes del resumen.
+function gastosSubRows(resumen, dictKey) {
+  const names = new Set();
+  resumen.forEach(m => Object.keys(m.gastos[dictKey] || {}).forEach(n => names.add(n)));
+  return Array.from(names)
+    .map(name => ({ name, vals: resumen.map(m => (m.gastos[dictKey] || {})[name] || 0) }))
+    .sort((a, b) => b.vals.reduce((x,y)=>x+y,0) - a.vals.reduce((x,y)=>x+y,0));
+}
+function toggleGastosGroup(id) {
+  const rows = document.querySelectorAll(`.gastos-grp-${id}`);
+  const chev = document.getElementById(`gastos-chev-${id}`);
+  const isCollapsed = chev && chev.classList.contains('collapsed');
+  rows.forEach(r => r.classList.toggle('group-rows-hidden', !isCollapsed));
+  if (chev) chev.classList.toggle('collapsed', !isCollapsed);
+}
+
 // Render single-mes: valor absoluto + columna "% s/ing" sobre Total Ingresos,
 // con gastos e ingresos ordenados de mayor a menor.
 function renderTablaResumenSingle(m, head, body) {
@@ -2575,24 +2633,49 @@ function renderTablaResumenSingle(m, head, body) {
 
   head.innerHTML = `<tr><th style="text-align:left">Concepto</th><th>${m.mes}</th><th style="white-space:nowrap">% s/ing</th></tr>`;
 
-  const row = (label, val, cls = '', colorFn = null, clickGroup = null, showPct = true) => {
-    const ck = clickGroup ? ` style="cursor:pointer" onclick="openConceptoModal('${clickGroup}')" title="Ver detalle"` : '';
+  const row = (label, val, cls = '', colorFn = null, opts = {}) => {
+    const onClick = gastosRowOnClick(opts);
+    const ck = onClick ? ` style="cursor:pointer" onclick="${escapeHtml(onClick)}" title="Ver detalle"` : '';
     const valCls = colorFn ? colorFn(val) : '';
+    const { toggleId, depth = 0, rowClasses = '', showPct = true } = opts;
+    const chevron = toggleId ? `<span class="gastos-chevron collapsed" id="gastos-chev-${toggleId}">▾</span>` : '';
+    const padStyle = depth > 0 ? ` style="padding-left:${14 + depth * 18}px"` : '';
     const pctCell = showPct ? `<td class="val-accent">${pctIng(val)}</td>` : '<td></td>';
-    return `<tr class="${cls}"${ck}><td>${label}</td><td class="${valCls}">${fmt(val)}</td>${pctCell}</tr>`;
+    return `<tr class="${cls} ${rowClasses}"${ck}><td${padStyle}>${chevron}${escapeHtml(label)}</td><td class="${valCls}">${fmt(val)}</td>${pctCell}</tr>`;
   };
   const section = label => `<tr class="row-header"><td colspan="3">${label}</td></tr>`;
 
-  const gastosItems = [
-    { label: 'Mercadería', val: m.gastos.Mercaderia || 0, group: 'Mercaderia' },
-    { label: 'Insumos', val: m.gastos.Insumos || 0, group: 'Insumos' },
-    { label: 'Equipamiento', val: m.gastos.Equipamiento || 0, group: 'Equipamiento' },
-    { label: 'Operativos', val: m.gastos.Operativos || 0, group: 'Operativos' },
-    { label: 'Fiscales', val: m.gastos.ImpuestosFiscales || 0, group: 'ImpuestosFiscales' },
-    { label: 'Comisiones', val: m.gastos.ImpuestosComisiones || 0, group: 'ImpuestosComisiones' },
-    { label: 'Personal', val: m.gastos.Personal || 0, group: 'Personal' },
-    { label: 'Otros', val: m.gastos.Otros || 0, group: 'Otros' },
+  const gastosTop = [
+    { label: 'Gastos Variables', val: m.gastos.Variables || 0, opts: { toggleId: 'variables' } },
+    { label: 'Personal', val: m.gastos.Personal || 0, opts: { clickGroup: 'Personal' } },
+    { label: 'Fijos', val: m.gastos.Fijos || 0, opts: { toggleId: 'fijos' } },
+    { label: 'Fiscales', val: m.gastos.Fiscales || 0, opts: { clickGroup: 'Fiscales' } },
+    { label: 'Financieros', val: m.gastos.Financieros || 0, opts: { clickGroup: 'Financieros' } },
+    { label: 'Extraordinarios', val: m.gastos.Extraordinarios || 0, opts: { toggleId: 'extraordinarios' } },
+    { label: 'Equipamiento', val: m.gastos.Equipamiento || 0, opts: { clickGroup: 'Equipamiento' } },
+    { label: 'Otros', val: m.gastos.Otros || 0, opts: { clickGroup: 'Otros' } },
   ].sort((a, b) => b.val - a.val);
+
+  const gastosRows = [];
+  for (const g of gastosTop) {
+    gastosRows.push(row(g.label, g.val, '', null, g.opts));
+    if (g.opts.toggleId === 'variables') {
+      gastosRows.push(row('Mercadería', m.gastos.Mercaderia || 0, 'group-rows-hidden', null, { clickGroup: 'Mercaderia', depth: 1, rowClasses: 'gastos-grp-variables' }));
+      gastosRows.push(row('Insumos', m.gastos.Insumos || 0, 'group-rows-hidden', null, { clickGroup: 'Insumos', depth: 1, rowClasses: 'gastos-grp-variables' }));
+    }
+    if (g.opts.toggleId === 'fijos') {
+      gastosRows.push(row('Alquiler', m.gastos.Alquiler || 0, 'group-rows-hidden', null, { clickGroup: 'Alquiler', depth: 1, rowClasses: 'gastos-grp-fijos' }));
+      gastosRows.push(row('Servicios', m.gastos.Servicios || 0, 'group-rows-hidden', null, { toggleId: 'servicios', depth: 1, rowClasses: 'gastos-grp-fijos' }));
+      Object.entries(m.gastos.serviciosPorProveedor || {}).sort((a,b)=>b[1]-a[1]).forEach(([prov, monto]) => {
+        gastosRows.push(row(prov, monto, 'group-rows-hidden', null, { clickGroup: 'Servicios', extra: { proveedor: prov }, depth: 2, rowClasses: 'gastos-grp-fijos gastos-grp-servicios', showPct: false }));
+      });
+    }
+    if (g.opts.toggleId === 'extraordinarios') {
+      Object.entries(m.gastos.extraordinariosPorCategoria || {}).sort((a,b)=>b[1]-a[1]).forEach(([cat, monto]) => {
+        gastosRows.push(row(cat, monto, 'group-rows-hidden', null, { clickGroup: 'Extraordinarios', extra: { categoria: cat }, depth: 1, rowClasses: 'gastos-grp-extraordinarios', showPct: false }));
+      });
+    }
+  }
 
   const ingItems = [
     { label: 'Efectivo', val: m.ingresos.Efectivo || 0 },
@@ -2603,7 +2686,7 @@ function renderTablaResumenSingle(m, head, body) {
 
   body.innerHTML = [
     section('GASTOS'),
-    ...gastosItems.map(g => row(g.label, g.val, '', null, g.group)),
+    ...gastosRows,
     row('Total Gastos', m.gastos.total, 'row-total'),
     section('INGRESOS'),
     ...ingItems.map(i => row(i.label, i.val)),
@@ -2614,7 +2697,7 @@ function renderTablaResumenSingle(m, head, body) {
 }
 
 // ─── Charts ───────────────────────────────────────────────────────────────────
-const CHART_COLORS = ['#50251f','#4caf82','#5c8fe0','#e05c5c','#e08a5c','#a05ce0','#5ce0c9'];
+const CHART_COLORS = ['#50251f','#4caf82','#5c8fe0','#e05c5c','#e08a5c','#a05ce0','#5ce0c9','#c9a84c'];
 function destroyChart(id) { if (state.charts[id]) { state.charts[id].destroy(); delete state.charts[id]; } }
 
 function renderCharts(resumen) {
@@ -2633,7 +2716,7 @@ function renderCharts(resumen) {
   });
 
   destroyChart('gastos-comp');
-  const grupos = ['Mercaderia','Insumos','Equipamiento','Operativos','Impuestos','Personal','Otros'];
+  const grupos = ['Variables','Personal','Fijos','Fiscales','Financieros','Extraordinarios','Equipamiento','Otros'];
   const filtered = grupos.map(g => ({ g, v: resumen.reduce((s, m) => s + (m.gastos[g] || 0), 0) })).filter(x => x.v > 0);
   const ctx2 = document.getElementById('chart-gastos-comp').getContext('2d');
   state.charts['gastos-comp'] = new Chart(ctx2, {
@@ -4682,7 +4765,7 @@ function openResultadoNetoModal() {
   const ing = r.reduce((s,m)=>s+m.ingresos.total,0);
   const gas = r.reduce((s,m)=>s+m.gastos.total,0);
   const neto = ing - gas;
-  const grupos = ['Mercaderia','Insumos','Equipamiento','Operativos','Impuestos','Personal','Otros'];
+  const grupos = ['Variables','Personal','Fijos','Fiscales','Financieros','Extraordinarios','Equipamiento','Otros'];
   const rowsG = grupos.map(g => { const v = r.reduce((s,m)=>s+(m.gastos[g]||0),0); return [g, fmt(v), ing>0?pct((v/ing)*100):'-']; }).filter(x => x[1] !== '$0');
   const body = '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:16px">'
     + '<div><div style="font-size:11px;color:var(--text-muted)">Ingresos</div><div style="font-size:20px;font-weight:700;color:var(--green)">'+fmt(ing)+'</div></div>'
@@ -4768,10 +4851,15 @@ async function openCmvOtrosModal() {
 
 
 
-async function openConceptoModal(grupo) {
+async function openConceptoModal(grupo, extra) {
   openDetalleModal('Gasto - ' + grupo, '<div class="loading"><div class="spinner"></div> Cargando...</div>');
   let res;
-  try { res = await api('/api/movimientos/grupo/' + encodeURIComponent(grupo) + buildQS()); }
+  try {
+    const qsBase = buildQS();
+    const extraParams = Object.entries(extra || {}).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+    const qs = extraParams ? (qsBase ? `${qsBase}&${extraParams}` : `?${extraParams}`) : qsBase;
+    res = await api('/api/movimientos/grupo/' + encodeURIComponent(grupo) + qs);
+  }
   catch (e) { document.getElementById('detalle-modal-body').innerHTML = 'Error: ' + escapeHtml(e.message); return; }
   const data = res.data || [], porCat = res.porCategoria || {};
   const rowsCat = Object.entries(porCat).sort((a,b)=>b[1]-a[1]).map(([c,v]) => [escapeHtml(c), fmt(v)]);

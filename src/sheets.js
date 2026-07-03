@@ -28,6 +28,30 @@ const CATEGORIA_GRUPO = {
   'Fondo de Comercio': 'Equipamiento',
 };
 
+// Taxonomía jerárquica para el desglose de "Gastos" del dashboard (tabla + acordeón).
+// Independiente de CATEGORIA_GRUPO/getGrupo (que siguen usándose sin cambios para
+// CMV y Proyecciones) para no alterar comportamiento existente en esas áreas.
+// superGrupo: 'Variables' | 'Personal' | 'Fijos' | 'Fiscales' | 'Financieros' | 'Extraordinarios' | 'Equipamiento' | 'Otros'
+// subGrupo (solo para superGrupo 'Fijos'): 'Alquiler' | 'Servicios'
+const CATEGORIA_SUPERGRUPO = {
+  'Mercaderia':        { superGrupo: 'Variables' },
+  'Insumos':           { superGrupo: 'Variables' },
+  'Personal':          { superGrupo: 'Personal' },
+  'Alquiler':          { superGrupo: 'Fijos', subGrupo: 'Alquiler' },
+  'Servicios':         { superGrupo: 'Fijos', subGrupo: 'Servicios' },
+  'Fiscales':          { superGrupo: 'Fiscales' },
+  'Legal / Escribano': { superGrupo: 'Fiscales' },
+  'Financieros':       { superGrupo: 'Financieros' },
+  'Cocina':            { superGrupo: 'Equipamiento' },
+  'Sala':              { superGrupo: 'Equipamiento' },
+  'Mobiliario':        { superGrupo: 'Equipamiento' },
+  'Frios':             { superGrupo: 'Equipamiento' },
+  'Fondo de Comercio': { superGrupo: 'Equipamiento' },
+  'Operativos':        { superGrupo: 'Otros' },
+  'Gastos Operativos': { superGrupo: 'Otros' },
+};
+function getSuperGrupo(categoria) { return CATEGORIA_SUPERGRUPO[categoria] || { superGrupo: 'Otros' }; }
+
 const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 function getAuth() {
@@ -183,6 +207,12 @@ async function getMovimientos() {
     const cuotasInfo = parseCuotas(row[5], estado);
     const cuotaId = (row[7] || '').toString().trim();
 
+    // Clasificación jerárquica para el desglose de Gastos (independiente de `grupo`)
+    const esExtraordinario = ((row[6] || '').toString().trim()).length > 0;
+    const superGrupoBase = getSuperGrupo(categoria);
+    const superGrupo = esExtraordinario ? 'Extraordinarios' : superGrupoBase.superGrupo;
+    const subGrupo   = esExtraordinario ? null : (superGrupoBase.subGrupo || null);
+
     movimientos.push({
       fecha,
       fechaStr: row[0],
@@ -191,6 +221,9 @@ async function getMovimientos() {
       estado,
       vencimiento: row[4] || '',
       extraordinario: row[6] || '',
+      esExtraordinario,
+      superGrupo,
+      subGrupo,
       proveedor: (row[8] || '').trim(),
       categoria,
       grupo: getGrupo(categoria),
@@ -291,7 +324,14 @@ async function getResumenMensual({ mes, fechaDesde, fechaHasta } = {}) {
     if (!meses[key]) {
       meses[key] = {
         mes: key,
-        gastos: { Mercaderia: 0, Insumos: 0, Equipamiento: 0, Operativos: 0, Impuestos: 0, ImpuestosFiscales: 0, ImpuestosComisiones: 0, Personal: 0, Otros: 0, total: 0 },
+        gastos: {
+          total: 0,
+          Variables: 0, Personal: 0, Fijos: 0, Fiscales: 0, Financieros: 0, Extraordinarios: 0, Equipamiento: 0, Otros: 0,
+          Mercaderia: 0, Insumos: 0,
+          Alquiler: 0, Servicios: 0,
+          serviciosPorProveedor: {},
+          extraordinariosPorCategoria: {},
+        },
         ingresos: { Efectivo: 0, 'Mercado Pago': 0, Galicia: 0, Otros: 0, total: 0 },
         gastosPorCategoria: {},
         ingresosPorMedioPago: {},
@@ -315,22 +355,28 @@ async function getResumenMensual({ mes, fechaDesde, fechaHasta } = {}) {
     }
 
     if (m.tipo === 'Gasto') {
-      const grupo = m.grupo;
-      entry.gastos[grupo] = (entry.gastos[grupo] || 0) + m.salidaTotal;
-      entry.gastos.total += m.salidaTotal;
-      // Sub-discriminacion de Impuestos: proveedor "Servicio" = Comisiones (Nave),
-      // el resto (ARCA, etc.) = Fiscales (impuestos reales a pagar).
-      if (grupo === 'Impuestos') {
-        const esComision = (m.proveedor || '').trim().toLowerCase() === 'servicio';
-        if (esComision) entry.gastos.ImpuestosComisiones += m.salidaTotal;
-        else entry.gastos.ImpuestosFiscales += m.salidaTotal;
+      const monto = m.salidaTotal;
+      entry.gastos.total += monto;
+      const sg = m.superGrupo;
+      entry.gastos[sg] = (entry.gastos[sg] || 0) + monto;
+      if (sg === 'Variables') {
+        entry.gastos[m.categoria] = (entry.gastos[m.categoria] || 0) + monto;   // Mercaderia | Insumos
+      } else if (sg === 'Fijos') {
+        entry.gastos[m.subGrupo] = (entry.gastos[m.subGrupo] || 0) + monto;    // Alquiler | Servicios
+        if (m.subGrupo === 'Servicios') {
+          const prov = m.proveedor || 'Sin proveedor';
+          entry.gastos.serviciosPorProveedor[prov] = (entry.gastos.serviciosPorProveedor[prov] || 0) + monto;
+        }
+      } else if (sg === 'Extraordinarios') {
+        const catOrig = m.categoria || 'Sin categoría';
+        entry.gastos.extraordinariosPorCategoria[catOrig] = (entry.gastos.extraordinariosPorCategoria[catOrig] || 0) + monto;
       }
       const cat = m.categoria || 'Sin categoría';
-      entry.gastosPorCategoria[cat] = (entry.gastosPorCategoria[cat] || 0) + m.salidaTotal;
+      entry.gastosPorCategoria[cat] = (entry.gastosPorCategoria[cat] || 0) + monto;
       // Una compra en cuotas se considera "pagada" en el estado de resultados
       // del mes de la compra (la financiación es tema de caja, no de P&L)
-      if (m.pagado || m.esCompraEnCuotas) entry.totalGastosPagados += m.salidaTotal;
-      entry.totalGastosComprometidos += m.salidaTotal;
+      if (m.pagado || m.esCompraEnCuotas) entry.totalGastosPagados += monto;
+      entry.totalGastosComprometidos += monto;
     }
   }
 

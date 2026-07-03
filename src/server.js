@@ -111,8 +111,8 @@ app.get('/api/me', authMiddleware, (req, res) => {
 //    (Ingreso si sobra, Gasto si falta) con descripción explícita.
 //    Así la planilla siempre matchea con Fudo y la diferencia queda a la vista.
 //  · Sin datos de Fudo: se registra el delta contado (comportamiento anterior).
-//  · Galicia: el ingreso se registra en BRUTO; los impuestos (Bruto − Neto)
-//    van como Gasto · Fiscales. El neto queda como resultado, discriminado.
+//  · Galicia: el ingreso se registra en BRUTO; la comisión del posnet (Bruto − Neto)
+//    va como Gasto · Financieros. El neto queda como resultado, discriminado.
 // gastosEfectivoSesion / gastosMPSesion: gastos YA registrados en Movimientos con la
 // caja abierta (ej: hielo). Reducen el esperado y NO deben generar fila delta duplicada.
 // ─── Zona horaria: TODA la app muestra horarios en Buenos Aires, Argentina ──────
@@ -156,10 +156,11 @@ function buildFilasCierreServicio({ fechaServicio, mesServicio, descripcionServi
   registrarCaja('Efectivo Local', deltaEfectivo, fudoOk ? (Number(fudo.efectivo) || 0) : 0, gastosEfectivoSesion, 'efectivo');
   registrarCaja('Mercado Pago', deltaMP, fudoOk ? (Number(fudo.mercadoPago) || 0) : 0, gastosMPSesion, 'mercado pago');
 
-  // Galicia: ingreso BRUTO + impuestos como gasto fiscal → resultado neto discriminado
+  // Galicia: ingreso BRUTO + impuestos (comisión del posnet) como gasto financiero
+  // → resultado neto discriminado
   if (galiciaBruto > 0) rows.push(ingreso('Galicia', galiciaBruto));
   if (impuestos > 0) {
-    rows.push(gasto('Galicia', impuestos, descripcionServicio, 'Fiscales'));
+    rows.push(gasto('Galicia', impuestos, descripcionServicio, 'Financieros'));
   }
   return rows;
 }
@@ -1355,37 +1356,49 @@ app.get('/api/cmv-otros-detalle', authMiddleware, adminOnly, async (req, res) =>
   }
 });
 
-// ─── Detalle de movimientos por GRUPO de gasto (para modales del dashboard) ────
-// grupo: Mercaderia | Insumos | Equipamiento | Operativos | Impuestos | Personal | Otros
+// ─── Detalle de movimientos por GRUPO de gasto (para modales/acordeón del dashboard) ──
+// grupo: Mercaderia | Insumos | Personal | Alquiler | Servicios | Fiscales |
+//        Financieros | Extraordinarios | Equipamiento | Otros
+// Filtros opcionales (solo relevantes para Servicios/Extraordinarios):
+//   ?proveedor=Edenor  → sub-filtro dentro de Servicios
+//   ?categoria=Sala    → sub-filtro dentro de Extraordinarios
+const LEAF_MATCH = {
+  Mercaderia:      m => m.superGrupo === 'Variables' && m.categoria === 'Mercaderia',
+  Insumos:         m => m.superGrupo === 'Variables' && m.categoria === 'Insumos',
+  Personal:        m => m.superGrupo === 'Personal',
+  Equipamiento:    m => m.superGrupo === 'Equipamiento',
+  Otros:           m => m.superGrupo === 'Otros',
+  Alquiler:        m => m.superGrupo === 'Fijos' && m.subGrupo === 'Alquiler',
+  Servicios:       m => m.superGrupo === 'Fijos' && m.subGrupo === 'Servicios',
+  Fiscales:        m => m.superGrupo === 'Fiscales',
+  Financieros:     m => m.superGrupo === 'Financieros',
+  Extraordinarios: m => m.superGrupo === 'Extraordinarios',
+};
 app.get('/api/movimientos/grupo/:grupo', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const grupo = req.params.grupo;
+    const matcher = LEAF_MATCH[req.params.grupo];
+    if (!matcher) return res.status(400).json({ ok: false, error: `Grupo desconocido: ${req.params.grupo}` });
     const filtro = parseFiltro(req.query);
     let movs = await getMovimientos();
     movs = movs.filter(m => m.tipo === 'Gasto' && !m.esCambio && !m.esFondeo && !m.esCuota);
     if (filtro.mes) movs = movs.filter(m => m.mes === filtro.mes);
     if (filtro.fechaDesde) movs = movs.filter(m => m.fecha >= filtro.fechaDesde && m.fecha <= filtro.fechaHasta);
+    movs = movs.filter(matcher);
+    if (req.query.proveedor) movs = movs.filter(m => (m.proveedor || '') === req.query.proveedor);
+    if (req.query.categoria) movs = movs.filter(m => (m.categoria || '') === req.query.categoria);
 
-    // Sub-grupos virtuales de Impuestos: proveedor "Servicio" = Comisiones (Nave);
-    // el resto = Fiscales. Permiten que el dashboard muestre 2 filas clickeables.
-    const esComisionImp = (m) => (m.proveedor || '').trim().toLowerCase() === 'servicio';
-    if (grupo === 'ImpuestosFiscales') {
-      movs = movs.filter(m => m.grupo === 'Impuestos' && !esComisionImp(m));
-    } else if (grupo === 'ImpuestosComisiones') {
-      movs = movs.filter(m => m.grupo === 'Impuestos' && esComisionImp(m));
-    } else {
-      movs = movs.filter(m => m.grupo === grupo);
-    }
-    // Desglose por categoría dentro del grupo + filas
-    const porCategoria = {};
+    // Desglose por categoría y por proveedor dentro del grupo + filas
+    const porCategoria = {}, porProveedor = {};
     for (const m of movs) {
       const c = m.categoria || 'Sin categoría';
       porCategoria[c] = (porCategoria[c] || 0) + m.salidaTotal;
+      const p = m.proveedor || 'Sin proveedor';
+      porProveedor[p] = (porProveedor[p] || 0) + m.salidaTotal;
     }
     const data = movs
       .map(m => ({ fecha: m.fecha.toISOString().split('T')[0], proveedor: m.proveedor, categoria: m.categoria, descripcion: m.descripcion, medioPago: m.medioPago, monto: m.salidaTotal, estado: m.estado }))
       .sort((a, b) => b.fecha.localeCompare(a.fecha));
-    res.json({ ok: true, data, porCategoria, total: data.reduce((s, x) => s + x.monto, 0) });
+    res.json({ ok: true, data, porCategoria, porProveedor, total: data.reduce((s, x) => s + x.monto, 0) });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
