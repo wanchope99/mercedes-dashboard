@@ -49,7 +49,7 @@ async function getSheetRows(sheetName) {
   const sheets = google.sheets({ version: 'v4', auth });
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A:O`,
+    range: `${sheetName}!A:P`,
   });
   const rows = response.data.values || [];
   cache.set(cacheKey, rows);
@@ -109,7 +109,7 @@ function getGrupo(categoria) {
 // Convención en la planilla Movimientos:
 //   Columna F "Cuotas":    fila madre → total de cuotas (ej: "6")
 //                          fila cuota → "n/m" (ej: "2/6")
-//   Columna G "ID Compra": mismo identificador en la madre y en todas sus cuotas
+//   Columna H "ID Compra": mismo identificador en la madre y en todas sus cuotas
 // La fila MADRE lleva el importe TOTAL, fecha/mes de la compra, estado "En cuotas"
 // y medio de pago vacío (no toca cajas). Computa el total en el estado de
 // resultados del mes de la compra.
@@ -160,28 +160,28 @@ async function getMovimientos() {
     if (!row || !row[0] || row[0] === '') continue;
 
     // Columnas: A Fecha, B Mes, C Tipo, D Estado, E Vencimiento, F Cuotas,
-    // G ID Compra, H Proveedor, I Categoría, J Descripción, K Medio de pago,
-    // L Entrada ARS, M Entrada USD, N Salida ARS, O Salida USD
+    // G Extraodinario, H ID Compra, I Proveedor, J Categoría, K Descripción,
+    // L Medio de pago, M Entrada ARS, N Entrada USD, O Salida ARS, P Salida USD
     const fecha = parseDate(row[0]);
     const tipo = (row[2] || '').trim();       // Gasto, Ingreso, Otros
     const estado = (row[3] || '').trim();
-    const categoria = (row[8] || '').trim();
+    const categoria = (row[9] || '').trim();
 
     if (!fecha || !tipo) continue;
 
     // Montos ARS y USD
-    const entradaARS = parseAmount(row[11]);
-    const entradaUSD = parseAmount(row[12]);
-    const salidaARS  = parseAmount(row[13]);
-    const salidaUSD  = parseAmount(row[14]);
+    const entradaARS = parseAmount(row[12]);
+    const entradaUSD = parseAmount(row[13]);
+    const salidaARS  = parseAmount(row[14]);
+    const salidaUSD  = parseAmount(row[15]);
 
     // Convertir USD a ARS para totales
     const entradaTotal = entradaARS + (entradaUSD * TC_USD);
     const salidaTotal  = salidaARS  + (salidaUSD  * TC_USD);
 
-    // Cuotas (columnas F y G)
+    // Cuotas (columnas F y H)
     const cuotasInfo = parseCuotas(row[5], estado);
-    const cuotaId = (row[6] || '').toString().trim();
+    const cuotaId = (row[7] || '').toString().trim();
 
     movimientos.push({
       fecha,
@@ -190,11 +190,12 @@ async function getMovimientos() {
       tipo,
       estado,
       vencimiento: row[4] || '',
-      proveedor: (row[7] || '').trim(),
+      extraordinario: row[6] || '',
+      proveedor: (row[8] || '').trim(),
       categoria,
       grupo: getGrupo(categoria),
-      descripcion: row[9] || '',
-      medioPago: (row[10] || '').trim(),
+      descripcion: row[10] || '',
+      medioPago: (row[11] || '').trim(),
       entradaARS,
       entradaUSD,
       salidaARS,
