@@ -123,12 +123,12 @@ function fechaHoraAR(d = new Date()) { return d.toLocaleString('es-AR', { timeZo
 
 function buildFilasCierreServicio({ fechaServicio, mesServicio, descripcionServicio, deltaEfectivo, deltaMP, galiciaBruto, impuestos, fudo, gastosEfectivoSesion = 0, gastosMPSesion = 0 }) {
   const ingreso = (medio, monto, desc) => [
-    fechaServicio, mesServicio, 'Ingreso', 'Pagado', '', '', '',
+    fechaServicio, mesServicio, 'Ingreso', 'Pagado', '', '', '', '',
     'Servicio', 'Ingreso', desc || descripcionServicio,
     medio, monto, '', '', '',
   ];
   const gasto = (medio, monto, desc, categoria = 'Operativos') => [
-    fechaServicio, mesServicio, 'Gasto', 'Pagado', '', '', '',
+    fechaServicio, mesServicio, 'Gasto', 'Pagado', '', '', '', '',
     'Servicio', categoria, desc,
     medio, '', '', monto, '',
   ];
@@ -375,10 +375,10 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
       },
     });
 
-    // 2. Escribir en Movimientos — columnas A:O
+    // 2. Escribir en Movimientos — columnas A:P
     // A:Fecha, B:Mes, C:Tipo Movimiento, D:Estado, E:Vencimiento, F:Cuotas,
-    // G:ID Compra, H:Proveedor, I:Categoría, J:Descripción, K:Medio de Pago,
-    // L:Monto Entrada ARS, M:Monto Entrada USD, N:Monto Salida ARS, O:Monto Salida USD
+    // G:Extraodinario, H:ID Compra, I:Proveedor, J:Categoría, K:Descripción,
+    // L:Medio de Pago, M:Monto Entrada ARS, N:Monto Entrada USD, O:Monto Salida ARS, P:Monto Salida USD
     const deltaEfectivo = Number(efectivo) - estadoCaja.efectivoInicial;
     const deltaMP       = Number(mercadoPago) - estadoCaja.mpInicial;
     // Gastos registrados durante la sesión (server-side, no se confía en el cliente)
@@ -395,7 +395,7 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
     if (rowsMovimientos.length > 0) {
       await sheets.spreadsheets.values.append({
         spreadsheetId: SPREADSHEET_ID,
-        range: 'Movimientos!A:O',
+        range: 'Movimientos!A:P',
         valueInputOption: 'USER_ENTERED',
         requestBody: { values: rowsMovimientos },
       });
@@ -445,9 +445,9 @@ app.post('/api/gastos-rapidos', authMiddleware, async (req, res) => {
     const estadoRow = (estado || 'Pagado') === 'A pagar' ? 'A pagar' : 'Pagado';
     const auth = getAuth();
     const sheets = google.sheets({ version: 'v4', auth });
-    const row = [fecha, mes || '', 'Gasto', estadoRow, '', '', '', proveedor, categoria || 'Insumos', descripcion || '', medioPago || '', '', '', Number(monto), ''];
+    const row = [fecha, mes || '', 'Gasto', estadoRow, '', '', '', '', proveedor, categoria || 'Insumos', descripcion || '', medioPago || '', '', '', Number(monto), ''];
     await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID, range: 'Movimientos!A:O',
+      spreadsheetId: SPREADSHEET_ID, range: 'Movimientos!A:P',
       valueInputOption: 'USER_ENTERED', requestBody: { values: [row] },
     });
     clearCache();
@@ -733,23 +733,23 @@ app.post('/api/pagos', authMiddleware, adminOnly, async (req, res) => {
       const montoCuota = Math.round(total / nCuotas);  // cuotas enteras (ARS)
       const cuotaId = `${proveedor}-${fecha}`.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '');
       const descBase = descripcion || proveedor;
-      // Fila madre: estado "En cuotas", medio de pago vacío, col F = total de cuotas, col G = ID
-      values = [[fecha, mes||'', 'Gasto', 'En cuotas', '', String(nCuotas), cuotaId, proveedor, categoria||'', `${descBase} — Total en ${nCuotas} cuotas`, '', '', '', total, '']];
+      // Fila madre: estado "En cuotas", medio de pago vacío, col F = total de cuotas, col H = ID
+      values = [[fecha, mes||'', 'Gasto', 'En cuotas', '', String(nCuotas), '', cuotaId, proveedor, categoria||'', `${descBase} — Total en ${nCuotas} cuotas`, '', '', '', total, '']];
       for (let i = 1; i <= nCuotas; i++) {
         const venc = addMonthsDDMM(vencimiento, i - 1);
         // Ajuste última cuota para que la suma cierre exacta con el total
         const monto = i === nCuotas ? total - montoCuota * (nCuotas - 1) : montoCuota;
         // Medio de pago vacío hasta que se pague (las fórmulas de Cajas suman por medio):
         // al marcarla Pagado se completa el medio, la fecha real y el mes.
-        values.push([venc, mesDeFecha(venc), 'Gasto', 'A pagar', venc, `${i}/${nCuotas}`, cuotaId, proveedor, categoria||'', `${descBase} — Cuota ${i}/${nCuotas}${medioPago ? ' ('+medioPago+')' : ''}`, '', '', '', monto, '']);
+        values.push([venc, mesDeFecha(venc), 'Gasto', 'A pagar', venc, `${i}/${nCuotas}`, '', cuotaId, proveedor, categoria||'', `${descBase} — Cuota ${i}/${nCuotas}${medioPago ? ' ('+medioPago+')' : ''}`, '', '', '', monto, '']);
       }
     } else {
       // Pagado: sin vencimiento (ya salió de caja) · A pagar: con vencimiento
-      values = [[fecha, mes||'', 'Gasto', estadoRow, estadoRow === 'Pagado' ? '' : (vencimiento||''), '', '', proveedor, categoria||'', descripcion||'', medioPago||'', '', '', salidaARS||'', '']];
+      values = [[fecha, mes||'', 'Gasto', estadoRow, estadoRow === 'Pagado' ? '' : (vencimiento||''), '', '', '', proveedor, categoria||'', descripcion||'', medioPago||'', '', '', salidaARS||'', '']];
     }
 
     await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID, range: 'Movimientos!A:O',
+      spreadsheetId: SPREADSHEET_ID, range: 'Movimientos!A:P',
       valueInputOption: 'USER_ENTERED', requestBody: { values },
     });
     clearCache();
@@ -790,7 +790,7 @@ async function leerProveedoresSheet() {
 }
 
 // POST /api/pagos/pagar — marca un registro "A pagar" como Pagado MODIFICANDO la
-// fila existente (no agrega línea): Estado (col D) → Pagado, y Medio de pago (col K)
+// fila existente (no agrega línea): Estado (col D) → Pagado, y Medio de pago (col L)
 // si vino uno. La fecha de registración original se conserva.
 app.post('/api/pagos/pagar', authMiddleware, adminOnly, async (req, res) => {
   try {
@@ -811,7 +811,7 @@ app.post('/api/pagos/pagar', authMiddleware, adminOnly, async (req, res) => {
     const auth = getAuth();
     const sheets = google.sheets({ version: 'v4', auth });
     const data = [{ range: `Movimientos!D${idx}`, values: [['Pagado']] }];
-    if (medio) data.push({ range: `Movimientos!K${idx}`, values: [[medio]] });
+    if (medio) data.push({ range: `Movimientos!L${idx}`, values: [[medio]] });
     await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: SPREADSHEET_ID,
       requestBody: { valueInputOption: 'USER_ENTERED', data },
