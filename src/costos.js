@@ -607,18 +607,24 @@ function mismoProveedor(a, b) {
 
 // ─── Resumen simplificado: Comida y Bebida por Gasto / Ingreso / Costo ──────────
 //
-// TRES CONCEPTOS independientes:
+// CONCEPTOS independientes:
 //   · GASTO   = lo que se pagó a proveedores (fuente: hoja Movimientos)
 //               clasificado por Comida/Bebida según config en "Costos Proveedores"
 //   · INGRESO = lo que se vendió (fuente: Fudo, por grupo comida/bebida)
-//   · COSTO   = mercadería efectivamente usada (fuente: Fudo, ventas × costo unitario)
-//               Solo aplica a BEBIDA — el ratio COSTO/INGRESO es el CMV real de bebida.
-//               Si un producto no tiene costo en Fudo, se acumula en sinCosto[].
+//   · COSTO (Fudo) = mercadería TEÓRICAMENTE usada según ventas (Fudo, ventas ×
+//               costo unitario). Solo bebida. Si un producto no tiene costo en
+//               Fudo, se acumula en sinCosto[].
+//   · COSTO (Stock real) = mercadería REALMENTE usada, medida con snapshots
+//               diarios de stock (inicio + comprado − fin). Solo bebida. Ver
+//               src/stock-bebidas.js. Es un número aparte del Costo (Fudo), no
+//               lo reemplaza — sirven para comparar entre sí (waste, mermas,
+//               comps no facturados quedan expuestos como la diferencia).
 //
 // Parámetros:
 //   gastos         → clasificarMovimientos(movsMercaderia) de costos-proveedores.js
 //   ventasConCosto → fudo.getVentasConCosto({ desde, hasta })
 //   { desde, hasta }
+//   consumoStock   → stockBebidas.getConsumoMensualBebidas({ desde, hasta }) (opcional)
 //
 // Devuelve:
 // {
@@ -627,11 +633,13 @@ function mismoProveedor(a, b) {
 //     gasto, ingreso, ratioGasto,
 //     costoFudo, ratioCosto,          ← Σ(unidades × costUnit Fudo) / ingreso
 //     sinCosto: [{ nombre, unidades }], sinCostoUnidades, sinCostoMonto (estimado)
+//     costoStock, ratioCostoStock,    ← consumo real medido por stock / ingreso
+//     rangoRealStock, productosSinSnapshot, detalleStock,
 //   },
 //   sinConfigurar, configurados,
 //   periodo
 // }
-function resumenCostosSimplificado(gastos, ventasConCosto, { desde, hasta } = {}) {
+function resumenCostosSimplificado(gastos, ventasConCosto, { desde, hasta } = {}, consumoStock = null) {
   // ── Gastos desde Movimientos ──────────────────────────────────────────────
   const gastoComida = (gastos && gastos.gastoComida) || 0;
   const gastoBebida = (gastos && gastos.gastoBebida) || 0;
@@ -678,6 +686,11 @@ function resumenCostosSimplificado(gastos, ventasConCosto, { desde, hasta } = {}
       sinCosto,
       sinCostoUnidades,
       sinCostoMonto,
+      costoStock: consumoStock ? consumoStock.total : null,
+      ratioCostoStock: consumoStock ? r(consumoStock.total, ingresoBebida) : null,
+      rangoRealStock: consumoStock ? consumoStock.rangoReal : null,
+      productosSinSnapshot: consumoStock ? consumoStock.productosSinSnapshot : [],
+      detalleStock: consumoStock ? consumoStock.detalle : [],
     },
     sinConfigurar: (gastos && gastos.sinConfigurar) || [],
     configurados:  (gastos && gastos.configurados)  || [],

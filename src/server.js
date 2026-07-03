@@ -20,6 +20,8 @@ const costosProveedores = require('./costos-proveedores');
 const cats = require('./proveedores-categorias');
 const consumo = require('./consumo');
 const cierres = require('./cierres');
+const stockBebidas = require('./stock-bebidas');
+const { iniciarCron } = require('./cron');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1445,11 +1447,12 @@ app.get('/api/costos/resumen', authMiddleware, adminOnly, async (req, res) => {
       if (!hasta) hasta = hoy.toISOString().slice(0, 10);
     }
 
-    // Traer movimientos y ventas en paralelo
+    // Traer movimientos, ventas y consumo real de stock (bebida) en paralelo
     // getVentasConCosto = getVentasItems enriquecido con product.cost de Fudo
-    const [todosMovs, ventasConCosto] = await Promise.all([
+    const [todosMovs, ventasConCosto, consumoStock] = await Promise.all([
       getMovimientos().catch(() => []),
       getVentasConCosto({ desde, hasta }).catch(() => []),
+      stockBebidas.getConsumoMensualBebidas({ desde, hasta }).catch(() => null),
     ]);
 
     // Filtrar: solo Gastos de Mercadería del período, sin cuotas ni cambios
@@ -1467,10 +1470,23 @@ app.get('/api/costos/resumen', authMiddleware, adminOnly, async (req, res) => {
     // Clasificar gastos por proveedor (Comida% / Bebida%)
     const gastos = await costosProveedores.clasificarMovimientos(movsMercaderia);
 
-    const data = costos.resumenCostosSimplificado(gastos, ventasConCosto, { desde, hasta });
+    const data = costos.resumenCostosSimplificado(gastos, ventasConCosto, { desde, hasta }, consumoStock);
     res.json({ ok: true, data });
   } catch (err) {
     console.error('Error /api/costos/resumen:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/stock-bebidas/snapshot — toma la foto de stock de HOY manualmente
+// (idempotente: si ya existe un snapshot de hoy, no hace nada). Útil para
+// pruebas o para forzar un catch-up sin esperar a que reinicie el server.
+app.post('/api/stock-bebidas/snapshot', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const data = await stockBebidas.tomarSnapshot();
+    res.json({ ok: true, data });
+  } catch (err) {
+    console.error('Error POST /api/stock-bebidas/snapshot:', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -1578,6 +1594,7 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Mercedes Dashboard corriendo en puerto ${PORT}`);
+  iniciarCron();
 });
 
 module.exports = { buildFilasCierreServicio, leerProveedoresSheet };
