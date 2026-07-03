@@ -943,17 +943,12 @@
       <!-- Divisor -->
       <div style="border-top:1px solid var(--border);margin:0 0 14px"></div>
 
-      <!-- Costo vs Ingreso (Fudo: unidades x costo unitario) -->
+      <!-- Costo vs Ingreso (consumo real medido con snapshots de stock) -->
       <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:10px">
         Costo de mercader&#xED;a &#x2014;
-        <span style="font-weight:400;text-transform:none;letter-spacing:0">ventas &#xD7; costo unitario Fudo</span>
+        <span style="font-weight:400;text-transform:none;letter-spacing:0">consumo real (stock)</span>
       </div>
-      <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
-        <div class="kpi-card" style="border-left:3px solid #e0a85c">
-          <div class="kpi-label">Costo (Fudo)</div>
-          <div class="kpi-value" id="c-bebida-costo-fudo">-</div>
-          <div class="kpi-sub">&#x3A3; unidades &#xD7; costo unitario</div>
-        </div>
+      <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
         <div class="kpi-card" style="border-left:3px solid #5c8fe0;cursor:pointer" onclick="openDetalleStockModal()" title="Ver detalle">
           <div class="kpi-label">Costo (Stock real)</div>
           <div class="kpi-value" id="c-bebida-costo-stock">-</div>
@@ -967,16 +962,8 @@
         <div class="kpi-card" style="border-left:3px solid #e0a85c">
           <div class="kpi-label">CMV bebida %</div>
           <div class="kpi-value" id="c-bebida-cmv-pct">-</div>
-          <div class="kpi-sub">costo / ingreso</div>
+          <div class="kpi-sub">costo (stock) / ingreso</div>
         </div>
-      </div>
-
-      <!-- Disclaimer accionable: productos sin costo en Fudo -->
-      <div id="c-sin-costo-bar" style="display:none;margin-top:12px;padding:9px 14px;
-           background:var(--surface2);border-radius:6px;border-left:3px solid #e0a85c;
-           cursor:pointer;user-select:none" onclick="openSinCostoModal()">
-        <span id="c-sin-costo-texto" style="font-size:12px;color:var(--text-muted)"></span>
-        <span style="font-size:11px;color:#e0a85c;margin-left:8px;font-weight:600">Ver detalle &#x2192;</span>
       </div>
 
       <!-- Disclaimer accionable: productos de bebida sin snapshot de stock -->
@@ -4894,10 +4881,9 @@ async function loadCostos() {
   // Reset KPIs
   ['c-comida-gasto','c-comida-ingreso','c-comida-ratio',
    'c-bebida-gasto','c-bebida-ingreso','c-bebida-ratio',
-   'c-bebida-costo-fudo','c-bebida-ingreso2','c-bebida-cmv-pct','c-bebida-costo-stock']
+   'c-bebida-ingreso2','c-bebida-cmv-pct','c-bebida-costo-stock']
     .forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '\u2026'; });
   document.getElementById('c-configurados-card').style.display = 'none';
-  document.getElementById('c-sin-costo-bar').style.display = 'none';
   document.getElementById('c-sin-snapshot-bar').style.display = 'none';
 
   const qs = new URLSearchParams();
@@ -4933,10 +4919,9 @@ async function loadCostos() {
   document.getElementById('c-bebida-ingreso').textContent = fmt(be.ingreso);
   document.getElementById('c-bebida-ratio').textContent   = be.ratioGasto != null ? pct(be.ratioGasto) : '-';
 
-  // Bebida — costo Fudo vs ingreso
-  document.getElementById('c-bebida-costo-fudo').textContent = fmt(be.costoFudo);
+  // Bebida — ingreso y CMV% (grid de costo real)
   document.getElementById('c-bebida-ingreso2').textContent   = fmt(be.ingreso);
-  document.getElementById('c-bebida-cmv-pct').textContent    = be.ratioCosto != null ? pct(be.ratioCosto) : '-';
+  document.getElementById('c-bebida-cmv-pct').textContent    = be.ratioCostoStock != null ? pct(be.ratioCostoStock) : '-';
 
   // Bebida — costo real medido por stock (inicio + comprado - fin)
   const costoStockEl = document.getElementById('c-bebida-costo-stock');
@@ -4949,18 +4934,6 @@ async function loadCostos() {
   } else {
     costoStockEl.textContent = '-';
     costoStockSub.textContent = 'sin snapshots de stock aun';
-  }
-
-  // Disclaimer sin costo — accionable
-  const bar  = document.getElementById('c-sin-costo-bar');
-  const txt  = document.getElementById('c-sin-costo-texto');
-  if (be.sinCostoUnidades > 0) {
-    const ejemplos = (be.sinCosto || []).slice(0, 3).map(x => x.nombre).join(', ');
-    txt.textContent = '\u26A0\uFE0F ' + be.sinCostoUnidades + ' unidades sin costo en Fudo ' +
-      '(pueden subir el CMV real). Ej: ' + ejemplos + (be.sinCosto.length > 3 ? '\u2026' : '');
-    bar.style.display = 'block';
-  } else {
-    bar.style.display = 'none';
   }
 
   // Disclaimer productos de bebida sin snapshot de stock — accionable
@@ -4977,39 +4950,6 @@ async function loadCostos() {
 
   // Desglose proveedores (colapsable)
   renderConfigurados(data.configurados || []);
-}
-
-// Modal: productos de bebida sin costo cargado en Fudo
-function openSinCostoModal() {
-  const be = _costosResumen && _costosResumen.bebida;
-  if (!be || !be.sinCosto || !be.sinCosto.length) return;
-
-  const filas = be.sinCosto.map(x =>
-    '<tr>' +
-    '<td>' + escapeHtml(x.nombre) + '</td>' +
-    '<td style="text-align:right">' + x.unidades + '</td>' +
-    '<td style="text-align:right;color:var(--text-muted)">' + fmt(x.montoVenta) + '</td>' +
-    '</tr>'
-  ).join('');
-
-  const body =
-    '<p style="font-size:13px;color:var(--text-muted);margin:0 0 14px">' +
-    'Estos productos se vendieron durante el per\u00edodo pero <strong>no tienen costo unitario cargado en Fudo</strong>, ' +
-    'por lo que no suman al CMV bebida. El CMV que ves es un m\u00ednimo &#x2014; el real es mayor.' +
-    '</p>' +
-    '<div class="table-wrap"><table class="prov-resumen-table" style="width:100%">' +
-    '<thead><tr>' +
-    '<th style="text-align:left">Producto</th>' +
-    '<th style="text-align:right">Unidades vendidas</th>' +
-    '<th style="text-align:right">Venta total</th>' +
-    '</tr></thead>' +
-    '<tbody>' + filas + '</tbody>' +
-    '</table></div>' +
-    '<p style="font-size:12px;color:var(--text-muted);margin:14px 0 0">' +
-    '\uD83D\uDCA1 Para que sumen al CMV: andá a Fudo &#x2192; Productos &#x2192; edit\u00e1 cada uno &#x2192; carg\u00e1 el Costo unitario.' +
-    '</p>';
-
-  openDetalleModal('Bebida sin costo en Fudo (' + be.sinCostoUnidades + ' unidades)', body);
 }
 
 // Modal: detalle de consumo real de bebida (snapshots de stock) por producto
