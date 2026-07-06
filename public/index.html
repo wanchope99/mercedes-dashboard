@@ -152,6 +152,7 @@
     .badge-proximo { background: rgba(201,168,76,0.15); color: #c9a84c; border: 1px solid rgba(201,168,76,0.4); }
     .badge-ok { background: var(--green-dim); color: var(--green); }
     .badge-sin { background: var(--surface2); color: var(--text-muted); }
+    .badge-almuerzo { background: rgba(160,92,224,0.15); color: var(--purple); border: 1px solid rgba(160,92,224,0.4); }
     .badge-mp { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 11px; background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
     .pagos-table-wrap { overflow-x: auto; }
     .pagos-table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -3779,9 +3780,10 @@ function buildServRow(s) {
   const fl = fechaLabel(s.fecha);
   const pctC = Math.round(s.pctComida);
   const pctB = Math.round(s.pctBebida);
+  const badgeAlmuerzo = s.turno === 'almuerzo' ? '<span class="badge badge-almuerzo">Almuerzo</span>' : '';
   return `
-    <div class="serv-row" onclick="openServModal('${s.fecha}')">
-      <div class="serv-fecha">${fl.dia}<span class="serv-dow">${fl.dow}</span></div>
+    <div class="serv-row" onclick="openServModal('${s.fecha}', '${s.turno || ''}')">
+      <div class="serv-fecha">${fl.dia}<span class="serv-dow">${fl.dow}</span>${badgeAlmuerzo}</div>
       <div class="serv-pax">
         <div class="serv-pax-num">${s.pax}</div>
         <div class="serv-pax-lbl">pax</div>
@@ -3839,10 +3841,10 @@ function renderServiciosList(servicios) {
 }
 
 
-async function openServModal(fecha) {
+async function openServModal(fecha, turno) {
   const fl = fechaLabel(fecha);
   document.getElementById('serv-modal-title').textContent = `Servicio ${fl.dia}`;
-  document.getElementById('serv-modal-sub').textContent = fl.dow;
+  document.getElementById('serv-modal-sub').textContent = turno === 'almuerzo' ? `${fl.dow} · Almuerzo` : fl.dow;
   document.getElementById('serv-modal-body').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
   document.getElementById('serv-modal-overlay').classList.add('open');
 

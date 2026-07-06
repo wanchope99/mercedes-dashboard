@@ -73,14 +73,35 @@ function grupoDeCategoria(nombre) {
 }
 
 // ─── Corte por turno de servicio ────────────────────────────────────────────────
-// El turno va de 16:00 a 16:00 del día siguiente (hora AR). La madrugada
-// pertenece al servicio del día anterior.
+// El turno "BAR MERCEDES" en Fudo corre de 16:00 a 04:00 del día siguiente (hora AR):
+//   [00:00, 04:00) hora AR → cola de la CENA del día anterior (servicio = ayer).
+//   [04:00, 16:00) hora AR → ALMUERZO del mismo día calendario.
+//   [16:00, 24:00) hora AR → CENA del mismo día calendario.
+// Nota: Argentina no tiene horario de verano desde 2009, por eso un offset fijo
+// (TZ_OFFSET_H) es seguro. Si el país reintrodujera DST, este cálculo dejaría de
+// ser válido en los días de cambio.
 const TZ_OFFSET_H = parseFloat(process.env.FUDO_TZ_OFFSET || '-3');
-const TURNO_INICIO_H = parseFloat(process.env.FUDO_TURNO_INICIO_H || '16');
+const CORTE_MADRUGADA_H = parseFloat(process.env.FUDO_CORTE_MADRUGADA_H || '4');
+const CORTE_TARDE_H = parseFloat(process.env.FUDO_CORTE_TARDE_H || '16');
+
+function fechaYTurno(isoUtc) {
+  const localMs = new Date(isoUtc).getTime() + TZ_OFFSET_H * 3600 * 1000;
+  const local = new Date(localMs); // getUTC*() de este Date se leen como hora LOCAL AR
+  const h = local.getUTCHours() + local.getUTCMinutes() / 60;
+  let turno;
+  if (h < CORTE_MADRUGADA_H) {
+    local.setUTCDate(local.getUTCDate() - 1); // madrugada: cola de la cena de AYER
+    turno = 'cena';
+  } else if (h < CORTE_TARDE_H) {
+    turno = 'almuerzo';
+  } else {
+    turno = 'cena';
+  }
+  return { fecha: local.toISOString().slice(0, 10), turno };
+}
 
 function fechaServicio(isoUtc) {
-  const shifted = new Date(isoUtc).getTime() + (TZ_OFFSET_H - TURNO_INICIO_H) * 3600 * 1000;
-  return new Date(shifted).toISOString().slice(0, 10);
+  return fechaYTurno(isoUtc).fecha;
 }
 
 // Fecha de servicio "en curso" ahora mismo. Todo día anterior a esta fecha se
@@ -343,9 +364,11 @@ function buildDetalles(raw) {
         return (ord[a.grupo] - ord[b.grupo]) || (b.unidades - a.unidades);
       });
     const baseCB = d.comida + d.bebida;
+    const turno = fechaYTurno(d.apertura).turno;
     delete d.porCategoria;
     out[fecha] = {
       ...d,
+      turno,
       categorias,
       ticketPromedio: d.pax > 0 ? d.total / d.pax : 0,
       pctComida: baseCB > 0 ? (d.comida / baseCB) * 100 : 0,
@@ -359,6 +382,7 @@ function buildDetalles(raw) {
 function resumenDeDetalle(d) {
   return {
     fecha: d.fecha, ventas: d.ventas, pax: d.pax, total: d.total,
+    turno: d.turno || null,
     propinas: d.propinas || 0,
     comida: d.comida, bebida: d.bebida, otros: d.otros,
     mediosPago: d.mediosPago || {},
