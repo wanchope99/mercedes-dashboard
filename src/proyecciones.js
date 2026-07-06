@@ -56,15 +56,28 @@ function calcularBaselines(movimientos, hoy = new Date()) {
 
   // Costo variable: Mercadería + Insumos como % de los ingresos de la ventana
   let costoVar28 = 0, operativos28 = 0;
+  let fijos28 = 0, fiscales28 = 0, financieros28 = 0, extraordinarios28 = 0, otros28 = 0;
   for (const m of enVentana) {
     if (m.tipo !== 'Gasto' || m.esCuota || m.esCompraEnCuotas) continue;
     if (m.grupo === 'Mercaderia' || m.grupo === 'Insumos') costoVar28 += m.salidaTotal;
     else if ((m.grupo === 'Operativos' || m.grupo === 'Impuestos') && m.categoria !== 'Alquiler') {
       operativos28 += m.salidaTotal;
     }
+    // Clasificación por superGrupo (taxonomía actual, independiente de `grupo` legacy
+    // usado arriba) — para el punto de equilibrio diario.
+    if (m.superGrupo === 'Fijos') fijos28 += m.salidaTotal;
+    else if (m.superGrupo === 'Fiscales') fiscales28 += m.salidaTotal;
+    else if (m.superGrupo === 'Financieros') financieros28 += m.salidaTotal;
+    else if (m.superGrupo === 'Extraordinarios') extraordinarios28 += m.salidaTotal;
+    else if (m.superGrupo === 'Otros') otros28 += m.salidaTotal;
   }
   const pctCostoVariable = ingresos28 > 0 ? Math.min(costoVar28 / ingresos28, 1) : 0;
   const operativosMensual = (operativos28 / DIAS_VENTANA) * DIAS_MES_PROM;
+  const fijosMensual = (fijos28 / DIAS_VENTANA) * DIAS_MES_PROM;
+  const fiscalesMensual = (fiscales28 / DIAS_VENTANA) * DIAS_MES_PROM;
+  const financierosMensual = (financieros28 / DIAS_VENTANA) * DIAS_MES_PROM;
+  const extraordinariosMensual = (extraordinarios28 / DIAS_VENTANA) * DIAS_MES_PROM;
+  const otrosMensual = (otros28 / DIAS_VENTANA) * DIAS_MES_PROM;
 
   // Personal: masa salarial del último mes (por nombre de mes) con sueldos
   const personalPorMes = {};
@@ -96,10 +109,21 @@ function calcularBaselines(movimientos, hoy = new Date()) {
     }
   }
 
+  // Punto de equilibrio diario: costos fijos (Personal + Fijos + Fiscales +
+  // Financieros + Extraordinarios + Otros; Equipamiento excluido por ser
+  // inversión no recurrente) prorrateados por día de SERVICIO esperado en el
+  // mes, elevados por el % de costo variable para que la venta cubra también
+  // su propio CMV.
+  const fixedMensual = personalMensual + fijosMensual + fiscalesMensual + financierosMensual + extraordinariosMensual + otrosMensual;
+  const fixedDiario = diasServicioMes > 0 ? fixedMensual / diasServicioMes : 0;
+  const puntoEquilibrioDiario = pctCostoVariable < 1 ? fixedDiario / (1 - pctCostoVariable) : null;
+
   return {
     ventanaDias: DIAS_VENTANA,
     diasServicio28, ingresoPorDiaServicio, diasServicioMes, ingresoMensual,
     pctCostoVariable, operativosMensual, personalMensual, alquilerMensual,
+    fijosMensual, fiscalesMensual, financierosMensual, extraordinariosMensual, otrosMensual,
+    fixedMensual, fixedDiario, puntoEquilibrioDiario,
   };
 }
 

@@ -1598,6 +1598,7 @@ const state = {
   charts: {}, pagosSort: 'vencimiento', proveedores: {},
   pagosVista: 'todos', pagosData: [], proy: null, cuotasAgrup: 'compra', cierrePendiente: null,
   galiciaFuturos: false, servAgrup: 'crono', servData: [], servDetalle: null,
+  puntoEquilibrio: null,
   fudoCierre: null, arqueoEstado: null,
   provSugerencias: null, vencManual: false, pgSeleccion: null,
   servVista: localStorage.getItem('mb_serv_vista') || 'numeros',
@@ -3723,8 +3724,12 @@ async function loadServicios() {
   if (qs.length) url += '?' + qs.join('&');
 
   try {
-    const { data } = await api(url);
+    const [{ data }, peRes] = await Promise.all([
+      api(url),
+      api('/api/punto-equilibrio').catch(() => null),
+    ]);
     state.servData = data;
+    state.puntoEquilibrio = peRes ? peRes.data : null;
     renderServiciosKPIs(data);
     renderServiciosList(data);
     document.getElementById('serv-count').textContent =
@@ -3766,6 +3771,17 @@ function renderServiciosKPIs(servicios) {
       <div class="kpi-value">${pct(pctC)} / ${pct(pctB)}</div>
       <div class="kpi-sub">${fmt(totalComida)} · ${fmt(totalBebida)}</div>
     </div>
+    ${(() => {
+      const pe = state.puntoEquilibrio;
+      const val = pe && typeof pe.puntoEquilibrioDiario === 'number' && pe.puntoEquilibrioDiario > 0 ? pe.puntoEquilibrioDiario : null;
+      if (val == null) return '';
+      return `
+    <div class="kpi-card red">
+      <div class="kpi-label">Punto de equilibrio diario</div>
+      <div class="kpi-value">${fmt(val)}</div>
+      <div class="kpi-sub">Costos fijos ÷ ${Math.round(pe.diasServicioMes)} días de servicio/mes</div>
+    </div>`;
+    })()}
   `;
 }
 
@@ -3781,6 +3797,14 @@ function buildServRow(s) {
   const pctC = Math.round(s.pctComida);
   const pctB = Math.round(s.pctBebida);
   const badgeAlmuerzo = s.turno === 'almuerzo' ? '<span class="badge badge-almuerzo">Almuerzo</span>' : '';
+  const pe = state.puntoEquilibrio;
+  const peVal = pe && typeof pe.puntoEquilibrioDiario === 'number' && pe.puntoEquilibrioDiario > 0 ? pe.puntoEquilibrioDiario : null;
+  let cbIndicator = '';
+  if (peVal != null) {
+    const diff = s.total - peVal;
+    const ok = diff >= 0;
+    cbIndicator = `<span class="serv-ticket" style="color:var(${ok ? '--green' : '--red'})">${ok ? '✓' : '✗'} ${ok ? '+' : '-'}${fmt(Math.abs(diff))} ${ok ? 'sobre' : 'bajo'} el equilibrio</span>`;
+  }
   return `
     <div class="serv-row" onclick="openServModal('${s.fecha}', '${s.turno || ''}')">
       <div class="serv-fecha">${fl.dia}<span class="serv-dow">${fl.dow}</span>${badgeAlmuerzo}</div>
@@ -3788,7 +3812,7 @@ function buildServRow(s) {
         <div class="serv-pax-num">${s.pax}</div>
         <div class="serv-pax-lbl">pax</div>
       </div>
-      <div class="serv-total">${fmt(s.total)}<span class="serv-ticket">${fmt(s.ticketPromedio)}/pax · ${s.ventas} venta${s.ventas !== 1 ? 's' : ''}${(s.propinas || 0) > 0 ? ` · <span style="color:var(--green)">+${fmt(s.propinas)} propina</span>` : ''}</span></div>
+      <div class="serv-total">${fmt(s.total)}<span class="serv-ticket">${fmt(s.ticketPromedio)}/pax · ${s.ventas} venta${s.ventas !== 1 ? 's' : ''}${(s.propinas || 0) > 0 ? ` · <span style="color:var(--green)">+${fmt(s.propinas)} propina</span>` : ''}</span>${cbIndicator}</div>
       <div class="serv-cb">
         <div class="serv-cb-bar">
           <div class="serv-cb-comida" style="width:${pctC}%"></div>

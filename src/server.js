@@ -12,7 +12,7 @@ const {
 } = require('./sheets');
 const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos, getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy, probeStock, probeStockMovements, getVentasItems, getVentasConCosto } = require('./fudo');
 const vinos = require('./vinos');
-const { proyectar, calcularCalculadora, proyeccionMes } = require('./proyecciones');
+const { proyectar, calcularCalculadora, proyeccionMes, calcularBaselines } = require('./proyecciones');
 const proveedoresRoutes = require('./proveedores-routes');
 const prov = require('./proveedores');
 const costos = require('./costos');
@@ -1418,6 +1418,36 @@ app.get('/api/calculadora/defaults', authMiddleware, adminOnly, async (req, res)
     const base = require('./proyecciones').calcularBaselines(movimientos);
     res.json({ ok: true, data: base });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─── Punto de equilibrio diario (Servicios) ──────────────────────────────────
+app.get('/api/punto-equilibrio', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const movimientos = await getMovimientos();
+    const base = calcularBaselines(movimientos);
+    res.json({
+      ok: true,
+      data: {
+        puntoEquilibrioDiario: base.puntoEquilibrioDiario,
+        fixedMensual: base.fixedMensual,
+        fixedDiario: base.fixedDiario,
+        pctCostoVariable: base.pctCostoVariable,
+        diasServicioMes: base.diasServicioMes,
+        diasServicio28: base.diasServicio28,
+        desglose: {
+          personal: base.personalMensual,
+          fijos: base.fijosMensual,
+          fiscales: base.fiscalesMensual,
+          financieros: base.financierosMensual,
+          extraordinarios: base.extraordinariosMensual,
+          otros: base.otrosMensual,
+        },
+      },
+    });
+  } catch (err) {
+    console.error('Error /api/punto-equilibrio:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // ─── Proyección del MES en curso (real acumulado + forecast a fin de mes) ──────
