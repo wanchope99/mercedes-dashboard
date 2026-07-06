@@ -858,16 +858,59 @@
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">ajusta las variables y recalcula al instante</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px">
-        <div class="form-group"><label>Servicios por mes (noches)</label><input type="number" id="calc-servicios" oninput="recalcCalc()"></div>
-        <div class="form-group"><label>Ingreso por noche (ARS)</label><input type="number" id="calc-ingreso-noche" oninput="recalcCalc()"></div>
-        <div class="form-group"><label>% CMV (sobre ingresos)</label><input type="number" id="calc-cmv" step="0.1" oninput="recalcCalc()"></div>
-        <div class="form-group"><label>Costo personal (ARS/mes)</label><input type="number" id="calc-personal" oninput="recalcCalc()"></div>
-        <div class="form-group"><label>Alquiler (ARS/mes)</label><input type="number" id="calc-alquiler" oninput="recalcCalc()"></div>
-        <div class="form-group"><label>Fijos operativos (ARS/mes)</label><input type="number" id="calc-fijos" oninput="recalcCalc()"></div>
-        <div class="form-group"><label>Costos extraordinarios (ARS/mes)</label><input type="number" id="calc-extra" oninput="recalcCalc()"></div>
-        <div class="form-group"><label>Costos financieros (ARS/mes)</label><input type="number" id="calc-fin" oninput="recalcCalc()"></div>
-        <div class="form-group"><label>Costos fiscales (ARS/mes)</label><input type="number" id="calc-fiscal" oninput="recalcCalc()"></div>
-        <div class="form-group"><label>Inversion total (ARS)</label><input type="number" id="calc-inversion" oninput="recalcCalc()"></div>
+        <div class="form-group">
+          <label>Servicios por mes (noches)</label>
+          <input type="number" id="calc-servicios" oninput="recalcCalc()"
+            title="Cantidad de servicios (noches) vendidos por mes. Se multiplica por el ingreso por noche para obtener el ingreso mensual.">
+        </div>
+        <div class="form-group">
+          <label>Ingreso por noche (ARS)</label>
+          <input type="number" id="calc-ingreso-noche" oninput="recalcCalc()"
+            title="Ingreso promedio, en pesos, que genera un servicio/noche. Ingreso mensual = Servicios por mes × Ingreso por noche.">
+        </div>
+        <div class="form-group">
+          <label>% CMV (sobre ingresos)</label>
+          <input type="number" id="calc-cmv" step="0.1" oninput="recalcCalc()"
+            title="Costo de mercadería vendida (materia prima, insumos) como % del ingreso mensual. Costo CMV = Ingreso mensual × % CMV / 100.">
+        </div>
+        <div class="form-group">
+          <label>Costo personal (ARS/mes)</label>
+          <input type="number" id="calc-personal" oninput="recalcCalc()"
+            title="Costo total mensual de personal: sueldos, cargas sociales y afines, en pesos.">
+        </div>
+        <div class="form-group">
+          <label>Costos Fijos (ARS/mes)</label>
+          <input type="number" id="calc-fijos" oninput="recalcCalc()"
+            title="Costos fijos mensuales combinados: alquiler + electricidad, gas, agua, ABL, internet, contaduría y software. (Próximamente se podrán desglosar línea por línea.)">
+        </div>
+        <div class="form-group">
+          <label>Costos extraordinarios (ARS/mes)</label>
+          <input type="number" id="calc-extra" oninput="recalcCalc()"
+            title="Gastos no recurrentes o excepcionales del mes: reparaciones puntuales, compras extraordinarias, etc., en pesos.">
+        </div>
+        <div class="form-group">
+          <label>Costos financieros (ARS o %)</label>
+          <div style="display:flex;gap:6px">
+            <input type="number" id="calc-fin-ars" oninput="recalcCalc('calc-fin-ars')" style="flex:1;min-width:0" placeholder="ARS/mes"
+              title="Intereses, comisiones bancarias y otros costos financieros del mes, en pesos. Completá este campo o el de % de al lado: se calculan entre sí automáticamente.">
+            <input type="number" id="calc-fin-pct" step="0.01" oninput="recalcCalc('calc-fin-pct')" style="flex:0 0 90px" placeholder="%"
+              title="Costos financieros como % del ingreso mensual. Completá este campo o el de ARS de al lado: se calculan entre sí automáticamente.">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Costos fiscales (ARS o %)</label>
+          <div style="display:flex;gap:6px">
+            <input type="number" id="calc-fiscal-ars" oninput="recalcCalc('calc-fiscal-ars')" style="flex:1;min-width:0" placeholder="ARS/mes"
+              title="Impuestos y costos fiscales del mes, en pesos. Completá este campo o el de % de al lado: se calculan entre sí automáticamente.">
+            <input type="number" id="calc-fiscal-pct" step="0.01" oninput="recalcCalc('calc-fiscal-pct')" style="flex:0 0 90px" placeholder="%"
+              title="Costos fiscales como % del ingreso mensual. Completá este campo o el de ARS de al lado: se calculan entre sí automáticamente.">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Inversion total (ARS)</label>
+          <input type="number" id="calc-inversion" oninput="recalcCalc()"
+            title="Inversión total realizada, en pesos, para el local/proyecto. Se usa para calcular el payback (meses para recuperarla con el resultado neto mensual).">
+        </div>
       </div>
       <div style="margin-top:10px;display:flex;gap:8px"><button class="btn" onclick="resetCalc()">Volver a los datos reales</button></div>
     </div>
@@ -5157,31 +5200,62 @@ async function renderTodosConfig() {
 
 
 let _calcDefaults = null;
+let _calcModo = { fin: 'ars', fiscal: 'ars' };
 async function loadCalculadora() {
   // Defaults SIEMPRE = valores del Excel (modelo de régimen). El usuario los edita.
+  _calcModo = { fin: 'ars', fiscal: 'ars' };
   const setIf = (id, val) => { const el = document.getElementById(id); if (el && (el.value === '' || el.value == null)) el.value = val; };
   setIf('calc-servicios', 21);
   setIf('calc-ingreso-noche', 1650000);
   setIf('calc-cmv', 38);
   setIf('calc-personal', 11300000);
-  setIf('calc-alquiler', 930000);
-  setIf('calc-fijos', 1030000);
+  setIf('calc-fijos', 1960000);
   setIf('calc-extra', 1500000);
-  setIf('calc-fin', 1178100);
-  setIf('calc-fiscal', 0);
+  setIf('calc-fin-ars', 1178100);
+  setIf('calc-fiscal-ars', 0);
   setIf('calc-inversion', 89400000);
   recalcCalc();
 }
 function resetCalc() {
-  ['calc-servicios','calc-ingreso-noche','calc-cmv','calc-personal','calc-alquiler','calc-fijos','calc-extra','calc-fin','calc-fiscal','calc-inversion'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  _calcModo = { fin: 'ars', fiscal: 'ars' };
+  ['calc-servicios','calc-ingreso-noche','calc-cmv','calc-personal','calc-fijos','calc-extra',
+   'calc-fin-ars','calc-fin-pct','calc-fiscal-ars','calc-fiscal-pct','calc-inversion']
+    .forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
   loadCalculadora();
 }
-async function recalcCalc() {
-  const v = id => Number(document.getElementById(id).value) || 0;
-  const payload = { serviciosPorMes: v('calc-servicios'), ingresoPorNoche: v('calc-ingreso-noche'), pctCMV: v('calc-cmv'), costoPersonal: v('calc-personal'), alquiler: v('calc-alquiler'), fijosOperativos: { total: v('calc-fijos') }, costosExtraordinarios: v('calc-extra'), costosFinancieros: v('calc-fin'), costosFiscales: v('calc-fiscal'), inversionTotalARS: v('calc-inversion') };
+async function recalcCalc(sourceId) {
+  const v = id => { const el = document.getElementById(id); const n = Number(el && el.value); return Number.isFinite(n) ? n : 0; };
+
+  if (sourceId === 'calc-fin-ars') _calcModo.fin = 'ars';
+  if (sourceId === 'calc-fin-pct') _calcModo.fin = 'pct';
+  if (sourceId === 'calc-fiscal-ars') _calcModo.fiscal = 'ars';
+  if (sourceId === 'calc-fiscal-pct') _calcModo.fiscal = 'pct';
+
+  const payload = {
+    serviciosPorMes: v('calc-servicios'), ingresoPorNoche: v('calc-ingreso-noche'), pctCMV: v('calc-cmv'),
+    costoPersonal: v('calc-personal'), costosFijos: { total: v('calc-fijos') }, costosExtraordinarios: v('calc-extra'),
+    costosFinancieros: v('calc-fin-ars'), pctFinancieros: v('calc-fin-pct'), modoFinancieros: _calcModo.fin,
+    costosFiscales: v('calc-fiscal-ars'), pctFiscales: v('calc-fiscal-pct'), modoFiscales: _calcModo.fiscal,
+    inversionTotalARS: v('calc-inversion'),
+  };
   let data;
   try { const r = await api('/api/calculadora', { method:'POST', body: JSON.stringify(payload) }); data = r.data; }
   catch (e) { showToast('Error calculadora: ' + e.message); return; }
+
+  // Escribe el valor derivado en el campo HERMANO de un par ARS/%, sin tocar el
+  // campo recién editado (sourceId) ni el que tiene foco ahora — evita loops de
+  // feedback y saltos de cursor mientras el usuario sigue tipeando.
+  const setSibling = (id, val, decimals) => {
+    if (id === sourceId) return;
+    const el = document.getElementById(id);
+    if (!el || document.activeElement === el) return;
+    el.value = Number(val.toFixed(decimals));
+  };
+  setSibling('calc-fin-ars', data.extraordinarios.financieros, 0);
+  setSibling('calc-fin-pct', data.extraordinarios.pctFinancieros, 2);
+  setSibling('calc-fiscal-ars', data.extraordinarios.fiscales, 0);
+  setSibling('calc-fiscal-pct', data.extraordinarios.pctFiscales, 2);
+
   document.getElementById('calc-kpis').innerHTML =
     '<div class="kpi-card green"><div class="kpi-label">Ingreso mensual</div><div class="kpi-value">'+fmt(data.ingresoMensual)+'</div></div>'
     + '<div class="kpi-card red"><div class="kpi-label">Total costos</div><div class="kpi-value">'+fmt(data.totalCostos)+'</div><div class="kpi-sub">'+pct(data.pctTotalCostos)+' de ingresos</div></div>'
@@ -5192,9 +5266,10 @@ async function recalcCalc() {
     row('Ingreso mensual', data.ingresoMensual, 100, 'row-total'),
     row('CMV (costos variables)', data.costosVariables.cmv, data.costosVariables.pct),
     row('Personal', data.costosFijos.personal, data.costosFijos.pctPersonal),
-    row('Alquiler', data.costosFijos.alquiler, data.costosFijos.pctAlquiler),
-    row('Fijos operativos', data.costosFijos.subtotalOperativos, data.costosFijos.pctOperativos),
-    row('Extraordinarios/Financieros/Fiscales', data.extraordinarios.subtotal, data.extraordinarios.pct),
+    row('Costos Fijos', data.costosFijos.subtotalFijos, data.costosFijos.pctFijos),
+    row('Fiscales', data.extraordinarios.fiscales, data.extraordinarios.pctFiscales),
+    row('Financieros', data.extraordinarios.financieros, data.extraordinarios.pctFinancieros),
+    row('Extraordinarios', data.extraordinarios.extraordinarios, data.extraordinarios.pctExtraordinarios),
     row('TOTAL COSTOS', data.totalCostos, data.pctTotalCostos, 'row-total'),
     row('RESULTADO NETO', data.resultadoNeto, data.pctResultadoNeto, 'row-resultado'),
   ].join('');

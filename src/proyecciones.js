@@ -192,9 +192,11 @@ function proyectar({ movimientos, resumen, variables = [], hoy = new Date(), hor
 // Estructura del Excel:
 //   A. Servicios/mes (noches) · Ingreso por noche → Ingreso mensual total
 //   C. % CMV → Costo variable
-//   D. Personal + Alquiler + Fijos operativos (electricidad, gas, agua, ABL,
+//   D. Personal + Costos Fijos (alquiler + electricidad, gas, agua, ABL,
 //      internet, contaduría, software) → Subtotal fijos
-//   E. Extraordinarios + Financieros + Fiscales
+//   E. Financieros, Fiscales, Extraordinarios (3 líneas separadas — mismo
+//      agrupamiento que usa el dashboard con datos reales, ver LEAF_MATCH en
+//      server.js)
 //   F. Total costos → Resultado neto (ARS y %)
 //   G. Inversión total → Payback (meses)
 const CALC_DEFAULTS = {
@@ -202,81 +204,109 @@ const CALC_DEFAULTS = {
   ingresoPorNoche: 1650000,
   pctCMV: 38,                 // % sobre ingresos
   costoPersonal: 11300000,
-  alquiler: 930000,
-  fijosOperativos: {
+  // "Costos Fijos" incluye el alquiler (antes un input aparte) + los operativos
+  // (electricidad, gas, ...) — igual que el agrupamiento real: Fijos → {Alquiler,
+  // Servicios}. El front hoy manda un total único (número o {total}); el objeto
+  // detallado queda listo para una futura pantalla de "configuración avanzada"
+  // que desglose cada línea (ver resolverPolimorfico).
+  costosFijos: {
+    alquiler: 930000,
     electricidad: 500000, gas: 40000, agua: 80000, abl: 15000,
     internet: 25000, contaduria: 250000, software: 120000,
   },
-  // NOTA del modelo original (Excel): el "Subtotal Costos Fijos Operativos" que
-  // muestra el Excel (1.960.000) INCLUYE el alquiler (1.030.000 líneas + 930.000
-  // alquiler). Acá los mantenemos separados: operativos = 1.030.000 y alquiler
-  // aparte = 930.000. El TOTAL de costos y el resultado neto coinciden exacto.
   costosExtraordinarios: 1500000,
   costosFinancieros: 1178100,
+  pctFinancieros: null,       // se recalcula si modoFinancieros === 'pct'
+  modoFinancieros: 'ars',     // 'ars' | 'pct' — cuál de los dos es la fuente de verdad
   costosFiscales: 0,
+  pctFiscales: null,
+  modoFiscales: 'ars',
   inversionTotalARS: 89400000,
 };
 
 function num(v, def = 0) { const n = Number(v); return Number.isFinite(n) ? n : def; }
 
+// Acepta un número plano, { total }, o un objeto detallado (electricidad, gas, ...)
+// y devuelve { detalle, total }. Usado hoy solo para costosFijos; queda genérico
+// para cuando se sume una pantalla de desglose por línea.
+function resolverPolimorfico(inputVal, defaults) {
+  if (typeof inputVal === 'number') {
+    const total = num(inputVal);
+    return { detalle: { total }, total };
+  }
+  if (inputVal && typeof inputVal === 'object' && inputVal.total != null && Object.keys(inputVal).length === 1) {
+    const total = num(inputVal.total);
+    return { detalle: { total }, total };
+  }
+  if (inputVal && typeof inputVal === 'object') {
+    const detalle = { ...defaults, ...inputVal };
+    return { detalle, total: Object.values(detalle).reduce((s, x) => s + num(x), 0) };
+  }
+  const detalle = { ...defaults };
+  return { detalle, total: Object.values(detalle).reduce((s, x) => s + num(x), 0) };
+}
+
+// Par ARS/% bidireccional: según `modo`, uno de los dos es la fuente de verdad y
+// el otro se deriva a partir del ingreso mensual. `pctPrecision` en 2 decimales
+// porque Financieros/Fiscales pueden ser una fracción chica del ingreso.
+function resolverArsPct(arsInput, pctInput, modo, ingresoMensual, pctPrecision = 2) {
+  const mult = Math.pow(10, pctPrecision);
+  const pctDe = (x) => ingresoMensual > 0 ? Math.round((x / ingresoMensual) * 100 * mult) / mult : 0;
+  if (modo === 'pct') {
+    const p = num(pctInput);
+    return { ars: ingresoMensual * (p / 100), pct: p };
+  }
+  const ars = num(arsInput);
+  return { ars, pct: pctDe(ars) };
+}
+
 function calcularCalculadora(input = {}) {
   const i = { ...CALC_DEFAULTS, ...input };
 
-  // Fijos operativos: el front manda un único subtotal (número o { total }).
-  // Si viene así, se usa TAL CUAL (no se le suman las líneas default → evita doble
-  // conteo). Si viene el objeto detallado (electricidad, gas, ...), se suman sus
-  // valores. El alquiler va SIEMPRE aparte (no se incluye acá).
-  let fo, subtotalFijosOperativos;
-  const inFO = input.fijosOperativos;
-  if (typeof inFO === 'number') {
-    subtotalFijosOperativos = num(inFO);
-    fo = { total: subtotalFijosOperativos };
-  } else if (inFO && typeof inFO === 'object' && inFO.total != null && Object.keys(inFO).length === 1) {
-    subtotalFijosOperativos = num(inFO.total);
-    fo = { total: subtotalFijosOperativos };
-  } else if (inFO && typeof inFO === 'object') {
-    fo = { ...CALC_DEFAULTS.fijosOperativos, ...inFO };
-    subtotalFijosOperativos = Object.values(fo).reduce((s, x) => s + num(x), 0);
-  } else {
-    fo = { ...CALC_DEFAULTS.fijosOperativos };
-    subtotalFijosOperativos = Object.values(fo).reduce((s, x) => s + num(x), 0);
-  }
+  const { detalle: cf, total: subtotalCostosFijos } =
+    resolverPolimorfico(input.costosFijos, CALC_DEFAULTS.costosFijos);
 
   const ingresoMensual = num(i.serviciosPorMes) * num(i.ingresoPorNoche);
 
   // C. Costos variables (CMV) — % sobre ingresos
   const cmv = ingresoMensual * (num(i.pctCMV) / 100);
   const costoPersonal = num(i.costoPersonal);
-  const alquiler = num(i.alquiler);
-  const subtotalFijos = costoPersonal + alquiler + subtotalFijosOperativos;
+  const subtotalFijos = costoPersonal + subtotalCostosFijos;
 
-  // E. Extraordinarios / financieros / fiscales
-  const extFinFis = num(i.costosExtraordinarios) + num(i.costosFinancieros) + num(i.costosFiscales);
+  // E. Financieros / Fiscales — bidireccional ARS↔%. Extraordinarios sigue
+  // siendo un monto ARS único (no se pidió modo dual para esta línea).
+  const modoFinancieros = i.modoFinancieros === 'pct' ? 'pct' : 'ars';
+  const modoFiscales = i.modoFiscales === 'pct' ? 'pct' : 'ars';
+  const financieros = resolverArsPct(i.costosFinancieros, i.pctFinancieros, modoFinancieros, ingresoMensual);
+  const fiscales = resolverArsPct(i.costosFiscales, i.pctFiscales, modoFiscales, ingresoMensual);
+  const extraordinariosArs = num(i.costosExtraordinarios);
+
+  const extFinFis = extraordinariosArs + financieros.ars + fiscales.ars;
 
   // F. Resultado
   const totalCostos = cmv + subtotalFijos + extFinFis;
   const resultadoNeto = ingresoMensual - totalCostos;
   const pct = (x) => ingresoMensual > 0 ? Math.round((x / ingresoMensual) * 1000) / 10 : 0;
+  const pct2 = (x) => ingresoMensual > 0 ? Math.round((x / ingresoMensual) * 10000) / 100 : 0;
 
   // G. Payback
   const inversion = num(i.inversionTotalARS);
   const payback = resultadoNeto > 0 ? Math.round((inversion / resultadoNeto) * 10) / 10 : null;
 
   return {
-    inputs: { ...i, fijosOperativos: fo },
+    inputs: { ...i, costosFijos: cf },
     ingresoMensual,
     costosVariables: { cmv, pct: pct(cmv) },
     costosFijos: {
       personal: costoPersonal, pctPersonal: pct(costoPersonal),
-      alquiler, pctAlquiler: pct(alquiler),
-      operativos: fo, subtotalOperativos: subtotalFijosOperativos, pctOperativos: pct(subtotalFijosOperativos),
+      fijos: cf, subtotalFijos: subtotalCostosFijos, pctFijos: pct(subtotalCostosFijos),
       subtotal: subtotalFijos, pctSubtotal: pct(subtotalFijos),
     },
     extraordinarios: {
-      extraordinarios: num(i.costosExtraordinarios),
-      financieros: num(i.costosFinancieros),
-      fiscales: num(i.costosFiscales),
-      subtotal: extFinFis, pct: pct(extFinFis),
+      fiscales: fiscales.ars, pctFiscales: pct2(fiscales.ars), modoFiscales,
+      financieros: financieros.ars, pctFinancieros: pct2(financieros.ars), modoFinancieros,
+      extraordinarios: extraordinariosArs, pctExtraordinarios: pct2(extraordinariosArs),
+      subtotal: extFinFis, pctSubtotal: pct(extFinFis),
     },
     totalCostos, pctTotalCostos: pct(totalCostos),
     resultadoNeto, pctResultadoNeto: pct(resultadoNeto),
