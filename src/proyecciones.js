@@ -34,6 +34,12 @@ const DIA_MS = 86_400_000;
 const DIAS_VENTANA = 28;          // ventana de observación para los baselines
 const DIAS_MES_PROM = 30.44;
 
+// Días de servicio/mes asumidos para el punto de equilibrio diario: un valor FIJO
+// (no el observado en los últimos 28 días) porque 21 es lo que pasa el 99% de las
+// veces — así el objetivo diario no salta de un día para el otro por variaciones
+// circunstanciales de frecuencia. Configurable por env si el ritmo real cambia.
+const DIAS_SERVICIO_EQUILIBRIO = parseFloat(process.env.DIAS_SERVICIO_EQUILIBRIO || '21');
+
 // ─── Baselines a partir de movimientos reales ──────────────────────────────────
 function calcularBaselines(movimientos, hoy = new Date()) {
   const corte = new Date(hoy.getTime() - DIAS_VENTANA * DIA_MS);
@@ -111,11 +117,11 @@ function calcularBaselines(movimientos, hoy = new Date()) {
 
   // Punto de equilibrio diario: costos fijos (Personal + Fijos + Fiscales +
   // Financieros + Extraordinarios + Otros; Equipamiento excluido por ser
-  // inversión no recurrente) prorrateados por día de SERVICIO esperado en el
-  // mes, elevados por el % de costo variable para que la venta cubra también
-  // su propio CMV.
+  // inversión no recurrente) prorrateados por DIAS_SERVICIO_EQUILIBRIO (fijo,
+  // no el diasServicioMes observado — ver nota arriba), elevados por el % de
+  // costo variable para que la venta cubra también su propio CMV.
   const fixedMensual = personalMensual + fijosMensual + fiscalesMensual + financierosMensual + extraordinariosMensual + otrosMensual;
-  const fixedDiario = diasServicioMes > 0 ? fixedMensual / diasServicioMes : 0;
+  const fixedDiario = DIAS_SERVICIO_EQUILIBRIO > 0 ? fixedMensual / DIAS_SERVICIO_EQUILIBRIO : 0;
   const puntoEquilibrioDiario = pctCostoVariable < 1 ? fixedDiario / (1 - pctCostoVariable) : null;
 
   return {
@@ -123,7 +129,7 @@ function calcularBaselines(movimientos, hoy = new Date()) {
     diasServicio28, ingresoPorDiaServicio, diasServicioMes, ingresoMensual,
     pctCostoVariable, operativosMensual, personalMensual, alquilerMensual,
     fijosMensual, fiscalesMensual, financierosMensual, extraordinariosMensual, otrosMensual,
-    fixedMensual, fixedDiario, puntoEquilibrioDiario,
+    fixedMensual, fixedDiario, puntoEquilibrioDiario, diasServicioEquilibrio: DIAS_SERVICIO_EQUILIBRIO,
   };
 }
 

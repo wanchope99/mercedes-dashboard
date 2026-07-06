@@ -1432,7 +1432,7 @@ app.get('/api/punto-equilibrio', authMiddleware, adminOnly, async (req, res) => 
         fixedMensual: base.fixedMensual,
         fixedDiario: base.fixedDiario,
         pctCostoVariable: base.pctCostoVariable,
-        diasServicioMes: base.diasServicioMes,
+        diasServicioEquilibrio: base.diasServicioEquilibrio,
         diasServicio28: base.diasServicio28,
         desglose: {
           personal: base.personalMensual,

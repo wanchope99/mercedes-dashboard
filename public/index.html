@@ -3830,7 +3830,7 @@ function renderServiciosKPIs(servicios) {
     <div class="kpi-card red" style="cursor:pointer" onclick="openPuntoEquilibrioModal()" title="Ver cálculo">
       <div class="kpi-label">Punto de equilibrio diario</div>
       <div class="kpi-value">${fmt(val)}</div>
-      <div class="kpi-sub">Costos fijos ÷ ${Math.round(pe.diasServicioMes)} días de servicio/mes</div>
+      <div class="kpi-sub">Costos fijos ÷ ${Math.round(pe.diasServicioEquilibrio)} días de servicio/mes</div>
     </div>`;
     })()}
   `;
@@ -4899,7 +4899,7 @@ function openResultadoNetoModal() {
 function openPuntoEquilibrioModal() {
   const pe = state.puntoEquilibrio;
   if (!pe) return; // defensivo: el card nunca renderiza cuando pe es null
-  const { fixedMensual, fixedDiario, pctCostoVariable, diasServicioMes, puntoEquilibrioDiario, desglose } = pe;
+  const { fixedMensual, fixedDiario, pctCostoVariable, diasServicioEquilibrio, puntoEquilibrioDiario, desglose } = pe;
   const pctCV = (pctCostoVariable || 0) * 100;
   const rows = [
     ['Personal', desglose.personal],
@@ -4911,14 +4911,14 @@ function openPuntoEquilibrioModal() {
   ].filter(([, v]) => v > 0)
    .map(([label, v]) => [label, fmt(v), fixedMensual > 0 ? pct((v / fixedMensual) * 100) : '-']);
   const body = '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.6">'
-    + 'Se toman los costos fijos de los últimos 28 días y se prorratean sobre los días de servicio esperados por mes (no días calendario). '
+    + 'Se toman los costos fijos de los últimos 28 días y se prorratean sobre ' + Math.round(diasServicioEquilibrio) + ' servicios estimados por mes (frecuencia habitual del local, no días calendario). '
     + 'El resultado se ajusta por el % de costo variable (CMV), para que la facturación también cubra su propio costo variable.'
     + '</div>'
     + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Costos fijos mensuales por rubro</div>'
     + miniTabla([{label:'Rubro'},{label:'Monto',align:'right'},{label:'% del total',align:'right'}], rows)
     + '<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border);font-size:13px;line-height:2.1">'
     + '<div>Costos fijos mensuales &nbsp;=&nbsp; <strong>' + fmt(fixedMensual) + '</strong></div>'
-    + '<div>÷ ' + Math.round(diasServicioMes) + ' días de servicio/mes &nbsp;=&nbsp; <strong>' + fmt(fixedDiario) + '</strong> costo fijo diario</div>'
+    + '<div>÷ ' + Math.round(diasServicioEquilibrio) + ' días de servicio/mes &nbsp;=&nbsp; <strong>' + fmt(fixedDiario) + '</strong> costo fijo diario</div>'
     + '<div>÷ (1 − ' + pct(pctCV) + ' costo variable) &nbsp;=&nbsp; <strong style="color:var(--red)">' + fmt(puntoEquilibrioDiario) + '</strong> punto de equilibrio diario</div>'
     + '</div>';
   openDetalleModal('Punto de Equilibrio Diario', body);
