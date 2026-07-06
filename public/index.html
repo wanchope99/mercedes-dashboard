@@ -1593,8 +1593,8 @@
 
 <script>
 const state = {
-  modo: 'mes', mes: '', desde: '', hasta: '',
-  resumen: [], diasData: [], diasSemana: [],
+  modo: 'mes', mes: '', desde: '', hasta: '', mesesDisponibles: [],
+  resumen: [], diasData: [], diasSemana: [], resumenAnterior: null, diasSemanaAnterior: null,
   charts: {}, pagosSort: 'vencimiento', proveedores: {},
   pagosVista: 'todos', pagosData: [], proy: null, cuotasAgrup: 'compra', cierrePendiente: null,
   galiciaFuturos: false, servAgrup: 'crono', servData: [], servDetalle: null,
@@ -2301,6 +2301,19 @@ async function confirmarCierreDefinitivo() {
 function difClass(v) { return v > 0 ? 'resumen-dif-pos' : v < 0 ? 'resumen-dif-neg' : ''; }
 function difStr(v) { return (v > 0 ? '+' : '') + fmt(v); }
 
+// ── Deltas vs. mes anterior (KPIs del dashboard) ──
+function mesAnterior(mes) {
+  const idx = state.mesesDisponibles.indexOf(mes);
+  return idx > 0 ? state.mesesDisponibles[idx - 1] : null;
+}
+function pctChange(actual, previo) { return previo ? ((actual - previo) / Math.abs(previo)) * 100 : null; }
+function ppChange(actual, previo) { return actual - previo; }
+function kpiDeltaSpan(v, inverted, suffix) {
+  if (v == null) return '';
+  const cls = inverted ? (v > 0 ? 'resumen-dif-neg' : v < 0 ? 'resumen-dif-pos' : '') : difClass(v);
+  return ` <span class="${cls}">${v > 0 ? '+' : ''}${v.toFixed(1)}${suffix} vs mes anterior</span>`;
+}
+
 function renderResumenCierre(d) {
   const el = document.getElementById('arqueo-ultimo-resumen');
   el.style.display = 'block';
@@ -2339,6 +2352,7 @@ function buildQS() {
 async function init() {
   try {
     const { data: meses } = await api('/api/meses');
+    state.mesesDisponibles = meses;
     const sel = document.getElementById('filter-mes');
     meses.forEach(m => { const o = document.createElement('option'); o.value = m; o.textContent = m; sel.appendChild(o); });
     // Por defecto: el mes calendario en curso. Si no existe en la planilla,
@@ -2380,7 +2394,20 @@ async function loadAll() {
   state.diasSemana = r3.data;
 
   const esMensual = state.modo === 'mes' && state.mes;
-  renderKPIs(state.resumen, state.diasSemana, esMensual);
+  const prevMes = esMensual ? mesAnterior(state.mes) : null;
+  if (prevMes) {
+    const [rp1, rp3] = await Promise.all([
+      api(`/api/resumen?mes=${encodeURIComponent(prevMes)}`),
+      api(`/api/actividad-semana?mes=${encodeURIComponent(prevMes)}`),
+    ]);
+    state.resumenAnterior = rp1.data;
+    state.diasSemanaAnterior = rp3.data;
+  } else {
+    state.resumenAnterior = null;
+    state.diasSemanaAnterior = null;
+  }
+
+  renderKPIs(state.resumen, state.diasSemana, esMensual, state.resumenAnterior, state.diasSemanaAnterior);
   renderTablaResumen(state.resumen);
   renderCierreMes();
   loadCierres();
@@ -2391,7 +2418,7 @@ async function loadAll() {
 }
 
 // ─── KPIs ─────────────────────────────────────────────────────────────────────
-function renderKPIs(resumen, diasSemana, esMensual) {
+function renderKPIs(resumen, diasSemana, esMensual, resumenAnterior, diasSemanaAnterior) {
   const totalIngresos = resumen.reduce((s, m) => s + m.ingresos.total, 0);
   const totalGastos = resumen.reduce((s, m) => s + m.gastos.total, 0);
   const resultado = totalIngresos - totalGastos;
@@ -2413,11 +2440,34 @@ function renderKPIs(resumen, diasSemana, esMensual) {
   const totalIngServ = diasSemana.reduce((s, d) => s + d.totalIngresos, 0);
   const promServ = diasServ > 0 ? totalIngServ / diasServ : 0;
 
+  // ── Deltas vs. mes anterior (solo si hay datos del mes previo) ──
+  let dIng = null, dGas = null, dRes = null, dProm = null, dMI = null, dPersonal = null;
+  if (resumenAnterior && diasSemanaAnterior) {
+    const ingA = resumenAnterior.reduce((s, m) => s + m.ingresos.total, 0);
+    const gasA = resumenAnterior.reduce((s, m) => s + m.gastos.total, 0);
+    const resA = ingA - gasA;
+    const mercA = resumenAnterior.reduce((s, m) => s + m.gastos.Mercaderia, 0);
+    const insA = resumenAnterior.reduce((s, m) => s + m.gastos.Insumos, 0);
+    const persA = resumenAnterior.reduce((s, m) => s + m.gastos.Personal, 0);
+    const pctMIA = ingA > 0 ? ((mercA + insA) / ingA) * 100 : 0;
+    const pctPersonalA = ingA > 0 ? (persA / ingA) * 100 : 0;
+    const diasServA = diasSemanaAnterior.reduce((s, d) => s + d.cantServicios, 0);
+    const totalIngServA = diasSemanaAnterior.reduce((s, d) => s + d.totalIngresos, 0);
+    const promServA = diasServA > 0 ? totalIngServA / diasServA : 0;
+
+    dIng = pctChange(totalIngresos, ingA);
+    dGas = pctChange(totalGastos, gasA);
+    dRes = pctChange(resultado, resA);
+    dProm = pctChange(promServ, promServA);
+    dMI = ppChange(pctMI, pctMIA);
+    dPersonal = ppChange(pctPersonal, pctPersonalA);
+  }
+
   document.getElementById('kpi-grid').innerHTML = `
     <div class="kpi-card green">
       <div class="kpi-label">Total Ingresos</div>
       <div class="kpi-value">${fmt(totalIngresos)}</div>
-      <div class="kpi-sub">${diasServ} servicio${diasServ !== 1 ? 's' : ''}</div>
+      <div class="kpi-sub">${diasServ} servicio${diasServ !== 1 ? 's' : ''}${kpiDeltaSpan(dIng, false, '%')}</div>
     </div>
     <div class="kpi-card red">
       <div class="kpi-label">Total Gastos</div>
@@ -2425,28 +2475,29 @@ function renderKPIs(resumen, diasSemana, esMensual) {
       <div class="kpi-sub" style="display:flex;flex-direction:column;gap:2px;margin-top:6px">
         <span>🔄 Operativo: <strong style="color:var(--text)">${fmt(gastoOperativo)}</strong></span>
         <span>📦 Inversión: <strong style="color:var(--text-muted)">${fmt(gastoInversion)}</strong></span>
+        ${dGas != null ? `<span class="${difClass(dGas)}">${dGas > 0 ? '+' : ''}${dGas.toFixed(1)}% vs mes anterior</span>` : ''}
       </div>
     </div>
     <div class="kpi-card ${resultado >= 0 ? 'green' : 'red'}" style="cursor:pointer" onclick="openResultadoNetoModal()" title="Ver detalle">
       <div class="kpi-label">Resultado Neto</div>
       <div class="kpi-value">${fmt(resultado)}</div>
-      <div class="kpi-sub">${totalIngresos>0 ? pct((resultado/totalIngresos)*100)+' sobre ingresos' : 'Ingresos − Gastos'}</div>
+      <div class="kpi-sub">${totalIngresos>0 ? pct((resultado/totalIngresos)*100)+' sobre ingresos' : 'Ingresos − Gastos'}${kpiDeltaSpan(dRes, false, '%')}</div>
     </div>
     <div class="kpi-card accent" style="cursor:pointer" onclick="openCmvModal()" title="Ver desglose">
       <div class="kpi-label">Merc + Insumos / Ing</div>
       <div class="kpi-value">${pct(pctMI)}</div>
-      <div class="kpi-sub">${fmt(mercaderia + insumos)} sobre ingresos</div>
+      <div class="kpi-sub">${fmt(mercaderia + insumos)} sobre ingresos${kpiDeltaSpan(dMI, true, 'pp')}</div>
     </div>
     <div class="kpi-card blue">
       <div class="kpi-label">Prom. por servicio</div>
       <div class="kpi-value">${fmt(promServ)}</div>
-      <div class="kpi-sub">Ingreso promedio</div>
+      <div class="kpi-sub">Ingreso promedio${kpiDeltaSpan(dProm, false, '%')}</div>
     </div>
     ${esMensual ? `
     <div class="kpi-card orange">
       <div class="kpi-label">Personal / Ingresos</div>
       <div class="kpi-value">${pct(pctPersonal)}</div>
-      <div class="kpi-sub">${fmt(personal)} en personal</div>
+      <div class="kpi-sub">${fmt(personal)} en personal${kpiDeltaSpan(dPersonal, true, 'pp')}</div>
     </div>` : ''}
   `;
 }
@@ -3776,7 +3827,7 @@ function renderServiciosKPIs(servicios) {
       const val = pe && typeof pe.puntoEquilibrioDiario === 'number' && pe.puntoEquilibrioDiario > 0 ? pe.puntoEquilibrioDiario : null;
       if (val == null) return '';
       return `
-    <div class="kpi-card red">
+    <div class="kpi-card red" style="cursor:pointer" onclick="openPuntoEquilibrioModal()" title="Ver cálculo">
       <div class="kpi-label">Punto de equilibrio diario</div>
       <div class="kpi-value">${fmt(val)}</div>
       <div class="kpi-sub">Costos fijos ÷ ${Math.round(pe.diasServicioMes)} días de servicio/mes</div>
@@ -4843,6 +4894,34 @@ function openResultadoNetoModal() {
     + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Gastos por grupo</div>'
     + miniTabla([{label:'Grupo'},{label:'Monto',align:'right'},{label:'% Ingresos',align:'right'}], rowsG);
   openDetalleModal('Resultado Neto', body);
+}
+
+function openPuntoEquilibrioModal() {
+  const pe = state.puntoEquilibrio;
+  if (!pe) return; // defensivo: el card nunca renderiza cuando pe es null
+  const { fixedMensual, fixedDiario, pctCostoVariable, diasServicioMes, puntoEquilibrioDiario, desglose } = pe;
+  const pctCV = (pctCostoVariable || 0) * 100;
+  const rows = [
+    ['Personal', desglose.personal],
+    ['Fijos', desglose.fijos],
+    ['Fiscales', desglose.fiscales],
+    ['Financieros', desglose.financieros],
+    ['Extraordinarios', desglose.extraordinarios],
+    ['Otros', desglose.otros],
+  ].filter(([, v]) => v > 0)
+   .map(([label, v]) => [label, fmt(v), fixedMensual > 0 ? pct((v / fixedMensual) * 100) : '-']);
+  const body = '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.6">'
+    + 'Se toman los costos fijos de los últimos 28 días y se prorratean sobre los días de servicio esperados por mes (no días calendario). '
+    + 'El resultado se ajusta por el % de costo variable (CMV), para que la facturación también cubra su propio costo variable.'
+    + '</div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Costos fijos mensuales por rubro</div>'
+    + miniTabla([{label:'Rubro'},{label:'Monto',align:'right'},{label:'% del total',align:'right'}], rows)
+    + '<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border);font-size:13px;line-height:2.1">'
+    + '<div>Costos fijos mensuales &nbsp;=&nbsp; <strong>' + fmt(fixedMensual) + '</strong></div>'
+    + '<div>÷ ' + Math.round(diasServicioMes) + ' días de servicio/mes &nbsp;=&nbsp; <strong>' + fmt(fixedDiario) + '</strong> costo fijo diario</div>'
+    + '<div>÷ (1 − ' + pct(pctCV) + ' costo variable) &nbsp;=&nbsp; <strong style="color:var(--red)">' + fmt(puntoEquilibrioDiario) + '</strong> punto de equilibrio diario</div>'
+    + '</div>';
+  openDetalleModal('Punto de Equilibrio Diario', body);
 }
 
 async function openCmvModal() {
