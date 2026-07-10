@@ -716,7 +716,9 @@ function normalizarMedio(medio) {
   return (medio || '').trim().toLowerCase() === 'echeq' ? 'Galicia' : (medio || '');
 }
 
-app.post('/api/pagos', authMiddleware, adminOnly, async (req, res) => {
+// Creación de compras/pagos: accesible también para el encargado (botón "Nueva compra"),
+// a diferencia del listado (GET) y el marcado de pagado, que permanecen solo admin.
+app.post('/api/pagos', authMiddleware, async (req, res) => {
   try {
     const { fecha, mes, proveedor, categoria, salidaARS, vencimiento, descripcion, cuotas, estado } = req.body;
     const medioPago = normalizarMedio(req.body.medioPago);
@@ -756,7 +758,7 @@ app.post('/api/pagos', authMiddleware, adminOnly, async (req, res) => {
       valueInputOption: 'USER_ENTERED', requestBody: { values },
     });
     clearCache();
-    res.json({ ok: true, message: nCuotas > 1 ? `Compra en ${nCuotas} cuotas registrada (${values.length} filas)` : 'Pago registrado correctamente' });
+    res.json({ ok: true, message: nCuotas > 1 ? `Compra en ${nCuotas} cuotas registrada (${values.length} filas)` : 'Compra registrada correctamente' });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
@@ -846,7 +848,9 @@ app.post('/api/pagos/pagar', authMiddleware, adminOnly, async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-app.get('/api/proveedores', authMiddleware, adminOnly, async (req, res) => {
+// Sin adminOnly: el formulario "Nueva compra" del encargado necesita esta
+// referencia (plazo, forma de pago) para autocompletar, aunque no vea el listado de pagos.
+app.get('/api/proveedores', authMiddleware, async (req, res) => {
   try {
     res.json({ ok: true, data: await leerProveedoresSheet() });
   } catch (err) { res.json({ ok: true, data: {} }); }
@@ -854,7 +858,8 @@ app.get('/api/proveedores', authMiddleware, adminOnly, async (req, res) => {
 
 // Sugerencias para el alta de pagos: proveedores ya usados en Movimientos
 // (con su última categoría y medio de pago) + los de la hoja Proveedores.
-app.get('/api/proveedores-sugerencias', authMiddleware, adminOnly, async (req, res) => {
+// Sin adminOnly por el mismo motivo que /api/proveedores arriba.
+app.get('/api/proveedores-sugerencias', authMiddleware, async (req, res) => {
   try {
     const movs = await getMovimientos();
     const map = {};

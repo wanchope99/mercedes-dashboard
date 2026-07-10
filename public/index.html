@@ -528,7 +528,7 @@
 <!-- Tab nav -->
 <div class="tab-nav" id="tab-nav">
   <button class="tab-btn active" id="tab-btn-dashboard" onclick="switchGroup('dashboard', this)">📊 Dashboard</button>
-  <button class="tab-btn" id="tab-btn-pagos" onclick="switchGroup('pagos', this)">💳 Pagos pendientes</button>
+  <button class="tab-btn" id="tab-btn-pagos" onclick="switchGroup('pagos', this)">💳 Pagos</button>
   <button class="tab-btn" id="tab-btn-cajas" onclick="switchGroup('cajas', this)">🏦 Cajas</button>
   <button class="tab-btn" id="tab-btn-servicios" onclick="switchGroup('servicios', this)">🍽️ Servicios</button>
   <button class="tab-btn" id="tab-btn-stocks" onclick="switchGroup('stocks', this)">📦 Stocks <span id="prov-badge" class="prov-badge" style="display:none">0</span></button>
@@ -1090,33 +1090,35 @@
 
 <div id="tab-pagos" class="tab-panel">
   <div class="pagos-filters">
-    <span class="filter-label">Ordenar por</span>
-    <select id="pagos-sort" onchange="loadPagos()">
-      <option value="vencimiento">Próximo vencimiento</option>
-      <option value="monto">Mayor monto</option>
-      <option value="proveedor">Proveedor A-Z</option>
-      <option value="formapago">Forma de pago</option>
-    </select>
-    <select id="pagos-filter-mp" onchange="loadPagos()">
-      <option value="">Todas las formas de pago</option>
-      <option value="Efectivo">Efectivo</option>
-      <option value="Galicia">Galicia</option>
-      <option value="Mercado Pago">Mercado Pago</option>
-      <option value="Echeq">Echeq</option>
-    </select>
-    <input type="text" id="pagos-search" placeholder="Buscar proveedor..." oninput="loadPagos()" style="width:200px" />
+    <span class="filter-label" id="pagos-filtros-admin-label">Ordenar por</span>
+    <span id="pagos-filtros-admin" style="display:contents">
+      <select id="pagos-sort" onchange="loadPagos()">
+        <option value="vencimiento">Próximo vencimiento</option>
+        <option value="monto">Mayor monto</option>
+        <option value="proveedor">Proveedor A-Z</option>
+        <option value="formapago">Forma de pago</option>
+      </select>
+      <select id="pagos-filter-mp" onchange="loadPagos()">
+        <option value="">Todas las formas de pago</option>
+        <option value="Efectivo">Efectivo</option>
+        <option value="Galicia">Galicia</option>
+        <option value="Mercado Pago">Mercado Pago</option>
+        <option value="Echeq">Echeq</option>
+      </select>
+      <input type="text" id="pagos-search" placeholder="Buscar proveedor..." oninput="loadPagos()" style="width:200px" />
+    </span>
     <div style="flex:1"></div>
-    <button class="btn btn-accent" onclick="openModal()">+ Nuevo pago</button>
-    <button class="btn" onclick="openPagarModal()">✓ Pagar</button>
+    <button class="btn btn-accent" onclick="openModal()">+ Nueva compra</button>
+    <button class="btn" id="btn-pagar-pendiente" onclick="openPagarModal()">✓ Pagar</button>
   </div>
 
-  <main style="padding-top:24px">
+  <main style="padding-top:24px" id="pagos-admin-panel">
     <div class="kpi-grid" id="pagos-kpis">
       <div class="loading"><div class="spinner"></div></div>
     </div>
     <div class="card" style="padding:0;overflow:hidden">
       <div class="card-title" style="padding:20px 24px 0;margin-bottom:0">
-        Pagos pendientes
+        Pagos
         <span class="pv-toggle">
           <button class="pv-btn active" id="pv-btn-todos" onclick="setPagosVista('todos')">Todos</button>
           <button class="pv-btn" id="pv-btn-cuotas" onclick="setPagosVista('cuotas')">📅 Cuotas</button>
@@ -1429,7 +1431,7 @@
 <!-- Modal nuevo pago -->
 <div id="modal-overlay">
   <div id="modal">
-    <h3>Registrar nuevo pago</h3>
+    <h3>Registrar nueva compra</h3>
     <div class="form-grid">
       <div class="form-group full">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-size:13px">
@@ -1683,14 +1685,25 @@ function onLoginSuccess(rol, nombre) {
     ['tab-btn-dashboard','tab-btn-pagos','tab-btn-cajas','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-proyecciones'].forEach(id => {
       const el = document.getElementById(id); if (el) el.style.display = '';
     });
+    // Pagos: vista completa (filtros, KPIs, listado y botón Pagar)
+    document.getElementById('pagos-filtros-admin-label').style.display = '';
+    document.getElementById('pagos-filtros-admin').style.display = 'contents';
+    document.getElementById('btn-pagar-pendiente').style.display = '';
+    document.getElementById('pagos-admin-panel').style.display = '';
     init(); // carga dashboard
     refreshProvBadge(); // badge de pendientes de proveedores
   } else {
-    // Encargado: solo la tab Cajas (con submenús Cajas / Arqueo)
-    ['tab-btn-dashboard','tab-btn-pagos','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-proyecciones'].forEach(id => {
+    // Encargado: solo la tab Cajas (con submenús Cajas / Arqueo) + Pagos
+    ['tab-btn-dashboard','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-proyecciones'].forEach(id => {
       const el = document.getElementById(id); if (el) el.style.display = 'none';
     });
     document.getElementById('tab-btn-cajas').style.display = '';
+    // Pagos visible solo para registrar una compra nueva: sin listado, KPIs ni "Pagar"
+    document.getElementById('tab-btn-pagos').style.display = '';
+    document.getElementById('pagos-filtros-admin-label').style.display = 'none';
+    document.getElementById('pagos-filtros-admin').style.display = 'none';
+    document.getElementById('btn-pagar-pendiente').style.display = 'none';
+    document.getElementById('pagos-admin-panel').style.display = 'none';
     // Abrir Cajas → y dentro, el submenú Arqueo directamente
     switchGroup('cajas', document.getElementById('tab-btn-cajas'));
     switchSub('arqueo', document.getElementById('subtab-arqueo'));
@@ -1805,7 +1818,7 @@ const TAB_GROUPS = {
 
 // Carga de cada panel cuando se activa.
 function cargarPanel(tab) {
-  if (tab === 'pagos') loadPagos();
+  if (tab === 'pagos') { if (state.rol === 'admin') loadPagos(); }
   else if (tab === 'cajas') loadCajas();
   else if (tab === 'arqueo') initArqueo();
   else if (tab === 'historial-arqueos') loadHistorialArqueos();
@@ -3724,14 +3737,14 @@ async function saveNewPago() {
     }) });
     showResultadoModal({
       ok: true,
-      titulo: 'Pago registrado',
+      titulo: 'Compra registrada',
       detalle: `<b>${escapeHtml(proveedor)}</b> · ${fmt(salidaARS)}<br>` +
         (cuotas > 1
           ? `Compra en ${cuotas} cuotas (madre + ${cuotas} filas creadas)`
           : `Estado: ${estado}${estado === 'A pagar' && vencRaw ? ` · vence ${fmtDate(vencRaw)}` : ''}`) +
         `<br><span style="font-size:11px">Escrito en la hoja Movimientos ✓</span>`,
     });
-    loadPagos();
+    if (state.rol === 'admin') loadPagos();
   } catch (err) {
     showResultadoModal({
       ok: false,
