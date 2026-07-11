@@ -22,6 +22,7 @@ const consumo = require('./consumo');
 const cierres = require('./cierres');
 const stockBebidas = require('./stock-bebidas');
 const { iniciarCron } = require('./cron');
+const { cargarEstadoCaja, guardarEstadoCaja } = require('./estado-caja');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -272,6 +273,7 @@ app.post('/api/arqueo/abrir', authMiddleware, (req, res) => {
     diffMPInicial: diffMP,
     gastosSesion: [],
   };
+  guardarEstadoCaja(estadoCaja); // respaldo en planilla, no bloquea la respuesta
   res.json({ ok: true, data: estadoCaja, diffEfectivo, diffMP });
 });
 
@@ -430,6 +432,7 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
 
   // Resetear estado
   estadoCaja = { abierta: false, apertura: null, encargado: null, efectivoInicial: null, mpInicial: null, gastosSesion: [] };
+  guardarEstadoCaja(estadoCaja); // respaldo en planilla, no bloquea la respuesta
 
   res.json({ ok: true, data: resumen });
 });
@@ -471,6 +474,7 @@ app.post('/api/gastos-rapidos', authMiddleware, async (req, res) => {
           usuario: req.user.nombre,
         });
         registradoEnSesion = true;
+        guardarEstadoCaja(estadoCaja); // respaldo en planilla, no bloquea la respuesta
       }
     }
     res.json({ ok: true, message: 'Gasto registrado', registradoEnSesion });
@@ -1627,9 +1631,20 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Mercedes Dashboard corriendo en puerto ${PORT}`);
-  iniciarCron();
-});
+// Antes de aceptar tráfico: si el proceso anterior murió (deploy, crash) con la
+// caja abierta, restaurar esa sesión desde la planilla en vez de perderla en
+// memoria — de lo contrario el próximo GET /api/arqueo/estado mostraría "cerrada"
+// aunque el turno siga en curso, y esa noche quedaría sin arquear.
+(async () => {
+  const persistido = await cargarEstadoCaja();
+  if (persistido && persistido.abierta) {
+    estadoCaja = persistido;
+    console.log(`Caja restaurada tras reinicio: abierta desde ${persistido.apertura} (${persistido.encargado})`);
+  }
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Mercedes Dashboard corriendo en puerto ${PORT}`);
+    iniciarCron();
+  });
+})();
 
 module.exports = { buildFilasCierreServicio, leerProveedoresSheet };
