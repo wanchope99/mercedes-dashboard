@@ -3124,15 +3124,14 @@ async function loadPagos() {
     const galiciaTotal = galiciaPagos.reduce((s, p) => s + p.salidaARS, 0);
     const independientes = pagos.filter(p => !(p.medioPago || '').toLowerCase().includes('galicia'));
 
-    // Próximo vencimiento de la tarjeta: por defecto solo se muestran esos cargos
-    const vencsGalicia = [...new Set(galiciaPagos.filter(p => p.vencDate).map(p => p.vencDate))].sort();
-    const proxVencGalicia = vencsGalicia[0] || null;
-    const galiciaVisibles = state.galiciaFuturos || !proxVencGalicia
-      ? galiciaPagos
-      : galiciaPagos.filter(p => !p.vencDate || p.vencDate <= proxVencGalicia);
-    const galiciaProxTotal = (proxVencGalicia
-      ? galiciaPagos.filter(p => !p.vencDate || p.vencDate <= proxVencGalicia)
-      : galiciaPagos).reduce((s, p) => s + p.salidaARS, 0);
+    // Próximo vencimiento de la tarjeta: por defecto se muestran los vencidos
+    // (siempre) más los cargos del próximo vencimiento aún no vencido.
+    const hoyISO = new Date().toISOString().split('T')[0];
+    const vencsGaliciaFuturos = [...new Set(galiciaPagos.filter(p => p.vencDate && p.vencDate >= hoyISO).map(p => p.vencDate))].sort();
+    const proxVencGalicia = vencsGaliciaFuturos[0] || null;
+    const esVisibleGalicia = p => p.urgencia === 'vencido' || !p.vencDate || !proxVencGalicia || p.vencDate <= proxVencGalicia;
+    const galiciaVisibles = state.galiciaFuturos ? galiciaPagos : galiciaPagos.filter(esVisibleGalicia);
+    const galiciaProxTotal = (state.galiciaFuturos ? galiciaPagos : galiciaPagos.filter(esVisibleGalicia)).reduce((s, p) => s + p.salidaARS, 0);
 
     document.getElementById('pagos-kpis').innerHTML = `
       <div class="kpi-card red"><div class="kpi-label">Total pendiente ARS</div><div class="kpi-value">${fmt(summary.totalARS)}</div><div class="kpi-sub">${summary.total} pagos</div></div>
