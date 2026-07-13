@@ -534,6 +534,7 @@
   <button class="tab-btn" id="tab-btn-stocks" onclick="switchGroup('stocks', this)">📦 Stocks <span id="prov-badge" class="prov-badge" style="display:none">0</span></button>
   <button class="tab-btn" id="tab-btn-costos" onclick="switchGroup('costos', this)">🧮 Costos</button>
   <button class="tab-btn" id="tab-btn-proyecciones" onclick="switchGroup('proyecciones', this)">📈 Proyecciones</button>
+  <button class="tab-btn" id="tab-btn-plan" onclick="switchGroup('plan', this)">🗓️ Plan</button>
 </div>
 
 <!-- Sub-navegación: aparece cuando la tab padre tiene submenús (Cajas, Stocks) -->
@@ -847,6 +848,62 @@
     <div class="card">
       <div class="card-title">Supuestos de la proyección</div>
       <div id="proy-supuestos" style="font-size:12px;color:var(--text-muted);line-height:2"></div>
+    </div>
+  </main>
+</div>
+
+<!-- ═══ PLAN DE INVERSIONES TAB ═══ -->
+<div id="tab-plan" class="tab-panel">
+  <main>
+    <div class="kpi-grid" id="plan-kpis"><div class="loading"><div class="spinner"></div> Cargando plan...</div></div>
+
+    <div class="card">
+      <div class="card-title">Presupuesto para inversiones
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· sugerido por mes = % del ingreso proyectado de ese mes</span>
+      </div>
+      <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;padding:4px 0">
+        <label style="display:inline-flex;align-items:center;gap:8px;font-size:13px">
+          Máximo por mes:
+          <input type="number" id="plan-budget-pct" min="0" max="100" step="0.5" style="width:72px" onkeydown="if(event.key==='Enter')savePlanBudgetPct()"> % del ingreso
+          <button class="btn" style="font-size:12px;padding:6px 12px" onclick="savePlanBudgetPct()">Aplicar</button>
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="plan-incluir-proy" onchange="togglePlanIncluir(this.checked)" style="accent-color:var(--accent)">
+          Incluir estos gastos en Proyecciones
+        </label>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Backlog de inversiones
+        <button class="btn btn-accent" style="float:right;font-size:12px;padding:6px 12px" onclick="togglePlanForm()">➕ Agregar ítem</button>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· pendientes sin agendar, ordená por prioridad</span>
+      </div>
+      <div id="plan-item-form" style="display:none">
+        <input type="hidden" id="plf-id">
+        <div class="proy-form-grid">
+          <div class="form-group"><label>Nombre</label><input id="plf-nombre" placeholder="Ej: Aires acondicionados"></div>
+          <div class="form-group"><label>Categoría</label><input id="plf-categoria" list="plf-cat-list" placeholder="Ej: Clima"><datalist id="plf-cat-list"><option>Clima</option><option>Extracción</option><option>Pintura</option><option>Equipamiento</option><option>Mobiliario</option><option>Extraordinarios</option></datalist></div>
+          <div class="form-group"><label>Costo estimado ARS</label><input type="number" id="plf-costo" min="0" placeholder="0"></div>
+          <div class="form-group"><label>Prioridad (1 = primero)</label><input type="number" id="plf-prioridad" min="1" placeholder="opcional"></div>
+          <div class="form-group"><label>Mes objetivo</label><select id="plf-mes"></select></div>
+        </div>
+        <div class="form-group"><label>Notas</label><input id="plf-notas" placeholder="opcional"></div>
+        <div id="plf-status" style="display:none;font-size:12px;margin:10px 0"></div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn btn-accent" onclick="savePlanItem()">Guardar</button>
+          <button class="btn" onclick="togglePlanForm(true)">Cancelar</button>
+        </div>
+      </div>
+      <div id="plan-backlog"></div>
+    </div>
+
+    <div style="margin-top:18px;font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Cronograma — próximos meses</div>
+    <div class="kpi-grid" id="plan-timeline" style="margin-top:12px"></div>
+
+    <div class="card" id="plan-hechos-card" style="display:none">
+      <div class="card-title">Completados ✓</div>
+      <div id="plan-hechos"></div>
     </div>
   </main>
 </div>
@@ -1682,7 +1739,7 @@ function onLoginSuccess(rol, nombre) {
     document.getElementById('last-updated').style.display = '';
     document.getElementById('btn-refresh').style.display = '';
     // Todas las tabs padre visibles
-    ['tab-btn-dashboard','tab-btn-pagos','tab-btn-cajas','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-proyecciones'].forEach(id => {
+    ['tab-btn-dashboard','tab-btn-pagos','tab-btn-cajas','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-proyecciones','tab-btn-plan'].forEach(id => {
       const el = document.getElementById(id); if (el) el.style.display = '';
     });
     // Pagos: vista completa (filtros, KPIs, listado y botón Pagar)
@@ -1694,7 +1751,7 @@ function onLoginSuccess(rol, nombre) {
     refreshProvBadge(); // badge de pendientes de proveedores
   } else {
     // Encargado: solo la tab Cajas (con submenús Cajas / Arqueo) + Pagos
-    ['tab-btn-dashboard','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-proyecciones'].forEach(id => {
+    ['tab-btn-dashboard','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-proyecciones','tab-btn-plan'].forEach(id => {
       const el = document.getElementById(id); if (el) el.style.display = 'none';
     });
     document.getElementById('tab-btn-cajas').style.display = '';
@@ -1796,6 +1853,7 @@ const TAB_GROUPS = {
   dashboard:    { subs: null },
   pagos:        { subs: null },
   servicios:    { subs: null },
+  plan:         { subs: null },
   costos: { subs: [
     { id: 'costos-resumen', label: '📊 Costos' },
     { id: 'costos-config',  label: '⚙️ Configuración' },
@@ -1845,6 +1903,7 @@ function cargarPanel(tab) {
   }
   else if (tab === 'calculadora') loadCalculadora();
   else if (tab === 'proymes') loadProyeccionMes();
+  else if (tab === 'plan') loadPlan();
 }
 
 // Activa un panel concreto (oculta el resto). No toca la barra superior.
@@ -3381,6 +3440,282 @@ async function deleteProyVar(id) {
   try {
     await api('/api/proyecciones/variables/' + id, { method: 'DELETE' });
     loadProyecciones(); if (typeof loadProyeccionMes==='function') loadProyeccionMes();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ─── PLAN DE INVERSIONES ──────────────────────────────────────────────────────
+const PLAN_MESES_HORIZONTE = 6;
+state.plan = { items: [], config: { budgetPct: 2, incluirEnProyeccion: false, overrides: {} }, proy: [] };
+
+function planProxMeses(n) {
+  const out = [], base = new Date();
+  for (let i = 0; i < n; i++) {
+    const d = new Date(base.getFullYear(), base.getMonth() + i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  return out;
+}
+function planMesLabel(iso) {
+  const [y, m] = iso.split('-').map(Number);
+  return `${MESES_PROY[m - 1].slice(0, 3)} ${y}`;
+}
+function planIngresoMes(iso) {
+  const [y, m] = iso.split('-').map(Number);
+  const nombre = MESES_PROY[m - 1];
+  const p = (state.plan.proy || []).find(x => x.mes === nombre && x.anio === y);
+  return p ? p.ingresos : 0;
+}
+function planPresupuestoMes(iso) {
+  const ov = state.plan.config.overrides[iso];
+  if (ov != null && ov > 0) return ov;
+  return planIngresoMes(iso) * (Number(state.plan.config.budgetPct) || 0) / 100;
+}
+
+async function loadPlan() {
+  document.getElementById('plan-kpis').innerHTML = '<div class="loading"><div class="spinner"></div> Cargando plan...</div>';
+  try {
+    const [{ data: planData }, { data: proyData }] = await Promise.all([
+      api('/api/plan'),
+      api('/api/proyecciones?meses=' + PLAN_MESES_HORIZONTE),
+    ]);
+    state.plan.items = planData.items || [];
+    state.plan.config = planData.config || { budgetPct: 2, incluirEnProyeccion: false, overrides: {} };
+    state.plan.proy = proyData.proyeccion || [];
+
+    document.getElementById('plan-budget-pct').value = state.plan.config.budgetPct;
+    document.getElementById('plan-incluir-proy').checked = !!state.plan.config.incluirEnProyeccion;
+
+    renderPlanKpis();
+    renderPlanBacklog();
+    renderPlanTimeline();
+    renderPlanHechos();
+  } catch (err) {
+    document.getElementById('plan-kpis').innerHTML = `<div style="color:var(--red);padding:20px">Error: ${err.message}</div>`;
+  }
+}
+
+function renderPlanKpis() {
+  const pendientes = state.plan.items.filter(i => i.estado !== 'hecho');
+  const totalPend = pendientes.reduce((s, i) => s + (i.costoEstimado || 0), 0);
+  const meses = planProxMeses(PLAN_MESES_HORIZONTE);
+  const presupuestos = meses.map(planPresupuestoMes);
+  const promMensual = presupuestos.reduce((s, v) => s + v, 0) / (presupuestos.length || 1);
+  const mesesParaCompletar = promMensual > 0 ? Math.ceil(totalPend / promMensual) : null;
+  const kpi = (label, valor, sub, color) =>
+    `<div class="kpi-card ${color || ''}"><div class="kpi-label">${label}</div><div class="kpi-value">${valor}</div><div class="kpi-sub">${sub}</div></div>`;
+  document.getElementById('plan-kpis').innerHTML =
+    kpi('Backlog pendiente', fmt(totalPend), `${pendientes.length} ítem${pendientes.length !== 1 ? 's' : ''}`, 'blue') +
+    kpi('Presupuesto próximo mes', fmt(presupuestos[0] || 0), `${planMesLabel(meses[0])} · ${state.plan.config.budgetPct}% del ingreso`, 'accent') +
+    kpi('Meses para completar', mesesParaCompletar != null ? mesesParaCompletar : '—', mesesParaCompletar != null ? `al ritmo de ${fmt(Math.round(promMensual))}/mes` : 'sin ingreso proyectado', mesesParaCompletar != null && mesesParaCompletar <= 12 ? 'green' : 'orange');
+}
+
+function renderPlanBacklog() {
+  const backlog = state.plan.items
+    .filter(i => !i.mesObjetivo && i.estado !== 'hecho')
+    .sort((a, b) => (a.prioridad || 999) - (b.prioridad || 999) || (a.nombre || '').localeCompare(b.nombre || ''));
+  const cont = document.getElementById('plan-backlog');
+  if (!backlog.length) {
+    cont.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0">No hay ítems sin agendar. Agregá uno o revisá el cronograma.</div>';
+    return;
+  }
+  const meses = planProxMeses(PLAN_MESES_HORIZONTE);
+  const opcionesMes = ['<option value="">Asignar a mes…</option>']
+    .concat(meses.map(m => `<option value="${m}">${planMesLabel(m)}</option>`)).join('');
+  cont.innerHTML = `<div class="table-wrap"><table class="pagos-table" style="width:100%"><tbody>` +
+    backlog.map((it, idx) => `
+      <tr>
+        <td style="white-space:nowrap;width:1%">
+          <button class="btn" style="padding:2px 7px;font-size:12px" title="Subir prioridad" ${idx === 0 ? 'disabled' : ''} onclick="planMoverPrioridad('${it.id}',-1)">▲</button>
+          <button class="btn" style="padding:2px 7px;font-size:12px" title="Bajar prioridad" ${idx === backlog.length - 1 ? 'disabled' : ''} onclick="planMoverPrioridad('${it.id}',1)">▼</button>
+        </td>
+        <td><span style="font-weight:600">${escapeHtml(it.nombre)}</span>${it.notas ? `<div class="td-desc">${escapeHtml(it.notas)}</div>` : ''}</td>
+        <td style="color:var(--text-muted);font-size:12px">${escapeHtml(it.categoria) || '—'}</td>
+        <td class="td-right"><span class="td-monto" style="color:var(--text)">${fmt(it.costoEstimado)}</span></td>
+        <td style="white-space:nowrap">
+          <select onchange="planAsignarMes('${it.id}', this.value)" style="font-size:12px;padding:5px 8px">${opcionesMes}</select>
+        </td>
+        <td style="white-space:nowrap;text-align:right">
+          <button class="btn" style="padding:4px 9px;font-size:12px" title="Editar" onclick="planEditarItem('${it.id}')">✏️</button>
+          <button class="btn" style="padding:4px 9px;font-size:12px" title="Marcar hecho" onclick="planMarcarHecho('${it.id}')">✓</button>
+          <button class="btn" style="padding:4px 9px;font-size:12px" title="Eliminar" onclick="planEliminar('${it.id}')">🗑</button>
+        </td>
+      </tr>`).join('') +
+    `</tbody></table></div>`;
+}
+
+function renderPlanTimeline() {
+  const meses = planProxMeses(PLAN_MESES_HORIZONTE);
+  const cont = document.getElementById('plan-timeline');
+  cont.innerHTML = meses.map(iso => {
+    const items = state.plan.items.filter(i => i.mesObjetivo === iso && i.estado !== 'hecho');
+    const asignado = items.reduce((s, i) => s + (i.costoEstimado || 0), 0);
+    const presu = planPresupuestoMes(iso);
+    const over = presu > 0 && asignado > presu;
+    const proy = (state.plan.proy || []).find(x => { const [y, m] = iso.split('-').map(Number); return x.mes === MESES_PROY[m - 1] && x.anio === y; });
+    // Si el toggle está ON, proy.resultado ya incluye el capex del plan; si está OFF, lo restamos para mostrar el impacto.
+    const incluido = state.plan.config.incluirEnProyeccion;
+    const resultadoConPlan = proy ? (incluido ? proy.resultado : proy.resultado - asignado) : null;
+    const chips = items.length
+      ? items.map(i => `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;margin-top:6px">
+          <span style="font-size:12px;font-weight:600">${escapeHtml(i.nombre)}</span>
+          <span style="display:flex;gap:6px;align-items:center;white-space:nowrap">
+            <span style="font-size:12px;color:var(--text-muted)">${fmt(i.costoEstimado)}</span>
+            <button class="btn" style="padding:1px 6px;font-size:11px" title="Volver al backlog" onclick="planAsignarMes('${i.id}','')">↩</button>
+            <button class="btn" style="padding:1px 6px;font-size:11px" title="Marcar hecho" onclick="planMarcarHecho('${i.id}')">✓</button>
+          </span>
+        </div>`).join('')
+      : '<div style="color:var(--text-muted);font-size:12px;padding:6px 0">Sin ítems asignados</div>';
+    return `<div class="card" style="margin:0">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <div style="font-weight:700;font-size:15px">${planMesLabel(iso)}</div>
+        <div style="font-size:11px;color:var(--text-muted)">Presup. ${fmt(Math.round(presu))}</div>
+      </div>
+      <div style="margin-top:6px;font-size:13px">
+        <span style="color:${over ? 'var(--red)' : 'var(--green)'};font-weight:700">${fmt(asignado)}</span>
+        <span style="color:var(--text-muted)"> / ${fmt(Math.round(presu))}</span>
+        ${over ? '<span class="badge badge-vencido" style="margin-left:6px">Excede</span>' : (asignado > 0 ? '<span class="badge badge-ok" style="margin-left:6px">OK</span>' : '')}
+      </div>
+      ${chips}
+      ${proy ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--text-muted)">
+        Resultado proyectado: <strong style="color:${resultadoConPlan >= 0 ? 'var(--green)' : 'var(--red)'}">${fmt(Math.round(resultadoConPlan))}</strong>${asignado > 0 ? ` <span>(con esta inversión)</span>` : ''}<br>
+        Caja acumulada: ${fmt(Math.round(proy.acumulado))}
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function renderPlanHechos() {
+  const hechos = state.plan.items.filter(i => i.estado === 'hecho');
+  const card = document.getElementById('plan-hechos-card');
+  if (!hechos.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  document.getElementById('plan-hechos').innerHTML = hechos.map(i =>
+    `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(46,46,62,0.4)">
+      <span style="font-size:13px">✓ ${escapeHtml(i.nombre)}${i.mesObjetivo ? ` <span style="color:var(--text-muted);font-size:11px">· ${planMesLabel(i.mesObjetivo)}</span>` : ''}</span>
+      <span style="display:flex;gap:8px;align-items:center;white-space:nowrap">
+        <span style="color:var(--text-muted);font-size:12px">${fmt(i.costoEstimado)}</span>
+        <button class="btn" style="padding:2px 8px;font-size:11px" title="Reabrir" onclick="planReabrir('${i.id}')">↺</button>
+        <button class="btn" style="padding:2px 8px;font-size:11px" title="Eliminar" onclick="planEliminar('${i.id}')">🗑</button>
+      </span>
+    </div>`).join('');
+}
+
+// ── Acciones (todas hacen upsert del ítem completo y recargan) ──
+function planItemById(id) { return state.plan.items.find(i => i.id === id); }
+
+async function planGuardar(item) {
+  await api('/api/plan/items', { method: 'POST', body: JSON.stringify(item) });
+  await loadPlan();
+}
+async function planAsignarMes(id, iso) {
+  const it = planItemById(id); if (!it) return;
+  await planGuardar({ ...it, mesObjetivo: iso, estado: iso ? 'planificado' : 'backlog' });
+}
+async function planMarcarHecho(id) {
+  const it = planItemById(id); if (!it) return;
+  await planGuardar({ ...it, estado: 'hecho' });
+}
+async function planReabrir(id) {
+  const it = planItemById(id); if (!it) return;
+  await planGuardar({ ...it, estado: it.mesObjetivo ? 'planificado' : 'backlog' });
+}
+async function planEliminar(id) {
+  if (!confirm('¿Eliminar este ítem del plan?')) return;
+  await api('/api/plan/items/' + id, { method: 'DELETE' });
+  await loadPlan();
+}
+async function planMoverPrioridad(id, dir) {
+  const backlog = state.plan.items
+    .filter(i => !i.mesObjetivo && i.estado !== 'hecho')
+    .sort((a, b) => (a.prioridad || 999) - (b.prioridad || 999) || (a.nombre || '').localeCompare(b.nombre || ''));
+  const idx = backlog.findIndex(i => i.id === id);
+  const swapIdx = idx + dir;
+  if (idx < 0 || swapIdx < 0 || swapIdx >= backlog.length) return;
+  // Reasignar prioridades secuenciales y hacer el swap para persistir un orden estable
+  backlog.forEach((it, i) => { it.prioridad = i + 1; });
+  const a = backlog[idx], b = backlog[swapIdx];
+  const tmp = a.prioridad; a.prioridad = b.prioridad; b.prioridad = tmp;
+  await api('/api/plan/items', { method: 'POST', body: JSON.stringify({ ...a }) });
+  await api('/api/plan/items', { method: 'POST', body: JSON.stringify({ ...b }) });
+  await loadPlan();
+}
+
+// ── Formulario alta/edición ──
+function planFillMesSelect(selected) {
+  const sel = document.getElementById('plf-mes');
+  const meses = planProxMeses(PLAN_MESES_HORIZONTE);
+  sel.innerHTML = ['<option value="">Backlog (sin agendar)</option>']
+    .concat(meses.map(m => `<option value="${m}" ${m === selected ? 'selected' : ''}>${planMesLabel(m)}</option>`)).join('');
+}
+function togglePlanForm(cancel) {
+  const form = document.getElementById('plan-item-form');
+  const abrir = cancel ? false : form.style.display === 'none';
+  form.style.display = abrir ? '' : 'none';
+  if (abrir) {
+    document.getElementById('plf-id').value = '';
+    ['plf-nombre', 'plf-categoria', 'plf-costo', 'plf-prioridad', 'plf-notas'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('plf-status').style.display = 'none';
+    planFillMesSelect('');
+  }
+}
+function planEditarItem(id) {
+  const it = planItemById(id); if (!it) return;
+  document.getElementById('plan-item-form').style.display = '';
+  document.getElementById('plf-id').value = it.id;
+  document.getElementById('plf-nombre').value = it.nombre;
+  document.getElementById('plf-categoria').value = it.categoria || '';
+  document.getElementById('plf-costo').value = it.costoEstimado || '';
+  document.getElementById('plf-prioridad').value = it.prioridad && it.prioridad !== 999 ? it.prioridad : '';
+  document.getElementById('plf-notas').value = it.notas || '';
+  document.getElementById('plf-status').style.display = 'none';
+  planFillMesSelect(it.mesObjetivo || '');
+  document.getElementById('plan-item-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+async function savePlanItem() {
+  const nombre = document.getElementById('plf-nombre').value.trim();
+  const costo = document.getElementById('plf-costo').value;
+  const status = document.getElementById('plf-status');
+  if (!nombre) { status.style.display = ''; status.style.color = 'var(--red)'; status.textContent = 'El nombre es obligatorio.'; return; }
+  if (costo === '' || Number(costo) < 0) { status.style.display = ''; status.style.color = 'var(--red)'; status.textContent = 'Ingresá un costo estimado válido.'; return; }
+  const id = document.getElementById('plf-id').value;
+  const mes = document.getElementById('plf-mes').value;
+  const prioridadRaw = document.getElementById('plf-prioridad').value;
+  const item = {
+    id: id || undefined,
+    nombre,
+    categoria: document.getElementById('plf-categoria').value.trim(),
+    costoEstimado: Number(costo),
+    prioridad: prioridadRaw === '' ? undefined : Number(prioridadRaw),
+    mesObjetivo: mes,
+    estado: mes ? 'planificado' : 'backlog',
+    notas: document.getElementById('plf-notas').value.trim(),
+  };
+  // Preservar estado 'hecho' si se está editando un ítem ya completado
+  const existing = id ? planItemById(id) : null;
+  if (existing && existing.estado === 'hecho') item.estado = 'hecho';
+  try {
+    await api('/api/plan/items', { method: 'POST', body: JSON.stringify(item) });
+    document.getElementById('plan-item-form').style.display = 'none';
+    await loadPlan();
+  } catch (e) {
+    status.style.display = ''; status.style.color = 'var(--red)'; status.textContent = 'Error: ' + e.message;
+  }
+}
+
+// ── Config: presupuesto % y toggle proyección ──
+async function savePlanBudgetPct() {
+  const v = document.getElementById('plan-budget-pct').value;
+  try {
+    await api('/api/plan/config', { method: 'PUT', body: JSON.stringify({ clave: 'budgetPct', valor: Number(v) || 0 }) });
+    state.plan.config.budgetPct = Number(v) || 0;
+    renderPlanKpis(); renderPlanBacklog(); renderPlanTimeline();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+async function togglePlanIncluir(checked) {
+  try {
+    await api('/api/plan/config', { method: 'PUT', body: JSON.stringify({ clave: 'incluirEnProyeccion', valor: checked ? 'TRUE' : 'FALSE' }) });
+    state.plan.config.incluirEnProyeccion = checked;
+    await loadPlan(); // recargar la proyección con/sin el plan
   } catch (e) { alert('Error: ' + e.message); }
 }
 

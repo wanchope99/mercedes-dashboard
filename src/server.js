@@ -20,6 +20,7 @@ const costosProveedores = require('./costos-proveedores');
 const cats = require('./proveedores-categorias');
 const consumo = require('./consumo');
 const cierres = require('./cierres');
+const plan = require('./plan');
 const stockBebidas = require('./stock-bebidas');
 const { iniciarCron } = require('./cron');
 const { cargarEstadoCaja, guardarEstadoCaja } = require('./estado-caja');
@@ -1005,11 +1006,17 @@ async function leerVariables() {
 app.get('/api/proyecciones', authMiddleware, adminOnly, async (req, res) => {
   try {
     const horizonte = Math.min(parseInt(req.query.meses) || 3, 24);
-    const [movimientos, resumen, variables] = await Promise.all([
-      getMovimientos(), getResumenMensual({}), leerVariables(),
+    const [movimientos, resumen, variables, planData] = await Promise.all([
+      getMovimientos(), getResumenMensual({}), leerVariables(), plan.listPlan(),
     ]);
-    const data = proyectar({ movimientos, resumen, variables, horizonte });
-    res.json({ ok: true, data: { ...data, variables } });
+    // Incluir el Plan de Inversiones en la proyección: query param si viene, si no
+    // el default guardado en la config del plan.
+    const incluirPlan = req.query.incluirPlan != null
+      ? (req.query.incluirPlan === '1' || req.query.incluirPlan === 'true')
+      : !!planData.config.incluirEnProyeccion;
+    const planGastos = incluirPlan ? await plan.planGastosProgramados() : [];
+    const data = proyectar({ movimientos, resumen, variables, planGastos, horizonte });
+    res.json({ ok: true, data: { ...data, variables, incluirPlan } });
   } catch (err) {
     console.error('Error /api/proyecciones:', err.message);
     res.status(500).json({ ok: false, error: err.message });
@@ -1053,6 +1060,38 @@ app.delete('/api/proyecciones/variables/:id', authMiddleware, adminOnly, async (
       } } }] },
     });
     res.json({ ok: true, message: 'Variable eliminada' });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─── Plan de Inversiones — gastos extraordinarios planificados (solo admin) ───
+app.get('/api/plan', authMiddleware, adminOnly, async (req, res) => {
+  try { res.json({ ok: true, data: await plan.listPlan() }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Alta o edición (upsert por id): también se usa para agendar mes, repriorizar y marcar hecho.
+app.post('/api/plan/items', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { nombre, costoEstimado } = req.body;
+    if (!nombre) return res.status(400).json({ ok: false, error: 'El nombre es obligatorio' });
+    if (costoEstimado == null || Number(costoEstimado) < 0) return res.status(400).json({ ok: false, error: 'Costo estimado inválido' });
+    const guardado = await plan.guardarItem(req.body);
+    res.json({ ok: true, data: guardado });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.delete('/api/plan/items/:id', authMiddleware, adminOnly, async (req, res) => {
+  try { await plan.deleteItem(req.params.id); res.json({ ok: true, message: 'Ítem eliminado' }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Config: budgetPct | incluirEnProyeccion | override:YYYY-MM
+app.put('/api/plan/config', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { clave, valor } = req.body;
+    if (!clave) return res.status(400).json({ ok: false, error: 'Falta clave' });
+    await plan.guardarConfig(clave, valor);
+    res.json({ ok: true });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 

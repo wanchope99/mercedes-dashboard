@@ -135,7 +135,11 @@ function calcularBaselines(movimientos, hoy = new Date()) {
 
 // ─── Proyección a N meses ───────────────────────────────────────────────────────
 // variables: [{ id, nombre, tipo: 'gasto'|'ingreso', monto, meses: ['Junio',...], repite: bool }]
-function proyectar({ movimientos, resumen, variables = [], hoy = new Date(), horizonte = 12 }) {
+// planGastos: [{ anio, mes: 'Agosto', monto, nombre }] — gastos extraordinarios (capex)
+//   del Plan de Inversiones agendados a un mes concreto. Se suman a los gastos del mes
+//   que coincide en (mes, anio). Aditivo y seguro: el capex está excluido de las
+//   baselines, así que no se duplica. Ver src/plan.js.
+function proyectar({ movimientos, resumen, variables = [], planGastos = [], hoy = new Date(), horizonte = 12 }) {
   const base = calcularBaselines(movimientos, hoy);
   const mesActualIdx = hoy.getMonth();
   const anioActual = hoy.getFullYear();
@@ -187,15 +191,24 @@ function proyectar({ movimientos, resumen, variables = [], hoy = new Date(), hor
       varDetalle.push({ id: v.id, nombre: v.nombre, tipo: v.tipo, monto });
     }
 
+    // Gastos extraordinarios (capex) del Plan de Inversiones agendados a este mes/año
+    let planExtraordinarios = 0;
+    for (const g of planGastos) {
+      if (g.mes !== mesNombre || Number(g.anio) !== anio) continue;
+      const monto = Number(g.monto) || 0;
+      planExtraordinarios += monto;
+      varDetalle.push({ id: null, nombre: g.nombre, tipo: 'gasto', monto, plan: true });
+    }
+
     const ingresos = ingresosBase + varIngresos;
-    const gastos = costoVariable + personal + alquiler + operativos + aguinaldo + varGastos;
+    const gastos = costoVariable + personal + alquiler + operativos + aguinaldo + varGastos + planExtraordinarios;
     const resultado = ingresos - gastos;
     acumulado += resultado;
 
     proyeccion.push({
       mes: mesNombre, anio, label: `${mesNombre.slice(0, 3)} ${anio}`,
       ingresos, gastos, resultado, acumulado,
-      desglose: { ingresosBase, varIngresos, costoVariable, personal, alquiler, operativos, aguinaldo, varGastos },
+      desglose: { ingresosBase, varIngresos, costoVariable, personal, alquiler, operativos, aguinaldo, varGastos, planExtraordinarios },
       variables: varDetalle,
       real: false,
     });
