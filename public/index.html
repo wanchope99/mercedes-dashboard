@@ -898,8 +898,8 @@
       <div id="plan-backlog"></div>
     </div>
 
-    <div style="margin-top:18px;font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Cronograma — próximos meses</div>
-    <div class="kpi-grid" id="plan-timeline" style="margin-top:12px"></div>
+    <div style="margin-top:18px;font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Cronograma — próximos 3 meses</div>
+    <div class="kpi-grid" id="plan-timeline" style="margin-top:12px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))"></div>
 
     <div class="card" id="plan-hechos-card" style="display:none">
       <div class="card-title">Completados ✓</div>
@@ -3444,7 +3444,7 @@ async function deleteProyVar(id) {
 }
 
 // ─── PLAN DE INVERSIONES ──────────────────────────────────────────────────────
-const PLAN_MESES_HORIZONTE = 6;
+const PLAN_MESES_HORIZONTE = 3;
 state.plan = { items: [], config: { budgetPct: 2, incluirEnProyeccion: false, overrides: {} }, proy: [] };
 
 function planProxMeses(n) {
@@ -3556,27 +3556,27 @@ function renderPlanTimeline() {
     const incluido = state.plan.config.incluirEnProyeccion;
     const resultadoConPlan = proy ? (incluido ? proy.resultado : proy.resultado - asignado) : null;
     const chips = items.length
-      ? items.map(i => `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;margin-top:6px">
-          <span style="font-size:12px;font-weight:600">${escapeHtml(i.nombre)}</span>
+      ? items.map(i => `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:9px 12px;margin-top:8px">
+          <span style="font-size:13px;font-weight:600">${escapeHtml(i.nombre)}</span>
           <span style="display:flex;gap:6px;align-items:center;white-space:nowrap">
-            <span style="font-size:12px;color:var(--text-muted)">${fmt(i.costoEstimado)}</span>
-            <button class="btn" style="padding:1px 6px;font-size:11px" title="Volver al backlog" onclick="planAsignarMes('${i.id}','')">↩</button>
-            <button class="btn" style="padding:1px 6px;font-size:11px" title="Marcar hecho" onclick="planMarcarHecho('${i.id}')">✓</button>
+            <span style="font-size:13px;color:var(--text-muted)">${fmt(i.costoEstimado)}</span>
+            <button class="btn" style="padding:2px 7px;font-size:11px" title="Volver al backlog" onclick="planAsignarMes('${i.id}','')">↩</button>
+            <button class="btn" style="padding:2px 7px;font-size:11px" title="Marcar hecho" onclick="planMarcarHecho('${i.id}')">✓</button>
           </span>
         </div>`).join('')
-      : '<div style="color:var(--text-muted);font-size:12px;padding:6px 0">Sin ítems asignados</div>';
-    return `<div class="card" style="margin:0">
+      : '<div style="color:var(--text-muted);font-size:13px;padding:10px 0">Sin ítems asignados</div>';
+    return `<div class="card" style="margin:0;padding:22px 24px">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
-        <div style="font-weight:700;font-size:15px">${planMesLabel(iso)}</div>
-        <div style="font-size:11px;color:var(--text-muted)">Presup. ${fmt(Math.round(presu))}</div>
+        <div style="font-weight:700;font-size:19px">${planMesLabel(iso)}</div>
+        <div style="font-size:12px;color:var(--text-muted)">Presup. ${fmt(Math.round(presu))}</div>
       </div>
-      <div style="margin-top:6px;font-size:13px">
+      <div style="margin-top:8px;font-size:16px">
         <span style="color:${over ? 'var(--red)' : 'var(--green)'};font-weight:700">${fmt(asignado)}</span>
-        <span style="color:var(--text-muted)"> / ${fmt(Math.round(presu))}</span>
-        ${over ? '<span class="badge badge-vencido" style="margin-left:6px">Excede</span>' : (asignado > 0 ? '<span class="badge badge-ok" style="margin-left:6px">OK</span>' : '')}
+        <span style="color:var(--text-muted);font-size:14px"> / ${fmt(Math.round(presu))}</span>
+        ${over ? '<span class="badge badge-vencido" style="margin-left:8px">Excede</span>' : (asignado > 0 ? '<span class="badge badge-ok" style="margin-left:8px">OK</span>' : '')}
       </div>
       ${chips}
-      ${proy ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--text-muted)">
+      ${proy ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted);line-height:1.7">
         Resultado proyectado: <strong style="color:${resultadoConPlan >= 0 ? 'var(--green)' : 'var(--red)'}">${fmt(Math.round(resultadoConPlan))}</strong>${asignado > 0 ? ` <span>(con esta inversión)</span>` : ''}<br>
         Caja acumulada: ${fmt(Math.round(proy.acumulado))}
       </div>` : ''}
