@@ -274,6 +274,9 @@
     .loading { display: flex; align-items: center; justify-content: center; height: 120px; color: var(--text-muted); font-size: 14px; gap: 12px; }
     .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .refresh-icon { display:inline-block; }
+    .btn.spinning .refresh-icon { animation: spin 0.7s linear infinite; }
+    .btn.spinning { opacity: 0.7; cursor: default; }
 
     @media (max-width: 900px) {
       main { padding: 16px; }
@@ -520,7 +523,7 @@
   <div class="header-right">
     <span id="last-updated" style="display:none"></span>
     <span id="header-usuario" style="font-size:13px;color:var(--text-muted)"></span>
-    <button class="btn" id="btn-refresh" style="display:none" onclick="refreshData()">↻ Actualizar</button>
+    <button class="btn" id="btn-refresh" style="display:none" onclick="refreshData()"><span class="refresh-icon">↻</span> Actualizar</button>
     <button class="btn" onclick="doLogout()" style="font-size:12px">Salir</button>
   </div>
 </header>
@@ -771,7 +774,7 @@
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· stock, plata inmovilizada y rotación · datos de Fudo</span>
         <span style="float:right">
           <label style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0;margin-right:8px"><input type="checkbox" id="vinos-solo-vino" onchange="loadVinos()"> solo vino</label>
-          <button class="btn" style="font-size:12px;padding:5px 12px" onclick="loadVinos()">↻ Actualizar</button>
+          <button class="btn" style="font-size:12px;padding:5px 12px" onclick="spinRefresh(this, loadVinos)"><span class="refresh-icon">↻</span> Actualizar</button>
         </span>
       </div>
       <div id="vinos-kpis" class="kpi-grid" style="margin-bottom:14px"></div>
@@ -991,7 +994,7 @@
     <input type="date" id="costos-desde" onchange="loadCostos()" />
     <span class="filter-label">Hasta</span>
     <input type="date" id="costos-hasta" onchange="loadCostos()" />
-    <button class="btn" style="padding:6px 12px;font-size:12px" onclick="loadCostos()">Actualizar</button>
+    <button class="btn" style="padding:6px 12px;font-size:12px" onclick="spinRefresh(this, loadCostos)"><span class="refresh-icon">↻</span> Actualizar</button>
     <span id="costos-periodo-label" style="font-size:12px;color:var(--text-muted);margin-left:8px"></span>
   </div>
   <main>
@@ -1387,7 +1390,7 @@
     <div class="card">
       <div class="card-title">Historial de arqueos
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· foco en efectivo · rastreá diferencias entre turnos</span>
-        <button class="btn" style="float:right;font-size:12px;padding:6px 12px" onclick="loadHistorialArqueos()">↻ Actualizar</button>
+        <button class="btn" style="float:right;font-size:12px;padding:6px 12px" onclick="spinRefresh(this, loadHistorialArqueos)"><span class="refresh-icon">↻</span> Actualizar</button>
       </div>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.6">
         <b>Diferencia</b> = Efectivo cierre − (Efectivo inicial + Ingreso Fudo − gastos del turno). Si da ✓, la caja cerró bien. Si faltan/sobran, hay una diferencia a revisar.<br>
@@ -1412,7 +1415,7 @@
     <span class="filter-label">Hasta</span>
     <input type="date" id="serv-hasta" onchange="loadServicios()" />
     <div style="flex:1"></div>
-    <button class="btn" onclick="refreshServicios()">↻ Actualizar Fudo</button>
+    <button class="btn" onclick="spinRefresh(this, refreshServicios)"><span class="refresh-icon">↻</span> Actualizar Fudo</button>
   </div>
 
   <main style="padding-top:24px">
@@ -1430,7 +1433,7 @@
           <input type="date" id="servagg-desde" onchange="loadServiciosAgregado()" />
           <span class="filter-label">Hasta</span>
           <input type="date" id="servagg-hasta" onchange="loadServiciosAgregado()" />
-          <button class="btn" style="padding:6px 12px;font-size:12px" onclick="loadServiciosAgregado()">Actualizar</button>
+          <button class="btn" style="padding:6px 12px;font-size:12px" onclick="spinRefresh(this, loadServiciosAgregado)"><span class="refresh-icon">↻</span> Actualizar</button>
         </div>
         <div id="servagg-content"><div style="color:var(--text-muted);font-size:13px">Elegí un rango (o dejalo vacío para todo) y actualizá.</div></div>
       </div>
@@ -3103,11 +3106,27 @@ function onFilterChange() {
   loadAll();
 }
 
-async function refreshData() {
-  await fetch('/api/refresh', { method: 'POST' });
-  await loadAll();
-  if (document.getElementById('tab-pagos').classList.contains('active')) loadPagos();
-  if (document.getElementById('tab-cajas').classList.contains('active')) loadCajas();
+// Gira el ícono de un botón "Actualizar" mientras corre fn, y lo deshabilita
+// para evitar doble-click. Sirve para todos los botones de refresco de la app.
+async function spinRefresh(btn, fn) {
+  if (btn.classList.contains('spinning')) return; // ya está actualizando
+  btn.classList.add('spinning');
+  btn.disabled = true;
+  try {
+    await fn();
+  } finally {
+    btn.classList.remove('spinning');
+    btn.disabled = false;
+  }
+}
+
+function refreshData() {
+  return spinRefresh(document.getElementById('btn-refresh'), async () => {
+    await fetch('/api/refresh', { method: 'POST' });
+    await loadAll();
+    if (document.getElementById('tab-pagos').classList.contains('active')) loadPagos();
+    if (document.getElementById('tab-cajas').classList.contains('active')) loadCajas();
+  });
 }
 
 // ─── PAGOS ────────────────────────────────────────────────────────────────────
