@@ -171,6 +171,17 @@ function buildFilasCierreServicio({ fechaServicio, mesServicio, descripcionServi
 
 // ─── Arqueo de Cajas ──────────────────────────────────────────────────────────
 
+// Encabezados canónicos de la hoja "Arqueo de Cajas" (A1:O1). Deben coincidir EXACTO
+// con el orden en que se escribe rowArqueo y en que lee /api/arqueo/historial. Se
+// reescriben en cada cierre para que la planilla se autocorrija (ver POST cerrar).
+const ARQUEO_HEADERS = [
+  'Fecha', 'Apertura', 'Cierre', 'Duración',
+  'Efectivo Local Inicial', 'Mercado Pago Inicial', 'Galicia Inicial',
+  'Efectivo Local Final', 'Mercado Pago Final', 'Galicia Final',
+  'Diff Efectivo Local Inicial', 'Diff Mercado Pago Inicial',
+  'Notas', 'Ingreso Fudo efectivo', 'Diferencia Efectivo Turno',
+];
+
 // GET /api/arqueo/estado — estado actual de la caja
 app.get('/api/arqueo/estado', authMiddleware, (req, res) => {
   res.json({ ok: true, data: estadoCaja });
@@ -334,10 +345,24 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
     const sheets = google.sheets({ version: 'v4', auth });
 
     // 1. Escribir en Arqueo de Cajas
-    // Columnas: A:Fecha, B:Apertura, C:Cierre, D:Duración,
-    // E:Efectivo Inicial, F:MP Inicial, G:Galicia Inicial (vacío),
-    // H:Efectivo Final, I:MP Final, J:Galicia Final,
-    // K:Diff Efectivo Local Inicial, L:Diff Mercado Pago Inicial
+    // Columnas (este es el orden REAL en que se escribe y se lee — la fila de
+    // encabezados de la planilla debe respetar exactamente este orden):
+    //   A: Fecha                     — día del servicio (apertura), hora AR
+    //   B: Apertura                  — hora de apertura de caja
+    //   C: Cierre                    — hora de cierre
+    //   D: Duración                  — "Xh Ym"
+    //   E: Efectivo Local Inicial       — efectivo contado al abrir
+    //   F: Mercado Pago Inicial         — saldo MP al abrir
+    //   G: Galicia Inicial              — ya no se usa, siempre vacío
+    //   H: Efectivo Local Final         — efectivo contado al cerrar
+    //   I: Mercado Pago Final           — saldo MP al cerrar
+    //   J: Galicia Final                — total BRUTO de tarjetas (Galicia)
+    //   K: Diff Efectivo Local Inicial  — efectivo contado al abrir − esperado (hoja Cajas)
+    //   L: Diff Mercado Pago Inicial    — MP contado al abrir − esperado (hoja Cajas)
+    //   M: Notas                        — nota de cierre (opcional)
+    //   N: Ingreso Fudo efectivo        — ventas en efectivo del turno según Fudo
+    //   O: Diferencia Efectivo Turno    — H − (E + N − gastos efvo del turno):
+    //                                  sobrante (+) o faltante (−) de caja del turno
     // Diferencia REAL del turno (efectivo): lo contado al cerrar vs lo esperado según
     // ventas de Fudo. Esperado = inicial + Fudo efectivo − gastos en efectivo del turno.
     const fudoEfectivo = (fudo && fudo.encontrado) ? (Number(fudo.efectivo) || 0) : 0;
@@ -362,11 +387,30 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
       fudoEfectivo,                          // N: Ingreso Fudo (efectivo) del turno
       difEfectivoTurno,                      // O: Diferencia de efectivo del turno
     ];
-    await sheets.spreadsheets.values.append({
+    // Escribimos en una fila absoluta calculada a partir de la columna A, NO con
+    // values.append. append detecta automáticamente una "tabla" y agrega la fila
+    // alineada al borde izquierdo de esa tabla: si queda cualquier bloque de datos
+    // suelto a la derecha (p. ej. una fila que alguna vez cayó corrida), append se
+    // "engancha" a ese bloque y sigue escribiendo en columnas equivocadas (N en
+    // adelante) fila tras fila. Con update sobre A{n}:O{n} la fila siempre cae en
+    // las columnas correctas, sin importar qué haya suelto a la derecha.
+    const colA = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Arqueo de Cajas!A:O',
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [rowArqueo] },
+      range: 'Arqueo de Cajas!A:A',
+    });
+    const proxFila = (colA.data.values || []).length + 1;
+    // Reescribimos SIEMPRE la fila de encabezados (A1:O1) junto con el dato. Así la
+    // planilla se autocorrige: si los títulos quedaron desordenados o falta alguno,
+    // el próximo cierre los deja en el orden exacto en que el código escribe/lee.
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        valueInputOption: 'USER_ENTERED',
+        data: [
+          { range: 'Arqueo de Cajas!A1:O1', values: [ARQUEO_HEADERS] },
+          { range: `Arqueo de Cajas!A${proxFila}:O${proxFila}`, values: [rowArqueo] },
+        ],
+      },
     });
 
     // 1b. Actualizar Saldo Real en hoja Cajas (G2=Mercado Pago, G8=Efectivo Local)
