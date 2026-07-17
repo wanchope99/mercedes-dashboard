@@ -21,6 +21,8 @@ const cats = require('./proveedores-categorias');
 const consumo = require('./consumo');
 const cierres = require('./cierres');
 const plan = require('./plan');
+const tc = require('./tc');
+const roi = require('./roi');
 const stockBebidas = require('./stock-bebidas');
 const { iniciarCron } = require('./cron');
 const { cargarEstadoCaja, guardarEstadoCaja } = require('./estado-caja');
@@ -611,7 +613,7 @@ app.get('/api/cierres', authMiddleware, adminOnly, async (req, res) => {
 
 app.post('/api/cierres/cerrar', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { mes, tcUsd, nota } = req.body || {};
+    const { mes, tcUsd, nota, recuperoARS, extraordinariaARS } = req.body || {};
     if (!mes) return res.status(400).json({ ok: false, error: 'Falta el mes' });
     const resumen = await getResumenMensual({ mes });
     const m = (resumen || [])[0];
@@ -623,6 +625,22 @@ app.post('/api/cierres/cerrar', authMiddleware, adminOnly, async (req, res) => {
       gastosARS: m.gastos.total,
       resultadoARS: m.resultadoNeto,
       nota,
+      recuperoARS: Number(recuperoARS) || 0,
+      extraordinariaARS: Number(extraordinariaARS) || 0,
+    });
+    res.json({ ok: true, data });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Ajusta (o asigna retroactivamente) el reparto recupero/extraordinaria de un cierre.
+app.put('/api/cierres/recupero', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { mes, recuperoARS, extraordinariaARS } = req.body || {};
+    if (!mes) return res.status(400).json({ ok: false, error: 'Falta el mes' });
+    const data = await cierres.ajustarRecupero({
+      mes,
+      recuperoARS: recuperoARS != null ? Number(recuperoARS) : undefined,
+      extraordinariaARS: extraordinariaARS != null ? Number(extraordinariaARS) : undefined,
     });
     res.json({ ok: true, data });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
@@ -638,6 +656,18 @@ app.put('/api/cierres/tc', authMiddleware, adminOnly, async (req, res) => {
 
 app.get('/api/cierres/tc-default', authMiddleware, adminOnly, (req, res) => {
   res.json({ ok: true, data: { tcDefault: cierres.TC_DEFAULT } });
+});
+
+// Dólar blue en vivo (dolarapi) para prellenar el TC y valuar la brecha de ROI.
+app.get('/api/tc-online', authMiddleware, adminOnly, async (req, res) => {
+  try { res.json({ ok: true, data: await tc.getDolarBlue() }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Progreso de recupero de la inversión (USD 60k por defecto).
+app.get('/api/roi', authMiddleware, adminOnly, async (req, res) => {
+  try { res.json({ ok: true, data: await roi.resumenRecupero() }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 app.get('/api/actividad-diaria', authMiddleware, adminOnly, async (req, res) => {

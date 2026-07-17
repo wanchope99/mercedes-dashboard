@@ -19,6 +19,12 @@
 //   I Estado           ("cerrado" | "pendiente_tc")
 //   J Fecha de cierre  (ISO)
 //   K Nota             (opcional)
+//   L Recupero ARS     (parte del resultado asignada a recuperar la inversión USD)
+//   M Extraordinaria ARS (parte apartada para financiar otras extraordinarias)
+//
+// Los USD de L/M NO se guardan: se derivan del TC de la columna B (mismo criterio
+// que Ingresos/Gastos/Resultado USD), para que el histórico no se corra si después
+// se ajusta el TC. Ver roi.js para la agregación de recupero.
 
 const { google } = require('googleapis');
 
@@ -30,7 +36,8 @@ const CIERRES_SHEET = process.env.CIERRES_SHEET || 'Cierres';
 const TC_DEFAULT = Number(process.env.TC_USD_DEFAULT) || 1425;
 
 const HEADER = ['Mes', 'TC USD', 'Ingresos ARS', 'Gastos ARS', 'Resultado ARS',
-  'Ingresos USD', 'Gastos USD', 'Resultado USD', 'Estado', 'Fecha cierre', 'Nota'];
+  'Ingresos USD', 'Gastos USD', 'Resultado USD', 'Estado', 'Fecha cierre', 'Nota',
+  'Recupero ARS', 'Extraordinaria ARS'];
 
 function _sheetsClient() {
   const credentials = process.env.GOOGLE_CREDENTIALS_JSON
@@ -56,7 +63,7 @@ async function _ensureSheet(api) {
       requestBody: { requests: [{ addSheet: { properties: { title: CIERRES_SHEET } } }] },
     });
     await api.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID, range: `${CIERRES_SHEET}!A1:K1`, valueInputOption: 'RAW',
+      spreadsheetId: SPREADSHEET_ID, range: `${CIERRES_SHEET}!A1:M1`, valueInputOption: 'RAW',
       requestBody: { values: [HEADER] },
     });
   } catch (e) {
@@ -66,6 +73,8 @@ async function _ensureSheet(api) {
 
 function _rowToCierre(r, i) {
   const tcUsd = _num(r[1]);
+  const recuperoARS = _num(r[11]);
+  const extraordinariaARS = _num(r[12]);
   return {
     mes: (r[0] || '').toString().trim(),
     tcUsd,
@@ -78,6 +87,11 @@ function _rowToCierre(r, i) {
     estado: (r[8] || 'cerrado').toString().trim() || 'cerrado',
     fechaCierre: (r[9] || '').toString().trim(),
     nota: (r[10] || '').toString().trim(),
+    recuperoARS,
+    extraordinariaARS,
+    // USD derivados del TC de este cierre (no se guardan).
+    recuperoUSD: tcUsd > 0 ? Math.round(recuperoARS / tcUsd) : 0,
+    extraordinariaUSD: tcUsd > 0 ? Math.round(extraordinariaARS / tcUsd) : 0,
     rowIndex: i + 1,
   };
 }
@@ -88,7 +102,7 @@ async function listCierres() {
   const api = _sheetsClient();
   let rows = [];
   try {
-    const res = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${CIERRES_SHEET}!A:K` });
+    const res = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${CIERRES_SHEET}!A:M` });
     rows = res.data.values || [];
   } catch (e) {
     await _ensureSheet(api);
@@ -111,9 +125,11 @@ async function getCierre(mes) {
 
 // Cierra (o re-cierra) un mes. Recibe los totales en ARS (calculados por el caller
 // a partir del resumen mensual) y un TC. Calcula los USD y hace upsert por mes.
-//   { mes, tcUsd, ingresosARS, gastosARS, resultadoARS, estado, nota }
+//   { mes, tcUsd, ingresosARS, gastosARS, resultadoARS, estado, nota,
+//     recuperoARS, extraordinariaARS }
 // Si tcUsd no viene, usa TC_DEFAULT y marca estado 'pendiente_tc'.
-async function cerrarMes({ mes, tcUsd, ingresosARS, gastosARS, resultadoARS, estado, nota } = {}) {
+async function cerrarMes({ mes, tcUsd, ingresosARS, gastosARS, resultadoARS, estado, nota,
+  recuperoARS, extraordinariaARS } = {}) {
   if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
   if (!mes) throw new Error('Falta el mes a cerrar');
   const api = _sheetsClient();
@@ -125,6 +141,8 @@ async function cerrarMes({ mes, tcUsd, ingresosARS, gastosARS, resultadoARS, est
   const gas = Number(gastosARS) || 0;
   const res = (resultadoARS != null) ? Number(resultadoARS) : (ing - gas);
   const estadoFinal = estado || (tcProvisto ? 'cerrado' : 'pendiente_tc');
+  const recup = Math.max(0, Math.round(Number(recuperoARS) || 0));
+  const extra = Math.max(0, Math.round(Number(extraordinariaARS) || 0));
 
   const fila = [
     mes,
@@ -138,12 +156,14 @@ async function cerrarMes({ mes, tcUsd, ingresosARS, gastosARS, resultadoARS, est
     estadoFinal,
     new Date().toISOString(),
     nota || '',
+    recup,
+    extra,
   ];
 
   // Upsert por nombre de mes
   let rows = [];
   try {
-    const r = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${CIERRES_SHEET}!A:K` });
+    const r = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${CIERRES_SHEET}!A:M` });
     rows = r.data.values || [];
   } catch (e) { rows = []; }
 
@@ -154,12 +174,12 @@ async function cerrarMes({ mes, tcUsd, ingresosARS, gastosARS, resultadoARS, est
 
   if (rowIndex > 0) {
     await api.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID, range: `${CIERRES_SHEET}!A${rowIndex}:K${rowIndex}`,
+      spreadsheetId: SPREADSHEET_ID, range: `${CIERRES_SHEET}!A${rowIndex}:M${rowIndex}`,
       valueInputOption: 'RAW', requestBody: { values: [fila] },
     });
   } else {
     await api.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID, range: `${CIERRES_SHEET}!A:K`,
+      spreadsheetId: SPREADSHEET_ID, range: `${CIERRES_SHEET}!A:M`,
       valueInputOption: 'RAW', requestBody: { values: [fila] },
     });
   }
@@ -175,7 +195,22 @@ async function ajustarTC({ mes, tcUsd } = {}) {
   return cerrarMes({
     mes: c.mes, tcUsd, ingresosARS: c.ingresosARS, gastosARS: c.gastosARS,
     resultadoARS: c.resultadoARS, estado: 'cerrado', nota: c.nota,
+    recuperoARS: c.recuperoARS, extraordinariaARS: c.extraordinariaARS,
   });
 }
 
-module.exports = { listCierres, getCierre, cerrarMes, ajustarTC, TC_DEFAULT, CIERRES_SHEET };
+// Ajusta SOLO la asignación de recupero/extraordinaria de un mes ya cerrado
+// (para asignar retroactivamente cierres viejos o editar el reparto), sin tocar
+// los demás totales ni el TC. Re-cierra con los mismos ARS y TC guardados.
+async function ajustarRecupero({ mes, recuperoARS, extraordinariaARS } = {}) {
+  const c = await getCierre(mes);
+  if (!c) throw new Error('No existe un cierre para ' + mes);
+  return cerrarMes({
+    mes: c.mes, tcUsd: c.tcUsd, ingresosARS: c.ingresosARS, gastosARS: c.gastosARS,
+    resultadoARS: c.resultadoARS, estado: c.estado || 'cerrado', nota: c.nota,
+    recuperoARS: recuperoARS != null ? recuperoARS : c.recuperoARS,
+    extraordinariaARS: extraordinariaARS != null ? extraordinariaARS : c.extraordinariaARS,
+  });
+}
+
+module.exports = { listCierres, getCierre, cerrarMes, ajustarTC, ajustarRecupero, TC_DEFAULT, CIERRES_SHEET };

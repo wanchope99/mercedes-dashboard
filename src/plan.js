@@ -17,7 +17,10 @@
 //   Hoja "Plan Config" — clave/valor:
 //     A Clave | B Valor
 //     budgetPct (default 2) · incluirEnProyeccion (TRUE/FALSE) ·
-//     override:YYYY-MM = <ARS> (presupuesto absoluto para un mes puntual)
+//     override:YYYY-MM = <ARS> (presupuesto absoluto para un mes puntual) ·
+//     roiInversionUSD (default 60000) · roiMesesTarget (default 18, meta stretch) ·
+//     roiMesesLimite (default 24, deadline duro / base del ritmo sugerido) ·
+//     roiMesInicio (YYYY-MM; default = cierre más viejo — ver roi.js)
 //
 // Los ítems agendados (MesObjetivo presente y estado != hecho) pueden inyectarse
 // como gastos en la proyección — ver planGastosProgramados() y proyectar() en
@@ -40,7 +43,10 @@ const HOJA_CONFIG = process.env.PLAN_CONFIG_SHEET || 'Plan Config';
 const HEADER = ['ID', 'Nombre', 'CostoEstimado', 'Categoria', 'Prioridad', 'MesObjetivo', 'Estado', 'Notas', 'Actualizado'];
 const HEADER_CONFIG = ['Clave', 'Valor'];
 
-const DEFAULT_CONFIG = { budgetPct: 2, incluirEnProyeccion: false, overrides: {} };
+const DEFAULT_CONFIG = {
+  budgetPct: 2, incluirEnProyeccion: false, overrides: {},
+  roiInversionUSD: 60000, roiMesesTarget: 18, roiMesesLimite: 24, roiMesInicio: '',
+};
 
 function _sheets() {
   const credentials = process.env.GOOGLE_CREDENTIALS_JSON
@@ -103,7 +109,11 @@ async function _leerItems(api) {
 }
 
 async function _leerConfig(api) {
-  const cfg = { budgetPct: DEFAULT_CONFIG.budgetPct, incluirEnProyeccion: false, overrides: {} };
+  const cfg = {
+    budgetPct: DEFAULT_CONFIG.budgetPct, incluirEnProyeccion: false, overrides: {},
+    roiInversionUSD: DEFAULT_CONFIG.roiInversionUSD, roiMesesTarget: DEFAULT_CONFIG.roiMesesTarget,
+    roiMesesLimite: DEFAULT_CONFIG.roiMesesLimite, roiMesInicio: '',
+  };
   let rows = [];
   try {
     const res = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${HOJA_CONFIG}!A:B` });
@@ -120,6 +130,10 @@ async function _leerConfig(api) {
     if (clave === 'budgetPct') cfg.budgetPct = _num(valor);
     else if (clave === 'incluirEnProyeccion') cfg.incluirEnProyeccion = valor.toUpperCase() === 'TRUE';
     else if (clave.startsWith('override:')) cfg.overrides[clave.slice('override:'.length)] = _num(valor);
+    else if (clave === 'roiInversionUSD') cfg.roiInversionUSD = _num(valor) || DEFAULT_CONFIG.roiInversionUSD;
+    else if (clave === 'roiMesesTarget') cfg.roiMesesTarget = _num(valor) || DEFAULT_CONFIG.roiMesesTarget;
+    else if (clave === 'roiMesesLimite') cfg.roiMesesLimite = _num(valor) || DEFAULT_CONFIG.roiMesesLimite;
+    else if (clave === 'roiMesInicio') cfg.roiMesInicio = valor; // "YYYY-MM" o ''
   }
   return cfg;
 }

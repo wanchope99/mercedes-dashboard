@@ -860,6 +860,8 @@
   <main>
     <div class="kpi-grid" id="plan-kpis"><div class="loading"><div class="spinner"></div> Cargando plan...</div></div>
 
+    <div id="roi-section"></div>
+
     <div class="card">
       <div class="card-title">Presupuesto para inversiones
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· sugerido por mes = % del ingreso proyectado de ese mes</span>
@@ -901,7 +903,7 @@
       <div id="plan-backlog"></div>
     </div>
 
-    <div style="margin-top:18px;font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Cronograma — próximos 3 meses</div>
+    <div style="margin-top:18px;font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Cronograma — próximos 3 meses<span id="plan-fondo-nota" style="text-transform:none;letter-spacing:0;font-weight:400;color:var(--text-muted)"></span></div>
     <div class="kpi-grid" id="plan-timeline" style="margin-top:12px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))"></div>
 
     <div class="card" id="plan-hechos-card" style="display:none">
@@ -2579,6 +2581,7 @@ function renderKPIs(resumen, diasSemana, esMensual, resumenAnterior, diasSemanaA
 
 // ─── Cierres mensuales (ARS + USD) ────────────────────────────────────────────
 let _cierresCache = [];
+let _cierreRes = 0;   // resultado ARS del mes en pantalla (para el reparto)
 
 // Muestra el panel de cierre solo cuando estamos viendo UN mes puntual.
 function renderCierreMes() {
@@ -2592,20 +2595,26 @@ function renderCierreMes() {
   const m = state.resumen[0];
   const yaCerrado = _cierresCache.find(c => normMes(c.mes) === normMes(state.mes));
   const ing = m.ingresos.total, gas = m.gastos.total, res = m.resultadoNeto;
+  _cierreRes = res;
 
   if (yaCerrado) {
     const tc = yaCerrado.tcUsd;
     const pend = yaCerrado.estado === 'pendiente_tc';
+    const rec = yaCerrado.recuperoARS || 0, ext = yaCerrado.extraordinariaARS || 0;
     body.innerHTML =
       '<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center">' +
         '<div><div style="font-size:11px;color:var(--text-muted)">Estado</div><div style="font-weight:600;color:' + (pend ? 'var(--orange,#e08a5c)' : 'var(--green)') + '">' + (pend ? 'Cerrado (TC provisorio)' : 'Cerrado') + '</div></div>' +
         '<div><div style="font-size:11px;color:var(--text-muted)">TC usado</div><div style="font-weight:600">$' + tc.toLocaleString('es-AR') + '/USD</div></div>' +
         '<div><div style="font-size:11px;color:var(--text-muted)">Resultado</div><div style="font-weight:600;color:' + (res>=0?'var(--green)':'var(--red)') + '">' + fmt(res) + ' · US$' + Math.round(res/tc).toLocaleString('es-AR') + '</div></div>' +
+        '<div><div style="font-size:11px;color:var(--text-muted)">Recupero inversión</div><div style="font-weight:600;color:var(--green)">' + fmt(rec) + ' · US$' + Math.round(rec/tc).toLocaleString('es-AR') + '</div></div>' +
+        '<div><div style="font-size:11px;color:var(--text-muted)">Fondo extraordinarias</div><div style="font-weight:600">' + fmt(ext) + ' · US$' + Math.round(ext/tc).toLocaleString('es-AR') + '</div></div>' +
       '</div>' +
+      '<div id="cierre-asig-edit"></div>' +
       '<div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
         '<span style="font-size:12px;color:var(--text-muted)">Ajustar TC:</span>' +
         '<input type="number" id="cierre-tc-input" value="' + tc + '" step="1" style="width:120px">' +
         '<button class="btn" onclick="ajustarTCCierre()">Recalcular USD</button>' +
+        '<button class="btn" onclick="editarAsignacionCierre()">Editar asignación</button>' +
         '<button class="btn" onclick="cerrarMesActual(true)" title="Volver a tomar los totales actuales">Re-cerrar con datos actuales</button>' +
       '</div>';
   } else {
@@ -2617,16 +2626,120 @@ function renderCierreMes() {
       '</div>' +
       '<div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
         '<span style="font-size:12px;color:var(--text-muted)">TC USD del período:</span>' +
-        '<input type="number" id="cierre-tc-input" placeholder="cargando..." step="1" style="width:120px">' +
+        '<input type="number" id="cierre-tc-input" placeholder="cargando..." step="1" style="width:120px" oninput="cierreRecalcAlloc()">' +
+        '<span id="cierre-tc-fuente" style="font-size:11px;color:var(--text-muted)"></span>' +
+      '</div>' +
+      '<div style="margin-top:14px;padding:12px;border:1px solid var(--border,#333);border-radius:8px">' +
+        '<div style="font-size:12px;font-weight:600;margin-bottom:8px">¿Cómo se reparte el resultado del mes?</div>' +
+        '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end">' +
+          '<div><div style="font-size:11px;color:var(--text-muted)">Recupero de inversión (ARS)</div>' +
+            '<input type="number" id="cierre-recupero-input" step="1000" style="width:150px" oninput="cierreRecalcAlloc()">' +
+            '<div id="cierre-recupero-usd" style="font-size:11px;color:var(--green)"></div></div>' +
+          '<div><div style="font-size:11px;color:var(--text-muted)">Fondo extraordinarias (ARS)</div>' +
+            '<input type="number" id="cierre-extra-input" step="1000" value="0" style="width:150px" oninput="cierreRecalcAlloc()">' +
+            '<div id="cierre-extra-usd" style="font-size:11px;color:var(--text-muted)"></div></div>' +
+          '<div><div style="font-size:11px;color:var(--text-muted)">Remanente</div><div id="cierre-remanente" style="font-weight:600"></div></div>' +
+        '</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px">El recupero viene sugerido al ritmo necesario para completar la inversión en el plazo objetivo. Editalo libremente si querés priorizar otra cosa este mes.</div>' +
+      '</div>' +
+      '<div style="margin-top:12px">' +
         '<button class="btn btn-primary" onclick="cerrarMesActual(false)">Cerrar ' + state.mes + '</button>' +
       '</div>' +
-      '<div style="font-size:11px;color:var(--text-muted);margin-top:8px">Al cerrar se congelan los valores en ARS y en USD con este tipo de cambio. Podés ajustar el TC después.</div>';
-    // Prellenar con el TC default
-    api('/api/cierres/tc-default').then(r => {
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:8px">Al cerrar se congelan los valores en ARS y en USD con este tipo de cambio. Podés ajustar el TC y la asignación después.</div>';
+    // Prellenar TC con el dólar blue EN VIVO (fallback: TC default)
+    api('/api/tc-online').then(r => {
       const el = document.getElementById('cierre-tc-input');
-      if (el && !el.value) el.value = r.data.tcDefault;
+      const f = document.getElementById('cierre-tc-fuente');
+      if (el && !el.value) el.value = r.data.tc;
+      if (f) f.textContent = r.data.stale
+        ? '⚠ sin conexión al blue — TC de respaldo'
+        : 'Blue en vivo · venta $' + Number(r.data.venta).toLocaleString('es-AR');
+      cierreRecalcAlloc();
+    }).catch(() => {
+      api('/api/cierres/tc-default').then(r => {
+        const el = document.getElementById('cierre-tc-input');
+        if (el && !el.value) el.value = r.data.tcDefault;
+        cierreRecalcAlloc();
+      }).catch(()=>{});
+    });
+    // Prellenar el recupero sugerido (ritmo para el plazo objetivo), tope = resultado positivo
+    api('/api/roi').then(r => {
+      const el = document.getElementById('cierre-recupero-input');
+      if (el && !el.value) {
+        const sug = Math.max(0, Math.min(Math.round(r.data.sugerido.ars), Math.max(0, _cierreRes)));
+        el.value = sug;
+      }
+      cierreRecalcAlloc();
     }).catch(()=>{});
   }
+}
+
+// Recalcula en vivo los USD del reparto y el remanente al tipear.
+function cierreRecalcAlloc() {
+  const tc = Number((document.getElementById('cierre-tc-input')||{}).value) || 0;
+  const rec = Number((document.getElementById('cierre-recupero-input')||{}).value) || 0;
+  const ext = Number((document.getElementById('cierre-extra-input')||{}).value) || 0;
+  const recUsd = document.getElementById('cierre-recupero-usd');
+  const extUsd = document.getElementById('cierre-extra-usd');
+  const rem = document.getElementById('cierre-remanente');
+  if (recUsd) recUsd.textContent = tc > 0 ? 'US$' + Math.round(rec/tc).toLocaleString('es-AR') : '';
+  if (extUsd) extUsd.textContent = tc > 0 ? 'US$' + Math.round(ext/tc).toLocaleString('es-AR') : '';
+  if (rem) {
+    const r = _cierreRes - rec - ext;
+    rem.textContent = fmt(r);
+    rem.style.color = r < 0 ? 'var(--red)' : 'var(--text)';
+  }
+}
+
+// Editar la asignación recupero/extraordinaria de un mes ya cerrado (retroactivo).
+async function editarAsignacionCierre() {
+  const yc = _cierresCache.find(c => normMes(c.mes) === normMes(state.mes));
+  const box = document.getElementById('cierre-asig-edit');
+  if (!yc || !box) return;
+  const resCerrado = yc.resultadoARS || 0;
+  const resUsd = yc.tcUsd > 0 ? Math.round(resCerrado / yc.tcUsd) : 0;
+  // Sugerencia de recupero para ESTE mes: mínimo para completar la inversión en el
+  // plazo límite, según el estado a esa altura. Viene de /api/roi (porMes).
+  let sugARS = 0, sugUSD = 0, mesesLimite = 24;
+  try {
+    const r = await api('/api/roi');
+    mesesLimite = r.data.mesesLimite || 24;
+    const m = (r.data.porMes || []).find(x => normMes(x.mes) === normMes(state.mes));
+    if (m) { sugARS = m.sugeridoRecuperoARS || 0; sugUSD = m.sugeridoRecuperoUSD || 0; }
+  } catch (e) {}
+  // Prefill: si todavía no hay recupero asignado, arrancamos con la sugerencia.
+  const prefill = (yc.recuperoARS || 0) > 0 ? yc.recuperoARS : sugARS;
+  const extraPrefill = (yc.recuperoARS || 0) > 0 ? (yc.extraordinariaARS || 0) : Math.max(0, resCerrado - sugARS);
+  box.innerHTML =
+    '<div style="margin-top:12px;padding:12px;border:1px solid var(--border,#333);border-radius:8px">' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Resultado cerrado del mes: <strong style="color:var(--green)">' + fmt(resCerrado) + ' · US$' + resUsd.toLocaleString('es-AR') + '</strong> (tope para repartir)</div>' +
+      '<div style="font-size:11px;color:var(--accent);margin-bottom:8px">Sugerido de recupero (mínimo para recuperar la inversión en ' + mesesLimite + ' meses): <strong>' + fmt(sugARS) + ' · US$' + sugUSD.toLocaleString('es-AR') + '</strong></div>' +
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end">' +
+        '<div><div style="font-size:11px;color:var(--text-muted)">Recupero inversión (ARS)</div><input type="number" id="asig-recupero" value="' + prefill + '" step="1000" style="width:150px" oninput="asigRecalcExtra(' + resCerrado + ')"></div>' +
+        '<div><div style="font-size:11px;color:var(--text-muted)">Fondo extraordinarias (ARS)</div><input type="number" id="asig-extra" value="' + extraPrefill + '" step="1000" style="width:150px"></div>' +
+        '<button class="btn" onclick="document.getElementById(\'asig-recupero\').value=' + sugARS + ';asigRecalcExtra(' + resCerrado + ')">Usar sugerido</button>' +
+        '<button class="btn" onclick="document.getElementById(\'asig-recupero\').value=' + resCerrado + ';document.getElementById(\'asig-extra\').value=0">Todo a recupero</button>' +
+        '<button class="btn btn-primary" onclick="guardarAsignacionCierre()">Guardar</button>' +
+      '</div>' +
+    '</div>';
+}
+
+// Al cambiar el recupero, el resto del resultado cerrado va sugerido a extraordinarias.
+function asigRecalcExtra(resCerrado) {
+  const rec = Number((document.getElementById('asig-recupero')||{}).value) || 0;
+  const ext = document.getElementById('asig-extra');
+  if (ext) ext.value = Math.max(0, Math.round(resCerrado - rec));
+}
+
+async function guardarAsignacionCierre() {
+  const rec = Number((document.getElementById('asig-recupero')||{}).value) || 0;
+  const ext = Number((document.getElementById('asig-extra')||{}).value) || 0;
+  try {
+    await api('/api/cierres/recupero', { method: 'PUT', body: JSON.stringify({ mes: state.mes, recuperoARS: rec, extraordinariaARS: ext }) });
+    await loadCierres();
+    renderCierreMes();
+    if (typeof loadPlan === 'function' && document.getElementById('tab-plan')) loadPlan();
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 function normMes(s) { return (s||'').toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim(); }
@@ -2635,10 +2748,23 @@ async function cerrarMesActual(reCerrar) {
   const el = document.getElementById('cierre-tc-input');
   const tc = el ? Number(el.value) : 0;
   if (!tc || tc <= 0) { alert('Cargá un tipo de cambio válido'); return; }
+  // Si estamos en el panel de un mes ya cerrado (re-cerrar), no hay inputs de
+  // reparto: preservamos la asignación ya guardada.
+  let rec, ext;
+  const recEl = document.getElementById('cierre-recupero-input');
+  if (recEl) {
+    rec = Number(recEl.value) || 0;
+    ext = Number((document.getElementById('cierre-extra-input')||{}).value) || 0;
+  } else {
+    const yc = _cierresCache.find(c => normMes(c.mes) === normMes(state.mes));
+    rec = yc ? (yc.recuperoARS||0) : 0;
+    ext = yc ? (yc.extraordinariaARS||0) : 0;
+  }
   try {
-    await api('/api/cierres/cerrar', { method: 'POST', body: JSON.stringify({ mes: state.mes, tcUsd: tc }) });
+    await api('/api/cierres/cerrar', { method: 'POST', body: JSON.stringify({ mes: state.mes, tcUsd: tc, recuperoARS: rec, extraordinariaARS: ext }) });
     await loadCierres();
     renderCierreMes();
+    if (typeof loadPlan === 'function' && document.getElementById('tab-plan')) loadPlan();
   } catch (e) { alert('Error al cerrar: ' + e.message); }
 }
 
@@ -3464,7 +3590,7 @@ async function deleteProyVar(id) {
 
 // ─── PLAN DE INVERSIONES ──────────────────────────────────────────────────────
 const PLAN_MESES_HORIZONTE = 3;
-state.plan = { items: [], config: { budgetPct: 2, incluirEnProyeccion: false, overrides: {} }, proy: [] };
+state.plan = { items: [], config: { budgetPct: 2, incluirEnProyeccion: false, overrides: {} }, proy: [], roi: null };
 
 function planProxMeses(n) {
   const out = [], base = new Date();
@@ -3493,17 +3619,20 @@ function planPresupuestoMes(iso) {
 async function loadPlan() {
   document.getElementById('plan-kpis').innerHTML = '<div class="loading"><div class="spinner"></div> Cargando plan...</div>';
   try {
-    const [{ data: planData }, { data: proyData }] = await Promise.all([
+    const [{ data: planData }, { data: proyData }, roiRes] = await Promise.all([
       api('/api/plan'),
       api('/api/proyecciones?meses=' + PLAN_MESES_HORIZONTE),
+      api('/api/roi').catch(() => ({ data: null })),
     ]);
     state.plan.items = planData.items || [];
     state.plan.config = planData.config || { budgetPct: 2, incluirEnProyeccion: false, overrides: {} };
     state.plan.proy = proyData.proyeccion || [];
+    state.plan.roi = roiRes ? roiRes.data : null;
 
     document.getElementById('plan-budget-pct').value = state.plan.config.budgetPct;
     document.getElementById('plan-incluir-proy').checked = !!state.plan.config.incluirEnProyeccion;
 
+    renderRoi();
     renderPlanKpis();
     renderPlanBacklog();
     renderPlanTimeline();
@@ -3511,6 +3640,111 @@ async function loadPlan() {
   } catch (err) {
     document.getElementById('plan-kpis').innerHTML = `<div style="color:var(--red);padding:20px">Error: ${err.message}</div>`;
   }
+}
+
+// ─── ROI / Recupero de inversión ──────────────────────────────────────────────
+function renderRoi() {
+  const cont = document.getElementById('roi-section');
+  const nota = document.getElementById('plan-fondo-nota');
+  if (!cont) return;
+  const r = state.plan.roi;
+  if (!r) { cont.innerHTML = ''; if (nota) nota.textContent = ''; return; }
+
+  const usd = v => 'US$' + Math.round(v || 0).toLocaleString('es-AR');
+  const pct = Math.round(r.pctRecuperado || 0);
+  const blue = r.blue || {};
+  const blueTxt = blue.stale
+    ? '⚠ dólar blue sin conexión — usando TC de respaldo $' + Number(blue.tc).toLocaleString('es-AR')
+    : 'Dólar blue en vivo: venta $' + Number(blue.venta || blue.tc).toLocaleString('es-AR') + ' · ' + (blue.fuente || '');
+  // Marcadores de ritmo: dónde "deberías" estar hoy al ritmo de 18 y 24 meses.
+  const mark18 = Math.min(100, r.mesesTarget ? (r.mesesTranscurridos / r.mesesTarget) * 100 : 0);
+  const mark24 = Math.min(100, r.mesesLimite ? (r.mesesTranscurridos / r.mesesLimite) * 100 : 0);
+  const fillPct = Math.min(100, pct);
+
+  const kpi = (label, valor, sub, color) =>
+    `<div class="kpi-card ${color || ''}"><div class="kpi-label">${label}</div><div class="kpi-value" style="font-size:22px">${valor}</div><div class="kpi-sub">${sub}</div></div>`;
+
+  const ritmoSub = (r.onTrack24 ? '✓ en ritmo para 24m' : '⚠ atrasado vs 24m') +
+    ' · ' + (r.onTrack18 ? 'y para 18m' : 'meta 18m exigida');
+  const ritmoColor = r.onTrack18 ? 'green' : (r.onTrack24 ? 'accent' : 'orange');
+
+  const kpis =
+    '<div class="kpi-grid" style="margin-bottom:14px">' +
+      kpi('Invertido', usd(r.inversionUSD), 'objetivo a recuperar', 'blue') +
+      kpi('Recuperado', usd(r.recuperadoUSD) + ' · ' + pct + '%', 'de la inversión', 'green') +
+      kpi('Falta', usd(r.gapUSD), '≈ ' + fmt(r.gapARS) + ' a hoy', 'orange') +
+      kpi('Ritmo', r.mesesTranscurridos + ' / ' + r.mesesLimite + ' meses', ritmoSub, ritmoColor) +
+    '</div>';
+
+  const barra =
+    '<div style="margin:6px 0 4px">' +
+      '<div style="position:relative;height:24px;background:var(--surface2);border-radius:12px;overflow:hidden;border:1px solid var(--border)">' +
+        '<div style="position:absolute;left:0;top:0;bottom:0;width:' + fillPct + '%;background:var(--green);transition:width .3s"></div>' +
+        '<div title="ritmo 18 meses" style="position:absolute;left:' + mark18 + '%;top:0;bottom:0;width:2px;background:var(--accent)"></div>' +
+        '<div title="ritmo 24 meses" style="position:absolute;left:' + mark24 + '%;top:0;bottom:0;width:2px;background:var(--orange,#e08a5c)"></div>' +
+      '</div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-top:4px">' +
+        '<span>' + usd(0) + '</span>' +
+        '<span><span style="color:var(--accent)">▎</span> ritmo 18m &nbsp; <span style="color:var(--orange,#e08a5c)">▎</span> ritmo 24m</span>' +
+        '<span>' + usd(r.inversionUSD) + '</span>' +
+      '</div>' +
+    '</div>';
+
+  const extras =
+    '<div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:12px;font-size:13px">' +
+      '<div><span style="color:var(--text-muted)">Sugerido próximo cierre:</span> <strong>' + usd(r.sugerido.usd) + '</strong> · ' + fmt(r.sugerido.ars) + '</div>' +
+      '<div><span style="color:var(--text-muted)">Fondo extraordinarias acumulado:</span> <strong>' + usd(r.fondoExtraordinariasUSD) + '</strong> · ' + fmt(r.fondoExtraordinariasARS) + '</div>' +
+    '</div>';
+
+  // Tabla por mes
+  const filas = (r.porMes || []).slice().reverse().map(m =>
+    '<tr>' +
+      '<td style="text-align:left;font-weight:600">' + m.mes + '</td>' +
+      '<td class="' + (m.resultadoARS >= 0 ? 'val-pos' : 'val-neg') + '">' + fmt(m.resultadoARS) + '</td>' +
+      '<td style="color:var(--green)">' + usd(m.recuperoUSD) + '</td>' +
+      '<td>' + usd(m.extraordinariaUSD) + '</td>' +
+      '<td>' + usd(m.acumuladoUSD) + '</td>' +
+      '<td style="color:var(--text-muted)">' + usd(m.gapUSD) + '</td>' +
+    '</tr>').join('');
+  const tabla = (r.porMes && r.porMes.length)
+    ? '<div class="table-wrap" style="margin-top:14px"><table class="pagos-table" style="width:100%">' +
+        '<thead><tr><th style="text-align:left">Mes</th><th>Resultado</th><th>Recupero</th><th>Extraord.</th><th>Acumulado</th><th>Falta</th></tr></thead>' +
+        '<tbody>' + filas + '</tbody></table></div>'
+    : '<div style="color:var(--text-muted);font-size:13px;margin-top:12px">Todavía no hay meses cerrados con recupero asignado. Al cerrar un mes vas a poder asignar cuánto del resultado recupera inversión. También podés asignar meses ya cerrados desde el Dashboard.</div>';
+
+  const cfg =
+    '<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">' +
+      '<div><div style="font-size:11px;color:var(--text-muted)">Inversión (USD)</div><input type="number" id="roi-inv" value="' + r.inversionUSD + '" step="1000" style="width:120px"></div>' +
+      '<div><div style="font-size:11px;color:var(--text-muted)">Meta (meses)</div><input type="number" id="roi-target" value="' + r.mesesTarget + '" step="1" style="width:80px"></div>' +
+      '<div><div style="font-size:11px;color:var(--text-muted)">Límite (meses)</div><input type="number" id="roi-limite" value="' + r.mesesLimite + '" step="1" style="width:80px"></div>' +
+      '<div><div style="font-size:11px;color:var(--text-muted)">Mes inicio (YYYY-MM)</div><input type="text" id="roi-inicio" value="' + (r.mesInicio || '') + '" placeholder="2026-01" style="width:110px"></div>' +
+      '<button class="btn" onclick="saveRoiConfig()">Guardar</button>' +
+    '</div>';
+
+  cont.innerHTML =
+    '<div class="card">' +
+      '<div class="card-title">Recupero de Inversión (ROI)' +
+        '<span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0;float:right">' + blueTxt + '</span>' +
+      '</div>' +
+      kpis + barra + extras + tabla + cfg +
+    '</div>';
+
+  if (nota) nota.textContent = ' · fondo extraordinarias disponible: ' + fmt(r.fondoExtraordinariasARS) + ' (' + usd(r.fondoExtraordinariasUSD) + ')';
+}
+
+async function saveRoiConfig() {
+  const pairs = [
+    ['roiInversionUSD', Number((document.getElementById('roi-inv')||{}).value) || 0],
+    ['roiMesesTarget', Number((document.getElementById('roi-target')||{}).value) || 0],
+    ['roiMesesLimite', Number((document.getElementById('roi-limite')||{}).value) || 0],
+    ['roiMesInicio', (document.getElementById('roi-inicio')||{}).value || ''],
+  ];
+  try {
+    for (const [clave, valor] of pairs) {
+      await api('/api/plan/config', { method: 'PUT', body: JSON.stringify({ clave, valor }) });
+    }
+    loadPlan();
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 function renderPlanKpis() {
