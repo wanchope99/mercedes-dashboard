@@ -43,7 +43,7 @@
     .subtab-nav { background: var(--surface2); border-bottom: 1px solid var(--border); padding: 0 32px; display: flex; align-items: center; gap: 0; }
     .subtab-btn { padding: 11px 18px; cursor: pointer; font-size: 12px; font-weight: 500; color: var(--text-muted); border-bottom: 2px solid transparent; transition: all 0.15s; background: none; border-top: none; border-left: none; border-right: none; font-family: inherit; white-space: nowrap; }
     .subtab-btn:hover { color: var(--text); }
-    .subtab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .subtab-btn.active { color: var(--orange); border-bottom-color: var(--orange); }
 
     /* Filters */
     .filters-bar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 32px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -851,10 +851,23 @@
       <div class="card-title">Supuestos de la proyección</div>
       <div id="proy-supuestos" style="font-size:12px;color:var(--text-muted);line-height:2"></div>
     </div>
+  </main>
+</div>
 
-    <div style="margin-top:26px;font-size:14px;font-weight:700;color:var(--text);letter-spacing:0.3px">🗓️ Plan de inversiones — presupuesto y backlog</div>
+<!-- ═══ PLAN — RESUMEN ═══ -->
+<div id="tab-plan" class="tab-panel">
+  <main>
+    <div id="roi-section"></div>
 
-    <div class="card" style="margin-top:12px">
+    <div style="margin-top:22px;font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Extraordinarias — presupuesto, backlog y plazo</div>
+    <div class="kpi-grid" id="plan-kpis" style="margin-top:12px"><div class="loading"><div class="spinner"></div> Cargando plan...</div></div>
+  </main>
+</div>
+
+<!-- ═══ PLAN — INVERSIONES (planificador) ═══ -->
+<div id="tab-inversiones" class="tab-panel">
+  <main>
+    <div class="card">
       <div class="card-title">Presupuesto para inversiones
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· sugerido por mes = % del ingreso proyectado de ese mes</span>
       </div>
@@ -902,15 +915,6 @@
       <div class="card-title">Completados ✓</div>
       <div id="plan-hechos"></div>
     </div>
-  </main>
-</div>
-
-<!-- ═══ PLAN DE INVERSIONES TAB ═══ -->
-<div id="tab-plan" class="tab-panel">
-  <main>
-    <div class="kpi-grid" id="plan-kpis"><div class="loading"><div class="spinner"></div> Cargando plan...</div></div>
-
-    <div id="roi-section"></div>
   </main>
 </div>
 
@@ -1862,6 +1866,7 @@ const TAB_GROUPS = {
   plan: { subs: [
     { id: 'plan',        label: '📋 Resumen' },
     { id: 'calculadora', label: '🧮 Calculadora' },
+    { id: 'inversiones', label: '🛠️ Inversiones' },
     { id: 'proymes',     label: '📅 Proyección Mes' },
   ] },
   costos: { subs: [
@@ -1908,7 +1913,8 @@ function cargarPanel(tab) {
     loadCostosConfig();
   }
   else if (tab === 'calculadora') loadCalculadora();
-  else if (tab === 'proymes') { loadProyeccionMes(); loadPlan(); }
+  else if (tab === 'proymes') loadProyeccionMes();
+  else if (tab === 'inversiones') loadPlan();
   else if (tab === 'plan') loadPlan();
 }
 
@@ -3760,16 +3766,38 @@ async function saveRoiConfig() {
 function renderPlanKpis() {
   const pendientes = state.plan.items.filter(i => i.estado !== 'hecho');
   const totalPend = pendientes.reduce((s, i) => s + (i.costoEstimado || 0), 0);
-  const meses = planProxMeses(PLAN_MESES_HORIZONTE);
-  const presupuestos = meses.map(planPresupuestoMes);
-  const promMensual = presupuestos.reduce((s, v) => s + v, 0) / (presupuestos.length || 1);
-  const mesesParaCompletar = promMensual > 0 ? Math.ceil(totalPend / promMensual) : null;
+  const roi = state.plan.roi || {};
+  const usd = v => 'US$' + Math.round(v || 0).toLocaleString('es-AR');
+
+  // Card 1: presupuesto extraordinario disponible = lo asignado a extraordinarias
+  // en los cierres, acumulado (último mes + lo que había disponible antes).
+  const fondoARS = roi.fondoExtraordinariasARS || 0;
+  const fondoUSD = roi.fondoExtraordinariasUSD || 0;
+
+  // Ritmo de fondeo: promedio mensual asignado a extraordinarias en los cierres.
+  const porMes = roi.porMes || [];
+  const mesesConExtra = porMes.filter(m => (m.extraordinariaARS || 0) > 0).length;
+  const totalExtra = porMes.reduce((s, m) => s + (m.extraordinariaARS || 0), 0);
+  const avgExtraMensual = mesesConExtra > 0 ? totalExtra / mesesConExtra : 0;
+
+  // Card 3: meses restantes para que el fondo cubra el backlog al ritmo actual.
+  const faltaCubrir = Math.max(0, totalPend - fondoARS);
+  let mesesVal, mesesSub, mesesColor;
+  if (totalPend <= 0) { mesesVal = '—'; mesesSub = 'sin backlog cargado'; mesesColor = 'blue'; }
+  else if (faltaCubrir <= 0) { mesesVal = '0'; mesesSub = 'el fondo ya cubre el backlog'; mesesColor = 'green'; }
+  else if (avgExtraMensual > 0) {
+    mesesVal = Math.ceil(faltaCubrir / avgExtraMensual);
+    mesesSub = 'faltan ' + fmt(Math.round(faltaCubrir)) + ' · ' + fmt(Math.round(avgExtraMensual)) + '/mes';
+    mesesColor = mesesVal <= 6 ? 'green' : 'orange';
+  } else { mesesVal = '—'; mesesSub = 'aún sin ritmo de fondeo'; mesesColor = 'orange'; }
+
   const kpi = (label, valor, sub, color) =>
     `<div class="kpi-card ${color || ''}"><div class="kpi-label">${label}</div><div class="kpi-value">${valor}</div><div class="kpi-sub">${sub}</div></div>`;
+  const nPend = pendientes.length;
   document.getElementById('plan-kpis').innerHTML =
-    kpi('Backlog pendiente', fmt(totalPend), `${pendientes.length} ítem${pendientes.length !== 1 ? 's' : ''}`, 'blue') +
-    kpi('Presupuesto próximo mes', fmt(presupuestos[0] || 0), `${planMesLabel(meses[0])} · ${state.plan.config.budgetPct}% del ingreso`, 'accent') +
-    kpi('Meses para completar', mesesParaCompletar != null ? mesesParaCompletar : '—', mesesParaCompletar != null ? `al ritmo de ${fmt(Math.round(promMensual))}/mes` : 'sin ingreso proyectado', mesesParaCompletar != null && mesesParaCompletar <= 12 ? 'green' : 'orange');
+    kpi('Presupuesto extraordinario mes en curso', fmt(fondoARS), usd(fondoUSD) + ' · disponible acumulado', 'green') +
+    kpi('Backlog extraordinario', fmt(totalPend), `${nPend} ítem${nPend !== 1 ? 's' : ''} planificado${nPend !== 1 ? 's' : ''}`, 'blue') +
+    kpi('Meses restantes', mesesVal, mesesSub, mesesColor);
 }
 
 function renderPlanBacklog() {
