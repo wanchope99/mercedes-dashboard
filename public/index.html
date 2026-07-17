@@ -536,7 +536,6 @@
   <button class="tab-btn" id="tab-btn-servicios" onclick="switchGroup('servicios', this)">🍽️ Servicios</button>
   <button class="tab-btn" id="tab-btn-stocks" onclick="switchGroup('stocks', this)">📦 Stocks <span id="prov-badge" class="prov-badge" style="display:none">0</span></button>
   <button class="tab-btn" id="tab-btn-costos" onclick="switchGroup('costos', this)">🧮 Costos</button>
-  <button class="tab-btn" id="tab-btn-proyecciones" onclick="switchGroup('proyecciones', this)">📈 Proyecciones</button>
   <button class="tab-btn" id="tab-btn-plan" onclick="switchGroup('plan', this)">🗓️ Plan</button>
 </div>
 
@@ -852,17 +851,10 @@
       <div class="card-title">Supuestos de la proyección</div>
       <div id="proy-supuestos" style="font-size:12px;color:var(--text-muted);line-height:2"></div>
     </div>
-  </main>
-</div>
 
-<!-- ═══ PLAN DE INVERSIONES TAB ═══ -->
-<div id="tab-plan" class="tab-panel">
-  <main>
-    <div class="kpi-grid" id="plan-kpis"><div class="loading"><div class="spinner"></div> Cargando plan...</div></div>
+    <div style="margin-top:26px;font-size:14px;font-weight:700;color:var(--text);letter-spacing:0.3px">🗓️ Plan de inversiones — presupuesto y backlog</div>
 
-    <div id="roi-section"></div>
-
-    <div class="card">
+    <div class="card" style="margin-top:12px">
       <div class="card-title">Presupuesto para inversiones
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· sugerido por mes = % del ingreso proyectado de ese mes</span>
       </div>
@@ -910,6 +902,15 @@
       <div class="card-title">Completados ✓</div>
       <div id="plan-hechos"></div>
     </div>
+  </main>
+</div>
+
+<!-- ═══ PLAN DE INVERSIONES TAB ═══ -->
+<div id="tab-plan" class="tab-panel">
+  <main>
+    <div class="kpi-grid" id="plan-kpis"><div class="loading"><div class="spinner"></div> Cargando plan...</div></div>
+
+    <div id="roi-section"></div>
   </main>
 </div>
 
@@ -1744,7 +1745,7 @@ function onLoginSuccess(rol, nombre) {
     document.getElementById('last-updated').style.display = '';
     document.getElementById('btn-refresh').style.display = '';
     // Todas las tabs padre visibles
-    ['tab-btn-dashboard','tab-btn-pagos','tab-btn-cajas','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-proyecciones','tab-btn-plan'].forEach(id => {
+    ['tab-btn-dashboard','tab-btn-pagos','tab-btn-cajas','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-plan'].forEach(id => {
       const el = document.getElementById(id); if (el) el.style.display = '';
     });
     // Pagos: vista completa (filtros, KPIs, listado y botón Pagar)
@@ -1756,7 +1757,7 @@ function onLoginSuccess(rol, nombre) {
     refreshProvBadge(); // badge de pendientes de proveedores
   } else {
     // Encargado: solo la tab Cajas (con submenús Cajas / Arqueo) + Pagos
-    ['tab-btn-dashboard','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-proyecciones','tab-btn-plan'].forEach(id => {
+    ['tab-btn-dashboard','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-plan'].forEach(id => {
       const el = document.getElementById(id); if (el) el.style.display = 'none';
     });
     document.getElementById('tab-btn-cajas').style.display = '';
@@ -1858,14 +1859,14 @@ const TAB_GROUPS = {
   dashboard:    { subs: null },
   pagos:        { subs: null },
   servicios:    { subs: null },
-  plan:         { subs: null },
+  plan: { subs: [
+    { id: 'plan',        label: '📋 Resumen' },
+    { id: 'calculadora', label: '🧮 Calculadora' },
+    { id: 'proymes',     label: '📅 Proyección Mes' },
+  ] },
   costos: { subs: [
     { id: 'costos-resumen', label: '📊 Costos' },
     { id: 'costos-config',  label: '⚙️ Configuración' },
-  ] },
-  proyecciones: { subs: [
-    { id: 'calculadora', label: '🧮 Calculadora' },
-    { id: 'proymes',     label: '📅 Proyección Mes' },
   ] },
   cajas:  { subs: [
     { id: 'cajas',  label: '🏦 Cajas' },
@@ -1907,7 +1908,7 @@ function cargarPanel(tab) {
     loadCostosConfig();
   }
   else if (tab === 'calculadora') loadCalculadora();
-  else if (tab === 'proymes') loadProyeccionMes();
+  else if (tab === 'proymes') { loadProyeccionMes(); loadPlan(); }
   else if (tab === 'plan') loadPlan();
 }
 
