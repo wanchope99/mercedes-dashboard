@@ -868,23 +868,6 @@
 <div id="tab-inversiones" class="tab-panel">
   <main>
     <div class="card">
-      <div class="card-title">Presupuesto para inversiones
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· sugerido por mes = % del ingreso proyectado de ese mes</span>
-      </div>
-      <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;padding:4px 0">
-        <label style="display:inline-flex;align-items:center;gap:8px;font-size:13px">
-          Máximo por mes:
-          <input type="number" id="plan-budget-pct" min="0" max="100" step="0.5" style="width:72px" onkeydown="if(event.key==='Enter')savePlanBudgetPct()"> % del ingreso
-          <button class="btn" style="font-size:12px;padding:6px 12px" onclick="savePlanBudgetPct()">Aplicar</button>
-        </label>
-        <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
-          <input type="checkbox" id="plan-incluir-proy" onchange="togglePlanIncluir(this.checked)" style="accent-color:var(--accent)">
-          Incluir estos gastos en Proyecciones
-        </label>
-      </div>
-    </div>
-
-    <div class="card">
       <div class="card-title">Backlog de inversiones
         <button class="btn btn-accent" style="float:right;font-size:12px;padding:6px 12px" onclick="togglePlanForm()">➕ Agregar ítem</button>
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· pendientes sin agendar, ordená por prioridad</span>
@@ -908,7 +891,13 @@
       <div id="plan-backlog"></div>
     </div>
 
-    <div style="margin-top:18px;font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Cronograma — próximos 3 meses<span id="plan-fondo-nota" style="text-transform:none;letter-spacing:0;font-weight:400;color:var(--text-muted)"></span></div>
+    <div style="margin-top:18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+      <div style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Cronograma — próximos 3 meses<span id="plan-fondo-nota" style="text-transform:none;letter-spacing:0;font-weight:400;color:var(--text-muted)"></span></div>
+      <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;color:var(--text-muted)">
+        <input type="checkbox" id="plan-incluir-proy" onchange="togglePlanIncluir(this.checked)" style="accent-color:var(--accent)">
+        Incluir estos gastos en Proyecciones
+      </label>
+    </div>
     <div class="kpi-grid" id="plan-timeline" style="margin-top:12px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))"></div>
 
     <div class="card" id="plan-hechos-card" style="display:none">
@@ -3636,8 +3625,10 @@ async function loadPlan() {
     state.plan.proy = proyData.proyeccion || [];
     state.plan.roi = roiRes ? roiRes.data : null;
 
-    document.getElementById('plan-budget-pct').value = state.plan.config.budgetPct;
-    document.getElementById('plan-incluir-proy').checked = !!state.plan.config.incluirEnProyeccion;
+    const _bp = document.getElementById('plan-budget-pct');
+    if (_bp) _bp.value = state.plan.config.budgetPct;
+    const _ip = document.getElementById('plan-incluir-proy');
+    if (_ip) _ip.checked = !!state.plan.config.incluirEnProyeccion;
 
     renderRoi();
     renderPlanKpis();
@@ -3837,11 +3828,18 @@ function renderPlanBacklog() {
 function renderPlanTimeline() {
   const meses = planProxMeses(PLAN_MESES_HORIZONTE);
   const cont = document.getElementById('plan-timeline');
+  // Presupuesto real = fondo extraordinarias acumulado en los cierres. Es un pozo
+  // ÚNICO compartido: cada ítem asignado a un mes lo consume, y lo que queda arrastra
+  // a los meses siguientes (por eso el "restante" baja mes a mes).
+  const fondoTotal = (state.plan.roi && state.plan.roi.fondoExtraordinariasARS) || 0;
+  let consumido = 0;
   cont.innerHTML = meses.map(iso => {
     const items = state.plan.items.filter(i => i.mesObjetivo === iso && i.estado !== 'hecho');
     const asignado = items.reduce((s, i) => s + (i.costoEstimado || 0), 0);
-    const presu = planPresupuestoMes(iso);
-    const over = presu > 0 && asignado > presu;
+    const disponibleAntes = fondoTotal - consumido;   // fondo disponible al entrar al mes
+    consumido += asignado;
+    const disponibleDespues = fondoTotal - consumido; // remanente que arrastra al mes siguiente
+    const over = asignado > disponibleAntes;          // se pasa del fondo disponible
     const proy = (state.plan.proy || []).find(x => { const [y, m] = iso.split('-').map(Number); return x.mes === MESES_PROY[m - 1] && x.anio === y; });
     // Si el toggle está ON, proy.resultado ya incluye el capex del plan; si está OFF, lo restamos para mostrar el impacto.
     const incluido = state.plan.config.incluirEnProyeccion;
@@ -3859,12 +3857,12 @@ function renderPlanTimeline() {
     return `<div class="card" style="margin:0;padding:22px 24px">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
         <div style="font-weight:700;font-size:19px">${planMesLabel(iso)}</div>
-        <div style="font-size:12px;color:var(--text-muted)">Presup. ${fmt(Math.round(presu))}</div>
+        <div style="font-size:12px;color:${disponibleDespues < 0 ? 'var(--red)' : 'var(--text-muted)'}">Fondo restante ${fmt(Math.round(disponibleDespues))}</div>
       </div>
       <div style="margin-top:8px;font-size:16px">
         <span style="color:${over ? 'var(--red)' : 'var(--green)'};font-weight:700">${fmt(asignado)}</span>
-        <span style="color:var(--text-muted);font-size:14px"> / ${fmt(Math.round(presu))}</span>
-        ${over ? '<span class="badge badge-vencido" style="margin-left:8px">Excede</span>' : (asignado > 0 ? '<span class="badge badge-ok" style="margin-left:8px">OK</span>' : '')}
+        <span style="color:var(--text-muted);font-size:14px"> / ${fmt(Math.round(disponibleAntes))} disp.</span>
+        ${over ? '<span class="badge badge-vencido" style="margin-left:8px">Excede fondo</span>' : (asignado > 0 ? '<span class="badge badge-ok" style="margin-left:8px">OK</span>' : '')}
       </div>
       ${chips}
       ${proy ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted);line-height:1.7">
