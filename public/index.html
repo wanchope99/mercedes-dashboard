@@ -3714,12 +3714,15 @@ function renderRoi() {
     : '<div style="color:var(--text-muted);font-size:13px;margin-top:12px">Todavía no hay meses cerrados con recupero asignado. Al cerrar un mes vas a poder asignar cuánto del resultado recupera inversión. También podés asignar meses ya cerrados desde el Dashboard.</div>';
 
   const cfg =
-    '<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">' +
+    '<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border);text-align:right">' +
+      '<button class="btn" style="font-size:12px;padding:6px 12px" onclick="toggleRoiParams()">⚙️ Ajustar parámetros</button>' +
+    '</div>' +
+    '<div id="roi-params" style="display:none;margin-top:10px;gap:14px;flex-wrap:wrap;align-items:flex-end">' +
       '<div><div style="font-size:11px;color:var(--text-muted)">Inversión (USD)</div><input type="number" id="roi-inv" value="' + r.inversionUSD + '" step="1000" style="width:120px"></div>' +
       '<div><div style="font-size:11px;color:var(--text-muted)">Meta (meses)</div><input type="number" id="roi-target" value="' + r.mesesTarget + '" step="1" style="width:80px"></div>' +
       '<div><div style="font-size:11px;color:var(--text-muted)">Límite (meses)</div><input type="number" id="roi-limite" value="' + r.mesesLimite + '" step="1" style="width:80px"></div>' +
       '<div><div style="font-size:11px;color:var(--text-muted)">Mes inicio (YYYY-MM)</div><input type="text" id="roi-inicio" value="' + (r.mesInicio || '') + '" placeholder="2026-01" style="width:110px"></div>' +
-      '<button class="btn" onclick="saveRoiConfig()">Guardar</button>' +
+      '<button class="btn btn-primary" onclick="saveRoiConfig()">Guardar</button>' +
     '</div>';
 
   cont.innerHTML =
@@ -3731,6 +3734,12 @@ function renderRoi() {
     '</div>';
 
   if (nota) nota.textContent = ' · fondo extraordinarias disponible: ' + fmt(r.fondoExtraordinariasARS) + ' (' + usd(r.fondoExtraordinariasUSD) + ')';
+}
+
+function toggleRoiParams() {
+  const el = document.getElementById('roi-params');
+  if (!el) return;
+  el.style.display = (el.style.display === 'none' || !el.style.display) ? 'flex' : 'none';
 }
 
 async function saveRoiConfig() {
