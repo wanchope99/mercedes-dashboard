@@ -3700,16 +3700,16 @@ function renderRoi() {
   // Tabla por mes
   const filas = (r.porMes || []).slice().reverse().map(m =>
     '<tr>' +
-      '<td style="text-align:left;font-weight:600">' + m.mes + '</td>' +
-      '<td class="' + (m.resultadoARS >= 0 ? 'val-pos' : 'val-neg') + '">' + fmt(m.resultadoARS) + '</td>' +
-      '<td style="color:var(--green)">' + usd(m.recuperoUSD) + '</td>' +
-      '<td>' + usd(m.extraordinariaUSD) + '</td>' +
-      '<td>' + usd(m.acumuladoUSD) + '</td>' +
-      '<td style="color:var(--text-muted)">' + usd(m.gapUSD) + '</td>' +
+      '<td style="font-weight:600">' + m.mes + '</td>' +
+      '<td class="td-right ' + (m.resultadoARS >= 0 ? 'val-pos' : 'val-neg') + '">' + fmt(m.resultadoARS) + '</td>' +
+      '<td class="td-right" style="color:var(--green)">' + usd(m.recuperoUSD) + '</td>' +
+      '<td class="td-right">' + usd(m.extraordinariaUSD) + '</td>' +
+      '<td class="td-right">' + usd(m.acumuladoUSD) + '</td>' +
+      '<td class="td-right" style="color:var(--text-muted)">' + usd(m.gapUSD) + '</td>' +
     '</tr>').join('');
   const tabla = (r.porMes && r.porMes.length)
     ? '<div class="table-wrap" style="margin-top:14px"><table class="pagos-table" style="width:100%">' +
-        '<thead><tr><th style="text-align:left">Mes</th><th>Resultado</th><th>Recupero</th><th>Extraord.</th><th>Acumulado</th><th>Falta</th></tr></thead>' +
+        '<thead><tr><th>Mes</th><th class="right">Resultado</th><th class="right">Recupero</th><th class="right">Extraord.</th><th class="right">Acumulado</th><th class="right">Falta</th></tr></thead>' +
         '<tbody>' + filas + '</tbody></table></div>'
     : '<div style="color:var(--text-muted);font-size:13px;margin-top:12px">Todavía no hay meses cerrados con recupero asignado. Al cerrar un mes vas a poder asignar cuánto del resultado recupera inversión. También podés asignar meses ya cerrados desde el Dashboard.</div>';
 
