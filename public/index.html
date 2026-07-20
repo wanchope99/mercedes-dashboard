@@ -445,6 +445,16 @@
     .vencidos-item-monto { font-weight: 700; font-size: 16px; color: var(--red); text-align: right; }
     .vencidos-item-dias { font-size: 11px; color: var(--red); text-align: right; margin-top: 2px; }
 
+    /* Recordatorio vencimiento tarjeta Galicia */
+    #galicia-recordatorio-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: 800; align-items: center; justify-content: center; }
+    #galicia-recordatorio-overlay.open { display: flex; }
+    #galicia-recordatorio-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 30px 28px; width: 440px; max-width: 92vw; box-shadow: 0 24px 64px rgba(0,0,0,0.55); }
+    #galicia-recordatorio-modal .gr-icono { font-size: 40px; text-align: center; margin-bottom: 10px; }
+    #galicia-recordatorio-modal .gr-titulo { font-size: 18px; font-weight: 700; text-align: center; margin-bottom: 14px; }
+    #galicia-recordatorio-modal .gr-texto { font-size: 14px; color: var(--text-muted); line-height: 1.65; margin-bottom: 24px; }
+    #galicia-recordatorio-modal .gr-btn { width: 100%; padding: 12px; border: none; border-radius: 10px; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+    #galicia-recordatorio-modal .gr-btn:hover { opacity: 0.9; }
+
     /* ── Proveedores ── */
     .prov-badge { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 5px; border-radius:99px; background:var(--red); color:#fff; font-size:10px; font-weight:700; margin-left:4px; }
     .prov-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
@@ -1649,6 +1659,16 @@
   </div>
 </div>
 
+<!-- Recordatorio: verificar próximo vencimiento de la tarjeta Galicia (solo admin, 1 vez por ciclo) -->
+<div id="galicia-recordatorio-overlay">
+  <div id="galicia-recordatorio-modal">
+    <div class="gr-icono">💳</div>
+    <div class="gr-titulo">Verificá el próximo vencimiento de la tarjeta Galicia</div>
+    <div class="gr-texto" id="galicia-recordatorio-texto"></div>
+    <button class="gr-btn" onclick="cerrarGaliciaRecordatorio()">Entendido</button>
+  </div>
+</div>
+
 <script>
 const state = {
   modo: 'mes', mes: '', desde: '', hasta: '', mesesDisponibles: [],
@@ -1748,6 +1768,7 @@ function onLoginSuccess(rol, nombre) {
     document.getElementById('pagos-admin-panel').style.display = '';
     init(); // carga dashboard
     refreshProvBadge(); // badge de pendientes de proveedores
+    checkGaliciaVencReminder(); // recordatorio de vencimiento de la tarjeta (1 vez por ciclo)
   } else {
     // Encargado: solo la tab Cajas (con submenús Cajas / Arqueo) + Pagos
     ['tab-btn-dashboard','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-plan'].forEach(id => {
@@ -1828,6 +1849,9 @@ function closeVencidosModal() {
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('vencidos-modal-overlay').addEventListener('click', function(e) {
     if (e.target === this) closeVencidosModal();
+  });
+  document.getElementById('galicia-recordatorio-overlay').addEventListener('click', function(e) {
+    if (e.target === this) cerrarGaliciaRecordatorio();
   });
 });
 
@@ -3305,6 +3329,85 @@ function buildPagosRows(pagos, groupId) {
   }).join('');
 }
 
+// ─── Ciclo de resumen de la tarjeta Galicia ───────────────────────────────────
+// La tarjeta cierra y vence alrededor del día GALICIA_DIA_VENC de cada mes. Los
+// cargos cuyo vencimiento cae dentro de ±GALICIA_TOLERANCIA_DIAS de ese día
+// (p.ej. una cuota fechada el 5 y un cargo fechado el 7) se consideran parte del
+// MISMO resumen y se agrupan bajo una única fecha de vencimiento (la nominal del
+// resumen). Los cargos lejos del día nominal conservan su propia fecha: son pagos
+// con vencimiento propio, no cargos de un resumen.
+// La tolerancia absorbe los corrimientos de 1-2 días que la tarjeta aplica según
+// la longitud del mes, así que normalmente NO hace falta tocar estos valores;
+// ajustá GALICIA_DIA_VENC solo si el banco cambia la fecha de cierre de forma
+// permanente.
+const GALICIA_DIA_VENC = 7;
+const GALICIA_TOLERANCIA_DIAS = 4;
+
+function galiciaStatementVenc(vencISO) {
+  if (!vencISO) return null;
+  const d = new Date(vencISO + 'T12:00:00');
+  if (isNaN(d.getTime())) return vencISO;
+  const y = d.getFullYear(), m = d.getMonth();
+  // Día nominal del resumen en el mes anterior, el actual y el siguiente
+  const candidatos = [
+    new Date(y, m - 1, GALICIA_DIA_VENC, 12),
+    new Date(y, m,     GALICIA_DIA_VENC, 12),
+    new Date(y, m + 1, GALICIA_DIA_VENC, 12),
+  ];
+  let mejor = null, mejorDist = Infinity;
+  for (const c of candidatos) {
+    const dist = Math.abs((c - d) / 86400000);
+    if (dist < mejorDist) { mejorDist = dist; mejor = c; }
+  }
+  if (mejorDist <= GALICIA_TOLERANCIA_DIAS) {
+    return `${mejor.getFullYear()}-${String(mejor.getMonth()+1).padStart(2,'0')}-${String(mejor.getDate()).padStart(2,'0')}`;
+  }
+  return vencISO;   // vencimiento propio, no es un cargo del resumen
+}
+
+// ─── Recordatorio de vencimiento de la tarjeta ────────────────────────────────
+// La primera vez que un admin entra/refresca la app después de que venció la
+// tarjeta, le recordamos verificar en el homebanking la fecha real del próximo
+// resumen (el banco puede correrla 1-2 días según el mes). Se muestra una sola
+// vez por ciclo: al reconocerlo se guarda la fecha del vencimiento ya pasado en
+// localStorage y no vuelve a aparecer hasta el siguiente vencimiento.
+let _galiciaCicloPendiente = null;
+
+function checkGaliciaVencReminder() {
+  try {
+    const isoDe = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const y = hoy.getFullYear(), m = hoy.getMonth();
+    const vencEsteMes = new Date(y, m, GALICIA_DIA_VENC);
+    // Último vencimiento ya pasado (incluye hoy si hoy es el día) y el próximo
+    let ultimoPasado, prox;
+    if (hoy >= vencEsteMes) { ultimoPasado = vencEsteMes;              prox = new Date(y, m + 1, GALICIA_DIA_VENC); }
+    else                    { ultimoPasado = new Date(y, m - 1, GALICIA_DIA_VENC); prox = vencEsteMes; }
+
+    const claveCiclo = isoDe(ultimoPasado);
+    if (localStorage.getItem('mb_galicia_venc_reminder') === claveCiclo) return; // ya avisado este ciclo
+
+    const fmtFecha = d => d.toLocaleDateString('es-AR', { day: 'numeric', month: 'long' });
+    document.getElementById('galicia-recordatorio-texto').innerHTML =
+      `La tarjeta venció el <strong style="color:var(--text)">${fmtFecha(ultimoPasado)}</strong>. ` +
+      `El sistema asume que el próximo vencimiento es el <strong style="color:var(--text)">${fmtFecha(prox)}</strong>, ` +
+      `pero el banco puede correrlo uno o dos días según el mes.<br><br>` +
+      `👉 Entrá al <strong style="color:var(--text)">homebanking</strong> y confirmá la fecha real del próximo resumen. ` +
+      `Si cambió de forma permanente, avisá para ajustar el sistema.`;
+
+    _galiciaCicloPendiente = claveCiclo;
+    document.getElementById('galicia-recordatorio-overlay').classList.add('open');
+  } catch (e) { /* nunca bloquear la carga por el recordatorio */ }
+}
+
+function cerrarGaliciaRecordatorio() {
+  if (_galiciaCicloPendiente) {
+    localStorage.setItem('mb_galicia_venc_reminder', _galiciaCicloPendiente);
+    _galiciaCicloPendiente = null;
+  }
+  document.getElementById('galicia-recordatorio-overlay').classList.remove('open');
+}
+
 async function loadPagos() {
   if (Object.keys(state.proveedores).length === 0) {
     try { const { data } = await api('/api/proveedores'); state.proveedores = data; } catch(e) {}
@@ -3325,11 +3428,15 @@ async function loadPagos() {
     const independientes = pagos.filter(p => !(p.medioPago || '').toLowerCase().includes('galicia'));
 
     // Próximo vencimiento de la tarjeta: por defecto se muestran los vencidos
-    // (siempre) más los cargos del próximo vencimiento aún no vencido.
+    // (siempre) más los cargos del próximo RESUMEN aún no vencido. Cada cargo se
+    // asigna al resumen de la tarjeta (galiciaStatementVenc) para que cargos con
+    // pequeñas diferencias de fecha (p.ej. cuotas al 5 y cargos al 7) queden en un
+    // único vencimiento en lugar de partirse en dos.
     const hoyISO = new Date().toISOString().split('T')[0];
-    const vencsGaliciaFuturos = [...new Set(galiciaPagos.filter(p => p.vencDate && p.vencDate >= hoyISO).map(p => p.vencDate))].sort();
+    galiciaPagos.forEach(p => { p.statementVenc = galiciaStatementVenc(p.vencDate); });
+    const vencsGaliciaFuturos = [...new Set(galiciaPagos.filter(p => p.statementVenc && p.statementVenc >= hoyISO).map(p => p.statementVenc))].sort();
     const proxVencGalicia = vencsGaliciaFuturos[0] || null;
-    const esVisibleGalicia = p => p.urgencia === 'vencido' || !p.vencDate || !proxVencGalicia || p.vencDate <= proxVencGalicia;
+    const esVisibleGalicia = p => p.urgencia === 'vencido' || !p.statementVenc || !proxVencGalicia || p.statementVenc <= proxVencGalicia;
     const galiciaVisibles = state.galiciaFuturos ? galiciaPagos : galiciaPagos.filter(esVisibleGalicia);
     const galiciaProxTotal = (state.galiciaFuturos ? galiciaPagos : galiciaPagos.filter(esVisibleGalicia)).reduce((s, p) => s + p.salidaARS, 0);
 
