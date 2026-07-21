@@ -832,29 +832,34 @@
 
     <!-- Pista de auditoría: qué se colocó de verdad, cuándo y con qué comprobante -->
     <div class="card">
-      <div class="card-title">📒 Registro de colocaciones
+      <div class="card-title">📒 Registro de movimientos
         <button class="btn btn-accent" style="float:right;font-size:12px;padding:6px 12px" onclick="toggleFinMovForm()">➕ Registrar movimiento</button>
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· cada peso que entra o sale de los instrumentos, con fecha y comprobante</span>
       </div>
       <div id="fin-mov-form" style="display:none">
+        <div style="font-size:12px;color:var(--text-muted);line-height:1.7;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:11px 13px;margin-bottom:14px">
+          <b>Balde</b> = la estrategia (colchón / UVA / CER), que es lo que usa la proyección para calcular.
+          <b>Instrumento</b> = el producto concreto que contrataste en el banco. Un mismo balde puede tener
+          varios instrumentos: el balde UVA puede ser un PF UVA de Galicia hoy y otro de otro banco mañana.
+        </div>
         <div class="proy-form-grid">
           <div class="form-group"><label>Fecha</label><input type="date" id="fmv-fecha"></div>
           <div class="form-group"><label>Tipo</label><select id="fmv-tipo">
             <option value="colocacion">Colocación (entra plata al instrumento)</option>
-            <option value="rescate">Rescate (sale plata del instrumento)</option>
+            <option value="rescate">Retiro / rescate (sale plata del instrumento)</option>
             <option value="renovacion">Renovación (se reubica, no mueve capital)</option>
             <option value="ajuste">Ajuste</option>
           </select></div>
-          <div class="form-group"><label>Balde</label><select id="fmv-balde">
+          <div class="form-group"><label>Balde (estrategia)</label><select id="fmv-balde">
             <option value="colchon">Colchón (money market)</option>
             <option value="uva">UVA (plazo fijo precancelable)</option>
             <option value="cer">CER (bonos)</option>
           </select></div>
-          <div class="form-group"><label>Monto ARS</label><input type="number" id="fmv-monto" min="0" placeholder="0"></div>
-          <div class="form-group"><label>Instrumento</label><input id="fmv-instrumento" list="fmv-instr-list" placeholder="Ej: PF UVA precancelable 12m">
+          <div class="form-group"><label>Instrumento (producto concreto)</label><input id="fmv-instrumento" list="fmv-instr-list" placeholder="Ej: PF UVA precancelable 12m">
             <datalist id="fmv-instr-list"><option>Fima Renta en Pesos</option><option>PF UVA precancelable 12m</option><option>Bono CER TX26</option><option>Bono CER TZXD7</option></datalist></div>
+          <div class="form-group"><label>Monto ARS</label><input type="number" id="fmv-monto" min="0" placeholder="0"></div>
           <div class="form-group"><label>Comprobante / N° operación</label><input id="fmv-comprobante" placeholder="Ej: Galicia op. 4471820"></div>
-          <div class="form-group"><label>Mes de recupero de origen</label><select id="fmv-mesrec"></select></div>
+          <div class="form-group"><label>Sale del recupero del mes</label><select id="fmv-mesrec" title="De qué mes salió esta plata: el mes cuyo recupero estás colocando. Sirve para saber si ya colocaste todo lo que apartaste ese mes."></select></div>
         </div>
         <div class="form-group"><label>Notas</label><input id="fmv-notas" placeholder="opcional"></div>
         <div id="fmv-status" style="display:none;font-size:12px;margin:10px 0"></div>
@@ -876,7 +881,7 @@
 
     <div class="card">
       <div class="card-title">📅 Vencimientos UVA
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· la escalera: a partir del mes 13 vence un tramo por mes</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· primero los reales, después los proyectados</span>
       </div>
       <div id="fin-vencimientos"></div>
     </div>
@@ -914,6 +919,12 @@
       </div>
     </div>
 
+    <div style="font-size:11px;color:var(--text-muted);line-height:1.7;margin:4px 2px 8px">
+      <b>Dónde se guarda todo:</b> en la misma planilla «Gestión Mercedes», en tres hojas que la app creó sola —
+      <b>Finanzas Movimientos</b> (el registro: fecha, tipo, balde, monto, instrumento, comprobante, mes de origen y cuándo se cargó),
+      <b>Finanzas Config</b> (los parámetros de acá abajo) y <b>Finanzas Aportes</b> (sólo los meses cuyo aporte fijaste a mano;
+      el resto sale del recupero de cada cierre). Podés abrirlas y auditarlas directo en la planilla.
+    </div>
     <div style="font-size:11px;color:var(--text-muted);line-height:1.7;margin:4px 2px 20px">
       Herramienta de planificación, <b>no asesoramiento financiero</b>. Los rendimientos son supuestos configurables:
       las condiciones reales (TNA, tasa real CER, cotización UVA) hay que verificarlas en el banco al momento de invertir.
@@ -4429,10 +4440,10 @@ function renderFinKpis() {
   if (!r) { document.getElementById('fin-kpis').innerHTML = kpi('Sin datos', '—', 'cargá aportes para proyectar', 'blue'); return; }
   const gan = Math.round(r.gananciaReal);
   document.getElementById('fin-kpis').innerHTML =
-    kpi('Total nominal al mes ' + r.meses, fmt(Math.round(r.totalNominal)), 'pesos corrientes', 'blue') +
-    kpi('Total real (pesos de hoy)', fmt(Math.round(r.totalReal)), 'deflactado por inflación', 'green') +
-    kpi('Ganancia real', (gan >= 0 ? '+' : '') + fmt(gan), (r.pctGananciaReal >= 0 ? '+' : '') + r.pctGananciaReal.toFixed(2) + '% sobre lo aportado', gan >= 0 ? 'green' : 'red') +
-    kpi('Colocado hoy', fmt(f.conciliacion.colocadoARS), 'según el registro real', 'orange');
+    kpi('Proyección · total nominal al mes ' + r.meses, fmt(Math.round(r.totalNominal)), 'simulación, pesos corrientes', 'blue') +
+    kpi('Proyección · total real', fmt(Math.round(r.totalReal)), 'simulación, en pesos de hoy', 'blue') +
+    kpi('Proyección · ganancia real', (gan >= 0 ? '+' : '') + fmt(gan), (r.pctGananciaReal >= 0 ? '+' : '') + r.pctGananciaReal.toFixed(2) + '% sobre lo aportado', gan >= 0 ? 'green' : 'red') +
+    kpi('REAL · colocado hoy', fmt(f.conciliacion.colocadoARS), f.conciliacion.movimientos + ' movimiento' + (f.conciliacion.movimientos !== 1 ? 's' : '') + ' registrado' + (f.conciliacion.movimientos !== 1 ? 's' : ''), 'orange');
 }
 
 // Conciliación: asignado a recupero en los cierres vs. lo realmente colocado.
@@ -4473,18 +4484,19 @@ function renderFinMovimientos() {
   }
   cont.innerHTML = `<div class="table-wrap"><table class="pagos-table" style="width:100%">
     <thead><tr>
-      <th style="text-align:left">Fecha</th><th style="text-align:left">Tipo</th><th style="text-align:left">Balde</th>
-      <th style="text-align:left">Instrumento</th><th style="text-align:left">Comprobante</th>
-      <th style="text-align:left">Origen</th><th class="td-right">Monto</th><th></th>
+      <th style="text-align:left">Fecha</th><th style="text-align:left">Tipo</th>
+      <th style="text-align:left">Balde</th><th style="text-align:left">Instrumento</th>
+      <th class="td-right">Monto</th>
+      <th style="text-align:left">Comprobante</th><th style="text-align:left">Sale del recupero de</th><th></th>
     </tr></thead><tbody>` +
     movs.map(m => `<tr>
       <td style="white-space:nowrap">${escapeHtml(m.fecha)}</td>
       <td><span class="badge ${m.tipo === 'rescate' ? 'badge-vencido' : 'badge-ok'}">${FIN_TIPOS[m.tipo] || m.tipo}</span></td>
       <td>${FIN_BALDES[m.balde] || m.balde}</td>
       <td>${escapeHtml(m.instrumento) || '—'}${m.notas ? `<div class="td-desc">${escapeHtml(m.notas)}</div>` : ''}</td>
+      <td class="td-right"><span class="td-monto" style="color:${m.tipo === 'rescate' ? 'var(--red)' : 'var(--green)'}">${m.tipo === 'rescate' ? '−' : ''}${fmt(m.monto)}</span></td>
       <td style="font-size:12px;color:var(--text-muted)">${escapeHtml(m.comprobante) || '—'}</td>
       <td style="font-size:12px;color:var(--text-muted)">${m.mesRecupero ? finMesLabel(m.mesRecupero) : '—'}</td>
-      <td class="td-right"><span class="td-monto" style="color:${m.tipo === 'rescate' ? 'var(--red)' : 'var(--green)'}">${m.tipo === 'rescate' ? '−' : ''}${fmt(m.monto)}</span></td>
       <td style="text-align:right"><button class="btn" style="padding:3px 8px;font-size:11px" title="Eliminar" onclick="deleteFinMovimiento('${m.id}')">🗑</button></td>
     </tr>`).join('') + '</tbody></table></div>';
 }
@@ -4544,28 +4556,72 @@ async function finResetAporte(mes) {
   } catch (e) { alert('No se pudo restablecer: ' + e.message); }
 }
 
+// Suma meses a una fecha "YYYY-MM-DD" (para el vencimiento de un PF real).
+function finSumarMeses(fechaISO, n) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fechaISO || '');
+  if (!m) return '';
+  const d = new Date(Number(m[1]), Number(m[2]) - 1 + n, Number(m[3]));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Dos bloques bien separados, porque mezclarlos confunde: arriba los tramos que
+// EXISTEN (salen del registro de movimientos), abajo los que la proyección
+// supone que se van a constituir si se colocan los aportes según el reparto.
 function renderFinVencimientos() {
-  const tramos = (state.fin.escalera.tramos || []).slice().sort((a, b) => a.mesVencimiento - b.mesVencimiento);
   const cont = document.getElementById('fin-vencimientos');
+  const plazo = Math.round(state.fin.config.plazoUvaMeses) || 12;
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+
+  const reales = (state.fin.movimientos || [])
+    .filter(m => m.balde === 'uva' && m.tipo === 'colocacion')
+    .map(m => ({ ...m, vence: finSumarMeses(m.fecha, plazo) }))
+    .sort((a, b) => (a.vence || '').localeCompare(b.vence || ''));
+
+  const bloqueReal = reales.length
+    ? `<div class="table-wrap"><table class="pagos-table" style="width:100%">
+        <thead><tr><th style="text-align:left">Vence</th><th style="text-align:left">Constituido</th>
+          <th style="text-align:left">Instrumento</th><th class="td-right">Monto colocado</th><th></th></tr></thead><tbody>` +
+        reales.map((t, i) => `<tr${i === 0 ? ' style="background:var(--green-dim)"' : ''}>
+          <td style="white-space:nowrap;font-weight:${i === 0 ? '700' : '400'}">${escapeHtml(t.vence)}</td>
+          <td style="color:var(--text-muted);font-size:12px">${escapeHtml(t.fecha)}</td>
+          <td style="font-size:12px">${escapeHtml(t.instrumento) || '—'}</td>
+          <td class="td-right"><span class="td-monto">${fmt(t.monto)}</span></td>
+          <td>${i === 0 ? '<span class="badge badge-ok">próximo</span>' : ''}${t.vence && t.vence <= hoy ? ' <span class="badge badge-vencido">ya venció</span>' : ''}</td>
+        </tr>`).join('') + '</tbody></table></div>'
+    : `<div style="color:var(--text-muted);font-size:13px;padding:8px 0">
+        Todavía no hay ninguna colocación en UVA registrada, así que no hay vencimientos reales.
+        Registrala en <b>Registro de movimientos</b> y el vencimiento aparece acá automáticamente (fecha + ${plazo} meses).
+      </div>`;
+
+  const tramos = (state.fin.escalera.tramos || []).slice().sort((a, b) => a.mesVencimiento - b.mesVencimiento);
   const dentro = tramos.filter(t => t.disponibleEnHorizonte);
-  if (!tramos.length) {
-    cont.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:10px 0">Sin tramos UVA: no hay aportes cargados todavía.</div>';
-    return;
-  }
-  cont.innerHTML = `<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
-      ${dentro.length} de ${tramos.length} tramos vencen dentro del horizonte. El más cercano es la liquidez disponible sin romper nada.
-    </div>
-    <div class="table-wrap"><table class="pagos-table" style="width:100%">
-    <thead><tr><th style="text-align:left">Vence</th><th style="text-align:left">Constituido</th>
-      <th class="td-right">Monto colocado</th><th class="td-right">UVAs</th><th class="td-right">Valor al vencer</th><th></th></tr></thead><tbody>` +
-    tramos.map((t, i) => `<tr${i === 0 ? ' style="background:var(--green-dim)"' : ''}>
-      <td style="white-space:nowrap;font-weight:${i === 0 ? '700' : '400'}">${finMesLabel(t.mesVencimientoISO)} <span style="color:var(--text-muted);font-size:11px">(mes ${t.mesVencimiento})</span></td>
-      <td style="color:var(--text-muted);font-size:12px">${finMesLabel(t.mesConstitucionISO)}</td>
-      <td class="td-right">${fmt(Math.round(t.montoUva))}</td>
-      <td class="td-right" style="color:var(--text-muted);font-size:12px">${t.cantidadUvas.toFixed(2)}</td>
-      <td class="td-right"><span class="td-monto" style="color:var(--green)">${fmt(Math.round(t.valorAlVencer))}</span></td>
-      <td>${t.disponibleEnHorizonte ? (i === 0 ? '<span class="badge badge-ok">próximo</span>' : '') : '<span class="badge" style="background:var(--surface2);color:var(--text-muted)" title="Vence después del horizonte proyectado">fuera de plazo</span>'}</td>
-    </tr>`).join('') + '</tbody></table></div>';
+  const bloqueProy = tramos.length
+    ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+        ${dentro.length} de ${tramos.length} tramos vencerían dentro del horizonte. A partir del mes ${plazo + 1} vence uno por mes: esa es la escalera.
+      </div>
+      <div class="table-wrap"><table class="pagos-table" style="width:100%">
+      <thead><tr><th style="text-align:left">Vencería</th><th style="text-align:left">Se constituiría</th>
+        <th class="td-right">Monto a colocar</th><th class="td-right">UVAs</th><th class="td-right">Valor al vencer</th><th></th></tr></thead><tbody>` +
+      tramos.map(t => `<tr>
+        <td style="white-space:nowrap">${finMesLabel(t.mesVencimientoISO)} <span style="color:var(--text-muted);font-size:11px">(mes ${t.mesVencimiento})</span></td>
+        <td style="color:var(--text-muted);font-size:12px">${finMesLabel(t.mesConstitucionISO)}</td>
+        <td class="td-right">${fmt(Math.round(t.montoUva))}</td>
+        <td class="td-right" style="color:var(--text-muted);font-size:12px">${t.cantidadUvas.toFixed(2)}</td>
+        <td class="td-right" style="color:var(--text-muted)">${fmt(Math.round(t.valorAlVencer))}</td>
+        <td>${t.disponibleEnHorizonte ? '' : '<span class="badge" style="background:var(--surface2);color:var(--text-muted)" title="Vencería después del horizonte proyectado">fuera de plazo</span>'}</td>
+      </tr>`).join('') + '</tbody></table></div>'
+    : '<div style="color:var(--text-muted);font-size:13px;padding:8px 0">Sin aportes cargados, no hay nada que proyectar.</div>';
+
+  cont.innerHTML =
+    `<div style="font-size:12px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Reales — de tus colocaciones registradas</div>
+     ${bloqueReal}
+     <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin:22px 0 8px;padding-top:16px;border-top:1px solid var(--border)">Proyectados — simulación, todavía no existen</div>
+     <div style="font-size:12px;color:var(--orange);line-height:1.6;margin-bottom:10px">
+       ⚠ Estos tramos <b>no son plata colocada</b>: son los que se formarían si colocaras cada aporte según el reparto
+       ${Math.round(state.fin.config.pctColchon * 100)}/${Math.round(state.fin.config.pctUva * 100)}/${Math.round(state.fin.config.pctCer * 100)}.
+       Sirven para ver el calendario de liquidez que tendrías.
+     </div>
+     ${bloqueProy}`;
 }
 
 function renderFinTabla() {
