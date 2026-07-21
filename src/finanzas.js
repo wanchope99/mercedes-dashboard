@@ -5,7 +5,7 @@
 // pesos que preserven su valor real hasta llegar a la meta (~24 meses). Como el
 // dinero entra todos los meses, el modelo es una ESCALERA de plazos escalonados.
 //
-// Tres "baldes", cada aporte mensual se reparte entre ellos:
+// Tres "buckets", cada aporte mensual se reparte entre ellos:
 //   · colchón (money market)  → liquidez inmediata, rinde MENOS que la inflación
 //   · UVA (plazo fijo precancelable, plazoUvaMeses) → ajusta por CER, sin riesgo
 //     de precio. El aporte del mes t constituye un tramo que vence en t+plazo.
@@ -29,7 +29,7 @@
 //       Sólo guarda los meses EDITADOS a mano. Si un mes no está, el aporte sale
 //       del recupero real de ese cierre (roi.js). Así el default siempre sigue a
 //       la realidad y lo que el usuario tocó queda explícito.
-//   "Finanzas Movimientos" A ID | B Fecha | C Tipo | D Balde | E MontoARS |
+//   "Finanzas Movimientos" A ID | B Fecha | C Tipo | D Bucket | E MontoARS |
 //       F Instrumento | G Comprobante | H MesRecupero | I Notas | J Registrado
 //
 // No es asesoramiento financiero: los rendimientos son supuestos configurables y
@@ -49,7 +49,7 @@ const HOJA_MOVS = process.env.FINANZAS_MOVS_SHEET || 'Finanzas Movimientos';
 
 const HEADER_CONFIG = ['Clave', 'Valor'];
 const HEADER_APORTES = ['MesISO', 'MontoARS', 'Notas', 'Actualizado'];
-const HEADER_MOVS = ['ID', 'Fecha', 'Tipo', 'Balde', 'MontoARS', 'Instrumento', 'Comprobante', 'MesRecupero', 'Notas', 'Registrado'];
+const HEADER_MOVS = ['ID', 'Fecha', 'Tipo', 'Bucket', 'MontoARS', 'Instrumento', 'Comprobante', 'MesRecupero', 'Notas', 'Registrado'];
 
 const BALDES = ['colchon', 'uva', 'cer'];
 const TIPOS = ['colocacion', 'rescate', 'renovacion', 'ajuste'];
@@ -466,7 +466,7 @@ async function guardarMovimiento(mov) {
   const balde = (mov.balde || '').toString().trim();
   const monto = Math.round(_num(mov.monto));
   if (!TIPOS.includes(tipo)) throw new Error(`Tipo inválido (${TIPOS.join(' | ')})`);
-  if (!BALDES.includes(balde)) throw new Error(`Balde inválido (${BALDES.join(' | ')})`);
+  if (!BALDES.includes(balde)) throw new Error(`Bucket inválido (${BALDES.join(' | ')})`);
   if (!(monto > 0)) throw new Error('El monto debe ser mayor a cero');
   const fecha = (mov.fecha || '').toString().trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new Error('Fecha inválida (se espera YYYY-MM-DD)');

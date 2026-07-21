@@ -838,9 +838,9 @@
       </div>
       <div id="fin-mov-form" style="display:none">
         <div style="font-size:12px;color:var(--text-muted);line-height:1.7;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:11px 13px;margin-bottom:14px">
-          <b>Balde</b> = la estrategia (colchón / UVA / CER), que es lo que usa la proyección para calcular.
-          <b>Instrumento</b> = el producto concreto que contrataste en el banco. Un mismo balde puede tener
-          varios instrumentos: el balde UVA puede ser un PF UVA de Galicia hoy y otro de otro banco mañana.
+          <b>Bucket</b> = la estrategia (colchón / UVA / CER), que es lo que usa la proyección para calcular.
+          <b>Instrumento</b> = el producto concreto que contrataste en el banco. Un mismo bucket puede tener
+          varios instrumentos: el bucket UVA puede ser un PF UVA de Galicia hoy y otro de otro banco mañana.
         </div>
         <div class="proy-form-grid">
           <div class="form-group"><label>Fecha</label><input type="date" id="fmv-fecha"></div>
@@ -850,7 +850,7 @@
             <option value="renovacion">Renovación (se reubica, no mueve capital)</option>
             <option value="ajuste">Ajuste</option>
           </select></div>
-          <div class="form-group"><label>Balde (estrategia)</label><select id="fmv-balde">
+          <div class="form-group"><label>Bucket (estrategia)</label><select id="fmv-balde">
             <option value="colchon">Colchón (money market)</option>
             <option value="uva">UVA (plazo fijo precancelable)</option>
             <option value="cer">CER (bonos)</option>
@@ -921,7 +921,7 @@
 
     <div style="font-size:11px;color:var(--text-muted);line-height:1.7;margin:4px 2px 8px">
       <b>Dónde se guarda todo:</b> en la misma planilla «Gestión Mercedes», en tres hojas que la app creó sola —
-      <b>Finanzas Movimientos</b> (el registro: fecha, tipo, balde, monto, instrumento, comprobante, mes de origen y cuándo se cargó),
+      <b>Finanzas Movimientos</b> (el registro: fecha, tipo, bucket, monto, instrumento, comprobante, mes de origen y cuándo se cargó),
       <b>Finanzas Config</b> (los parámetros de acá abajo) y <b>Finanzas Aportes</b> (sólo los meses cuyo aporte fijaste a mano;
       el resto sale del recupero de cada cierre). Podés abrirlas y auditarlas directo en la planilla.
     </div>
@@ -4485,7 +4485,7 @@ function renderFinMovimientos() {
   cont.innerHTML = `<div class="table-wrap"><table class="pagos-table" style="width:100%">
     <thead><tr>
       <th style="text-align:left">Fecha</th><th style="text-align:left">Tipo</th>
-      <th style="text-align:left">Balde</th><th style="text-align:left">Instrumento</th>
+      <th style="text-align:left">Bucket</th><th style="text-align:left">Instrumento</th>
       <th class="td-right">Monto</th>
       <th style="text-align:left">Comprobante</th><th style="text-align:left">Sale del recupero de</th><th></th>
     </tr></thead><tbody>` +
