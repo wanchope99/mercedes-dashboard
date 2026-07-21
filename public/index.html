@@ -4035,17 +4035,23 @@ function renderPlanTimeline() {
     const chips = delMes.length
       ? hechos.map(chipHecho).join('') + items.map(chipPendiente).join('')
       : '<div style="color:var(--text-muted);font-size:13px;padding:10px 0">Sin ítems asignados</div>';
+    // Jerarquía del mes: cuánto hay → cuánto está comprometido → cuánto sobra.
+    const linea = (label, valor, o = {}) =>
+      `<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+        <span style="font-size:13px;color:${o.big ? 'var(--text)' : 'var(--text-muted)'};font-weight:${o.big ? '600' : '400'}">${label}</span>
+        <span style="font-size:${o.big ? '21' : '15'}px;font-weight:700;color:${o.color || 'var(--text)'};white-space:nowrap">${valor}</span>
+      </div>`;
     return `<div class="card" style="margin:0;padding:22px 24px">
-      <div style="display:flex;justify-content:space-between;align-items:baseline">
-        <div style="font-weight:700;font-size:19px">${planMesLabel(iso)}</div>
-        <div style="font-size:12px;color:${disponibleDespues < 0 ? 'var(--red)' : 'var(--text-muted)'}">Fondo restante ${fmt(Math.round(disponibleDespues))}</div>
+      <div style="font-weight:700;font-size:19px;margin-bottom:14px">${planMesLabel(iso)}</div>
+      ${linea('Presupuesto mensual', fmt(Math.round(disponibleAntes)))}
+      <div style="margin-top:7px">${linea('Inversiones planeadas', (asignado > 0 ? '− ' : '') + fmt(asignado), { color: 'var(--text-muted)' })}</div>
+      <div style="margin-top:11px;padding-top:11px;border-top:1px solid var(--border)">
+        ${linea('Presupuesto restante', fmt(Math.round(disponibleDespues)) +
+          (over ? ' <span class="badge badge-vencido" style="margin-left:6px;vertical-align:middle">Excede</span>'
+                : (asignado > 0 ? ' <span class="badge badge-ok" style="margin-left:6px;vertical-align:middle">OK</span>' : '')),
+          { big: true, color: disponibleDespues < 0 ? 'var(--red)' : 'var(--green)' })}
       </div>
-      <div style="margin-top:8px;font-size:16px">
-        <span style="color:${over ? 'var(--red)' : 'var(--green)'};font-weight:700">${fmt(asignado)}</span>
-        <span style="color:var(--text-muted);font-size:14px"> pendiente / ${fmt(Math.round(disponibleAntes))} disp.</span>
-        ${over ? '<span class="badge badge-vencido" style="margin-left:8px">Excede fondo</span>' : (asignado > 0 ? '<span class="badge badge-ok" style="margin-left:8px">OK</span>' : '')}
-      </div>
-      ${ejecutadoMes > 0 ? `<div style="margin-top:5px;font-size:12px;color:var(--text-muted)">✓ ${fmt(Math.round(ejecutadoMes))} ya ejecutado este mes (ya descontado del fondo)</div>` : ''}
+      ${ejecutadoMes > 0 ? `<div style="margin-top:9px;font-size:12px;color:var(--text-muted)">✓ ${fmt(Math.round(ejecutadoMes))} ya ejecutado este mes (ya descontado del presupuesto)</div>` : ''}
       ${chips}
       ${proy ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted);line-height:1.7">
         Resultado proyectado: <strong style="color:${resultadoConPlan >= 0 ? 'var(--green)' : 'var(--red)'}">${fmt(Math.round(resultadoConPlan))}</strong>${asignado > 0 ? ` <span>(con esta inversión)</span>` : ''}<br>
