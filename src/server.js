@@ -23,6 +23,7 @@ const cierres = require('./cierres');
 const plan = require('./plan');
 const tc = require('./tc');
 const roi = require('./roi');
+const finanzas = require('./finanzas');
 const stockBebidas = require('./stock-bebidas');
 const { iniciarCron } = require('./cron');
 const { cargarEstadoCaja, guardarEstadoCaja } = require('./estado-caja');
@@ -1222,6 +1223,67 @@ app.put('/api/plan/config', authMiddleware, adminOnly, async (req, res) => {
     await plan.guardarConfig(clave, valor);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─── Finanzas — escalera de recupero (solo admin) ────────────────────────────
+// La plata del recupero se coloca en instrumentos en pesos en vez de quedar
+// quieta. Los aportes mensuales salen del recupero real de cada cierre (roi.js)
+// salvo que se hayan editado a mano. Ver src/finanzas.js.
+app.get('/api/finanzas', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const r = await roi.resumenRecupero().catch(() => ({ porMes: [] }));
+    res.json({ ok: true, data: await finanzas.resumenFinanzas(r.porMes || []) });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Config: una clave suelta { clave, valor }, o los tres porcentajes juntos
+// { pcts: { colchon, uva, cer } } — que se validan sumando 100%.
+app.put('/api/finanzas/config', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { clave, valor, pcts } = req.body;
+    if (pcts) {
+      const c = Number(pcts.colchon), u = Number(pcts.uva), e = Number(pcts.cer);
+      if (![c, u, e].every(n => Number.isFinite(n) && n >= 0)) {
+        return res.status(400).json({ ok: false, error: 'Los porcentajes deben ser números positivos' });
+      }
+      if (Math.abs(c + u + e - 1) > 1e-6) {
+        return res.status(400).json({ ok: false, error:
+          `Los porcentajes tienen que sumar 100% (suman ${((c + u + e) * 100).toFixed(1)}%)` });
+      }
+      await finanzas.guardarConfig('pctColchon', c);
+      await finanzas.guardarConfig('pctUva', u);
+      await finanzas.guardarConfig('pctCer', e);
+      return res.json({ ok: true });
+    }
+    if (!clave) return res.status(400).json({ ok: false, error: 'Falta clave' });
+    await finanzas.guardarConfig(clave, valor);
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+// Aporte de un mes. monto null/'' borra el override y el mes vuelve a tomar el
+// recupero real del cierre.
+app.put('/api/finanzas/aportes', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { mes, monto, notas } = req.body;
+    const m = (monto === '' || monto == null) ? null : Number(monto);
+    if (m != null && !(Number.isFinite(m) && m >= 0)) {
+      return res.status(400).json({ ok: false, error: 'Monto inválido' });
+    }
+    res.json({ ok: true, data: await finanzas.guardarAporte(mes, m, notas) });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+// Registro real de colocaciones/rescates: la pista de auditoría que separa el
+// capital del recupero de la caja operativa del bar.
+app.post('/api/finanzas/movimientos', authMiddleware, adminOnly, async (req, res) => {
+  try { res.json({ ok: true, data: await finanzas.guardarMovimiento(req.body) }); }
+  catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.delete('/api/finanzas/movimientos/:id', authMiddleware, adminOnly, async (req, res) => {
+  try { await finanzas.borrarMovimiento(req.params.id); res.json({ ok: true, message: 'Movimiento eliminado' }); }
+  catch (err) { res.status(400).json({ ok: false, error: err.message }); }
 });
 
 // ─── Servicios: agregado de productos multi-día (solo admin) ──────────────────

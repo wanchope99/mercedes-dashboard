@@ -817,6 +817,111 @@
   </main>
 </div>
 
+<!-- ═══ PLAN — FINANZAS (escalera de recupero) ═══ -->
+<div id="tab-finanzas" class="tab-panel">
+  <main>
+    <div class="kpi-grid" id="fin-kpis"><div class="loading"><div class="spinner"></div> Cargando finanzas...</div></div>
+
+    <!-- Trazabilidad: lo asignado a recupero vs. lo efectivamente colocado -->
+    <div class="card">
+      <div class="card-title">🔒 Capital del recupero — control y trazabilidad
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· que la plata de la inversión no se mezcle con la caja operativa</span>
+      </div>
+      <div id="fin-conciliacion"></div>
+    </div>
+
+    <!-- Pista de auditoría: qué se colocó de verdad, cuándo y con qué comprobante -->
+    <div class="card">
+      <div class="card-title">📒 Registro de colocaciones
+        <button class="btn btn-accent" style="float:right;font-size:12px;padding:6px 12px" onclick="toggleFinMovForm()">➕ Registrar movimiento</button>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· cada peso que entra o sale de los instrumentos, con fecha y comprobante</span>
+      </div>
+      <div id="fin-mov-form" style="display:none">
+        <div class="proy-form-grid">
+          <div class="form-group"><label>Fecha</label><input type="date" id="fmv-fecha"></div>
+          <div class="form-group"><label>Tipo</label><select id="fmv-tipo">
+            <option value="colocacion">Colocación (entra plata al instrumento)</option>
+            <option value="rescate">Rescate (sale plata del instrumento)</option>
+            <option value="renovacion">Renovación (se reubica, no mueve capital)</option>
+            <option value="ajuste">Ajuste</option>
+          </select></div>
+          <div class="form-group"><label>Balde</label><select id="fmv-balde">
+            <option value="colchon">Colchón (money market)</option>
+            <option value="uva">UVA (plazo fijo precancelable)</option>
+            <option value="cer">CER (bonos)</option>
+          </select></div>
+          <div class="form-group"><label>Monto ARS</label><input type="number" id="fmv-monto" min="0" placeholder="0"></div>
+          <div class="form-group"><label>Instrumento</label><input id="fmv-instrumento" list="fmv-instr-list" placeholder="Ej: PF UVA precancelable 12m">
+            <datalist id="fmv-instr-list"><option>Fima Renta en Pesos</option><option>PF UVA precancelable 12m</option><option>Bono CER TX26</option><option>Bono CER TZXD7</option></datalist></div>
+          <div class="form-group"><label>Comprobante / N° operación</label><input id="fmv-comprobante" placeholder="Ej: Galicia op. 4471820"></div>
+          <div class="form-group"><label>Mes de recupero de origen</label><select id="fmv-mesrec"></select></div>
+        </div>
+        <div class="form-group"><label>Notas</label><input id="fmv-notas" placeholder="opcional"></div>
+        <div id="fmv-status" style="display:none;font-size:12px;margin:10px 0"></div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn btn-accent" onclick="saveFinMovimiento()">Guardar movimiento</button>
+          <button class="btn" onclick="toggleFinMovForm(true)">Cancelar</button>
+        </div>
+      </div>
+      <div id="fin-movimientos"></div>
+    </div>
+
+    <!-- Aportes: editables, con default = recupero real del cierre -->
+    <div class="card">
+      <div class="card-title">💰 Aportes mensuales
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· por defecto salen del recupero de cada cierre · click en el monto para fijarlo a mano</span>
+      </div>
+      <div id="fin-aportes"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📅 Vencimientos UVA
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· la escalera: a partir del mes 13 vence un tramo por mes</span>
+      </div>
+      <div id="fin-vencimientos"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📈 Proyección de la escalera
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· valor real = deflactado a pesos del primer mes</span>
+      </div>
+      <div class="chart-container" style="height:300px"><canvas id="chart-fin"></canvas></div>
+      <div id="fin-tabla" style="margin-top:14px"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">⚙️ Parámetros
+        <button class="btn" style="float:right;font-size:12px;padding:5px 12px" onclick="toggleFinParams()">Ajustar parámetros</button>
+      </div>
+      <div id="fin-params" style="display:none">
+        <div class="proy-form-grid">
+          <div class="form-group"><label>Inflación mensual %</label><input type="number" step="0.01" id="fpa-inflacion" onchange="saveFinParam('inflacionMensual', this.value/100)"></div>
+          <div class="form-group"><label>Rinde colchón mensual %</label><input type="number" step="0.01" id="fpa-colchon-rend" onchange="saveFinParam('rendColchonMensual', this.value/100)"></div>
+          <div class="form-group"><label>Tasa real CER anual %</label><input type="number" step="0.1" id="fpa-cer-real" onchange="saveFinParam('rendRealCerAnual', this.value/100)"></div>
+          <div class="form-group"><label>Plazo UVA (meses)</label><input type="number" min="1" id="fpa-plazo" onchange="saveFinParam('plazoUvaMeses', this.value)"></div>
+          <div class="form-group"><label>TNA precancelación %</label><input type="number" step="0.1" id="fpa-tna" onchange="saveFinParam('tnaPrecancelacion', this.value/100)"></div>
+          <div class="form-group"><label>Cotización UVA inicial</label><input type="number" step="0.01" id="fpa-uva" onchange="saveFinParam('cotizacionUvaInicial', this.value)"></div>
+          <div class="form-group"><label>Horizonte (meses)</label><input type="number" min="1" id="fpa-horizonte" onchange="saveFinParam('horizonteMeses', this.value)"></div>
+        </div>
+        <div style="margin-top:14px;font-size:12px;color:var(--text-muted)">Reparto de cada aporte — los tres tienen que sumar 100%</div>
+        <div class="proy-form-grid" style="margin-top:8px">
+          <div class="form-group"><label>% Colchón</label><input type="number" step="1" id="fpa-pct-colchon" oninput="renderFinPctSuma()"></div>
+          <div class="form-group"><label>% UVA</label><input type="number" step="1" id="fpa-pct-uva" oninput="renderFinPctSuma()"></div>
+          <div class="form-group"><label>% CER</label><input type="number" step="1" id="fpa-pct-cer" oninput="renderFinPctSuma()"></div>
+          <div class="form-group"><label>&nbsp;</label><button class="btn btn-accent" onclick="saveFinPcts()">Guardar reparto</button></div>
+        </div>
+        <div id="fpa-pct-status" style="font-size:12px;margin-top:8px"></div>
+      </div>
+    </div>
+
+    <div style="font-size:11px;color:var(--text-muted);line-height:1.7;margin:4px 2px 20px">
+      Herramienta de planificación, <b>no asesoramiento financiero</b>. Los rendimientos son supuestos configurables:
+      las condiciones reales (TNA, tasa real CER, cotización UVA) hay que verificarlas en el banco al momento de invertir.
+      El escenario asume inflación constante.
+    </div>
+  </main>
+</div>
+
 <div id="tab-proymes" class="tab-panel">
   <main>
     <div class="kpi-grid" id="proymes-kpis"><div class="loading"><div class="spinner"></div> Calculando el mes...</div></div>
@@ -1921,6 +2026,7 @@ const TAB_GROUPS = {
     { id: 'plan',        label: '📋 Resumen' },
     { id: 'calculadora', label: '🧮 Calculadora' },
     { id: 'inversiones', label: '🛠️ Inversiones' },
+    { id: 'finanzas',    label: '🏦 Finanzas' },
     { id: 'proymes',     label: '📅 Proyección Mes' },
   ] },
   costos: { subs: [
@@ -1949,6 +2055,7 @@ function cargarPanel(tab) {
   else if (tab === 'proveedores') loadProveedores();
   else if (tab === 'comportamiento') loadComportamiento();
   else if (tab === 'vinos') loadVinos();
+  else if (tab === 'finanzas') loadFinanzas();
   else if (tab === 'costos-resumen') {
     // Pre-fill período a mes en curso si están vacíos
     const desdeEl = document.getElementById('costos-desde');
@@ -4281,6 +4388,312 @@ async function planMoverPrioridad(id, dir) {
   await api('/api/plan/items', { method: 'POST', body: JSON.stringify(planSinVinculo({ ...a })) });
   await api('/api/plan/items', { method: 'POST', body: JSON.stringify(planSinVinculo({ ...b })) });
   await loadPlan();
+}
+
+// ═══ FINANZAS — escalera de recupero ═══════════════════════════════════════
+// Dos planos separados a propósito: la PROYECCIÓN (simulación con parámetros)
+// y el REGISTRO REAL de colocaciones, que es lo que permite demostrar que el
+// capital del recupero no se mezcló con la caja operativa del bar.
+const FIN_BALDES = { colchon: 'Colchón', uva: 'UVA', cer: 'CER' };
+const FIN_TIPOS = { colocacion: 'Colocación', rescate: 'Rescate', renovacion: 'Renovación', ajuste: 'Ajuste' };
+state.fin = null;
+
+async function loadFinanzas() {
+  document.getElementById('fin-kpis').innerHTML = '<div class="loading"><div class="spinner"></div> Cargando finanzas...</div>';
+  try {
+    const { data } = await api('/api/finanzas');
+    state.fin = data;
+    renderFinKpis();
+    renderFinConciliacion();
+    renderFinMovimientos();
+    renderFinAportes();
+    renderFinVencimientos();
+    renderFinTabla();
+    renderFinChart();
+    fillFinParams();
+  } catch (err) {
+    document.getElementById('fin-kpis').innerHTML = `<div style="color:var(--red);padding:20px">Error: ${err.message}</div>`;
+  }
+}
+
+function finMesLabel(iso) {
+  if (!/^\d{4}-\d{2}$/.test(iso || '')) return '—';
+  const [y, m] = iso.split('-').map(Number);
+  return `${MESES_PROY[m - 1].slice(0, 3)} ${y}`;
+}
+
+function renderFinKpis() {
+  const f = state.fin, r = f.escalera.resumen;
+  const kpi = (label, valor, sub, color) =>
+    `<div class="kpi-card ${color || ''}"><div class="kpi-label">${label}</div><div class="kpi-value" style="font-size:22px">${valor}</div><div class="kpi-sub">${sub}</div></div>`;
+  if (!r) { document.getElementById('fin-kpis').innerHTML = kpi('Sin datos', '—', 'cargá aportes para proyectar', 'blue'); return; }
+  const gan = Math.round(r.gananciaReal);
+  document.getElementById('fin-kpis').innerHTML =
+    kpi('Total nominal al mes ' + r.meses, fmt(Math.round(r.totalNominal)), 'pesos corrientes', 'blue') +
+    kpi('Total real (pesos de hoy)', fmt(Math.round(r.totalReal)), 'deflactado por inflación', 'green') +
+    kpi('Ganancia real', (gan >= 0 ? '+' : '') + fmt(gan), (r.pctGananciaReal >= 0 ? '+' : '') + r.pctGananciaReal.toFixed(2) + '% sobre lo aportado', gan >= 0 ? 'green' : 'red') +
+    kpi('Colocado hoy', fmt(f.conciliacion.colocadoARS), 'según el registro real', 'orange');
+}
+
+// Conciliación: asignado a recupero en los cierres vs. lo realmente colocado.
+function renderFinConciliacion() {
+  const c = state.fin.conciliacion;
+  const sin = c.sinColocarARS;
+  const estado = sin === 0
+    ? { color: 'var(--green)', txt: '✓ Todo el recupero asignado está colocado en instrumentos.' }
+    : sin > 0
+      ? { color: 'var(--orange)', txt: `⚠ Hay ${fmt(sin)} asignados al recupero que todavía NO figuran colocados. Mientras estén sin registrar, esa plata está mezclada con la caja operativa.` }
+      : { color: 'var(--red)', txt: `⚠ Hay ${fmt(-sin)} colocados de MÁS respecto de lo asignado en los cierres. Revisá si algún movimiento se cargó dos veces o si falta asignar recupero en un cierre.` };
+  const linea = (label, valor, color) =>
+    `<div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:7px 0">
+      <span style="font-size:13px;color:var(--text-muted)">${label}</span>
+      <span style="font-size:15px;font-weight:700;color:${color || 'var(--text)'};white-space:nowrap">${valor}</span>
+    </div>`;
+  document.getElementById('fin-conciliacion').innerHTML =
+    linea('Asignado a recupero en los cierres', fmt(c.asignadoARS)) +
+    linea('Colocado en instrumentos (registro real)', '− ' + fmt(c.colocadoARS), 'var(--text-muted)') +
+    `<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px">` +
+      linea('Sin colocar', fmt(sin), estado.color) +
+    `</div>` +
+    `<div style="font-size:12px;color:${estado.color};line-height:1.6;margin-top:8px">${estado.txt}</div>` +
+    `<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted)">
+      <span>Colchón: <b style="color:var(--text)">${fmt(c.porBalde.colchon)}</b></span>
+      <span>UVA: <b style="color:var(--text)">${fmt(c.porBalde.uva)}</b></span>
+      <span>CER: <b style="color:var(--text)">${fmt(c.porBalde.cer)}</b></span>
+      <span>${c.movimientos} movimiento${c.movimientos !== 1 ? 's' : ''} registrado${c.movimientos !== 1 ? 's' : ''}</span>
+    </div>`;
+}
+
+function renderFinMovimientos() {
+  const movs = (state.fin.movimientos || []).slice().sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+  const cont = document.getElementById('fin-movimientos');
+  if (!movs.length) {
+    cont.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:10px 0">Todavía no hay movimientos registrados. Cada vez que coloques plata del recupero en un instrumento, registralo acá: es la prueba de que ese capital está separado de la caja del bar.</div>';
+    return;
+  }
+  cont.innerHTML = `<div class="table-wrap"><table class="pagos-table" style="width:100%">
+    <thead><tr>
+      <th style="text-align:left">Fecha</th><th style="text-align:left">Tipo</th><th style="text-align:left">Balde</th>
+      <th style="text-align:left">Instrumento</th><th style="text-align:left">Comprobante</th>
+      <th style="text-align:left">Origen</th><th class="td-right">Monto</th><th></th>
+    </tr></thead><tbody>` +
+    movs.map(m => `<tr>
+      <td style="white-space:nowrap">${escapeHtml(m.fecha)}</td>
+      <td><span class="badge ${m.tipo === 'rescate' ? 'badge-vencido' : 'badge-ok'}">${FIN_TIPOS[m.tipo] || m.tipo}</span></td>
+      <td>${FIN_BALDES[m.balde] || m.balde}</td>
+      <td>${escapeHtml(m.instrumento) || '—'}${m.notas ? `<div class="td-desc">${escapeHtml(m.notas)}</div>` : ''}</td>
+      <td style="font-size:12px;color:var(--text-muted)">${escapeHtml(m.comprobante) || '—'}</td>
+      <td style="font-size:12px;color:var(--text-muted)">${m.mesRecupero ? finMesLabel(m.mesRecupero) : '—'}</td>
+      <td class="td-right"><span class="td-monto" style="color:${m.tipo === 'rescate' ? 'var(--red)' : 'var(--green)'}">${m.tipo === 'rescate' ? '−' : ''}${fmt(m.monto)}</span></td>
+      <td style="text-align:right"><button class="btn" style="padding:3px 8px;font-size:11px" title="Eliminar" onclick="deleteFinMovimiento('${m.id}')">🗑</button></td>
+    </tr>`).join('') + '</tbody></table></div>';
+}
+
+function renderFinAportes() {
+  const aportes = state.fin.aportes || [];
+  const cont = document.getElementById('fin-aportes');
+  const tag = o => o === 'manual'
+    ? '<span class="badge badge-ok" title="Fijado a mano">manual</span>'
+    : o === 'cierre'
+      ? '<span class="badge" style="background:var(--blue-dim);color:var(--blue)" title="Sale del recupero asignado en el cierre de ese mes">del cierre</span>'
+      : '<span class="badge" style="background:var(--surface2);color:var(--text-muted)" title="Ese mes todavía no cerró y no tiene aporte fijado">sin datos</span>';
+  cont.innerHTML = `<div class="table-wrap"><table class="pagos-table" style="width:100%">
+    <thead><tr><th style="text-align:left">Mes</th><th style="text-align:left">Origen</th><th class="td-right">Aporte</th>
+    <th class="td-right">Colchón</th><th class="td-right">UVA</th><th class="td-right">CER</th><th></th></tr></thead><tbody>` +
+    aportes.map((a, i) => {
+      const f = state.fin.escalera.filas[i] || {};
+      return `<tr>
+        <td style="white-space:nowrap">${i + 1}. ${finMesLabel(a.mes)}</td>
+        <td>${tag(a.origen)}</td>
+        <td class="td-right"><span class="td-monto" style="cursor:pointer;border-bottom:1px dashed var(--text-muted)" title="Click para fijar el aporte de este mes a mano" onclick="finEditarAporte(this,'${a.mes}')">${fmt(a.monto)}</span></td>
+        <td class="td-right" style="color:var(--text-muted);font-size:12px">${fmt(Math.round(f.aColchon || 0))}</td>
+        <td class="td-right" style="color:var(--text-muted);font-size:12px">${fmt(Math.round(f.aUva || 0))}</td>
+        <td class="td-right" style="color:var(--text-muted);font-size:12px">${fmt(Math.round(f.aCer || 0))}</td>
+        <td style="text-align:right">${a.origen === 'manual' ? `<button class="btn" style="padding:3px 8px;font-size:11px" title="Volver al valor del cierre" onclick="finResetAporte('${a.mes}')">↺</button>` : ''}</td>
+      </tr>`;
+    }).join('') + '</tbody></table></div>';
+}
+
+function finEditarAporte(el, mes) {
+  const a = (state.fin.aportes || []).find(x => x.mes === mes); if (!a) return;
+  const td = el.parentElement;
+  td.innerHTML = `<input type="number" min="0" value="${a.monto || 0}"
+    style="width:130px;text-align:right;background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:5px 7px;border-radius:6px;font-size:13px;font-family:inherit;outline:none"
+    onkeydown="finAporteKey(event)" onblur="finGuardarAporte(this,'${mes}')">`;
+  const inp = td.querySelector('input'); inp.focus(); inp.select();
+}
+function finAporteKey(ev) {
+  if (ev.key === 'Enter') ev.target.blur();
+  else if (ev.key === 'Escape') { ev.target.dataset.cancel = '1'; renderFinAportes(); }
+}
+async function finGuardarAporte(inp, mes) {
+  if (inp.dataset.cancel) return;
+  const a = (state.fin.aportes || []).find(x => x.mes === mes);
+  const v = Number(inp.value);
+  if (!a || inp.value === '' || !(v >= 0) || Math.round(v) === Math.round(a.monto)) { renderFinAportes(); return; }
+  inp.disabled = true;
+  try {
+    await api('/api/finanzas/aportes', { method: 'PUT', body: JSON.stringify({ mes, monto: v }) });
+    await loadFinanzas();
+  } catch (e) { alert('No se pudo guardar el aporte: ' + e.message); renderFinAportes(); }
+}
+async function finResetAporte(mes) {
+  try {
+    await api('/api/finanzas/aportes', { method: 'PUT', body: JSON.stringify({ mes, monto: null }) });
+    await loadFinanzas();
+  } catch (e) { alert('No se pudo restablecer: ' + e.message); }
+}
+
+function renderFinVencimientos() {
+  const tramos = (state.fin.escalera.tramos || []).slice().sort((a, b) => a.mesVencimiento - b.mesVencimiento);
+  const cont = document.getElementById('fin-vencimientos');
+  const dentro = tramos.filter(t => t.disponibleEnHorizonte);
+  if (!tramos.length) {
+    cont.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:10px 0">Sin tramos UVA: no hay aportes cargados todavía.</div>';
+    return;
+  }
+  cont.innerHTML = `<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+      ${dentro.length} de ${tramos.length} tramos vencen dentro del horizonte. El más cercano es la liquidez disponible sin romper nada.
+    </div>
+    <div class="table-wrap"><table class="pagos-table" style="width:100%">
+    <thead><tr><th style="text-align:left">Vence</th><th style="text-align:left">Constituido</th>
+      <th class="td-right">Monto colocado</th><th class="td-right">UVAs</th><th class="td-right">Valor al vencer</th><th></th></tr></thead><tbody>` +
+    tramos.map((t, i) => `<tr${i === 0 ? ' style="background:var(--green-dim)"' : ''}>
+      <td style="white-space:nowrap;font-weight:${i === 0 ? '700' : '400'}">${finMesLabel(t.mesVencimientoISO)} <span style="color:var(--text-muted);font-size:11px">(mes ${t.mesVencimiento})</span></td>
+      <td style="color:var(--text-muted);font-size:12px">${finMesLabel(t.mesConstitucionISO)}</td>
+      <td class="td-right">${fmt(Math.round(t.montoUva))}</td>
+      <td class="td-right" style="color:var(--text-muted);font-size:12px">${t.cantidadUvas.toFixed(2)}</td>
+      <td class="td-right"><span class="td-monto" style="color:var(--green)">${fmt(Math.round(t.valorAlVencer))}</span></td>
+      <td>${t.disponibleEnHorizonte ? (i === 0 ? '<span class="badge badge-ok">próximo</span>' : '') : '<span class="badge" style="background:var(--surface2);color:var(--text-muted)" title="Vence después del horizonte proyectado">fuera de plazo</span>'}</td>
+    </tr>`).join('') + '</tbody></table></div>';
+}
+
+function renderFinTabla() {
+  const filas = state.fin.escalera.filas || [];
+  document.getElementById('fin-tabla').innerHTML = `<div class="table-wrap"><table class="pagos-table" style="width:100%;font-size:12px">
+    <thead><tr><th style="text-align:left">Mes</th><th class="td-right">Aporte</th>
+      <th class="td-right">Colchón</th><th class="td-right">UVA</th><th class="td-right">CER</th>
+      <th class="td-right">Total nominal</th><th class="td-right">Total real</th><th class="td-right">Ganancia real</th></tr></thead><tbody>` +
+    filas.map(f => `<tr>
+      <td style="white-space:nowrap">${f.mes}. ${finMesLabel(f.mesISO)}</td>
+      <td class="td-right">${fmt(Math.round(f.aporte))}</td>
+      <td class="td-right" style="color:var(--text-muted)">${fmt(Math.round(f.saldoColchon))}</td>
+      <td class="td-right" style="color:var(--text-muted)">${fmt(Math.round(f.saldoUva))}</td>
+      <td class="td-right" style="color:var(--text-muted)">${fmt(Math.round(f.saldoCer))}</td>
+      <td class="td-right">${fmt(Math.round(f.totalNominal))}</td>
+      <td class="td-right" style="font-weight:600">${fmt(Math.round(f.totalReal))}</td>
+      <td class="td-right" style="color:${f.gananciaReal >= 0 ? 'var(--green)' : 'var(--red)'}">${f.gananciaReal >= 0 ? '+' : ''}${fmt(Math.round(f.gananciaReal))}</td>
+    </tr>`).join('') + '</tbody></table></div>';
+}
+
+function renderFinChart() {
+  const filas = state.fin.escalera.filas || [];
+  const el = document.getElementById('chart-fin');
+  if (!el || !filas.length) return;
+  destroyChart('fin-escalera');
+  state.charts['fin-escalera'] = new Chart(el.getContext('2d'), {
+    data: {
+      labels: filas.map(f => finMesLabel(f.mesISO)),
+      datasets: [
+        { type: 'line', label: 'Valor real (pesos de hoy)', data: filas.map(f => Math.round(f.totalReal)), borderColor: '#4caf82', backgroundColor: 'rgba(76,175,130,0.12)', fill: true, tension: 0.3, pointRadius: 2 },
+        { type: 'line', label: 'Aportado real', data: filas.map(f => Math.round(f.aportadoReal)), borderColor: '#7878a0', borderDash: [6, 4], tension: 0.3, pointRadius: 0 },
+        { type: 'line', label: 'Total nominal', data: filas.map(f => Math.round(f.totalNominal)), borderColor: '#5c8fe0', tension: 0.3, pointRadius: 0 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#7878a0' } }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.raw)}` } } },
+      scales: {
+        x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#7878a0', maxRotation: 0, autoSkipPadding: 16 } },
+        y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#7878a0', callback: v => fmt(v) } },
+      },
+    },
+  });
+}
+
+// ── Parámetros ──
+function toggleFinParams() {
+  const el = document.getElementById('fin-params');
+  el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+function fillFinParams() {
+  const c = state.fin.config;
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  set('fpa-inflacion', +(c.inflacionMensual * 100).toFixed(4));
+  set('fpa-colchon-rend', +(c.rendColchonMensual * 100).toFixed(4));
+  set('fpa-cer-real', +(c.rendRealCerAnual * 100).toFixed(2));
+  set('fpa-plazo', c.plazoUvaMeses);
+  set('fpa-tna', +(c.tnaPrecancelacion * 100).toFixed(2));
+  set('fpa-uva', c.cotizacionUvaInicial);
+  set('fpa-horizonte', c.horizonteMeses);
+  set('fpa-pct-colchon', +(c.pctColchon * 100).toFixed(2));
+  set('fpa-pct-uva', +(c.pctUva * 100).toFixed(2));
+  set('fpa-pct-cer', +(c.pctCer * 100).toFixed(2));
+  renderFinPctSuma();
+}
+function renderFinPctSuma() {
+  const n = id => Number(document.getElementById(id).value) || 0;
+  const suma = n('fpa-pct-colchon') + n('fpa-pct-uva') + n('fpa-pct-cer');
+  const el = document.getElementById('fpa-pct-status');
+  const ok = Math.abs(suma - 100) < 0.01;
+  el.style.color = ok ? 'var(--green)' : 'var(--red)';
+  el.textContent = ok ? '✓ Suman 100%' : `Suman ${suma.toFixed(2)}% — tienen que sumar 100% para poder guardar`;
+  return ok;
+}
+async function saveFinParam(clave, valor) {
+  try {
+    await api('/api/finanzas/config', { method: 'PUT', body: JSON.stringify({ clave, valor: Number(valor) }) });
+    await loadFinanzas();
+  } catch (e) { alert('No se pudo guardar el parámetro: ' + e.message); }
+}
+async function saveFinPcts() {
+  if (!renderFinPctSuma()) return;
+  const n = id => Number(document.getElementById(id).value) || 0;
+  try {
+    await api('/api/finanzas/config', { method: 'PUT', body: JSON.stringify({ pcts: {
+      colchon: n('fpa-pct-colchon') / 100, uva: n('fpa-pct-uva') / 100, cer: n('fpa-pct-cer') / 100,
+    } }) });
+    await loadFinanzas();
+  } catch (e) {
+    const el = document.getElementById('fpa-pct-status');
+    el.style.color = 'var(--red)'; el.textContent = 'Error: ' + e.message;
+  }
+}
+
+// ── Registro de movimientos reales ──
+function toggleFinMovForm(cancel) {
+  const form = document.getElementById('fin-mov-form');
+  const abrir = cancel ? false : form.style.display === 'none';
+  form.style.display = abrir ? '' : 'none';
+  if (!abrir) return;
+  document.getElementById('fmv-fecha').value = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+  ['fmv-monto', 'fmv-instrumento', 'fmv-comprobante', 'fmv-notas'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('fmv-status').style.display = 'none';
+  const sel = document.getElementById('fmv-mesrec');
+  sel.innerHTML = '<option value="">— sin especificar —</option>' +
+    (state.fin.aportes || []).map(a => `<option value="${a.mes}">${finMesLabel(a.mes)}</option>`).join('');
+}
+async function saveFinMovimiento() {
+  const status = document.getElementById('fmv-status');
+  const val = id => document.getElementById(id).value;
+  const body = {
+    fecha: val('fmv-fecha'), tipo: val('fmv-tipo'), balde: val('fmv-balde'),
+    monto: Number(val('fmv-monto')), instrumento: val('fmv-instrumento').trim(),
+    comprobante: val('fmv-comprobante').trim(), mesRecupero: val('fmv-mesrec'), notas: val('fmv-notas').trim(),
+  };
+  if (!(body.monto > 0)) { status.style.display = ''; status.style.color = 'var(--red)'; status.textContent = 'Ingresá un monto mayor a cero.'; return; }
+  try {
+    await api('/api/finanzas/movimientos', { method: 'POST', body: JSON.stringify(body) });
+    document.getElementById('fin-mov-form').style.display = 'none';
+    await loadFinanzas();
+  } catch (e) { status.style.display = ''; status.style.color = 'var(--red)'; status.textContent = 'Error: ' + e.message; }
+}
+async function deleteFinMovimiento(id) {
+  if (!confirm('¿Eliminar este movimiento del registro?\n\nEl registro es la pista de auditoría: si el movimiento existió de verdad, mejor corregirlo cargando el ajuste en vez de borrarlo.')) return;
+  try {
+    await api('/api/finanzas/movimientos/' + id, { method: 'DELETE' });
+    await loadFinanzas();
+  } catch (e) { alert('No se pudo eliminar: ' + e.message); }
 }
 
 // ── Formulario alta/edición ──
