@@ -911,10 +911,35 @@
     <div class="kpi-grid" id="plan-timeline" style="margin-top:12px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))"></div>
 
     <div class="card" id="plan-hechos-card" style="display:none">
-      <div class="card-title">Completados ✓</div>
+      <div class="card-title">Completados ✓<span id="plan-hechos-total" style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"></span></div>
       <div id="plan-hechos"></div>
     </div>
   </main>
+</div>
+
+<!-- Modal: vincular un ítem del plan con el gasto REAL ya cargado en Movimientos -->
+<div id="plan-link-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:800;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:780px;width:100%;padding:24px;max-height:88vh;display:flex;flex-direction:column">
+    <h3 style="margin-bottom:4px">🔗 Vincular con un gasto real</h3>
+    <p id="plan-link-sub" style="font-size:12px;color:var(--text-muted);margin-bottom:14px"></p>
+    <div id="plan-link-actual" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:11px 13px;margin-bottom:14px;font-size:12px"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <input id="plan-link-q" placeholder="Buscar por descripción, proveedor o monto…" oninput="renderPlanLinkLista()"
+        style="flex:1;min-width:220px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:9px 11px;border-radius:8px;font-size:13px;font-family:inherit;outline:none">
+      <input id="plan-link-fila" type="number" min="2" placeholder="N° de fila" oninput="renderPlanLinkLista()"
+        title="Si ya sabés la fila exacta de la hoja Movimientos (ej: 802), escribila acá"
+        style="width:120px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:9px 11px;border-radius:8px;font-size:13px;font-family:inherit;outline:none">
+    </div>
+    <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);cursor:pointer;margin-bottom:10px">
+      <input type="checkbox" id="plan-link-solo-extra" checked onchange="renderPlanLinkLista()" style="accent-color:var(--accent)">
+      Mostrar sólo extraordinarios / equipamiento (al buscar o filtrar por fila se ignora)
+    </label>
+    <div id="plan-link-lista" style="overflow-y:auto;flex:1;min-height:120px;border:1px solid var(--border);border-radius:10px"></div>
+    <div id="plan-link-error" style="color:var(--red);font-size:12px;margin-top:10px;text-align:center"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closePlanLinkModal()">Cerrar</button>
+    </div>
+  </div>
 </div>
 
 <!-- CALCULADORA sub-tab -->
@@ -3919,12 +3944,13 @@ function renderPlanBacklog() {
         </td>
         <td><span style="font-weight:600">${escapeHtml(it.nombre)}</span>${it.notas ? `<div class="td-desc">${escapeHtml(it.notas)}</div>` : ''}</td>
         <td style="color:var(--text-muted);font-size:12px">${escapeHtml(it.categoria) || '—'}</td>
-        <td class="td-right"><span class="td-monto" style="color:var(--text)">${fmt(it.costoEstimado)}</span></td>
+        <td class="td-right"><span class="td-monto" style="color:var(--text);cursor:pointer;border-bottom:1px dashed var(--text-muted)" title="Click para editar el costo estimado" onclick="planEditarCostoInline(this,'${it.id}')">${fmt(it.costoEstimado)}</span></td>
         <td style="white-space:nowrap">
           <select onchange="planAsignarMes('${it.id}', this.value)" style="font-size:12px;padding:5px 8px">${opcionesMes}</select>
         </td>
         <td style="white-space:nowrap;text-align:right">
           <button class="btn" style="padding:4px 9px;font-size:12px" title="Editar" onclick="planEditarItem('${it.id}')">✏️</button>
+          <button class="btn" style="padding:4px 9px;font-size:12px" title="Vincular con un gasto real de Movimientos" onclick="openPlanLinkModal('${it.id}')">🔗</button>
           <button class="btn" style="padding:4px 9px;font-size:12px" title="Marcar hecho" onclick="planMarcarHecho('${it.id}')">✓</button>
           <button class="btn" style="padding:4px 9px;font-size:12px" title="Eliminar" onclick="planEliminar('${it.id}')">🗑</button>
         </td>
@@ -3957,6 +3983,7 @@ function renderPlanTimeline() {
           <span style="display:flex;gap:6px;align-items:center;white-space:nowrap">
             <span style="font-size:13px;color:var(--text-muted)">${fmt(i.costoEstimado)}</span>
             <button class="btn" style="padding:2px 7px;font-size:11px" title="Volver al backlog" onclick="planAsignarMes('${i.id}','')">↩</button>
+            <button class="btn" style="padding:2px 7px;font-size:11px" title="Vincular con un gasto real de Movimientos" onclick="openPlanLinkModal('${i.id}')">🔗</button>
             <button class="btn" style="padding:2px 7px;font-size:11px" title="Marcar hecho" onclick="planMarcarHecho('${i.id}')">✓</button>
           </span>
         </div>`).join('')
@@ -3985,22 +4012,46 @@ function renderPlanHechos() {
   const card = document.getElementById('plan-hechos-card');
   if (!hechos.length) { card.style.display = 'none'; return; }
   card.style.display = '';
-  document.getElementById('plan-hechos').innerHTML = hechos.map(i =>
-    `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(46,46,62,0.4)">
-      <span style="font-size:13px">✓ ${escapeHtml(i.nombre)}${i.mesObjetivo ? ` <span style="color:var(--text-muted);font-size:11px">· ${planMesLabel(i.mesObjetivo)}</span>` : ''}</span>
+  // Total ejecutado: importe REAL de los que están vinculados a Movimientos,
+  // estimado de los demás (todavía sin fila real que los respalde).
+  const real = hechos.filter(i => i.movimientoFila).reduce((s, i) => s + (i.costoReal || 0), 0);
+  const nVinc = hechos.filter(i => i.movimientoFila).length;
+  const nota = document.getElementById('plan-hechos-total');
+  if (nota) nota.textContent = nVinc
+    ? ` · ejecutado real ${fmt(Math.round(real))} en ${nVinc} de ${hechos.length} ítem${hechos.length !== 1 ? 's' : ''}`
+    : ' · ninguno vinculado todavía a un gasto real';
+  document.getElementById('plan-hechos').innerHTML = hechos.map(i => {
+    const vinc = !!i.movimientoFila;
+    const desvio = vinc && i.costoEstimado ? Math.round(i.costoReal - i.costoEstimado) : 0;
+    const desvioTxt = vinc && i.costoEstimado
+      ? ` <span style="color:${desvio > 0 ? 'var(--red)' : 'var(--green)'}">${desvio > 0 ? '+' : ''}${fmt(desvio)} vs estimado ${fmt(i.costoEstimado)}</span>`
+      : '';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(46,46,62,0.4)">
+      <span style="font-size:13px;min-width:0">✓ ${escapeHtml(i.nombre)}${i.mesObjetivo ? ` <span style="color:var(--text-muted);font-size:11px">· ${planMesLabel(i.mesObjetivo)}</span>` : ''}
+        ${vinc ? `<div class="td-desc" style="font-size:11px">🔗 Movimientos fila ${i.movimientoFila}${i.movimientoRef ? ' · ' + escapeHtml(i.movimientoRef) : ''}${desvioTxt}</div>` : ''}
+      </span>
       <span style="display:flex;gap:8px;align-items:center;white-space:nowrap">
-        <span style="color:var(--text-muted);font-size:12px">${fmt(i.costoEstimado)}</span>
+        <span style="color:${vinc ? 'var(--green)' : 'var(--text-muted)'};font-size:12px" title="${vinc ? 'Costo real registrado en Movimientos' : 'Costo estimado (sin gasto real vinculado)'}">${fmt(vinc ? i.costoReal : i.costoEstimado)}${vinc ? '' : ' est.'}</span>
+        <button class="btn" style="padding:2px 8px;font-size:11px" title="${vinc ? 'Cambiar o quitar el vínculo' : 'Vincular con un gasto real de Movimientos'}" onclick="openPlanLinkModal('${i.id}')">🔗</button>
         <button class="btn" style="padding:2px 8px;font-size:11px" title="Reabrir" onclick="planReabrir('${i.id}')">↺</button>
         <button class="btn" style="padding:2px 8px;font-size:11px" title="Eliminar" onclick="planEliminar('${i.id}')">🗑</button>
       </span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 // ── Acciones (todas hacen upsert del ítem completo y recargan) ──
 function planItemById(id) { return state.plan.items.find(i => i.id === id); }
 
+// Los campos del vínculo se omiten en los upserts comunes: si viajan, el server
+// re-resuelve el vínculo y vuelve a forzar estado "hecho" y el mes del gasto real
+// (pisando justo lo que se quería cambiar, ej. reabrir o repriorizar).
+function planSinVinculo(item) {
+  const { movimientoFila, costoReal, movimientoRef, ...rest } = item;
+  return rest;
+}
 async function planGuardar(item) {
-  await api('/api/plan/items', { method: 'POST', body: JSON.stringify(item) });
+  await api('/api/plan/items', { method: 'POST', body: JSON.stringify(planSinVinculo(item)) });
   await loadPlan();
 }
 async function planAsignarMes(id, iso) {
@@ -4020,6 +4071,132 @@ async function planEliminar(id) {
   await api('/api/plan/items/' + id, { method: 'DELETE' });
   await loadPlan();
 }
+// ── Edición rápida del costo estimado (click sobre el monto en el backlog) ──
+function planEditarCostoInline(el, id) {
+  const it = planItemById(id); if (!it) return;
+  const td = el.parentElement;
+  td.innerHTML = `<input type="number" min="0" value="${it.costoEstimado || 0}"
+    style="width:130px;text-align:right;background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:5px 7px;border-radius:6px;font-size:13px;font-family:inherit;outline:none"
+    onkeydown="planCostoKey(event)" onblur="planGuardarCostoInline(this,'${id}')">`;
+  const inp = td.querySelector('input');
+  inp.focus(); inp.select();
+}
+function planCostoKey(ev) {
+  if (ev.key === 'Enter') ev.target.blur();
+  else if (ev.key === 'Escape') { ev.target.dataset.cancel = '1'; renderPlanBacklog(); }
+}
+async function planGuardarCostoInline(inp, id) {
+  if (inp.dataset.cancel) return;
+  const it = planItemById(id);
+  const v = Number(inp.value);
+  if (!it || inp.value === '' || !(v >= 0) || Math.round(v) === Math.round(it.costoEstimado)) {
+    renderPlanBacklog();
+    return;
+  }
+  inp.disabled = true;
+  try { await planGuardar({ ...it, costoEstimado: v }); }
+  catch (e) { alert('No se pudo guardar el costo: ' + e.message); renderPlanBacklog(); }
+}
+
+// ── Vínculo con el gasto real ya registrado en Movimientos ──
+// El ítem del plan es una ESTIMACIÓN; cuando la compra se hace de verdad ya
+// existe una fila en Movimientos (ej: el bicicletero en la fila 802). Vincular
+// las dos deja el plan mostrando plata real en vez de la estimación, y evita
+// que el gasto se vuelva a proyectar (ya está contabilizado).
+let planLinkItemId = null;
+let planLinkMovs = null;   // cache de los gastos de Movimientos (se pide una vez)
+
+async function openPlanLinkModal(id) {
+  const it = planItemById(id); if (!it) return;
+  planLinkItemId = id;
+  document.getElementById('plan-link-overlay').style.display = 'flex';
+  document.getElementById('plan-link-error').textContent = '';
+  document.getElementById('plan-link-sub').textContent =
+    `${it.nombre} · costo estimado ${fmt(it.costoEstimado)}. Elegí la fila de Movimientos donde quedó registrado el gasto real.`;
+  const actual = document.getElementById('plan-link-actual');
+  if (it.movimientoFila) {
+    actual.style.display = '';
+    actual.innerHTML = `Vinculado hoy a <strong>Movimientos fila ${it.movimientoFila}</strong> · ${escapeHtml(it.movimientoRef || '')}
+      <span style="color:var(--green);font-weight:600"> ${fmt(it.costoReal)}</span>
+      <button class="btn" style="padding:2px 8px;font-size:11px;margin-left:10px" onclick="planDesvincular()">Desvincular</button>`;
+  } else {
+    actual.style.display = 'none';
+    actual.innerHTML = '';
+  }
+  document.getElementById('plan-link-q').value = it.nombre || '';
+  document.getElementById('plan-link-fila').value = '';
+  document.getElementById('plan-link-solo-extra').checked = true;
+  const lista = document.getElementById('plan-link-lista');
+  lista.innerHTML = '<div class="loading" style="padding:20px"><div class="spinner"></div> Cargando movimientos...</div>';
+  try {
+    if (!planLinkMovs) planLinkMovs = (await api('/api/plan/movimientos')).data || [];
+    renderPlanLinkLista();
+  } catch (e) {
+    lista.innerHTML = `<div style="color:var(--red);padding:16px;font-size:13px">Error cargando movimientos: ${e.message}</div>`;
+  }
+}
+function closePlanLinkModal() {
+  document.getElementById('plan-link-overlay').style.display = 'none';
+  planLinkItemId = null;
+}
+const PLAN_LINK_CAT_RE = /equipamiento|mobiliario|obra|inversi|extraordinar/i;
+function renderPlanLinkLista() {
+  const lista = document.getElementById('plan-link-lista');
+  if (!planLinkMovs) return;
+  const q = document.getElementById('plan-link-q').value.trim().toLowerCase();
+  const fila = Number(document.getElementById('plan-link-fila').value) || 0;
+  const soloExtra = document.getElementById('plan-link-solo-extra').checked;
+  let movs;
+  if (fila) {
+    movs = planLinkMovs.filter(m => m.fila === fila);
+  } else if (q) {
+    // Al buscar no se aplica el filtro de extraordinarios: el gasto puede estar
+    // cargado en cualquier categoría.
+    movs = planLinkMovs.filter(m =>
+      `${m.descripcion} ${m.proveedor} ${m.categoria} ${m.fecha} ${m.monto}`.toLowerCase().includes(q));
+  } else {
+    movs = soloExtra
+      ? planLinkMovs.filter(m => m.esExtraordinario || PLAN_LINK_CAT_RE.test(m.categoria || ''))
+      : planLinkMovs;
+  }
+  const total = movs.length;
+  movs = movs.slice(0, 60);
+  if (!total) {
+    lista.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:16px">Ningún gasto coincide. Probá con otra búsqueda o escribí el número de fila exacto.</div>';
+    return;
+  }
+  lista.innerHTML = movs.map(m => `
+    <div onclick="planVincular(${m.fila})" style="display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer"
+         onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
+      <div style="min-width:0">
+        <div style="font-size:13px;font-weight:600">${escapeHtml(m.descripcion || m.proveedor || '(sin descripción)')}</div>
+        <div style="font-size:11px;color:var(--text-muted)">fila ${m.fila} · ${escapeHtml(m.fecha || '')} · ${escapeHtml(m.proveedor || '—')} · ${escapeHtml(m.categoria || '—')}${m.esExtraordinario ? ' · extraordinario' : ''}${m.esCompraEnCuotas ? ' · en cuotas' : ''}</div>
+      </div>
+      <div style="white-space:nowrap;font-weight:700;font-size:13px">${fmt(m.monto)}</div>
+    </div>`).join('') +
+    (total > movs.length ? `<div style="font-size:11px;color:var(--text-muted);padding:10px 12px">Mostrando 60 de ${total} — afiná la búsqueda</div>` : '');
+}
+async function planVincular(fila) {
+  const it = planItemById(planLinkItemId); if (!it) return;
+  const err = document.getElementById('plan-link-error');
+  err.textContent = '';
+  try {
+    await api('/api/plan/items', { method: 'POST', body: JSON.stringify({ ...it, movimientoFila: fila }) });
+    closePlanLinkModal();
+    await loadPlan();
+  } catch (e) { err.textContent = 'Error: ' + e.message; }
+}
+async function planDesvincular() {
+  const it = planItemById(planLinkItemId); if (!it) return;
+  const err = document.getElementById('plan-link-error');
+  err.textContent = '';
+  try {
+    await api('/api/plan/items', { method: 'POST', body: JSON.stringify({ ...it, movimientoFila: 0 }) });
+    closePlanLinkModal();
+    await loadPlan();
+  } catch (e) { err.textContent = 'Error: ' + e.message; }
+}
+
 async function planMoverPrioridad(id, dir) {
   const backlog = state.plan.items
     .filter(i => !i.mesObjetivo && i.estado !== 'hecho')
@@ -4031,8 +4208,8 @@ async function planMoverPrioridad(id, dir) {
   backlog.forEach((it, i) => { it.prioridad = i + 1; });
   const a = backlog[idx], b = backlog[swapIdx];
   const tmp = a.prioridad; a.prioridad = b.prioridad; b.prioridad = tmp;
-  await api('/api/plan/items', { method: 'POST', body: JSON.stringify({ ...a }) });
-  await api('/api/plan/items', { method: 'POST', body: JSON.stringify({ ...b }) });
+  await api('/api/plan/items', { method: 'POST', body: JSON.stringify(planSinVinculo({ ...a })) });
+  await api('/api/plan/items', { method: 'POST', body: JSON.stringify(planSinVinculo({ ...b })) });
   await loadPlan();
 }
 

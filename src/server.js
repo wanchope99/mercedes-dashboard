@@ -1143,13 +1143,68 @@ app.get('/api/plan', authMiddleware, adminOnly, async (req, res) => {
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-// Alta o edición (upsert por id): también se usa para agendar mes, repriorizar y marcar hecho.
+// Gastos reales de Movimientos candidatos a vincularse con un ítem del plan.
+// Se excluyen las filas de cuota (n/m): la fila madre ya lleva el importe total.
+app.get('/api/plan/movimientos', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const movs = await getMovimientos();
+    const out = movs
+      .filter(m => m.tipo === 'Gasto' && !m.esCuota && m.salidaTotal > 0)
+      .map(m => ({
+        fila: m.rowIndex,
+        fecha: m.fechaStr,
+        ts: m.fecha ? m.fecha.getTime() : 0,
+        mesISO: m.fecha ? `${m.fecha.getFullYear()}-${String(m.fecha.getMonth() + 1).padStart(2, '0')}` : '',
+        proveedor: m.proveedor,
+        descripcion: m.descripcion,
+        categoria: m.categoria,
+        medioPago: m.medioPago,
+        monto: Math.round(m.salidaTotal),
+        esExtraordinario: m.esExtraordinario,
+        esCompraEnCuotas: m.esCompraEnCuotas,
+      }))
+      .sort((a, b) => b.ts - a.ts || b.fila - a.fila);
+    res.json({ ok: true, data: out });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Resuelve el vínculo con Movimientos de un ítem del plan.
+// fila > 0  → snapshot del gasto real (importe, referencia legible) + estado hecho
+//             y mes objetivo = mes real del gasto.
+// fila == 0 → desvincula (el ítem vuelve a valer por su costo estimado).
+async function resolverVinculoPlan(body) {
+  if (body.movimientoFila === undefined) return body;
+  const fila = Math.round(Number(body.movimientoFila)) || 0;
+  if (!fila) return { ...body, movimientoFila: 0, costoReal: 0, movimientoRef: '' };
+  // Un gasto real no puede respaldar dos ítems del plan: sería contarlo dos veces.
+  const { items } = await plan.listPlan();
+  const ocupado = items.find(i => i.movimientoFila === fila && i.id !== body.id);
+  if (ocupado) throw new Error(`La fila ${fila} ya está vinculada al ítem "${ocupado.nombre}"`);
+  const movs = await getMovimientos();
+  const m = movs.find(x => x.rowIndex === fila);
+  if (!m) throw new Error(`La fila ${fila} de Movimientos no existe o no es un movimiento válido`);
+  if (m.tipo !== 'Gasto' || m.salidaTotal <= 0) {
+    throw new Error(`La fila ${fila} no es un gasto (tipo "${m.tipo || '—'}", sin salida)`);
+  }
+  const mesISO = m.fecha ? `${m.fecha.getFullYear()}-${String(m.fecha.getMonth() + 1).padStart(2, '0')}` : '';
+  return {
+    ...body,
+    movimientoFila: fila,
+    costoReal: Math.round(m.salidaTotal),
+    movimientoRef: [m.fechaStr, m.proveedor, m.descripcion].filter(Boolean).join(' · ').slice(0, 180),
+    estado: 'hecho',                                   // vinculado = ejecutado
+    mesObjetivo: mesISO || body.mesObjetivo || '',     // el mes real manda
+  };
+}
+
+// Alta o edición (upsert por id): también se usa para agendar mes, repriorizar,
+// marcar hecho y vincular/desvincular con una fila real de Movimientos.
 app.post('/api/plan/items', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { nombre, costoEstimado } = req.body;
     if (!nombre) return res.status(400).json({ ok: false, error: 'El nombre es obligatorio' });
     if (costoEstimado == null || Number(costoEstimado) < 0) return res.status(400).json({ ok: false, error: 'Costo estimado inválido' });
-    const guardado = await plan.guardarItem(req.body);
+    const guardado = await plan.guardarItem(await resolverVinculoPlan(req.body));
     res.json({ ok: true, data: guardado });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });

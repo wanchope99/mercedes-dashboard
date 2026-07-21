@@ -12,7 +12,15 @@
 //   Hoja "Plan Inversiones" — un ítem por fila:
 //     A ID | B Nombre | C CostoEstimado | D Categoria | E Prioridad |
 //     F MesObjetivo (ISO "YYYY-MM", vacío = backlog) | G Estado
-//     (backlog|planificado|hecho) | H Notas | I Actualizado
+//     (backlog|planificado|hecho) | H Notas | I Actualizado |
+//     J MovimientoFila | K CostoReal | L MovimientoRef
+//
+//   J/K/L = vínculo con el gasto REAL ya registrado en la hoja Movimientos:
+//   MovimientoFila es el número de fila (1-based) de esa hoja, CostoReal el
+//   importe efectivamente pagado y MovimientoRef un snapshot legible
+//   ("fecha · proveedor · descripción") que sirve para detectar si la fila se
+//   movió. El vínculo lo resuelve el endpoint POST /api/plan/items (server.js),
+//   que es quien tiene acceso a Movimientos; acá sólo se persiste.
 //
 //   Hoja "Plan Config" — clave/valor:
 //     A Clave | B Valor
@@ -40,7 +48,7 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const HOJA = process.env.PLAN_SHEET || 'Plan Inversiones';
 const HOJA_CONFIG = process.env.PLAN_CONFIG_SHEET || 'Plan Config';
 
-const HEADER = ['ID', 'Nombre', 'CostoEstimado', 'Categoria', 'Prioridad', 'MesObjetivo', 'Estado', 'Notas', 'Actualizado'];
+const HEADER = ['ID', 'Nombre', 'CostoEstimado', 'Categoria', 'Prioridad', 'MesObjetivo', 'Estado', 'Notas', 'Actualizado', 'MovimientoFila', 'CostoReal', 'MovimientoRef'];
 const HEADER_CONFIG = ['Clave', 'Valor'];
 
 const DEFAULT_CONFIG = {
@@ -82,10 +90,10 @@ function _num(v) { return Number(String(v == null ? '' : v).replace(/[^0-9.-]/g,
 async function _leerItems(api) {
   let rows = [];
   try {
-    const res = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${HOJA}!A:I` });
+    const res = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${HOJA}!A:L` });
     rows = res.data.values || [];
   } catch (e) {
-    await _ensureHoja(api, HOJA, HEADER, 'A1:I1');
+    await _ensureHoja(api, HOJA, HEADER, 'A1:L1');
     return [];
   }
   const items = [];
@@ -102,6 +110,9 @@ async function _leerItems(api) {
       estado: (r[6] || 'backlog').toString().trim(),
       notas: (r[7] || '').toString().trim(),
       actualizado: (r[8] || '').toString().trim(),
+      movimientoFila: Math.round(_num(r[9])) || 0,   // 0 = sin vincular
+      costoReal: _num(r[10]),
+      movimientoRef: (r[11] || '').toString().trim(),
       rowIndex: i + 1,
     });
   }
@@ -165,11 +176,21 @@ async function guardarItem(item) {
   if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
   if (!item || !item.nombre) throw new Error('Falta nombre');
   const api = _sheets();
-  await _ensureHoja(api, HOJA, HEADER, 'A1:I1');
+  await _ensureHoja(api, HOJA, HEADER, 'A1:L1');
   const items = await _leerItems(api);
 
   const id = item.id || `p${Date.now()}`;
   const existing = item.id ? items.find(x => x.id === item.id) : null;
+  // Campos del vínculo con Movimientos: sólo se tocan si vienen explícitos
+  // (undefined = "no cambiar"), para que un upsert cualquiera no lo borre.
+  const linkTocado = item.movimientoFila !== undefined;
+  const fila = linkTocado ? (Math.round(_num(item.movimientoFila)) || 0) : (existing ? existing.movimientoFila : 0);
+  const costoReal = linkTocado
+    ? (fila ? Math.round(_num(item.costoReal)) : 0)
+    : (existing ? existing.costoReal : 0);
+  const movimientoRef = linkTocado
+    ? (fila ? (item.movimientoRef || '').toString().trim() : '')
+    : (existing ? existing.movimientoRef : '');
   const guardado = {
     id,
     nombre: item.nombre.toString().trim(),
@@ -179,26 +200,36 @@ async function guardarItem(item) {
     mesObjetivo: (item.mesObjetivo || '').toString().trim(),
     estado: (item.estado || (existing && existing.estado) || 'backlog').toString().trim(),
     notas: (item.notas != null ? item.notas : (existing ? existing.notas : '')).toString().trim(),
+    movimientoFila: fila,
+    costoReal,
+    movimientoRef,
   };
-  const fila = [
+  const filaValores = [
     guardado.id, guardado.nombre, guardado.costoEstimado, guardado.categoria,
     guardado.prioridad, guardado.mesObjetivo, guardado.estado, guardado.notas,
     new Date().toISOString(),
+    guardado.movimientoFila || '', guardado.costoReal || '', guardado.movimientoRef,
   ];
 
+  // Reescribimos siempre el encabezado A1:L1: las hojas creadas antes de existir
+  // las columnas del vínculo (J/K/L) se autocorrigen en el próximo guardado.
+  const data = [{ range: `${HOJA}!A1:L1`, values: [HEADER] }];
   if (existing) {
-    await api.spreadsheets.values.update({
+    data.push({ range: `${HOJA}!A${existing.rowIndex}:L${existing.rowIndex}`, values: [filaValores] });
+    await api.spreadsheets.values.batchUpdate({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${HOJA}!A${existing.rowIndex}:I${existing.rowIndex}`,
-      valueInputOption: 'RAW',
-      requestBody: { values: [fila] },
+      requestBody: { valueInputOption: 'RAW', data },
     });
   } else {
+    await api.spreadsheets.values.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { valueInputOption: 'RAW', data },
+    });
     await api.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${HOJA}!A:I`,
+      range: `${HOJA}!A:L`,
       valueInputOption: 'RAW',
-      requestBody: { values: [fila] },
+      requestBody: { values: [filaValores] },
     });
   }
   cache.del(CACHE_KEY);
@@ -262,7 +293,9 @@ async function planGastosProgramados() {
   const { items } = await _load();
   const out = [];
   for (const it of items) {
-    if (!it.mesObjetivo || it.estado === 'hecho') continue;
+    // Vinculado a un Movimiento real = ya está gastado y contabilizado, no se
+    // proyecta de nuevo (aunque alguien lo haya reabierto por error).
+    if (!it.mesObjetivo || it.estado === 'hecho' || it.movimientoFila) continue;
     const m = /^(\d{4})-(\d{2})$/.exec(it.mesObjetivo);
     if (!m) continue;
     const anio = Number(m[1]);
