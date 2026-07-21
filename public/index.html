@@ -482,6 +482,20 @@
     .prov-duda label { color:var(--text-muted); min-width:90px; }
     .prov-duda select, .prov-duda input { background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:6px 10px; border-radius:6px; font-size:12px; font-family:inherit; flex:1; min-width:140px; }
     .prov-duda .sug { font-size:10px; color:#c9a84c; }
+
+    /* Switch: checkbox con pinta de interruptor (filtros de las tablas) */
+    .switch { display:inline-flex; align-items:center; gap:8px; cursor:pointer; user-select:none; vertical-align:middle; }
+    .switch input { position:absolute; opacity:0; width:0; height:0; }
+    .switch .switch-track { position:relative; flex:0 0 auto; width:36px; height:20px; border-radius:999px;
+      background:var(--surface2); border:1px solid var(--border); transition:background .18s, border-color .18s; }
+    .switch .switch-track::after { content:''; position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%;
+      background:var(--text-muted); transition:transform .18s, background .18s; }
+    .switch input:checked + .switch-track { background:var(--orange-dim); border-color:var(--orange); }
+    .switch input:checked + .switch-track::after { transform:translateX(16px); background:var(--orange); }
+    .switch input:focus-visible + .switch-track { box-shadow:0 0 0 2px var(--orange-dim); }
+    .switch .switch-label { font-size:11px; color:var(--text-muted); text-transform:none; letter-spacing:0; transition:color .18s; }
+    .switch input:checked ~ .switch-label { color:var(--orange); font-weight:600; }
+    .switch:hover .switch-track { border-color:var(--orange); }
   </style>
 </head>
 <body>
@@ -775,14 +789,16 @@
 </div>
 
 <!-- ═══ PROYECCIONES TAB ═══ -->
-<!-- ═══ GESTIÓN DE VINOS (subtab propia) ═══ -->
+<!-- ═══ GESTIÓN DE BEBIDAS (subtab propia; ids internos siguen siendo "vinos") ═══ -->
 <div id="tab-vinos" class="tab-panel">
   <main style="padding-top:24px">
     <div class="card" id="vinos-card">
-      <div class="card-title">🍷 Gestión de vinos
+      <div class="card-title">🥂 Gestión de bebidas
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· stock, plata inmovilizada y rotación · datos de Fudo</span>
         <span style="float:right">
-          <label style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0;margin-right:8px"><input type="checkbox" id="vinos-solo-vino" onchange="loadVinos()"> solo vino</label>
+          <label class="switch" style="margin-right:12px" title="Filtrar el listado para ver únicamente los vinos">
+            <input type="checkbox" id="vinos-solo-vino" onchange="loadVinos()"><span class="switch-track"></span><span class="switch-label">🍷 Solo vinos</span>
+          </label>
           <button class="btn" style="font-size:12px;padding:5px 12px" onclick="spinRefresh(this, loadVinos)"><span class="refresh-icon">↻</span> Actualizar</button>
         </span>
       </div>
@@ -1919,7 +1935,7 @@ const TAB_GROUPS = {
   stocks: { subs: [
     { id: 'proveedores',   label: '🛒 Proveedores' },
     { id: 'comportamiento', label: '📈 Comportamiento de Stocks' },
-    { id: 'vinos', label: '🍷 Gestión de Vinos' },
+    { id: 'vinos', label: '🥂 Gestión de Bebidas' },
   ] },
 };
 
@@ -5325,7 +5341,7 @@ const STK_COLORS = { compra: '#4caf82', venta: '#e08a5c' };
 let _stkInit = false;
 let _stkProductos = [], _stkCategorias = [];
 
-// ─── Gestión de vinos: inventario + rotación (datos de Fudo) ──────────────────
+// ─── Gestión de bebidas: inventario + rotación (datos de Fudo) ────────────────
 let _vinosData = null;
 
 // Modal de detalle al clickear un KPI. tipo: inmovilizado | valor | quiebre | agotarse
@@ -5336,7 +5352,7 @@ function openVinosModal(tipo) {
   let titulo, filtrados, cols, totalLinea = '';
 
   if (tipo === 'inmovilizado') {
-    titulo = '💰 Plata inmovilizada en vinos';
+    titulo = '💰 Plata inmovilizada en bebidas';
     filtrados = items.filter(i => (i.valorCosto || 0) > 0).sort((a,b) => (b.valorCosto||0)-(a.valorCosto||0));
     cols = ['stock','costo','inmovilizado','peso'];
     totalLinea = 'Total inmovilizado: <b>'+fmt(t.plataInmovilizada)+'</b> en '+t.stockTotal+' botellas. Es la plata que tenés "parada" en stock al costo de compra.';
@@ -5346,12 +5362,12 @@ function openVinosModal(tipo) {
     cols = ['stock','precio','valorVenta','margenLinea'];
     totalLinea = 'Si vendieras TODO el stock al precio actual: <b>'+fmt(t.valorVentaStock)+'</b>, con un margen potencial de <b>'+fmt(t.margenPotencial)+'</b> sobre el costo.';
   } else if (tipo === 'quiebre') {
-    titulo = '🔴 Vinos en quiebre (reponer)';
+    titulo = '🔴 Bebidas en quiebre (reponer)';
     filtrados = items.filter(i => i.alerta === 'quiebre');
     cols = ['stock','minStock','vtaSem','precio'];
-    totalLinea = filtrados.length ? '<b>'+filtrados.length+'</b> vinos sin stock o por debajo del mínimo de Fudo. Estos son los que conviene comprar ya.' : 'No hay vinos en quiebre. 👌';
+    totalLinea = filtrados.length ? '<b>'+filtrados.length+'</b> bebidas sin stock o por debajo del mínimo de Fudo. Estos son los que conviene comprar ya.' : 'No hay bebidas en quiebre. 👌';
   } else { // agotarse
-    titulo = '🟠 Vinos por agotarse y sobrestock';
+    titulo = '🟠 Bebidas por agotarse y sobrestock';
     filtrados = items.filter(i => i.alerta === 'pronto' || i.alerta === 'sobrestock');
     cols = ['stock','cobertura','vtaSem','estado'];
     totalLinea = '🟠 se agotan en ≤7 días (reponer pronto) · 🔵 sobrestock >60 días (plata parada, no comprar).';
@@ -5380,9 +5396,9 @@ function openVinosModal(tipo) {
 
   let html = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.6">'+totalLinea+'</div>';
   if (!filtrados.length) {
-    html += '<div style="color:var(--text-muted);padding:10px">Sin vinos en esta categoría.</div>';
+    html += '<div style="color:var(--text-muted);padding:10px">Sin bebidas en esta categoría.</div>';
   } else {
-    html += '<table class="prov-resumen-table" style="width:100%;font-size:13px"><thead><tr><th style="text-align:left">Vino</th>'
+    html += '<table class="prov-resumen-table" style="width:100%;font-size:13px"><thead><tr><th style="text-align:left">Bebida</th>'
       + cols.map(c => '<th style="text-align:'+(c==='estado'?'left':'right')+'">'+th[c]+'</th>').join('') + '</tr></thead><tbody>'
       + filtrados.map(it => '<tr><td style="text-align:left;font-weight:600">'+escapeHtml(it.nombre)+' <span style="color:var(--text-muted);font-size:11px">'+escapeHtml(it.categoria)+'</span></td>'+cols.map(c=>celda(it,c)).join('')+'</tr>').join('')
       + '</tbody></table>';
@@ -5411,7 +5427,7 @@ async function loadVinos() {
     + '<div class="kpi-card orange" style="'+ck+'" onclick="openVinosModal(\'agotarse\')" title="Ver detalle"><div class="kpi-label">Por agotarse ›</div><div class="kpi-value">'+t.porAgotarse+'</div><div class="kpi-sub">≤ 7 días · '+t.sobrestock+' con sobrestock</div></div>';
 
   head.innerHTML = '<tr>'
-    + '<th style="text-align:left">Vino</th><th style="text-align:left">Categoría</th>'
+    + '<th style="text-align:left">Bebida</th><th style="text-align:left">Categoría</th>'
     + '<th style="text-align:right">Stock</th>'
     + '<th style="text-align:right">Vta/sem</th>'
     + '<th style="text-align:right">Días cob.</th>'
