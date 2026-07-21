@@ -3862,7 +3862,13 @@ function renderRoi() {
       kpis + barra + extras + tabla + cfg +
     '</div>';
 
-  if (nota) nota.textContent = ' · fondo extraordinarias disponible: ' + fmt(r.fondoExtraordinariasARS) + ' (' + usd(r.fondoExtraordinariasUSD) + ')';
+  if (nota) {
+    const ejec = planEjecutadoARS();
+    nota.textContent = ejec > 0
+      ? ' · fondo extraordinarias: ' + fmt(r.fondoExtraordinariasARS) + ' apartado − ' + fmt(Math.round(ejec)) +
+        ' ya invertido = ' + fmt(Math.round(r.fondoExtraordinariasARS - ejec)) + ' disponible'
+      : ' · fondo extraordinarias disponible: ' + fmt(r.fondoExtraordinariasARS) + ' (' + usd(r.fondoExtraordinariasUSD) + ')';
+  }
 }
 
 function toggleRoiParams() {
@@ -3893,9 +3899,14 @@ function renderPlanKpis() {
   const usd = v => 'US$' + Math.round(v || 0).toLocaleString('es-AR');
 
   // Card 1: presupuesto extraordinario disponible = lo asignado a extraordinarias
-  // en los cierres, acumulado (último mes + lo que había disponible antes).
-  const fondoARS = roi.fondoExtraordinariasARS || 0;
-  const fondoUSD = roi.fondoExtraordinariasUSD || 0;
+  // en los cierres, acumulado (último mes + lo que había disponible antes),
+  // menos lo que ya se invirtió de verdad (ítems vinculados a Movimientos).
+  const fondoBruto = roi.fondoExtraordinariasARS || 0;
+  const ejecutado = planEjecutadoARS();
+  const fondoARS = fondoBruto - ejecutado;
+  const fondoUSD = fondoBruto > 0
+    ? (roi.fondoExtraordinariasUSD || 0) * (fondoARS / fondoBruto)
+    : (roi.fondoExtraordinariasUSD || 0);
 
   // Ritmo de fondeo: promedio mensual asignado a extraordinarias en los cierres.
   const porMes = roi.porMes || [];
@@ -3918,9 +3929,28 @@ function renderPlanKpis() {
     `<div class="kpi-card ${color || ''}"><div class="kpi-label">${label}</div><div class="kpi-value">${valor}</div><div class="kpi-sub">${sub}</div></div>`;
   const nPend = pendientes.length;
   document.getElementById('plan-kpis').innerHTML =
-    kpi('Presupuesto extraordinario mes en curso', fmt(fondoARS), usd(fondoUSD) + ' · disponible acumulado', 'green') +
+    kpi('Presupuesto extraordinario mes en curso', fmt(Math.round(fondoARS)),
+        usd(fondoUSD) + (ejecutado > 0 ? ' · neto de ' + fmt(Math.round(ejecutado)) + ' ya invertido' : ' · disponible acumulado'), 'green') +
     kpi('Backlog extraordinario', fmt(totalPend), `${nPend} ítem${nPend !== 1 ? 's' : ''} planificado${nPend !== 1 ? 's' : ''}`, 'blue') +
     kpi('Meses restantes', mesesVal, mesesSub, mesesColor);
+}
+
+// ── Fondo de extraordinarias: bruto vs. disponible ──
+// El fondo que viene de los cierres (roi.fondoExtraordinariasARS) es lo APARTADO.
+// Los ítems del plan vinculados a un gasto real ya salieron de ese pozo, así que
+// lo que queda para planificar es el bruto menos lo ejecutado.
+function planEjecutadoARS() {
+  return state.plan.items.reduce((s, i) => s + (i.movimientoFila ? (i.costoReal || 0) : 0), 0);
+}
+function planFondoBrutoARS() {
+  return (state.plan.roi && state.plan.roi.fondoExtraordinariasARS) || 0;
+}
+function planFondoDisponibleARS() {
+  return planFondoBrutoARS() - planEjecutadoARS();
+}
+// Monto con el que cuenta un ítem: el real si está vinculado, si no el estimado.
+function planMontoItem(i) {
+  return i.movimientoFila ? (i.costoReal || 0) : (i.costoEstimado || 0);
 }
 
 function renderPlanBacklog() {
@@ -3964,29 +3994,46 @@ function renderPlanTimeline() {
   // Presupuesto real = fondo extraordinarias acumulado en los cierres. Es un pozo
   // ÚNICO compartido: cada ítem asignado a un mes lo consume, y lo que queda arrastra
   // a los meses siguientes (por eso el "restante" baja mes a mes).
-  const fondoTotal = (state.plan.roi && state.plan.roi.fondoExtraordinariasARS) || 0;
+  // Los ítems ya ejecutados (vinculados a un Movimiento real) ya salieron del
+  // pozo: se descuentan una sola vez acá, y en su mes se muestran como hechos
+  // sin volver a consumir fondo.
+  const fondoTotal = planFondoDisponibleARS();
   let consumido = 0;
   cont.innerHTML = meses.map(iso => {
-    const items = state.plan.items.filter(i => i.mesObjetivo === iso && i.estado !== 'hecho');
+    const delMes = state.plan.items.filter(i => i.mesObjetivo === iso);
+    const items = delMes.filter(i => i.estado !== 'hecho');    // pendientes: consumen fondo
+    const hechos = delMes.filter(i => i.estado === 'hecho');   // ya ejecutados
     const asignado = items.reduce((s, i) => s + (i.costoEstimado || 0), 0);
+    const ejecutadoMes = hechos.reduce((s, i) => s + planMontoItem(i), 0);
     const disponibleAntes = fondoTotal - consumido;   // fondo disponible al entrar al mes
     consumido += asignado;
     const disponibleDespues = fondoTotal - consumido; // remanente que arrastra al mes siguiente
     const over = asignado > disponibleAntes;          // se pasa del fondo disponible
     const proy = (state.plan.proy || []).find(x => { const [y, m] = iso.split('-').map(Number); return x.mes === MESES_PROY[m - 1] && x.anio === y; });
-    // Si el toggle está ON, proy.resultado ya incluye el capex del plan; si está OFF, lo restamos para mostrar el impacto.
+    // Si el toggle está ON, proy.resultado ya incluye el capex del plan; si está OFF, lo restamos
+    // para mostrar el impacto. Sólo lo PENDIENTE: lo ejecutado ya está en los movimientos reales.
     const incluido = state.plan.config.incluirEnProyeccion;
     const resultadoConPlan = proy ? (incluido ? proy.resultado : proy.resultado - asignado) : null;
-    const chips = items.length
-      ? items.map(i => `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:9px 12px;margin-top:8px">
-          <span style="font-size:13px;font-weight:600">${escapeHtml(i.nombre)}</span>
-          <span style="display:flex;gap:6px;align-items:center;white-space:nowrap">
-            <span style="font-size:13px;color:var(--text-muted)">${fmt(i.costoEstimado)}</span>
-            <button class="btn" style="padding:2px 7px;font-size:11px" title="Volver al backlog" onclick="planAsignarMes('${i.id}','')">↩</button>
-            <button class="btn" style="padding:2px 7px;font-size:11px" title="Vincular con un gasto real de Movimientos" onclick="openPlanLinkModal('${i.id}')">🔗</button>
-            <button class="btn" style="padding:2px 7px;font-size:11px" title="Marcar hecho" onclick="planMarcarHecho('${i.id}')">✓</button>
-          </span>
-        </div>`).join('')
+    const chipHecho = i => `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:9px 12px;margin-top:8px"
+        title="${i.movimientoFila ? 'Gasto real · Movimientos fila ' + i.movimientoFila + ' · ' + escapeHtml(i.movimientoRef || '') : 'Marcado hecho, sin gasto real vinculado'}">
+        <span style="font-size:13px;font-weight:600;color:var(--text-muted)">✓ ${escapeHtml(i.nombre)}</span>
+        <span style="display:flex;gap:6px;align-items:center;white-space:nowrap">
+          <span style="font-size:13px;color:var(--green)">${fmt(planMontoItem(i))}${i.movimientoFila ? '' : ' est.'}</span>
+          <button class="btn" style="padding:2px 7px;font-size:11px" title="${i.movimientoFila ? 'Cambiar o quitar el vínculo' : 'Vincular con un gasto real de Movimientos'}" onclick="openPlanLinkModal('${i.id}')">🔗</button>
+          <button class="btn" style="padding:2px 7px;font-size:11px" title="Reabrir" onclick="planReabrir('${i.id}')">↺</button>
+        </span>
+      </div>`;
+    const chipPendiente = i => `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:9px 12px;margin-top:8px">
+        <span style="font-size:13px;font-weight:600">${escapeHtml(i.nombre)}</span>
+        <span style="display:flex;gap:6px;align-items:center;white-space:nowrap">
+          <span style="font-size:13px;color:var(--text-muted)">${fmt(i.costoEstimado)}</span>
+          <button class="btn" style="padding:2px 7px;font-size:11px" title="Volver al backlog" onclick="planAsignarMes('${i.id}','')">↩</button>
+          <button class="btn" style="padding:2px 7px;font-size:11px" title="Vincular con un gasto real de Movimientos" onclick="openPlanLinkModal('${i.id}')">🔗</button>
+          <button class="btn" style="padding:2px 7px;font-size:11px" title="Marcar hecho" onclick="planMarcarHecho('${i.id}')">✓</button>
+        </span>
+      </div>`;
+    const chips = delMes.length
+      ? hechos.map(chipHecho).join('') + items.map(chipPendiente).join('')
       : '<div style="color:var(--text-muted);font-size:13px;padding:10px 0">Sin ítems asignados</div>';
     return `<div class="card" style="margin:0;padding:22px 24px">
       <div style="display:flex;justify-content:space-between;align-items:baseline">
@@ -3995,9 +4042,10 @@ function renderPlanTimeline() {
       </div>
       <div style="margin-top:8px;font-size:16px">
         <span style="color:${over ? 'var(--red)' : 'var(--green)'};font-weight:700">${fmt(asignado)}</span>
-        <span style="color:var(--text-muted);font-size:14px"> / ${fmt(Math.round(disponibleAntes))} disp.</span>
+        <span style="color:var(--text-muted);font-size:14px"> pendiente / ${fmt(Math.round(disponibleAntes))} disp.</span>
         ${over ? '<span class="badge badge-vencido" style="margin-left:8px">Excede fondo</span>' : (asignado > 0 ? '<span class="badge badge-ok" style="margin-left:8px">OK</span>' : '')}
       </div>
+      ${ejecutadoMes > 0 ? `<div style="margin-top:5px;font-size:12px;color:var(--text-muted)">✓ ${fmt(Math.round(ejecutadoMes))} ya ejecutado este mes (ya descontado del fondo)</div>` : ''}
       ${chips}
       ${proy ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted);line-height:1.7">
         Resultado proyectado: <strong style="color:${resultadoConPlan >= 0 ? 'var(--green)' : 'var(--red)'}">${fmt(Math.round(resultadoConPlan))}</strong>${asignado > 0 ? ` <span>(con esta inversión)</span>` : ''}<br>
