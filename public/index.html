@@ -2229,21 +2229,37 @@ async function abrirCaja() {
   const errEl = document.getElementById('arqueo-error');
   errEl.textContent = '';
 
-  // Toast si hay diferencia vs planilla (no bloquea)
-  const diffEf = efectivo - efectivoEsperado;
-  const diffMp = mp - mpEsperado;
-  const alertLines = [];
-  if (diffEf !== 0) alertLines.push(`💵 Efectivo: ${diffEf > 0 ? '+' : ''}${fmt(diffEf)} vs planilla`);
-  if (diffMp !== 0) alertLines.push(`📱 Mercado Pago: ${diffMp > 0 ? '+' : ''}${fmt(diffMp)} vs planilla`);
-  if (alertLines.length > 0) showToast('⚠️ Diferencia detectada\n' + alertLines.join('\n'));
-
+  // La diferencia de efectivo NO se calcula acá: el server relee Cajas!F8 al abrir
+  // y devuelve el número contra el esperado real de ese instante. El valor que hay
+  // en pantalla puede ser de hace horas y F8 se mueve sola cuando se edita cualquier
+  // fila de Movimientos.
   try {
-    const { data } = await api('/api/arqueo/abrir', {
+    const { data, diffEfectivo, ajuste, avisoAjuste } = await api('/api/arqueo/abrir', {
       method: 'POST',
       body: JSON.stringify({ efectivo, mercadoPago: mp, efectivoEsperado, mpEsperado }),
     });
     document.getElementById('arqueo-ultimo-resumen').style.display = 'none';
     renderEstadoArqueo(data);
+
+    const diffMp = mp - mpEsperado;
+    if (ajuste) {
+      showResultadoModal({
+        ok: true,
+        titulo: ajuste.sobra ? 'Caja abierta — sobrante ajustado' : 'Caja abierta — faltante ajustado',
+        detalle:
+          `Contaste <b>${fmt(efectivo)}</b> y la planilla esperaba <b>${fmt(data.efectivoEsperado)}</b>.<br>` +
+          `<b style="color:${ajuste.sobra ? 'var(--green)' : 'var(--red)'}">` +
+          `${ajuste.sobra ? 'Sobran' : 'Faltan'} ${fmt(ajuste.monto)}</b><br><br>` +
+          `Se registró un <b>Ajuste de Caja</b> en Movimientos por ese monto, así el saldo ` +
+          `calculado vuelve a coincidir con la plata real y la diferencia queda asentada ` +
+          `a tu nombre.<br><span style="font-size:11px">Buscalo en el ledger como proveedor "Ajuste de Caja".</span>`,
+      });
+    } else if (avisoAjuste) {
+      showToast('⚠️ Caja abierta, pero el ajuste no se guardó\n' + avisoAjuste);
+    } else if (Math.abs(diffEfectivo) <= 1) {
+      showToast('✅ Caja abierta — el efectivo coincide con la planilla');
+    }
+    if (diffMp !== 0) showToast(`📱 Mercado Pago: ${diffMp > 0 ? '+' : ''}${fmt(diffMp)} vs planilla`);
   } catch(err) {
     errEl.textContent = err.message;
   }
@@ -2398,15 +2414,24 @@ async function loadHistorialArqueos() {
     + '<div class="kpi-card '+(conDif>0?'red':'green')+'"><div class="kpi-label">Con diferencia</div><div class="kpi-value">'+conDif+'</div><div class="kpi-sub">efectivo vs Fudo</div></div>'
     + '<div class="kpi-card accent"><div class="kpi-label">Con nota</div><div class="kpi-value">'+conNota+'</div><div class="kpi-sub">explicaciones cargadas</div></div>';
 
+  // La tabla muestra la CUENTA ENTERA del efectivo, no solo el resultado: esperado
+  // y real al abrir, qué entró por Fudo, qué se gastó, esperado y real al cerrar.
+  // Antes solo se veía inicial/final/Fudo/diferencia, y con eso la diferencia no se
+  // podía verificar a mano — faltaban los términos.
   head.innerHTML = '<tr>'
     + '<th style="text-align:left">Fecha</th><th>Apertura</th><th>Cierre</th>'
-    + '<th style="text-align:right">Efectivo inicial</th>'
-    + '<th style="text-align:right">Efectivo cierre</th>'
+    + '<th style="text-align:left">Encargado</th>'
+    + '<th style="text-align:right" title="Saldo calculado de la planilla al abrir">Esperado apertura</th>'
+    + '<th style="text-align:right" title="Efectivo contado al abrir">Real apertura</th>'
+    + '<th style="text-align:right" title="Contado − esperado al abrir">Dif. apertura</th>'
     + '<th style="text-align:right">Ingreso Fudo</th>'
-    + '<th style="text-align:right">Diferencia</th>'
+    + '<th style="text-align:right" title="Gastos en efectivo con la caja abierta">Gastos turno</th>'
+    + '<th style="text-align:right" title="Real apertura + Fudo − gastos">Esperado cierre</th>'
+    + '<th style="text-align:right" title="Efectivo contado al cerrar">Real cierre</th>'
+    + '<th style="text-align:right">Diferencia turno</th>'
     + '<th style="text-align:left">Nota</th></tr>';
 
-  if (!data.length) { body.innerHTML = '<tr><td colspan="8" style="color:var(--text-muted);padding:14px">Sin arqueos registrados.</td></tr>'; return; }
+  if (!data.length) { body.innerHTML = '<tr><td colspan="13" style="color:var(--text-muted);padding:14px">Sin arqueos registrados.</td></tr>'; return; }
 
   const celdaDif = v => {
     if (v == null) return '<td style="text-align:right;color:var(--text-muted)">—</td>';
@@ -2416,16 +2441,37 @@ async function loadHistorialArqueos() {
     return '<td style="text-align:right;color:'+col+';font-weight:600">'+txt+'</td>';
   };
 
+  // Guion largo para los arqueos viejos: esas columnas no existían cuando se
+  // escribieron, así que el dato no está. Mostrar 0 sería inventarlo.
+  const celdaNum = v => '<td style="text-align:right">'
+    + (v != null ? fmt(v) : '<span style="color:var(--text-muted)">—</span>') + '</td>';
+
+  const celdaDifApertura = v => {
+    if (v == null) return '<td style="text-align:right;color:var(--text-muted)">—</td>';
+    if (Math.abs(v) <= TOL) return '<td style="text-align:right;color:var(--green)">✓</td>';
+    const col = v > 0 ? 'var(--green)' : 'var(--red)';
+    return '<td style="text-align:right;color:'+col+'">'+(v > 0 ? '+' : '')+fmt(v)+'</td>';
+  };
+
   body.innerHTML = data.map(a => {
     const tieneDif = a.difEfectivoTurno != null && Math.abs(a.difEfectivoTurno) > TOL;
     const bg = (tieneDif && a.nota) ? 'background:rgba(224,138,92,0.10)' : (tieneDif ? 'background:rgba(224,92,92,0.06)' : '');
+    const enc = [a.encargadoApertura, a.encargadoCierre].filter(Boolean);
+    const encTxt = enc.length === 0 ? '<span style="color:var(--text-muted)">—</span>'
+      : enc[0] === enc[1] ? escapeHtml(enc[0])
+      : escapeHtml(enc.join(' → '));
     return '<tr style="'+bg+'">'
       + '<td style="text-align:left;font-weight:600">'+escapeHtml(a.fecha)+'</td>'
       + '<td>'+escapeHtml(a.apertura)+'</td>'
       + '<td>'+escapeHtml(a.cierre)+'</td>'
+      + '<td style="text-align:left;color:var(--text-muted)">'+encTxt+'</td>'
+      + celdaNum(a.efectivoEsperadoInicial)
       + '<td style="text-align:right">'+fmt(a.efectivoInicial)+'</td>'
+      + celdaDifApertura(a.efectivoEsperadoInicial != null ? a.diffAperturaEfectivo : null)
+      + celdaNum(a.ingresoFudoEfectivo)
+      + celdaNum(a.gastosEfectivoTurno)
+      + celdaNum(a.efectivoEsperadoCierre)
       + '<td style="text-align:right">'+fmt(a.efectivoFinal)+'</td>'
-      + '<td style="text-align:right">'+(a.ingresoFudoEfectivo != null ? fmt(a.ingresoFudoEfectivo) : '<span style=\'color:var(--text-muted)\'>—</span>')+'</td>'
       + celdaDif(a.difEfectivoTurno)
       + '<td style="text-align:left;color:var(--text-muted);max-width:240px;white-space:normal">'+escapeHtml(a.nota || '')+'</td>'
       + '</tr>';

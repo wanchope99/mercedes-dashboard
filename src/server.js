@@ -174,16 +174,95 @@ function buildFilasCierreServicio({ fechaServicio, mesServicio, descripcionServi
 
 // ─── Arqueo de Cajas ──────────────────────────────────────────────────────────
 
-// Encabezados canónicos de la hoja "Arqueo de Cajas" (A1:O1). Deben coincidir EXACTO
+// Encabezados canónicos de la hoja "Arqueo de Cajas" (A1:V1). Deben coincidir EXACTO
 // con el orden en que se escribe rowArqueo y en que lee /api/arqueo/historial. Se
 // reescriben en cada cierre para que la planilla se autocorrija (ver POST cerrar).
+//
+// A–O son las columnas históricas: NO se reordenan ni se reinterpretan, porque las
+// filas viejas ya están escritas con ese layout. Todo lo nuevo se agrega de P en
+// adelante, así el historial anterior sigue leyéndose bien (queda vacío en P–V).
+//
+// P–V existen para que la cuenta del efectivo quede COMPLETA y auditable en la
+// propia fila. Antes solo se guardaba el resultado (columna O) pero no sus términos:
+// el esperado nunca se persistía y los gastos del turno no quedaban en ningún lado,
+// así que la diferencia del turno era imposible de verificar a posteriori.
 const ARQUEO_HEADERS = [
   'Fecha', 'Apertura', 'Cierre', 'Duración',
   'Efectivo Local Inicial', 'Mercado Pago Inicial', 'Galicia Inicial',
   'Efectivo Local Final', 'Mercado Pago Final', 'Galicia Final',
   'Diff Efectivo Local Inicial', 'Diff Mercado Pago Inicial',
   'Notas', 'Ingreso Fudo efectivo', 'Diferencia Efectivo Turno',
+  // ─── Efectivo: la cuenta completa, término por término ───
+  'Encargado Apertura',           // P
+  'Encargado Cierre',             // Q
+  'Efectivo Esperado Inicial',    // R — Cajas!F8 leído al abrir
+  'Gastos Efectivo Turno',        // S — gastos en efectivo con la caja abierta
+  'Efectivo Esperado Cierre',     // T — R real inicial + Fudo − gastos
+  'Saldo Calculado al Cerrar',    // U — Cajas!F8 leído al cerrar
+  'Ajuste Apertura Posteado',     // V — fila de ajuste escrita en Movimientos al abrir
 ];
+
+// Diferencias de efectivo por debajo de esto se ignoran (redondeo, no plata real).
+const TOLERANCIA_AJUSTE_EFECTIVO = 1;
+
+// Lee el "Saldo Calculado" de Efectivo Local (Cajas!F8) en este instante.
+//
+// OJO con qué es este número: F8 = SUMIFS(entradas Efectivo Local) −
+// SUMIFS(salidas Efectivo Local con Estado="Pagado"), acumulado sobre TODA la
+// historia de Movimientos. No es el saldo del turno. Cambia sin que se agregue
+// ninguna fila: basta con editar una fila vieja (completarle el medio de pago, o
+// pasarla de "A pagar" a "Pagado") para que se mueva hoy. Por eso lo persistimos
+// en el arqueo: sin la foto del momento, la diferencia es imposible de reconstruir.
+async function leerSaldoCalculadoEfectivo(sheets) {
+  const r = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'Cajas!F8',
+    valueRenderOption: 'UNFORMATTED_VALUE',
+  });
+  const v = r.data.values?.[0]?.[0];
+  return typeof v === 'number' ? v : (parseFloat(String(v ?? '0').replace(/[^0-9.-]/g, '')) || 0);
+}
+
+// Postea en Movimientos la diferencia entre el efectivo contado y el que la
+// planilla creía tener, para que Cajas!F8 vuelva a coincidir con la plata real.
+//
+// Sin esta fila el desvío no se corrige nunca: la app escribía el conteo real en
+// Cajas!G8 y en la hoja de arqueo, pero F8 se calcula solo desde Movimientos, así
+// que cada diferencia no explicada quedaba archivada en la columna K del arqueo y
+// F8 seguía arrastrándola para siempre. Al 21/07/2026 ese arrastre era $122.164,43.
+//
+// Queda como un gasto/ingreso normal y explícito: se ve en el ledger, suma al
+// resultado del mes y es auditable (dice quién, cuándo y contra qué esperado).
+async function postearAjusteEfectivo(sheets, { diferencia, esperado, contado, encargado, momento }) {
+  const monto = Math.abs(Math.round(diferencia * 100) / 100);
+  const ahora = new Date();
+  const [anio, mesNum, dia] = fechaServicioDe(ahora.toISOString()).split('-').map(Number);
+  const fecha = `${String(dia).padStart(2, '0')}/${String(mesNum).padStart(2, '0')}/${String(anio).slice(-2)}`;
+  const mesesNombres = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const sobra = diferencia > 0;
+  const descripcion =
+    `Ajuste de caja ${momento} — ${sobra ? 'sobrante' : 'faltante'} de ${fmtARS(monto)}. ` +
+    `Contado ${fmtARS(contado)} vs esperado ${fmtARS(esperado)}. ` +
+    `${encargado || 'sin usuario'} · ${fechaHoraAR(ahora)}`;
+
+  // A:Fecha B:Mes C:Tipo D:Estado E:Venc F:Cuotas G:Extraord H:ID I:Proveedor
+  // J:Categoría K:Descripción L:Medio M:EntradaARS N:EntradaUSD O:SalidaARS P:SalidaUSD
+  const row = [
+    fecha, mesesNombres[mesNum - 1], sobra ? 'Ingreso' : 'Gasto', 'Pagado', '', '', '', '',
+    'Ajuste de Caja', 'Ajuste de Caja', descripcion,
+    'Efectivo Local',
+    sobra ? monto : '', '', sobra ? '' : monto, '',
+  ];
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID, range: 'Movimientos!A:P',
+    valueInputOption: 'USER_ENTERED', requestBody: { values: [row] },
+  });
+  return { monto, sobra, descripcion };
+}
+
+function fmtARS(n) {
+  return '$' + Number(n || 0).toLocaleString('es-AR', { maximumFractionDigits: 2 });
+}
 
 // GET /api/arqueo/estado — estado actual de la caja
 app.get('/api/arqueo/estado', authMiddleware, (req, res) => {
@@ -198,7 +277,7 @@ app.get('/api/arqueo/historial', authMiddleware, adminOnly, async (req, res) => 
     const sheets = google.sheets({ version: 'v4', auth });
     const r = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Arqueo de Cajas!A:O',
+      range: 'Arqueo de Cajas!A:V',
     });
     const rows = r.data.values || [];
     const num = v => {
@@ -206,6 +285,7 @@ app.get('/api/arqueo/historial', authMiddleware, adminOnly, async (req, res) => 
       const n = parseFloat(String(v).replace(/[^0-9.,-]/g, '').replace(/\.(?=\d{3}\b)/g, '').replace(',', '.'));
       return Number.isFinite(n) ? n : 0;
     };
+    const opt = v => (v == null || v === '') ? null : num(v);
     let start = 0;
     if (rows.length && String(rows[0][0] || '').trim().toLowerCase() === 'fecha') start = 1;
     const arqueos = [];
@@ -228,6 +308,15 @@ app.get('/api/arqueo/historial', authMiddleware, adminOnly, async (req, res) => 
         nota: (row[12] || '').toString().trim(),
         ingresoFudoEfectivo: (row[13] != null && row[13] !== '') ? num(row[13]) : null,
         difEfectivoTurno: (row[14] != null && row[14] !== '') ? num(row[14]) : null,
+        // P–V: vacíos en los arqueos anteriores a este cambio → null, no 0, para no
+        // mostrar ceros inventados en filas donde el dato nunca se registró.
+        encargadoApertura: (row[15] || '').toString().trim(),
+        encargadoCierre: (row[16] || '').toString().trim(),
+        efectivoEsperadoInicial: opt(row[17]),
+        gastosEfectivoTurno: opt(row[18]),
+        efectivoEsperadoCierre: opt(row[19]),
+        saldoCalculadoAlCerrar: opt(row[20]),
+        ajusteApertura: opt(row[21]),
       });
     }
     // Continuidad entre turnos (referencial): efvo abierto vs cerrado el turno previo.
@@ -265,31 +354,64 @@ app.get('/api/arqueo/saldos-iniciales', authMiddleware, async (req, res) => {
 });
 
 // POST /api/arqueo/abrir
-app.post('/api/arqueo/abrir', authMiddleware, (req, res) => {
+//
+// El esperado de EFECTIVO no se toma del body: se relee Cajas!F8 acá, en el server.
+// El valor que mandaba el cliente venía de cuando se cargó la pantalla y podía estar
+// viejo — y F8 se mueve sola cuando alguien edita cualquier fila de Movimientos.
+// Comparar contra un esperado viejo era, justamente, una de las formas de generar
+// una diferencia que después nadie podía explicar.
+app.post('/api/arqueo/abrir', authMiddleware, async (req, res) => {
   if (estadoCaja.abierta) {
     return res.status(400).json({ ok: false, error: 'La caja ya está abierta' });
   }
-  // efectivo/mercadoPago = saldo REAL contado; efectivoEsperado/mpEsperado = saldo del sheet
-  const { efectivo, mercadoPago, efectivoEsperado, mpEsperado } = req.body;
+  // efectivo/mercadoPago = saldo REAL contado; mpEsperado = saldo del sheet
+  const { efectivo, mercadoPago, mpEsperado } = req.body;
   if (efectivo === undefined || mercadoPago === undefined) {
     return res.status(400).json({ ok: false, error: 'Faltan valores de saldo inicial' });
   }
-  const diffEfectivo = Number(efectivo) - Number(efectivoEsperado || 0);
+
+  const contado = Number(efectivo);
+  let esperadoEfectivo = Number(req.body.efectivoEsperado || 0);
+  let ajuste = null;
+  let avisoAjuste = null;
+
+  try {
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+    esperadoEfectivo = await leerSaldoCalculadoEfectivo(sheets);
+
+    const diferencia = Math.round((contado - esperadoEfectivo) * 100) / 100;
+    if (Math.abs(diferencia) > TOLERANCIA_AJUSTE_EFECTIVO) {
+      ajuste = await postearAjusteEfectivo(sheets, {
+        diferencia, esperado: esperadoEfectivo, contado,
+        encargado: req.user.nombre, momento: 'apertura',
+      });
+      clearCache();
+    }
+  } catch (err) {
+    // Que falle el ajuste no puede impedir abrir la caja: el local tiene que operar.
+    // Queda avisado en la respuesta y sin fila de ajuste (el desvío sigue vivo).
+    console.error('No se pudo postear el ajuste de apertura:', err.message);
+    avisoAjuste = 'No se pudo escribir el ajuste en la planilla: ' + err.message;
+  }
+
+  const diffEfectivo = Math.round((contado - esperadoEfectivo) * 100) / 100;
   const diffMP       = Number(mercadoPago) - Number(mpEsperado || 0);
   estadoCaja = {
     abierta: true,
     apertura: new Date().toISOString(),
     encargado: req.user.nombre,
-    efectivoInicial: Number(efectivo),
+    efectivoInicial: contado,
     mpInicial: Number(mercadoPago),
-    efectivoEsperado: Number(efectivoEsperado || 0),
+    efectivoEsperado: esperadoEfectivo,
     mpEsperado: Number(mpEsperado || 0),
     diffEfectivoInicial: diffEfectivo,
     diffMPInicial: diffMP,
+    ajusteApertura: ajuste ? (ajuste.sobra ? ajuste.monto : -ajuste.monto) : 0,
     gastosSesion: [],
   };
   guardarEstadoCaja(estadoCaja); // respaldo en planilla, no bloquea la respuesta
-  res.json({ ok: true, data: estadoCaja, diffEfectivo, diffMP });
+  res.json({ ok: true, data: estadoCaja, diffEfectivo, diffMP, ajuste, avisoAjuste });
 });
 
 // POST /api/arqueo/cerrar
@@ -373,6 +495,13 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
     const _esperadoEfvo = (estadoCaja.efectivoInicial || 0) + fudoEfectivo - _gastosEfvoTurno;
     const difEfectivoTurno = Math.round((Number(efectivo) - _esperadoEfvo) * 100) / 100;
 
+    // Foto de Cajas!F8 ANTES de escribir las filas del cierre. Comparada contra el
+    // efectivo contado muestra cuánto se había despegado la planilla de la realidad
+    // durante el turno, que es la información que faltaba para poder auditar.
+    let saldoCalculadoAlCerrar = '';
+    try { saldoCalculadoAlCerrar = await leerSaldoCalculadoEfectivo(sheets); }
+    catch (e) { console.error('No se pudo leer Cajas!F8 al cerrar:', e.message); }
+
     const rowArqueo = [
       fechaStr,
       aperturaStr,
@@ -389,6 +518,14 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
       (nota || '').toString().trim(),        // M: Nota de cierre (cuando no cierra)
       fudoEfectivo,                          // N: Ingreso Fudo (efectivo) del turno
       difEfectivoTurno,                      // O: Diferencia de efectivo del turno
+      // ─── P–V: la cuenta del efectivo, completa y verificable ───
+      estadoCaja.encargado || '',            // P: quién abrió
+      req.user.nombre || '',                 // Q: quién cerró
+      estadoCaja.efectivoEsperado ?? '',     // R: Cajas!F8 al abrir
+      _gastosEfvoTurno,                      // S: gastos en efectivo del turno
+      _esperadoEfvo,                         // T: esperado al cierre = E + N − S
+      saldoCalculadoAlCerrar,                // U: Cajas!F8 al cerrar
+      estadoCaja.ajusteApertura || 0,        // V: ajuste posteado al abrir
     ];
     // Escribimos en una fila absoluta calculada a partir de la columna A, NO con
     // values.append. append detecta automáticamente una "tabla" y agrega la fila
@@ -410,8 +547,8 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
       requestBody: {
         valueInputOption: 'USER_ENTERED',
         data: [
-          { range: 'Arqueo de Cajas!A1:O1', values: [ARQUEO_HEADERS] },
-          { range: `Arqueo de Cajas!A${proxFila}:O${proxFila}`, values: [rowArqueo] },
+          { range: 'Arqueo de Cajas!A1:V1', values: [ARQUEO_HEADERS] },
+          { range: `Arqueo de Cajas!A${proxFila}:V${proxFila}`, values: [rowArqueo] },
         ],
       },
     });
@@ -792,8 +929,26 @@ function mesDeFecha(fechaStr) {
 }
 
 // Un Echeq sale de la cuenta Galicia: en Movimientos se registra como Galicia.
+// Las fórmulas de la hoja Cajas matchean el medio de pago por texto EXACTO
+// (SUMIFS(... L:L, "Efectivo Local")). Cualquier variante — "Efectivo" a secas,
+// "contado", otra capitalización — es plata que sale del cajón y que el saldo
+// calculado nunca resta. Al 21/07/2026 había 124 filas cargadas como "Efectivo"
+// invisibles para F8. Normalizamos acá, en la única puerta de entrada.
+//
+// "Efectivo Pablo" y "Efectivo Tincho" son cajas DISTINTAS (F7 y F6): se respetan
+// tal cual y no se pisan con Efectivo Local.
+const MEDIOS_CANONICOS = ['Efectivo Local', 'Efectivo Pablo', 'Efectivo Tincho', 'Mercado Pago', 'Galicia', 'USD Pablo', 'USD Tincho'];
+
 function normalizarMedio(medio) {
-  return (medio || '').trim().toLowerCase() === 'echeq' ? 'Galicia' : (medio || '');
+  const m = (medio || '').toString().trim();
+  if (!m) return '';                       // vacío es válido: fila madre de cuotas
+  const low = m.toLowerCase();
+  if (low === 'echeq' || low.includes('cheque')) return 'Galicia';
+  const canonico = MEDIOS_CANONICOS.find(c => c.toLowerCase() === low);
+  if (canonico) return canonico;           // corrige capitalización
+  if (low === 'efectivo' || low === 'cash' || low.startsWith('contado')) return 'Efectivo Local';
+  if (low === 'mp') return 'Mercado Pago';
+  return m;                                // desconocido: se deja tal cual
 }
 
 // Creación de compras/pagos: accesible también para el encargado (botón "Nueva compra"),
