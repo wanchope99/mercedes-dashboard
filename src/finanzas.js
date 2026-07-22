@@ -5,13 +5,18 @@
 // pesos que preserven su valor real hasta llegar a la meta (~24 meses). Como el
 // dinero entra todos los meses, el modelo es una ESCALERA de plazos escalonados.
 //
-// Tres "buckets", cada aporte mensual se reparte entre ellos:
-//   · colchón (money market)  → liquidez inmediata, rinde MENOS que la inflación
+// Dos "buckets", cada aporte mensual se reparte entre ellos:
 //   · UVA (plazo fijo precancelable, plazoUvaMeses) → ajusta por CER, sin riesgo
 //     de precio. El aporte del mes t constituye un tramo que vence en t+plazo.
 //   · CER (bonos)             → ajusta por CER + tasa real, con riesgo de precio
 // CER y UVA no son ajustes distintos: la UVA se actualiza por el mismo CER. Lo
 // que cambia es el envoltorio (depósito bancario vs. bono que cotiza).
+//
+// Hubo un tercer bucket, "colchón" (money market), que se sacó a propósito: rendía
+// menos que la inflación, así que su único rol era liquidez inmediata — y para eso
+// ya está la precancelación del plazo fijo UVA. Tenerlo obligaba a leer todo a tres
+// columnas para nada. Se removió antes de registrar ningún movimiento real, así que
+// no hay historial en colchón que migrar.
 //
 // DOS PLANOS, deliberadamente separados:
 //   1. PROYECCIÓN (calcularEscalera): simulación con parámetros configurables.
@@ -51,16 +56,14 @@ const HEADER_CONFIG = ['Clave', 'Valor'];
 const HEADER_APORTES = ['MesISO', 'MontoARS', 'Notas', 'Actualizado'];
 const HEADER_MOVS = ['ID', 'Fecha', 'Tipo', 'Bucket', 'MontoARS', 'Instrumento', 'Comprobante', 'MesRecupero', 'Notas', 'Registrado'];
 
-const BALDES = ['colchon', 'uva', 'cer'];
+const BALDES = ['uva', 'cer'];
 const TIPOS = ['colocacion', 'rescate', 'renovacion', 'ajuste'];
 
 // Defaults del spec (INDEC jun-2026 / pantalla Galicia).
 const DEFAULT_CONFIG = {
   inflacionMensual: 0.019,
-  pctColchon: 0.15,
-  pctUva: 0.65,
-  pctCer: 0.20,
-  rendColchonMensual: 0.014,
+  pctUva: 0.75,
+  pctCer: 0.25,
   rendRealCerAnual: 0.08,
   plazoUvaMeses: 12,
   tnaPrecancelacion: 0.10,
@@ -151,6 +154,16 @@ async function _leerConfig(api) {
     if (clave === 'mesInicio') cfg.mesInicio = /^\d{4}-\d{2}$/.test(valor) ? valor : '';
     else if (CLAVES_NUM.includes(clave)) cfg[clave] = _numCfg(valor);
   }
+  // Un reparto que no suma 100% no es un reparto: la diferencia se perdía en
+  // silencio, porque cada aporte se repartía por pctUva/pctCer y el resto no iba
+  // a ningún lado. Pasa, por ejemplo, con la config guardada cuando existía el
+  // tercer bucket (65/20 al sacarle el colchón). Se vuelve al default y se avisa,
+  // en vez de proyectar sobre plata que desaparece.
+  if (Math.abs((cfg.pctUva + cfg.pctCer) - 1) > 1e-9) {
+    cfg.pctGuardadoInvalido = +((cfg.pctUva + cfg.pctCer) * 100).toFixed(2);
+    cfg.pctUva = DEFAULT_CONFIG.pctUva;
+    cfg.pctCer = DEFAULT_CONFIG.pctCer;
+  }
   return cfg;
 }
 
@@ -235,21 +248,19 @@ function calcularEscalera(config, aportes) {
 
   const filas = [];
   const tramos = [];
-  let sColchon = 0, sUva = 0, sCer = 0, aportadoAcum = 0, aportadoReal = 0;
+  let sUva = 0, sCer = 0, aportadoAcum = 0, aportadoReal = 0;
 
   for (let i = 0; i < N; i++) {
     const t = i + 1;
     const aporte = Number(aportes[i].monto) || 0;
-    const aColchon = aporte * p.pctColchon;
     const aUva = aporte * p.pctUva;
     const aCer = aporte * p.pctCer;
 
-    sColchon = sColchon * (1 + (Number(p.rendColchonMensual) || 0)) + aColchon;
     sUva = sUva * (1 + infl) + aUva;
     sCer = sCer * (1 + infl) * (1 + rendCer) + aCer;
 
     const indicePrecios = Math.pow(1 + infl, t - 1);
-    const totalNominal = sColchon + sUva + sCer;
+    const totalNominal = sUva + sCer;
     aportadoAcum += aporte;
     aportadoReal += aporte / indicePrecios;
     const totalReal = totalNominal / indicePrecios;
@@ -259,8 +270,8 @@ function calcularEscalera(config, aportes) {
       mesISO: aportes[i].mes,
       origen: aportes[i].origen || 'sin datos',
       aporte,
-      aColchon, aUva, aCer,
-      saldoColchon: sColchon, saldoUva: sUva, saldoCer: sCer,
+      aUva, aCer,
+      saldoUva: sUva, saldoCer: sCer,
       totalNominal, aportadoAcum,
       indicePrecios, totalReal, aportadoReal,
       gananciaReal: totalReal - aportadoReal,
@@ -325,13 +336,18 @@ function _sumarMeses(iso, n) {
 // efectivamente se colocó en instrumentos según el registro.
 function conciliar(movimientos, recuperoPorMes) {
   const signo = t => (t === 'rescate' ? -1 : 1);   // rescate saca plata de los instrumentos
-  const porBalde = { colchon: 0, uva: 0, cer: 0 };
+  const porBalde = { uva: 0, cer: 0 };
+  // Cualquier bucket que no sea uva/cer (el viejo "colchón", o algo tipeado a mano
+  // en la planilla) cae acá en vez de descartarse: si se ignorara, el total colocado
+  // dejaría de coincidir con la suma por bucket y nadie se enteraría.
+  let otros = 0;
   let colocado = 0;
   for (const m of movimientos) {
     if (m.tipo === 'renovacion') continue;         // no mueve capital, sólo lo reubica
     const v = signo(m.tipo) * (m.monto || 0);
     colocado += v;
     if (porBalde[m.balde] !== undefined) porBalde[m.balde] += v;
+    else otros += v;
   }
   const asignado = (recuperoPorMes || []).reduce((s, m) => s + (m.recuperoARS || 0), 0);
   return {
@@ -339,9 +355,9 @@ function conciliar(movimientos, recuperoPorMes) {
     colocadoARS: Math.round(colocado),
     sinColocarARS: Math.round(asignado - colocado),
     porBalde: {
-      colchon: Math.round(porBalde.colchon),
       uva: Math.round(porBalde.uva),
       cer: Math.round(porBalde.cer),
+      otros: Math.round(otros),
     },
     movimientos: movimientos.length,
   };
@@ -378,7 +394,9 @@ async function resumenFinanzas(recuperoPorMes = []) {
     movimientos: movimientos.map(({ rowIndex, ...m }) => m),
     escalera,
     conciliacion: conciliar(movimientos, recuperoPorMes),
-    pctValido: Math.abs((config.pctColchon + config.pctUva + config.pctCer) - 1) < 1e-9,
+    // Si la config guardada traía un reparto que no sumaba 100%, _leerConfig ya
+    // volvió al default; acá se expone para poder avisarlo en pantalla.
+    pctGuardadoInvalido: config.pctGuardadoInvalido || null,
   };
 }
 

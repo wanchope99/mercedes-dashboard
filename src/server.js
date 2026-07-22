@@ -1391,21 +1391,20 @@ app.get('/api/finanzas', authMiddleware, adminOnly, async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-// Config: una clave suelta { clave, valor }, o los tres porcentajes juntos
-// { pcts: { colchon, uva, cer } } — que se validan sumando 100%.
+// Config: una clave suelta { clave, valor }, o el reparto entre los dos buckets
+// { pcts: { uva, cer } } — que se valida sumando 100%.
 app.put('/api/finanzas/config', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { clave, valor, pcts } = req.body;
     if (pcts) {
-      const c = Number(pcts.colchon), u = Number(pcts.uva), e = Number(pcts.cer);
-      if (![c, u, e].every(n => Number.isFinite(n) && n >= 0)) {
+      const u = Number(pcts.uva), e = Number(pcts.cer);
+      if (![u, e].every(n => Number.isFinite(n) && n >= 0)) {
         return res.status(400).json({ ok: false, error: 'Los porcentajes deben ser números positivos' });
       }
-      if (Math.abs(c + u + e - 1) > 1e-6) {
+      if (Math.abs(u + e - 1) > 1e-6) {
         return res.status(400).json({ ok: false, error:
-          `Los porcentajes tienen que sumar 100% (suman ${((c + u + e) * 100).toFixed(1)}%)` });
+          `Los porcentajes tienen que sumar 100% (suman ${((u + e) * 100).toFixed(1)}%)` });
       }
-      await finanzas.guardarConfig('pctColchon', c);
       await finanzas.guardarConfig('pctUva', u);
       await finanzas.guardarConfig('pctCer', e);
       return res.json({ ok: true });

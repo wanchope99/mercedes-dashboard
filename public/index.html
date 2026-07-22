@@ -846,7 +846,7 @@
       </div>
       <div id="fin-mov-form" style="display:none">
         <div style="font-size:12px;color:var(--text-muted);line-height:1.7;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:11px 13px;margin-bottom:14px">
-          <b>Bucket</b> = la estrategia (colchón / UVA / CER), que es lo que usa la proyección para calcular.
+          <b>Bucket</b> = la estrategia (UVA o CER), que es lo que usa la proyección para calcular.
           <b>Instrumento</b> = el producto concreto que contrataste en el banco. Un mismo bucket puede tener
           varios instrumentos: el bucket UVA puede ser un PF UVA de Galicia hoy y otro de otro banco mañana.
         </div>
@@ -859,12 +859,11 @@
             <option value="ajuste">Ajuste</option>
           </select></div>
           <div class="form-group"><label>Bucket (estrategia)</label><select id="fmv-balde">
-            <option value="colchon">Colchón (money market)</option>
             <option value="uva">UVA (plazo fijo precancelable)</option>
             <option value="cer">CER (bonos)</option>
           </select></div>
           <div class="form-group"><label>Instrumento (producto concreto)</label><input id="fmv-instrumento" list="fmv-instr-list" placeholder="Ej: PF UVA precancelable 12m">
-            <datalist id="fmv-instr-list"><option>Fima Renta en Pesos</option><option>PF UVA precancelable 12m</option><option>Bono CER TX26</option><option>Bono CER TZXD7</option></datalist></div>
+            <datalist id="fmv-instr-list"><option>PF UVA precancelable 12m</option><option>Bono CER TX26</option><option>Bono CER TZXD7</option></datalist></div>
           <div class="form-group"><label>Monto ARS</label><input type="number" id="fmv-monto" min="0" placeholder="0"></div>
           <div class="form-group"><label>Comprobante / N° operación</label><input id="fmv-comprobante" placeholder="Ej: Galicia op. 4471820"></div>
           <div class="form-group"><label>Sale del recupero del mes</label><select id="fmv-mesrec" title="De qué mes salió esta plata: el mes cuyo recupero estás colocando. Sirve para saber si ya colocaste todo lo que apartaste ese mes."></select></div>
@@ -909,18 +908,17 @@
       <div id="fin-params" style="display:none">
         <div class="proy-form-grid">
           <div class="form-group"><label>Inflación mensual %</label><input type="number" step="0.01" id="fpa-inflacion" onchange="saveFinParam('inflacionMensual', this.value/100)"></div>
-          <div class="form-group"><label>Rinde colchón mensual %</label><input type="number" step="0.01" id="fpa-colchon-rend" onchange="saveFinParam('rendColchonMensual', this.value/100)"></div>
           <div class="form-group"><label>Tasa real CER anual %</label><input type="number" step="0.1" id="fpa-cer-real" onchange="saveFinParam('rendRealCerAnual', this.value/100)"></div>
           <div class="form-group"><label>Plazo UVA (meses)</label><input type="number" min="1" id="fpa-plazo" onchange="saveFinParam('plazoUvaMeses', this.value)"></div>
           <div class="form-group"><label>TNA precancelación %</label><input type="number" step="0.1" id="fpa-tna" onchange="saveFinParam('tnaPrecancelacion', this.value/100)"></div>
           <div class="form-group"><label>Cotización UVA inicial</label><input type="number" step="0.01" id="fpa-uva" onchange="saveFinParam('cotizacionUvaInicial', this.value)"></div>
           <div class="form-group"><label>Horizonte (meses)</label><input type="number" min="1" id="fpa-horizonte" onchange="saveFinParam('horizonteMeses', this.value)"></div>
         </div>
-        <div style="margin-top:14px;font-size:12px;color:var(--text-muted)">Reparto de cada aporte — los tres tienen que sumar 100%</div>
+        <div id="fin-pct-aviso" style="display:none;font-size:12px;color:var(--orange);line-height:1.6;background:rgba(224,138,92,0.10);border:1px solid var(--orange);border-radius:9px;padding:10px 12px;margin-top:14px"></div>
+        <div style="margin-top:14px;font-size:12px;color:var(--text-muted)">Reparto de cada aporte entre los dos instrumentos — poné cuánto va a UVA y el resto va a CER solo</div>
         <div class="proy-form-grid" style="margin-top:8px">
-          <div class="form-group"><label>% Colchón</label><input type="number" step="1" id="fpa-pct-colchon" oninput="renderFinPctSuma()"></div>
-          <div class="form-group"><label>% UVA</label><input type="number" step="1" id="fpa-pct-uva" oninput="renderFinPctSuma()"></div>
-          <div class="form-group"><label>% CER</label><input type="number" step="1" id="fpa-pct-cer" oninput="renderFinPctSuma()"></div>
+          <div class="form-group"><label>% UVA (plazo fijo)</label><input type="number" step="1" min="0" max="100" id="fpa-pct-uva" oninput="renderFinPctSuma()"></div>
+          <div class="form-group"><label>% CER (bonos)</label><input type="number" id="fpa-pct-cer" disabled title="Se calcula solo: es todo lo que no va a UVA" style="opacity:.6"></div>
           <div class="form-group"><label>&nbsp;</label><button class="btn btn-accent" onclick="saveFinPcts()">Guardar reparto</button></div>
         </div>
         <div id="fpa-pct-status" style="font-size:12px;margin-top:8px"></div>
@@ -4580,7 +4578,7 @@ async function planMoverPrioridad(id, dir) {
 // Dos planos separados a propósito: la PROYECCIÓN (simulación con parámetros)
 // y el REGISTRO REAL de colocaciones, que es lo que permite demostrar que el
 // capital del recupero no se mezcló con la caja operativa del bar.
-const FIN_BALDES = { colchon: 'Colchón', uva: 'UVA', cer: 'CER' };
+const FIN_BALDES = { uva: 'UVA', cer: 'CER' };
 const FIN_TIPOS = { colocacion: 'Colocación', rescate: 'Rescate', renovacion: 'Renovación', ajuste: 'Ajuste' };
 state.fin = null;
 
@@ -4643,9 +4641,9 @@ function renderFinConciliacion() {
     `</div>` +
     `<div style="font-size:12px;color:${estado.color};line-height:1.6;margin-top:8px">${estado.txt}</div>` +
     `<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted)">
-      <span>Colchón: <b style="color:var(--text)">${fmt(c.porBalde.colchon)}</b></span>
       <span>UVA: <b style="color:var(--text)">${fmt(c.porBalde.uva)}</b></span>
       <span>CER: <b style="color:var(--text)">${fmt(c.porBalde.cer)}</b></span>
+      ${c.porBalde.otros ? `<span title="Movimientos cargados con un bucket que ya no existe (por ejemplo el viejo colchón). Editalos en la planilla para que queden en UVA o CER.">Fuera de UVA/CER: <b style="color:var(--orange)">${fmt(c.porBalde.otros)}</b></span>` : ''}
       <span>${c.movimientos} movimiento${c.movimientos !== 1 ? 's' : ''} registrado${c.movimientos !== 1 ? 's' : ''}</span>
     </div>`;
 }
@@ -4686,14 +4684,13 @@ function renderFinAportes() {
       : '<span class="badge" style="background:var(--surface2);color:var(--text-muted)" title="Ese mes todavía no cerró y no tiene aporte fijado">sin datos</span>';
   cont.innerHTML = `<div class="table-wrap"><table class="pagos-table" style="width:100%">
     <thead><tr><th style="text-align:left">Mes</th><th style="text-align:left">Origen</th><th class="td-right">Aporte</th>
-    <th class="td-right">Colchón</th><th class="td-right">UVA</th><th class="td-right">CER</th><th></th></tr></thead><tbody>` +
+    <th class="td-right">UVA</th><th class="td-right">CER</th><th></th></tr></thead><tbody>` +
     aportes.map((a, i) => {
       const f = state.fin.escalera.filas[i] || {};
       return `<tr>
         <td style="white-space:nowrap">${i + 1}. ${finMesLabel(a.mes)}</td>
         <td>${tag(a.origen)}</td>
         <td class="td-right"><span class="td-monto" style="cursor:pointer;border-bottom:1px dashed var(--text-muted)" title="Click para fijar el aporte de este mes a mano" onclick="finEditarAporte(this,'${a.mes}')">${fmt(a.monto)}</span></td>
-        <td class="td-right" style="color:var(--text-muted);font-size:12px">${fmt(Math.round(f.aColchon || 0))}</td>
         <td class="td-right" style="color:var(--text-muted);font-size:12px">${fmt(Math.round(f.aUva || 0))}</td>
         <td class="td-right" style="color:var(--text-muted);font-size:12px">${fmt(Math.round(f.aCer || 0))}</td>
         <td style="text-align:right">${a.origen === 'manual' ? `<button class="btn" style="padding:3px 8px;font-size:11px" title="Volver al valor del cierre" onclick="finResetAporte('${a.mes}')">↺</button>` : ''}</td>
@@ -4793,7 +4790,7 @@ function renderFinVencimientos() {
      <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin:22px 0 8px;padding-top:16px;border-top:1px solid var(--border)">Proyectados — simulación, todavía no existen</div>
      <div style="font-size:12px;color:var(--orange);line-height:1.6;margin-bottom:10px">
        ⚠ Estos tramos <b>no son plata colocada</b>: son los que se formarían si colocaras cada aporte según el reparto
-       ${Math.round(state.fin.config.pctColchon * 100)}/${Math.round(state.fin.config.pctUva * 100)}/${Math.round(state.fin.config.pctCer * 100)}.
+       ${Math.round(state.fin.config.pctUva * 100)}% UVA / ${Math.round(state.fin.config.pctCer * 100)}% CER.
        Sirven para ver el calendario de liquidez que tendrías.
      </div>
      ${bloqueProy}`;
@@ -4803,12 +4800,11 @@ function renderFinTabla() {
   const filas = state.fin.escalera.filas || [];
   document.getElementById('fin-tabla').innerHTML = `<div class="table-wrap"><table class="pagos-table" style="width:100%;font-size:12px">
     <thead><tr><th style="text-align:left">Mes</th><th class="td-right">Aporte</th>
-      <th class="td-right">Colchón</th><th class="td-right">UVA</th><th class="td-right">CER</th>
+      <th class="td-right">UVA</th><th class="td-right">CER</th>
       <th class="td-right">Total nominal</th><th class="td-right">Total real</th><th class="td-right">Ganancia real</th></tr></thead><tbody>` +
     filas.map(f => `<tr>
       <td style="white-space:nowrap">${f.mes}. ${finMesLabel(f.mesISO)}</td>
       <td class="td-right">${fmt(Math.round(f.aporte))}</td>
-      <td class="td-right" style="color:var(--text-muted)">${fmt(Math.round(f.saldoColchon))}</td>
       <td class="td-right" style="color:var(--text-muted)">${fmt(Math.round(f.saldoUva))}</td>
       <td class="td-right" style="color:var(--text-muted)">${fmt(Math.round(f.saldoCer))}</td>
       <td class="td-right">${fmt(Math.round(f.totalNominal))}</td>
@@ -4851,24 +4847,43 @@ function fillFinParams() {
   const c = state.fin.config;
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
   set('fpa-inflacion', +(c.inflacionMensual * 100).toFixed(4));
-  set('fpa-colchon-rend', +(c.rendColchonMensual * 100).toFixed(4));
   set('fpa-cer-real', +(c.rendRealCerAnual * 100).toFixed(2));
   set('fpa-plazo', c.plazoUvaMeses);
   set('fpa-tna', +(c.tnaPrecancelacion * 100).toFixed(2));
   set('fpa-uva', c.cotizacionUvaInicial);
   set('fpa-horizonte', c.horizonteMeses);
-  set('fpa-pct-colchon', +(c.pctColchon * 100).toFixed(2));
   set('fpa-pct-uva', +(c.pctUva * 100).toFixed(2));
-  set('fpa-pct-cer', +(c.pctCer * 100).toFixed(2));
   renderFinPctSuma();
+
+  // El reparto guardado en la planilla no sumaba 100% (típicamente quedó de cuando
+  // existía el colchón). Se está proyectando con el default hasta que se guarde.
+  const av = document.getElementById('fin-pct-aviso');
+  if (av) {
+    const inv = state.fin.pctGuardadoInvalido;
+    av.style.display = inv ? '' : 'none';
+    av.innerHTML = inv
+      ? `⚠ El reparto guardado en la planilla sumaba ${inv}%, no 100%. Se está proyectando con
+         ${Math.round(c.pctUva * 100)}% UVA / ${Math.round(c.pctCer * 100)}% CER. Tocá
+         <b>Guardar reparto</b> para dejarlo fijado en la planilla y que este aviso desaparezca.`
+      : '';
+  }
 }
+// Con dos buckets el reparto es un solo número: lo que no va a UVA va a CER. El
+// campo CER se muestra igual, calculado y deshabilitado, para que se vea el
+// reparto completo sin poder desbalancearlo.
 function renderFinPctSuma() {
-  const n = id => Number(document.getElementById(id).value) || 0;
-  const suma = n('fpa-pct-colchon') + n('fpa-pct-uva') + n('fpa-pct-cer');
   const el = document.getElementById('fpa-pct-status');
-  const ok = Math.abs(suma - 100) < 0.01;
+  const inUva = document.getElementById('fpa-pct-uva');
+  if (!el || !inUva) return false;
+  const uva = Number(inUva.value);
+  const ok = Number.isFinite(uva) && uva >= 0 && uva <= 100;
+  const cer = ok ? +(100 - uva).toFixed(2) : '';
+  const inCer = document.getElementById('fpa-pct-cer');
+  if (inCer) inCer.value = cer;
   el.style.color = ok ? 'var(--green)' : 'var(--red)';
-  el.textContent = ok ? '✓ Suman 100%' : `Suman ${suma.toFixed(2)}% — tienen que sumar 100% para poder guardar`;
+  el.textContent = ok
+    ? `✓ ${(+uva.toFixed(2))}% UVA / ${cer}% CER`
+    : 'El % de UVA tiene que estar entre 0 y 100';
   return ok;
 }
 async function saveFinParam(clave, valor) {
@@ -4879,10 +4894,10 @@ async function saveFinParam(clave, valor) {
 }
 async function saveFinPcts() {
   if (!renderFinPctSuma()) return;
-  const n = id => Number(document.getElementById(id).value) || 0;
+  const uva = Number(document.getElementById('fpa-pct-uva').value);
   try {
     await api('/api/finanzas/config', { method: 'PUT', body: JSON.stringify({ pcts: {
-      colchon: n('fpa-pct-colchon') / 100, uva: n('fpa-pct-uva') / 100, cer: n('fpa-pct-cer') / 100,
+      uva: uva / 100, cer: (100 - uva) / 100,
     } }) });
     await loadFinanzas();
   } catch (e) {
