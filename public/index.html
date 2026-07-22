@@ -95,6 +95,14 @@
     td { padding: 10px 12px; border-bottom: 1px solid rgba(46,46,62,0.5); text-align: right; white-space: nowrap; }
     td:first-child { text-align: left; font-weight: 500; }
     tr:last-child td { border-bottom: none; }
+
+    /* Historial de arqueos: filas clickeables + navegación horizontal */
+    .hist-arqueo-row { cursor: pointer; }
+    /* El hover va en los td y es translúcido a propósito: el tinte rojo/naranja de
+       la fila con diferencia se pinta en el tr y tiene que seguir viéndose debajo. */
+    .hist-arqueo-row:hover td { background: rgba(255,255,255,0.05); }
+    #hist-arqueos-nav .btn:disabled { opacity: 0.35; cursor: default; }
+    #hist-arqueos-nav .btn:disabled:hover { background: var(--surface2); }
     tr:hover td { background: var(--surface2); }
     .row-header td { background: var(--surface2); font-weight: 600; color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
     .row-total td { font-weight: 700; border-top: 1px solid var(--border); }
@@ -1560,7 +1568,12 @@
         Las filas con diferencia se resaltan; en naranja si tienen nota (explicada), en rojo si falta explicar. Los arqueos viejos no tienen el dato de Fudo y muestran "—".
       </div>
       <div id="hist-arqueos-kpis" class="kpi-grid" style="margin-bottom:14px"></div>
-      <div class="table-wrap">
+      <div id="hist-arqueos-nav" style="display:none;align-items:center;gap:8px;margin-bottom:8px">
+        <button class="btn" id="hist-arqueos-prev" style="padding:4px 12px" onclick="scrollHistArqueos(-1)" title="Columnas anteriores">&larr;</button>
+        <button class="btn" id="hist-arqueos-next" style="padding:4px 12px" onclick="scrollHistArqueos(1)" title="Columnas siguientes">&rarr;</button>
+        <span style="font-size:11px;color:var(--text-muted)">La tabla sigue a la derecha &middot; clic en una fila para ver el detalle completo</span>
+      </div>
+      <div class="table-wrap" id="hist-arqueos-scroll">
         <table class="prov-resumen-table" style="width:100%;font-size:13px">
           <thead id="hist-arqueos-head"></thead>
           <tbody id="hist-arqueos-body"><tr><td style="color:var(--text-muted);padding:14px">Cargando...</td></tr></tbody>
@@ -1834,7 +1847,7 @@ const state = {
   pagosVista: 'todos', pagosData: [], proy: null, cuotasAgrup: 'compra', cierrePendiente: null,
   galiciaFuturos: false, servAgrup: 'crono', servData: [], servDetalle: null,
   puntoEquilibrio: null,
-  fudoCierre: null, arqueoEstado: null,
+  fudoCierre: null, arqueoEstado: null, histArqueos: [],
   provSugerencias: null, vencManual: false, pgSeleccion: null,
   servVista: localStorage.getItem('mb_serv_vista') || 'numeros',
   tc: 1425,
@@ -2420,7 +2433,6 @@ async function loadHistorialArqueos() {
   // podía verificar a mano — faltaban los términos.
   head.innerHTML = '<tr>'
     + '<th style="text-align:left">Fecha</th><th>Apertura</th><th>Cierre</th>'
-    + '<th style="text-align:left">Encargado</th>'
     + '<th style="text-align:right" title="Saldo calculado de la planilla al abrir">Esperado apertura</th>'
     + '<th style="text-align:right" title="Efectivo contado al abrir">Real apertura</th>'
     + '<th style="text-align:right" title="Contado − esperado al abrir">Dif. apertura</th>'
@@ -2431,7 +2443,7 @@ async function loadHistorialArqueos() {
     + '<th style="text-align:right">Diferencia turno</th>'
     + '<th style="text-align:left">Nota</th></tr>';
 
-  if (!data.length) { body.innerHTML = '<tr><td colspan="13" style="color:var(--text-muted);padding:14px">Sin arqueos registrados.</td></tr>'; return; }
+  if (!data.length) { body.innerHTML = '<tr><td colspan="12" style="color:var(--text-muted);padding:14px">Sin arqueos registrados.</td></tr>'; updateHistArqueosNav(); return; }
 
   const celdaDif = v => {
     if (v == null) return '<td style="text-align:right;color:var(--text-muted)">—</td>';
@@ -2453,18 +2465,17 @@ async function loadHistorialArqueos() {
     return '<td style="text-align:right;color:'+col+'">'+(v > 0 ? '+' : '')+fmt(v)+'</td>';
   };
 
-  body.innerHTML = data.map(a => {
+  // El encargado ya no ocupa una columna: se ve en el detalle de la fila, junto con
+  // el resto de lo que no entra a lo ancho (Mercado Pago, Galicia, ajustes, continuidad).
+  state.histArqueos = data;
+
+  body.innerHTML = data.map((a, i) => {
     const tieneDif = a.difEfectivoTurno != null && Math.abs(a.difEfectivoTurno) > TOL;
     const bg = (tieneDif && a.nota) ? 'background:rgba(224,138,92,0.10)' : (tieneDif ? 'background:rgba(224,92,92,0.06)' : '');
-    const enc = [a.encargadoApertura, a.encargadoCierre].filter(Boolean);
-    const encTxt = enc.length === 0 ? '<span style="color:var(--text-muted)">—</span>'
-      : enc[0] === enc[1] ? escapeHtml(enc[0])
-      : escapeHtml(enc.join(' → '));
-    return '<tr style="'+bg+'">'
+    return '<tr class="hist-arqueo-row" style="'+bg+'" onclick="openArqueoDetalle('+i+')" title="Ver el detalle completo de este arqueo">'
       + '<td style="text-align:left;font-weight:600">'+escapeHtml(a.fecha)+'</td>'
       + '<td>'+escapeHtml(a.apertura)+'</td>'
       + '<td>'+escapeHtml(a.cierre)+'</td>'
-      + '<td style="text-align:left;color:var(--text-muted)">'+encTxt+'</td>'
       + celdaNum(a.efectivoEsperadoInicial)
       + '<td style="text-align:right">'+fmt(a.efectivoInicial)+'</td>'
       + celdaDifApertura(a.efectivoEsperadoInicial != null ? a.diffAperturaEfectivo : null)
@@ -2476,6 +2487,124 @@ async function loadHistorialArqueos() {
       + '<td style="text-align:left;color:var(--text-muted);max-width:240px;white-space:normal">'+escapeHtml(a.nota || '')+'</td>'
       + '</tr>';
   }).join('');
+
+  updateHistArqueosNav();
+}
+
+// ─── Navegación horizontal de la tabla de arqueos ────────────────────────────
+// La tabla no entra a lo ancho y el scroll horizontal solo, sin barra visible,
+// no se descubre: las columnas de la derecha (esperado/real cierre, diferencia)
+// son justamente las que se miran, y quedaban escondidas.
+function scrollHistArqueos(dir) {
+  const sc = document.getElementById('hist-arqueos-scroll');
+  if (!sc) return;
+  sc.scrollBy({ left: dir * Math.max(200, sc.clientWidth * 0.7), behavior: 'smooth' });
+}
+
+function updateHistArqueosNav() {
+  const sc = document.getElementById('hist-arqueos-scroll');
+  const nav = document.getElementById('hist-arqueos-nav');
+  if (!sc || !nav) return;
+  const overflow = sc.scrollWidth - sc.clientWidth;
+  nav.style.display = overflow > 4 ? 'flex' : 'none';
+  const prev = document.getElementById('hist-arqueos-prev');
+  const next = document.getElementById('hist-arqueos-next');
+  // 4px de tolerancia: el scroll fraccionario nunca llega al extremo exacto.
+  if (prev) prev.disabled = sc.scrollLeft <= 4;
+  if (next) next.disabled = sc.scrollLeft >= overflow - 4;
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  const sc = document.getElementById('hist-arqueos-scroll');
+  if (sc) sc.addEventListener('scroll', updateHistArqueosNav);
+  window.addEventListener('resize', updateHistArqueosNav);
+});
+
+// Detalle de un arqueo: la cuenta completa del efectivo más todo lo que no entra
+// en la tabla (encargados, Mercado Pago, Galicia, ajuste posteado, continuidad).
+function openArqueoDetalle(i) {
+  const a = (state.histArqueos || [])[i];
+  if (!a) return;
+  const TOL = 1;
+
+  const dash = '<span style="color:var(--text-muted)">—</span>';
+  const val = v => v != null ? fmt(v) : dash;
+  const fila = (label, valor, opts) => {
+    opts = opts || {};
+    return '<div style="display:flex;justify-content:space-between;gap:16px;padding:5px 0'
+      + (opts.borde ? ';border-top:1px solid var(--border);margin-top:4px;padding-top:8px' : '') + '">'
+      + '<span style="color:var(--text-muted)'+(opts.sangria ? ';padding-left:12px' : '')+'">'+label+'</span>'
+      + '<span style="text-align:right'+(opts.color ? ';color:'+opts.color : '')+(opts.fuerte ? ';font-weight:700' : '')+'">'+valor+'</span></div>';
+  };
+  const bloque = (titulo, contenido) =>
+    '<div style="background:var(--surface2);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px">'
+    + '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:6px">'+titulo+'</div>'
+    + contenido + '</div>';
+
+  const enc = [a.encargadoApertura, a.encargadoCierre].filter(Boolean);
+  const encTxt = enc.length === 0 ? dash
+    : enc[0] === enc[1] ? escapeHtml(enc[0])
+    : escapeHtml(enc[0]) + ' &rarr; ' + escapeHtml(enc[1]);
+
+  const turno = bloque('Turno',
+    fila('Fecha', '<strong>'+escapeHtml(a.fecha)+'</strong>')
+    + fila('Apertura', escapeHtml(a.apertura) || dash)
+    + fila('Cierre', escapeHtml(a.cierre) || dash)
+    + fila('Duración', escapeHtml(a.duracion) || dash)
+    + fila('Encargado', encTxt));
+
+  // Misma cuenta que la tabla, pero término por término y en vertical, que es
+  // como se verifica a mano: esperado → real → qué entró → qué salió → resultado.
+  const difOk = a.difEfectivoTurno != null && Math.abs(a.difEfectivoTurno) <= TOL;
+  const difTxt = a.difEfectivoTurno == null ? dash
+    : difOk ? '✓ Cierra'
+    : (a.difEfectivoTurno > 0 ? 'Sobran ' : 'Faltan ') + fmt(Math.abs(a.difEfectivoTurno));
+  const difApTxt = a.efectivoEsperadoInicial == null ? dash
+    : Math.abs(a.diffAperturaEfectivo) <= TOL ? '✓ Coincide'
+    : (a.diffAperturaEfectivo > 0 ? '+' : '') + fmt(a.diffAperturaEfectivo);
+
+  const efectivo = bloque('Efectivo — la cuenta completa',
+    fila('Esperado al abrir <span style="font-size:11px">(Cajas!F8)</span>', val(a.efectivoEsperadoInicial))
+    + fila('Contado al abrir', fmt(a.efectivoInicial))
+    + fila('Diferencia de apertura', difApTxt, {
+        sangria: true,
+        color: a.efectivoEsperadoInicial == null ? null
+          : Math.abs(a.diffAperturaEfectivo) <= TOL ? 'var(--green)'
+          : (a.diffAperturaEfectivo > 0 ? 'var(--green)' : 'var(--red)'),
+      })
+    + fila('+ Ingreso Fudo en efectivo', val(a.ingresoFudoEfectivo), { borde: true })
+    + fila('− Gastos del turno en efectivo', val(a.gastosEfectivoTurno))
+    + fila('= Esperado al cerrar', val(a.efectivoEsperadoCierre), { fuerte: true })
+    + fila('Contado al cerrar', fmt(a.efectivoFinal), { borde: true })
+    + fila('Diferencia del turno', difTxt, {
+        fuerte: true,
+        color: a.difEfectivoTurno == null ? null : (difOk ? 'var(--green)' : 'var(--red)'),
+      }));
+
+  const otrasCajas = bloque('Otras cajas',
+    fila('Mercado Pago inicial', fmt(a.mpInicial))
+    + fila('Mercado Pago final', fmt(a.mpFinal))
+    + fila('Diferencia apertura MP', a.diffAperturaMP ? fmt(a.diffAperturaMP) : '✓ Coincide', { sangria: true })
+    + fila('Galicia final', fmt(a.galiciaFinal), { borde: true }));
+
+  // Datos de auditoría: sirven para reconstruir por qué F8 quedó donde quedó.
+  const auditoria = bloque('Auditoría',
+    fila('Saldo calculado al cerrar <span style="font-size:11px">(Cajas!F8)</span>', val(a.saldoCalculadoAlCerrar))
+    + fila('Ajuste posteado en la apertura', a.ajusteApertura != null ? fmt(a.ajusteApertura) : dash)
+    + fila('Continuidad con el turno anterior',
+        a.diffContinuidadEfectivo == null ? dash
+        : Math.abs(a.diffContinuidadEfectivo) <= TOL ? '✓ Sin salto'
+        : (a.diffContinuidadEfectivo > 0 ? '+' : '') + fmt(a.diffContinuidadEfectivo),
+        { color: a.diffContinuidadEfectivo != null && Math.abs(a.diffContinuidadEfectivo) > TOL ? 'var(--red)' : null })
+    + fila('Fila en la planilla', 'Arqueo de Cajas!' + a.rowIndex, { borde: true }));
+
+  const nota = a.nota
+    ? '<div style="background:rgba(224,138,92,0.10);border:1px solid var(--accent);border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.6">'
+      + '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:4px">Nota</div>'
+      + escapeHtml(a.nota) + '</div>'
+    : '<div style="font-size:12px;color:var(--text-muted)">Sin nota cargada.</div>';
+
+  openDetalleModal('Arqueo del ' + escapeHtml(a.fecha), turno + efectivo + otrasCajas + auditoria + nota);
 }
 async function cerrarCaja() {
   const efectivo    = parseFloat(document.getElementById('ci-efectivo').value) || 0;
