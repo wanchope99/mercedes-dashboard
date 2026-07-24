@@ -1392,7 +1392,7 @@
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div>
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Saldo esperado (planilla)</div>
-            <input type="number" id="ap-efectivo-esperado" placeholder="—" readonly
+            <input type="text" id="ap-efectivo-esperado" placeholder="—" readonly
               style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);padding:12px 14px;border-radius:8px;font-size:16px;font-family:inherit;cursor:not-allowed;" />
           </div>
           <div>
@@ -1407,7 +1407,7 @@
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div>
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Saldo esperado (planilla)</div>
-            <input type="number" id="ap-mp-esperado" placeholder="—" readonly
+            <input type="text" id="ap-mp-esperado" placeholder="—" readonly
               style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text-muted);padding:12px 14px;border-radius:8px;font-size:16px;font-family:inherit;cursor:not-allowed;" />
           </div>
           <div>
@@ -2162,8 +2162,10 @@ async function initArqueo() {
   // Cargar saldos esperados desde la planilla
   try {
     const { data: saldos } = await api('/api/arqueo/saldos-iniciales');
-    document.getElementById('ap-efectivo-esperado').value = saldos.efectivoEsperado || '';
-    document.getElementById('ap-mp-esperado').value = saldos.mpEsperado || '';
+    // Se muestran formateados ($1.357.000) y el número crudo queda en dataset.raw:
+    // el texto con separadores de miles no se puede volver a parsear con parseFloat.
+    setEsperado('ap-efectivo-esperado', saldos.efectivoEsperado);
+    setEsperado('ap-mp-esperado', saldos.mpEsperado);
     // Si alguna caja no se encontró por nombre en la planilla, el esperado que se
     // muestra es 0 y no significa "no hay plata". Hay que decirlo, porque contra
     // un esperado de 0 cualquier conteo parece un sobrante enorme.
@@ -2171,6 +2173,20 @@ async function initArqueo() {
       showToast('⚠ No pude leer un saldo esperado de la hoja Cajas: ' + saldos.aviso);
     }
   } catch(err) { /* no bloqueante */ }
+}
+
+// Campo de "saldo esperado": se ve formateado en pesos, se lee crudo.
+function setEsperado(id, valor) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const n = Number(valor);
+  const ok = Number.isFinite(n);
+  el.dataset.raw = ok ? String(n) : '';
+  el.value = ok ? fmt(n) : '';
+}
+function getEsperado(id) {
+  const el = document.getElementById(id);
+  return el ? (parseFloat(el.dataset.raw) || 0) : 0;
 }
 
 function renderEstadoArqueo(data) {
@@ -2230,8 +2246,8 @@ function renderEstadoArqueo(data) {
 async function abrirCaja() {
   const efectivo         = parseFloat(document.getElementById('ap-efectivo').value) || 0;
   const mp               = parseFloat(document.getElementById('ap-mp').value) || 0;
-  const efectivoEsperado = parseFloat(document.getElementById('ap-efectivo-esperado').value) || 0;
-  const mpEsperado       = parseFloat(document.getElementById('ap-mp-esperado').value) || 0;
+  const efectivoEsperado = getEsperado('ap-efectivo-esperado');
+  const mpEsperado       = getEsperado('ap-mp-esperado');
   const errEl = document.getElementById('arqueo-error');
   errEl.textContent = '';
 

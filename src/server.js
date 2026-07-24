@@ -272,7 +272,12 @@ async function leerSaldoCalculado(sheets, nombreCaja) {
     valueRenderOption: 'UNFORMATTED_VALUE',
   });
   const v = r.data.values?.[0]?.[0];
-  return typeof v === 'number' ? v : (parseFloat(String(v ?? '0').replace(/[^0-9.-]/g, '')) || 0);
+  const n = typeof v === 'number' ? v : (parseFloat(String(v ?? '0').replace(/[^0-9.-]/g, '')) || 0);
+  // Redondear a 2 decimales acá, en la fuente. El SUMIFS de la planilla arrastra
+  // el error de punto flotante y devuelve cosas como 1356999,9999999999981: eso
+  // se mostraba crudo en la pantalla de apertura y, peor, se guardaba así en las
+  // columnas R y U del arqueo. Son centavos que no existen.
+  return Math.round(n * 100) / 100;
 }
 
 const leerSaldoCalculadoEfectivo = sheets => leerSaldoCalculado(sheets, CAJA_EFECTIVO);
@@ -924,6 +929,17 @@ app.get('/api/cajas', authMiddleware, async (req, res) => {
 // viejo pasó a ser huérfana de la noche a la mañana.
 //
 // Esto lo detecta solo. Es sólo lectura: reporta, no corrige.
+//
+// Medios del sistema VIEJO que quedan fuera del control a propósito. No son un
+// error a corregir: son historia anterior a que las cajas existieran, y ya se
+// revisaron una por una.
+//   · "Efectivo" (124 filas): entradas y salidas dan exactamente lo mismo
+//     ($40.234.922), o sea que netean en cero y no mueven ningún saldo.
+//   · "Legacy" (29 filas): asientos de arrastre del sistema anterior.
+// Se listan acá para que el aviso hable sólo de plata realmente descolgada.
+const MEDIOS_LEGACY = (process.env.MEDIOS_LEGACY || 'Efectivo,Legacy')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+
 app.get('/api/cajas/medios-huerfanos', authMiddleware, adminOnly, async (req, res) => {
   try {
     const [cajas, movimientos] = await Promise.all([getCajas(), getMovimientos()]);
@@ -936,6 +952,7 @@ app.get('/api/cajas/medios-huerfanos', authMiddleware, adminOnly, async (req, re
       // que a propósito no toca ninguna caja hasta que se paga cada cuota.
       if (!medio) continue;
       if (nombres.has(medio.toLowerCase())) continue;
+      if (MEDIOS_LEGACY.includes(medio.toLowerCase())) continue;
       const e = porMedio.get(medio) || { medio, filas: 0, entradas: 0, salidas: 0, ultimaFecha: null, ejemploFila: null };
       e.filas++;
       e.entradas += m.entradaTotal || 0;
