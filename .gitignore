@@ -1,3 +1,9 @@
 node_modules/
 .env
 credentials.json
+
+# Bitácora de trabajo, a propósito fuera del repo: este repositorio es PÚBLICO y
+# progress.json es un diario interno del negocio (resultados mensuales, saldos,
+# la meta de recupero en USD, proveedores y notas sobre el personal por nombre).
+# Nada de eso tiene por qué ser legible por cualquiera. Se queda local.
+progress.json
