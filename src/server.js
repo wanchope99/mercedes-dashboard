@@ -160,8 +160,11 @@ function buildFilasCierreServicio({ fechaServicio, mesServicio, descripcionServi
     }
   };
 
-  registrarCaja('Efectivo Local', deltaEfectivo, fudoOk ? (Number(fudo.efectivo) || 0) : 0, gastosEfectivoSesion, 'efectivo');
-  registrarCaja('Mercado Pago', deltaMP, fudoOk ? (Number(fudo.mercadoPago) || 0) : 0, gastosMPSesion, 'mercado pago');
+  // El medio se escribe con el nombre EXACTO de la caja: las fórmulas de la hoja
+  // Cajas suman por texto exacto, así que un "Mercado Pago" a secas después del
+  // rename a "Mercado Pago Tincho" sería plata que ninguna caja vuelve a sumar.
+  registrarCaja(CAJA_EFECTIVO, deltaEfectivo, fudoOk ? (Number(fudo.efectivo) || 0) : 0, gastosEfectivoSesion, 'efectivo');
+  registrarCaja(CAJA_MP, deltaMP, fudoOk ? (Number(fudo.mercadoPago) || 0) : 0, gastosMPSesion, 'mercado pago');
 
   // Galicia: ingreso BRUTO + impuestos (comisión del posnet) como gasto financiero
   // → resultado neto discriminado
@@ -170,6 +173,54 @@ function buildFilasCierreServicio({ fechaServicio, mesServicio, descripcionServi
     rows.push(gasto('Galicia', impuestos, descripcionServicio, 'Financieros'));
   }
   return rows;
+}
+
+// ─── Cajas: resolución de filas por NOMBRE, no por número ─────────────────────
+//
+// Las filas de la hoja "Cajas" estaban hardcodeadas en el código (F8 = Efectivo
+// Local, F2 = Mercado Pago). El 24/07/2026 se agregó "Mercado Pago Pablo" en la
+// fila 3 y TODO lo de abajo se corrió una fila: F8 pasó a ser Efectivo Pablo.
+// Con las filas fijas la app habría leído el saldo de OTRA caja al abrir y
+// posteado un ajuste de efectivo de cientos de miles de pesos contra un esperado
+// que no era el suyo — y habría pisado el saldo real de Efectivo Pablo al cerrar.
+//
+// Por eso ahora la fila se busca por el nombre de la columna A. Insertar, borrar
+// o reordenar cajas en la planilla deja de romper el arqueo.
+const CAJA_EFECTIVO = process.env.CAJA_EFECTIVO || 'Efectivo Local';
+const CAJA_MP       = process.env.CAJA_MP       || 'Mercado Pago Tincho';
+
+let _filasCajasCache = { at: 0, mapa: null };
+
+async function filasCajas(sheets) {
+  if (_filasCajasCache.mapa && Date.now() - _filasCajasCache.at < 60_000) {
+    return _filasCajasCache.mapa;
+  }
+  const r = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'Cajas!A:A',
+  });
+  const mapa = new Map();
+  (r.data.values || []).forEach((row, i) => {
+    const nombre = (row?.[0] || '').toString().trim();
+    if (nombre && nombre.toLowerCase() !== 'caja') mapa.set(nombre.toLowerCase(), i + 1);
+  });
+  _filasCajasCache = { at: Date.now(), mapa };
+  return mapa;
+}
+
+// Fila de una caja, o error explícito. Fallar acá es MUCHO mejor que caer a una
+// fila por defecto: un número leído de la caja equivocada se convierte en un
+// ajuste escrito en Movimientos que después nadie puede explicar.
+async function filaCaja(sheets, nombre) {
+  const mapa = await filasCajas(sheets);
+  const fila = mapa.get(nombre.toLowerCase());
+  if (!fila) {
+    throw new Error(
+      `No encontré la caja "${nombre}" en la hoja Cajas (columna A). ` +
+      `Cajas disponibles: ${[...mapa.keys()].join(', ') || 'ninguna'}.`
+    );
+  }
+  return fila;
 }
 
 // ─── Arqueo de Cajas ──────────────────────────────────────────────────────────
@@ -195,41 +246,45 @@ const ARQUEO_HEADERS = [
   // ─── Efectivo: la cuenta completa, término por término ───
   'Encargado Apertura',           // P
   'Encargado Cierre',             // Q
-  'Efectivo Esperado Inicial',    // R — Cajas!F8 leído al abrir
+  'Efectivo Esperado Inicial',    // R — Saldo Calculado de la caja de efectivo al abrir
   'Gastos Efectivo Turno',        // S — gastos en efectivo con la caja abierta
   'Efectivo Esperado Cierre',     // T — R real inicial + Fudo − gastos
-  'Saldo Calculado al Cerrar',    // U — Cajas!F8 leído al cerrar
+  'Saldo Calculado al Cerrar',    // U — Saldo Calculado de la caja de efectivo al cerrar
   'Ajuste Apertura Posteado',     // V — fila de ajuste escrita en Movimientos al abrir
 ];
 
 // Diferencias de efectivo por debajo de esto se ignoran (redondeo, no plata real).
 const TOLERANCIA_AJUSTE_EFECTIVO = 1;
 
-// Lee el "Saldo Calculado" de Efectivo Local (Cajas!F8) en este instante.
+// Lee el "Saldo Calculado" (columna F) de una caja en este instante.
 //
-// OJO con qué es este número: F8 = SUMIFS(entradas Efectivo Local) −
-// SUMIFS(salidas Efectivo Local con Estado="Pagado"), acumulado sobre TODA la
+// OJO con qué es este número: F = SUMIFS(entradas de la caja) −
+// SUMIFS(salidas de la caja con Estado="Pagado"), acumulado sobre TODA la
 // historia de Movimientos. No es el saldo del turno. Cambia sin que se agregue
 // ninguna fila: basta con editar una fila vieja (completarle el medio de pago, o
 // pasarla de "A pagar" a "Pagado") para que se mueva hoy. Por eso lo persistimos
 // en el arqueo: sin la foto del momento, la diferencia es imposible de reconstruir.
-async function leerSaldoCalculadoEfectivo(sheets) {
+async function leerSaldoCalculado(sheets, nombreCaja) {
+  const fila = await filaCaja(sheets, nombreCaja);
   const r = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: 'Cajas!F8',
+    range: `Cajas!F${fila}`,
     valueRenderOption: 'UNFORMATTED_VALUE',
   });
   const v = r.data.values?.[0]?.[0];
   return typeof v === 'number' ? v : (parseFloat(String(v ?? '0').replace(/[^0-9.-]/g, '')) || 0);
 }
 
+const leerSaldoCalculadoEfectivo = sheets => leerSaldoCalculado(sheets, CAJA_EFECTIVO);
+
 // Postea en Movimientos la diferencia entre el efectivo contado y el que la
-// planilla creía tener, para que Cajas!F8 vuelva a coincidir con la plata real.
+// planilla creía tener, para que el Saldo Calculado vuelva a coincidir con la plata real.
 //
 // Sin esta fila el desvío no se corrige nunca: la app escribía el conteo real en
-// Cajas!G8 y en la hoja de arqueo, pero F8 se calcula solo desde Movimientos, así
-// que cada diferencia no explicada quedaba archivada en la columna K del arqueo y
-// F8 seguía arrastrándola para siempre. Al 21/07/2026 ese arrastre era $122.164,43.
+// el "Saldo Real" (columna G) y en la hoja de arqueo, pero el "Saldo Calculado"
+// (columna F) sale sólo de Movimientos. Así, cada diferencia no explicada quedaba
+// archivada en la columna K del arqueo y la columna F seguía arrastrándola para
+// siempre. Al 21/07/2026 ese arrastre era $122.164,43.
 //
 // Queda como un gasto/ingreso normal y explícito: se ve en el ledger, suma al
 // resultado del mes y es auditable (dice quién, cuándo y contra qué esperado).
@@ -250,7 +305,7 @@ async function postearAjusteEfectivo(sheets, { diferencia, esperado, contado, en
   const row = [
     fecha, mesesNombres[mesNum - 1], sobra ? 'Ingreso' : 'Gasto', 'Pagado', '', '', '', '',
     'Ajuste de Caja', 'Ajuste de Caja', descripcion,
-    'Efectivo Local',
+    CAJA_EFECTIVO,
     sobra ? monto : '', '', sobra ? '' : monto, '',
   ];
   await sheets.spreadsheets.values.append({
@@ -332,21 +387,31 @@ app.get('/api/arqueo/historial', authMiddleware, adminOnly, async (req, res) => 
   }
 });
 
-// GET /api/arqueo/saldos-iniciales — lee saldos esperados de la hoja Cajas
-// Efectivo Local = F8, Mercado Pago = F2
+// GET /api/arqueo/saldos-iniciales — saldos esperados (columna F de la hoja
+// Cajas) de las DOS cajas que se arquean cada noche. La fila se busca por nombre:
+// no asumir F2/F8, que se corrieron al agregarse Mercado Pago Pablo.
 app.get('/api/arqueo/saldos-iniciales', authMiddleware, async (req, res) => {
   try {
     const auth = getAuth();
     const sheets = google.sheets({ version: 'v4', auth });
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: 'Cajas!F2:F8',
+    // Cada caja se resuelve por separado y un fallo NO tumba la pantalla de
+    // apertura: si una caja se renombró, se muestra la otra y se avisa cuál falta.
+    // El local tiene que poder abrir igual.
+    const leer = async nombre => {
+      try { return { valor: await leerSaldoCalculado(sheets, nombre), error: null }; }
+      catch (e) { console.error(`No se pudo leer el saldo de "${nombre}":`, e.message); return { valor: 0, error: e.message }; }
+    };
+    const [efvo, mp] = await Promise.all([leer(CAJA_EFECTIVO), leer(CAJA_MP)]);
+    res.json({
+      ok: true,
+      data: {
+        efectivoEsperado: efvo.valor,
+        mpEsperado: mp.valor,
+        cajaEfectivo: CAJA_EFECTIVO,
+        cajaMP: CAJA_MP,
+        aviso: [efvo.error, mp.error].filter(Boolean).join(' · ') || null,
+      },
     });
-    const vals = response.data.values || [];
-    // F2 = índice 0, F8 = índice 6
-    const mpEsperado       = parseFloat((vals[0]?.[0] || '0').toString().replace(/[^0-9.-]/g, '')) || 0;
-    const efectivoEsperado = parseFloat((vals[6]?.[0] || '0').toString().replace(/[^0-9.-]/g, '')) || 0;
-    res.json({ ok: true, data: { efectivoEsperado, mpEsperado } });
   } catch (err) {
     console.error('Error leyendo saldos iniciales:', err.message);
     res.status(500).json({ ok: false, error: err.message });
@@ -355,9 +420,9 @@ app.get('/api/arqueo/saldos-iniciales', authMiddleware, async (req, res) => {
 
 // POST /api/arqueo/abrir
 //
-// El esperado de EFECTIVO no se toma del body: se relee Cajas!F8 acá, en el server.
+// El esperado de EFECTIVO no se toma del body: se relee el Saldo Calculado acá, en el server.
 // El valor que mandaba el cliente venía de cuando se cargó la pantalla y podía estar
-// viejo — y F8 se mueve sola cuando alguien edita cualquier fila de Movimientos.
+// viejo — y ese saldo se mueve solo cuando alguien edita cualquier fila de Movimientos.
 // Comparar contra un esperado viejo era, justamente, una de las formas de generar
 // una diferencia que después nadie podía explicar.
 app.post('/api/arqueo/abrir', authMiddleware, async (req, res) => {
@@ -463,6 +528,8 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   // Impuestos = diferencia entre Bruto y Neto Acreditado
   const galiciaBruto = Number(galicia) || 0;
   const galiciaNetoVal = Number(galiciaNeto) || 0;
+  // Avisos no fatales del cierre (ver paso 1b): el cierre igual se completa.
+  let avisoCajas = null;
   const impuestos = galiciaBruto > galiciaNetoVal ? galiciaBruto - galiciaNetoVal : 0;
 
   try {
@@ -495,12 +562,12 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
     const _esperadoEfvo = (estadoCaja.efectivoInicial || 0) + fudoEfectivo - _gastosEfvoTurno;
     const difEfectivoTurno = Math.round((Number(efectivo) - _esperadoEfvo) * 100) / 100;
 
-    // Foto de Cajas!F8 ANTES de escribir las filas del cierre. Comparada contra el
+    // Foto del Saldo Calculado ANTES de escribir las filas del cierre. Comparada contra el
     // efectivo contado muestra cuánto se había despegado la planilla de la realidad
     // durante el turno, que es la información que faltaba para poder auditar.
     let saldoCalculadoAlCerrar = '';
     try { saldoCalculadoAlCerrar = await leerSaldoCalculadoEfectivo(sheets); }
-    catch (e) { console.error('No se pudo leer Cajas!F8 al cerrar:', e.message); }
+    catch (e) { console.error('No se pudo leer el Saldo Calculado al cerrar:', e.message); }
 
     const rowArqueo = [
       fechaStr,
@@ -521,10 +588,10 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
       // ─── P–V: la cuenta del efectivo, completa y verificable ───
       estadoCaja.encargado || '',            // P: quién abrió
       req.user.nombre || '',                 // Q: quién cerró
-      estadoCaja.efectivoEsperado ?? '',     // R: Cajas!F8 al abrir
+      estadoCaja.efectivoEsperado ?? '',     // R: Saldo Calculado al abrir
       _gastosEfvoTurno,                      // S: gastos en efectivo del turno
       _esperadoEfvo,                         // T: esperado al cierre = E + N − S
-      saldoCalculadoAlCerrar,                // U: Cajas!F8 al cerrar
+      saldoCalculadoAlCerrar,                // U: Saldo Calculado al cerrar
       estadoCaja.ajusteApertura || 0,        // V: ajuste posteado al abrir
     ];
     // Escribimos en una fila absoluta calculada a partir de la columna A, NO con
@@ -553,17 +620,34 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
       },
     });
 
-    // 1b. Actualizar Saldo Real en hoja Cajas (G2=Mercado Pago, G8=Efectivo Local)
-    await sheets.spreadsheets.values.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
-      requestBody: {
-        valueInputOption: 'USER_ENTERED',
-        data: [
-          { range: 'Cajas!G2', values: [[Number(mercadoPago)]] },
-          { range: 'Cajas!G8', values: [[Number(efectivo)]] },
-        ],
-      },
-    });
+    // 1b. Actualizar "Saldo Real" (columna G) de las dos cajas arqueadas. Las
+    // filas se resuelven por nombre — escribir en una fila fija acá significaba
+    // pisar el saldo real de la caja de otra persona.
+    //
+    // NO puede tumbar el cierre: si el nombre de una caja no matchea (alguien la
+    // renombró en la planilla), este paso se saltea y se avisa. La columna G es
+    // informativa; lo que no se puede perder son las filas de Movimientos que
+    // vienen en el paso 2, y abortar acá las dejaba sin escribir con el arqueo
+    // ya guardado — el peor de los estados posibles.
+    try {
+      const [filaEfvo, filaMP] = await Promise.all([
+        filaCaja(sheets, CAJA_EFECTIVO),
+        filaCaja(sheets, CAJA_MP),
+      ]);
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          valueInputOption: 'USER_ENTERED',
+          data: [
+            { range: `Cajas!G${filaMP}`,   values: [[Number(mercadoPago)]] },
+            { range: `Cajas!G${filaEfvo}`, values: [[Number(efectivo)]] },
+          ],
+        },
+      });
+    } catch (e) {
+      console.error('No se pudo actualizar el Saldo Real en la hoja Cajas:', e.message);
+      avisoCajas = 'El cierre se guardó bien, pero no se pudo actualizar el "Saldo Real" en la hoja Cajas: ' + e.message;
+    }
 
     // 2. Escribir en Movimientos — columnas A:P
     // A:Fecha, B:Mes, C:Tipo Movimiento, D:Estado, E:Vencimiento, F:Cuotas,
@@ -619,13 +703,13 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   estadoCaja = { abierta: false, apertura: null, encargado: null, efectivoInicial: null, mpInicial: null, gastosSesion: [] };
   guardarEstadoCaja(estadoCaja); // respaldo en planilla, no bloquea la respuesta
 
-  res.json({ ok: true, data: resumen });
+  res.json({ ok: true, data: resumen, avisoCajas });
 });
 
 // POST /api/gastos-rapidos — gasto pagado en el momento (ej: hielo al empezar
 // el servicio). Accesible para el encargado. Si la caja está ABIERTA y el medio
-// es una caja arqueada (Efectivo Local / Mercado Pago), se anota en la sesión
-// para descontarlo del esperado en el cierre.
+// es una de las dos cajas arqueadas (CAJA_EFECTIVO / CAJA_MP), se anota en la
+// sesión para descontarlo del esperado en el cierre.
 app.post('/api/gastos-rapidos', authMiddleware, async (req, res) => {
   try {
     const { fecha, mes, proveedor, categoria, monto, descripcion, estado } = req.body;
@@ -648,8 +732,11 @@ app.post('/api/gastos-rapidos', authMiddleware, async (req, res) => {
     let registradoEnSesion = false;
     const medioLower = (medioPago || '').toLowerCase();
     if (estadoCaja.abierta && estadoRow === 'Pagado') {
-      const bucket = medioLower.includes('efectivo local') ? 'efectivo'
-        : medioLower.includes('mercado pago') ? 'mp' : null;
+      // Match EXACTO contra las dos cajas que se arquean. Un `includes('mercado
+      // pago')` acá metería los gastos de Mercado Pago Pablo (la cuenta del
+      // recupero, que no se arquea) dentro del esperado del turno.
+      const bucket = medioLower === CAJA_EFECTIVO.toLowerCase() ? 'efectivo'
+        : medioLower === CAJA_MP.toLowerCase() ? 'mp' : null;
       if (bucket) {
         estadoCaja.gastosSesion = estadoCaja.gastosSesion || [];
         estadoCaja.gastosSesion.push({
@@ -823,6 +910,59 @@ app.get('/api/cajas', authMiddleware, async (req, res) => {
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// GET /api/cajas/medios-huerfanos — plata que ninguna caja está sumando.
+//
+// Las fórmulas de la hoja Cajas hacen SUMIFS por texto EXACTO contra la columna L
+// de Movimientos. Cualquier fila con un medio de pago que no sea el nombre exacto
+// de una caja es plata real que el "Saldo Calculado" nunca suma ni resta, y no
+// hay nada en la planilla que lo avise: el saldo simplemente queda mal, para
+// siempre, sin ningún error a la vista.
+//
+// Ya pasó dos veces. En julio/2026 había 124 filas cargadas como "Efectivo" a
+// secas, invisibles para Efectivo Local. Y al renombrar la caja "Mercado Pago" a
+// "Mercado Pago Tincho" (24/07/2026), toda fila que hubiera quedado con el nombre
+// viejo pasó a ser huérfana de la noche a la mañana.
+//
+// Esto lo detecta solo. Es sólo lectura: reporta, no corrige.
+app.get('/api/cajas/medios-huerfanos', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [cajas, movimientos] = await Promise.all([getCajas(), getMovimientos()]);
+    const nombres = new Set(cajas.map(c => (c.caja || '').trim().toLowerCase()).filter(Boolean));
+
+    const porMedio = new Map();
+    for (const m of movimientos) {
+      const medio = (m.medioPago || '').trim();
+      // Vacío es válido y frecuente: es la fila madre de una compra en cuotas,
+      // que a propósito no toca ninguna caja hasta que se paga cada cuota.
+      if (!medio) continue;
+      if (nombres.has(medio.toLowerCase())) continue;
+      const e = porMedio.get(medio) || { medio, filas: 0, entradas: 0, salidas: 0, ultimaFecha: null, ejemploFila: null };
+      e.filas++;
+      e.entradas += m.entradaTotal || 0;
+      e.salidas += m.salidaTotal || 0;
+      if (!e.ultimaFecha || m.fecha > e.ultimaFecha) e.ultimaFecha = m.fecha;
+      if (!e.ejemploFila) e.ejemploFila = m.rowIndex;
+      porMedio.set(medio, e);
+    }
+
+    const huerfanos = [...porMedio.values()]
+      .map(h => ({ ...h, ultimaFecha: h.ultimaFecha ? h.ultimaFecha.toISOString().split('T')[0] : null }))
+      .sort((a, b) => b.filas - a.filas);
+
+    res.json({
+      ok: true,
+      data: {
+        huerfanos,
+        totalFilas: huerfanos.reduce((s, h) => s + h.filas, 0),
+        cajas: cajas.map(c => c.caja),
+      },
+    });
+  } catch (err) {
+    console.error('Error /api/cajas/medios-huerfanos:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.get('/api/cambios', authMiddleware, adminOnly, async (req, res) => {
   try { res.json({ ok: true, data: await getMovimientosCambio(parseFiltro(req.query)) }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
@@ -935,9 +1075,16 @@ function mesDeFecha(fechaStr) {
 // calculado nunca resta. Al 21/07/2026 había 124 filas cargadas como "Efectivo"
 // invisibles para F8. Normalizamos acá, en la única puerta de entrada.
 //
-// "Efectivo Pablo" y "Efectivo Tincho" son cajas DISTINTAS (F7 y F6): se respetan
-// tal cual y no se pisan con Efectivo Local.
-const MEDIOS_CANONICOS = ['Efectivo Local', 'Efectivo Pablo', 'Efectivo Tincho', 'Mercado Pago', 'Galicia', 'USD Pablo', 'USD Tincho'];
+// "Efectivo Pablo" y "Efectivo Tincho" son cajas DISTINTAS de "Efectivo Local":
+// se respetan tal cual y no se pisan entre sí. Lo mismo desde el 24/07/2026 con
+// "Mercado Pago Tincho" (la operativa del bar, la que se arquea) y "Mercado Pago
+// Pablo" (donde se coloca la plata del recupero): un "Mercado Pago" a secas es
+// ambiguo y ninguna de las dos lo suma, así que se resuelve a la operativa.
+const MEDIOS_CANONICOS = [
+  'Efectivo Local', 'Efectivo Pablo', 'Efectivo Tincho',
+  'Mercado Pago Tincho', 'Mercado Pago Pablo',
+  'Galicia', 'USD Pablo', 'USD Tincho',
+];
 
 function normalizarMedio(medio) {
   const m = (medio || '').toString().trim();
@@ -947,7 +1094,7 @@ function normalizarMedio(medio) {
   const canonico = MEDIOS_CANONICOS.find(c => c.toLowerCase() === low);
   if (canonico) return canonico;           // corrige capitalización
   if (low === 'efectivo' || low === 'cash' || low.startsWith('contado')) return 'Efectivo Local';
-  if (low === 'mp') return 'Mercado Pago';
+  if (low === 'mp' || low === 'mercado pago') return CAJA_MP;
   return m;                                // desconocido: se deja tal cual
 }
 
@@ -1066,8 +1213,10 @@ app.post('/api/pagos/pagar', authMiddleware, adminOnly, async (req, res) => {
     const medioEfectivoPago = (medio || m.medioPago || '').toLowerCase();
     const montoSalida = Number(m.salidaTotal || m.salidaARS || 0);
     if (estadoCaja.abierta && montoSalida > 0) {
-      const bucket = medioEfectivoPago.includes('efectivo local') ? 'efectivo'
-        : medioEfectivoPago.includes('mercado pago') ? 'mp' : null;
+      // Match exacto: sólo las dos cajas que se arquean afectan el esperado del
+      // turno. Mercado Pago Pablo es la cuenta del recupero y no se arquea.
+      const bucket = medioEfectivoPago === CAJA_EFECTIVO.toLowerCase() ? 'efectivo'
+        : medioEfectivoPago === CAJA_MP.toLowerCase() ? 'mp' : null;
       if (bucket) {
         estadoCaja.gastosSesion = estadoCaja.gastosSesion || [];
         estadoCaja.gastosSesion.push({
@@ -1380,7 +1529,7 @@ app.put('/api/plan/config', authMiddleware, adminOnly, async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-// ─── Finanzas — escalera de recupero (solo admin) ────────────────────────────
+// ─── Finanzas — capital del recupero (solo admin) ───────────────────────────
 // La plata del recupero se coloca en instrumentos en pesos en vez de quedar
 // quieta. Los aportes mensuales salen del recupero real de cada cierre (roi.js)
 // salvo que se hayan editado a mano. Ver src/finanzas.js.
@@ -1391,25 +1540,16 @@ app.get('/api/finanzas', authMiddleware, adminOnly, async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-// Config: una clave suelta { clave, valor }, o el reparto entre los dos buckets
-// { pcts: { uva, cer } } — que se valida sumando 100%.
+// Config: una clave suelta { clave, valor }. Ya no hay reparto entre buckets —
+// el 100% del recupero va a Mercado Pago Pablo.
 app.put('/api/finanzas/config', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const { clave, valor, pcts } = req.body;
-    if (pcts) {
-      const u = Number(pcts.uva), e = Number(pcts.cer);
-      if (![u, e].every(n => Number.isFinite(n) && n >= 0)) {
-        return res.status(400).json({ ok: false, error: 'Los porcentajes deben ser números positivos' });
-      }
-      if (Math.abs(u + e - 1) > 1e-6) {
-        return res.status(400).json({ ok: false, error:
-          `Los porcentajes tienen que sumar 100% (suman ${((u + e) * 100).toFixed(1)}%)` });
-      }
-      await finanzas.guardarConfig('pctUva', u);
-      await finanzas.guardarConfig('pctCer', e);
-      return res.json({ ok: true });
-    }
+    const { clave, valor } = req.body;
     if (!clave) return res.status(400).json({ ok: false, error: 'Falta clave' });
+    const n = Number(valor);
+    if (clave !== 'mesInicio' && !(Number.isFinite(n) && n >= 0)) {
+      return res.status(400).json({ ok: false, error: 'El valor tiene que ser un número positivo' });
+    }
     await finanzas.guardarConfig(clave, valor);
     res.json({ ok: true });
   } catch (err) { res.status(400).json({ ok: false, error: err.message }); }

@@ -1,30 +1,32 @@
-// ─── Finanzas — escalera de recupero de inversión ───────────────────────────────
+// ─── Finanzas — capital del recupero de la inversión ────────────────────────────
 //
 // La plata que cada mes se separa para RECUPERAR la inversión (col L de Cierres,
-// ver roi.js) no se deja quieta: se coloca en instrumentos de bajo riesgo y en
-// pesos que preserven su valor real hasta llegar a la meta (~24 meses). Como el
-// dinero entra todos los meses, el modelo es una ESCALERA de plazos escalonados.
+// ver roi.js) no se deja quieta en la caja operativa: se coloca en una cuenta
+// aparte que rinde. Desde el 24/07/2026 la estrategia es UNA SOLA:
 //
-// Dos "buckets", cada aporte mensual se reparte entre ellos:
-//   · UVA (plazo fijo precancelable, plazoUvaMeses) → ajusta por CER, sin riesgo
-//     de precio. El aporte del mes t constituye un tramo que vence en t+plazo.
-//   · CER (bonos)             → ajusta por CER + tasa real, con riesgo de precio
-// CER y UVA no son ajustes distintos: la UVA se actualiza por el mismo CER. Lo
-// que cambia es el envoltorio (depósito bancario vs. bono que cotiza).
+//   · 100% a MERCADO PAGO PABLO — cuenta remunerada, rinde tnaMercadoPago (17%
+//     TNA al 24/07/2026), liquidez inmediata, sin plazo ni riesgo de precio.
 //
-// Hubo un tercer bucket, "colchón" (money market), que se sacó a propósito: rendía
-// menos que la inflación, así que su único rol era liquidez inmediata — y para eso
-// ya está la precancelación del plazo fijo UVA. Tenerlo obligaba a leer todo a tres
-// columnas para nada. Se removió antes de registrar ningún movimiento real, así que
-// no hay historial en colchón que migrar.
+// Antes había dos buckets (UVA + CER) con una escalera de plazos escalonados.
+// Se sacó a propósito: obligaba a mantener un reparto, un calendario de
+// vencimientos y una cotización UVA para administrar plata que en la práctica se
+// coloca en un solo lugar. Los movimientos viejos cargados con bucket "uva" o
+// "cer" NO se migran ni se descartan: conciliar() los junta aparte para que el
+// total siga cerrando y se vean como lo que son, plata en otro instrumento.
+//
+// OJO — esta estrategia NO protege contra la inflación. A 17% TNA (≈1,42%
+// mensual) contra una inflación de ~1,9% mensual, el capital pierde poder
+// adquisitivo mes a mes. La proyección lo muestra explícito en "valor real": es
+// la contrapartida de tener la plata disponible al instante y sin riesgo de
+// precio. Decisión tomada a conciencia, no un descuido del modelo.
 //
 // DOS PLANOS, deliberadamente separados:
-//   1. PROYECCIÓN (calcularEscalera): simulación con parámetros configurables.
-//      Todo se deriva de los aportes + parámetros, no se persiste.
+//   1. PROYECCIÓN (calcularProyeccion): simulación con parámetros configurables.
+//      Todo se deriva del capital inicial + aportes + parámetros, no se persiste.
 //   2. REGISTRO REAL (hoja "Finanzas Movimientos"): qué se colocó de verdad,
 //      cuándo, en qué instrumento y con qué comprobante. Es la pista de
 //      auditoría que permite demostrar que la plata del recupero NO se mezcló
-//      con la caja operativa del bar. conciliacion() compara ambos planos.
+//      con la caja operativa del bar. conciliar() compara ambos planos.
 //
 // Persistencia (sin base de datos, como todo el resto): tres hojas en la
 // planilla maestra SPREADSHEET_ID, creadas automáticamente al primer uso.
@@ -38,8 +40,8 @@
 //       F Instrumento | G Comprobante | H MesRecupero | I Notas | J Registrado
 //
 // No es asesoramiento financiero: los rendimientos son supuestos configurables y
-// las condiciones reales (TNA, tasa real CER, cotización UVA) hay que
-// verificarlas en el banco al momento de invertir.
+// las condiciones reales (TNA vigente) hay que verificarlas en la app de Mercado
+// Pago al momento de colocar — la TNA de la cuenta remunerada cambia seguido.
 
 const { google } = require('googleapis');
 const NodeCache = require('node-cache');
@@ -56,18 +58,20 @@ const HEADER_CONFIG = ['Clave', 'Valor'];
 const HEADER_APORTES = ['MesISO', 'MontoARS', 'Notas', 'Actualizado'];
 const HEADER_MOVS = ['ID', 'Fecha', 'Tipo', 'Bucket', 'MontoARS', 'Instrumento', 'Comprobante', 'MesRecupero', 'Notas', 'Registrado'];
 
-const BALDES = ['uva', 'cer'];
+// Único destino vigente. Los históricos 'uva'/'cer' se siguen LEYENDO (no se
+// pierde historial) pero ya no se pueden cargar nuevos.
+const BALDE_MP = 'mp';
+const BALDES = [BALDE_MP];
+const BALDES_LEGACY = ['uva', 'cer'];
 const TIPOS = ['colocacion', 'rescate', 'renovacion', 'ajuste'];
 
-// Defaults del spec (INDEC jun-2026 / pantalla Galicia).
+// Defaults al 24/07/2026: inflación INDEC jun-2026, TNA de la cuenta remunerada
+// de Mercado Pago, y los $15.000.000 que ese día se pasaron de Galicia a
+// Mercado Pago Pablo para arrancar la colocación.
 const DEFAULT_CONFIG = {
   inflacionMensual: 0.019,
-  pctUva: 0.75,
-  pctCer: 0.25,
-  rendRealCerAnual: 0.08,
-  plazoUvaMeses: 12,
-  tnaPrecancelacion: 0.10,
-  cotizacionUvaInicial: 2045.53,
+  tnaMercadoPago: 0.17,
+  capitalInicialARS: 15000000,
   horizonteMeses: 24,
   mesInicio: '',   // "YYYY-MM"; vacío = el primer mes con recupero
 };
@@ -102,10 +106,13 @@ async function _ensureHoja(api, titulo, header, rango) {
 }
 
 // Parser de los valores de CONFIG. Los escribe la app con String(number), así
-// que el formato canónico es JS ("0.019", "2045.53"): se parsea estricto. La
+// que el formato canónico es JS ("0.019", "0.17"): se parsea estricto. La
 // heurística de miles de es-AR NO sirve acá — leería "0.019" como 19, tomando
 // el punto por separador de miles. Sólo se tolera la coma decimal por si el
 // valor se editó a mano en la planilla.
+//
+// Excepción: capitalInicialARS es un MONTO, no un ratio. Un "15.000.000" tipeado
+// a mano en la planilla tiene que leerse como quince millones, no como 15.
 function _numCfg(v) {
   if (v == null || v === '') return 0;
   if (typeof v === 'number') return v;
@@ -117,7 +124,7 @@ function _numCfg(v) {
 
 // Número tolerante a "$ 1.234,56", "1,9%" y a los puntos de miles de es-AR.
 // Para MONTOS cargados a mano, donde "1.234" significa mil doscientos treinta y
-// cuatro. No usar para config (ver _numCfg).
+// cuatro. No usar para ratios de config (ver _numCfg).
 function _num(v) {
   if (v == null || v === '') return 0;
   if (typeof v === 'number') return v;
@@ -135,6 +142,9 @@ function _num(v) {
   return isNaN(n) ? 0 : n;
 }
 
+// Claves que son montos en pesos y no ratios.
+const CLAVES_MONTO = ['capitalInicialARS'];
+
 // ─── Lectura ────────────────────────────────────────────────────────────────
 async function _leerConfig(api) {
   const cfg = { ...DEFAULT_CONFIG };
@@ -146,24 +156,20 @@ async function _leerConfig(api) {
     await _ensureHoja(api, HOJA_CONFIG, HEADER_CONFIG, 'A1:B1');
     return cfg;
   }
+  // Claves de la estrategia vieja (UVA/CER) que puedan haber quedado guardadas.
+  // No se borran de la planilla — se ignoran acá y se listan para poder avisar.
+  const obsoletas = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     if (!r || !r[0]) continue;
     const clave = r[0].toString().trim();
     const valor = (r[1] == null ? '' : r[1]).toString().trim();
     if (clave === 'mesInicio') cfg.mesInicio = /^\d{4}-\d{2}$/.test(valor) ? valor : '';
+    else if (CLAVES_MONTO.includes(clave)) cfg[clave] = _num(valor);
     else if (CLAVES_NUM.includes(clave)) cfg[clave] = _numCfg(valor);
+    else obsoletas.push(clave);
   }
-  // Un reparto que no suma 100% no es un reparto: la diferencia se perdía en
-  // silencio, porque cada aporte se repartía por pctUva/pctCer y el resto no iba
-  // a ningún lado. Pasa, por ejemplo, con la config guardada cuando existía el
-  // tercer bucket (65/20 al sacarle el colchón). Se vuelve al default y se avisa,
-  // en vez de proyectar sobre plata que desaparece.
-  if (Math.abs((cfg.pctUva + cfg.pctCer) - 1) > 1e-9) {
-    cfg.pctGuardadoInvalido = +((cfg.pctUva + cfg.pctCer) * 100).toFixed(2);
-    cfg.pctUva = DEFAULT_CONFIG.pctUva;
-    cfg.pctCer = DEFAULT_CONFIG.pctCer;
-  }
+  if (obsoletas.length) cfg.clavesObsoletas = obsoletas;
   return cfg;
 }
 
@@ -206,11 +212,13 @@ async function _leerMovimientos(api) {
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     if (!r || !r[0]) continue;
+    const balde = (r[3] || '').toString().trim().toLowerCase();
     out.push({
       id: r[0].toString().trim(),
       fecha: (r[1] || '').toString().trim(),          // "YYYY-MM-DD"
       tipo: (r[2] || 'colocacion').toString().trim(),
-      balde: (r[3] || '').toString().trim(),
+      balde,
+      esLegacy: BALDES_LEGACY.includes(balde),
       monto: Math.round(_num(r[4])),
       instrumento: (r[5] || '').toString().trim(),
       comprobante: (r[6] || '').toString().trim(),
@@ -236,91 +244,82 @@ async function _load() {
   return data;
 }
 
-// ─── Cálculo de la escalera (puro; §5 del spec) ─────────────────────────────
+// ─── Proyección (pura) ──────────────────────────────────────────────────────
 // aportes: [{ mes: "YYYY-MM", monto, origen }] ordenado, uno por mes del horizonte.
-// El aporte del mes t empieza a rendir el mes SIGUIENTE (base t=0 = 0).
-function calcularEscalera(config, aportes) {
+//
+// Modelo: el capital inicial ya está colocado al arrancar y rinde desde el mes 1.
+// El aporte del mes t entra al final de ese mes, así que empieza a rendir en t+1.
+//
+// La tasa mensual sale de TNA/12. La cuenta de Mercado Pago capitaliza todos los
+// días, así que el rendimiento efectivo es apenas mayor; la diferencia a 17% TNA
+// es de centésimas por mes y no justifica modelar la capitalización diaria en una
+// proyección cuya variable dominante — la TNA futura — es una suposición.
+function calcularProyeccion(config, aportes) {
   const p = { ...DEFAULT_CONFIG, ...(config || {}) };
   const infl = Number(p.inflacionMensual) || 0;
-  const rendCer = Math.pow(1 + (Number(p.rendRealCerAnual) || 0), 1 / 12) - 1;
-  const plazo = Math.max(1, Math.round(Number(p.plazoUvaMeses) || 12));
+  const rMensual = (Number(p.tnaMercadoPago) || 0) / 12;
+  const capitalInicial = Math.max(0, Number(p.capitalInicialARS) || 0);
   const N = aportes.length;
 
   const filas = [];
-  const tramos = [];
-  let sUva = 0, sCer = 0, aportadoAcum = 0, aportadoReal = 0;
+  let saldo = capitalInicial;
+  let aportadoAcum = capitalInicial;
+  let aportadoReal = capitalInicial;
 
   for (let i = 0; i < N; i++) {
     const t = i + 1;
     const aporte = Number(aportes[i].monto) || 0;
-    const aUva = aporte * p.pctUva;
-    const aCer = aporte * p.pctCer;
 
-    sUva = sUva * (1 + infl) + aUva;
-    sCer = sCer * (1 + infl) * (1 + rendCer) + aCer;
+    const interes = saldo * rMensual;
+    saldo = saldo + interes + aporte;
 
     const indicePrecios = Math.pow(1 + infl, t - 1);
-    const totalNominal = sUva + sCer;
     aportadoAcum += aporte;
     aportadoReal += aporte / indicePrecios;
-    const totalReal = totalNominal / indicePrecios;
+    const totalReal = saldo / indicePrecios;
 
     filas.push({
       mes: t,
       mesISO: aportes[i].mes,
       origen: aportes[i].origen || 'sin datos',
       aporte,
-      aUva, aCer,
-      saldoUva: sUva, saldoCer: sCer,
-      totalNominal, aportadoAcum,
-      indicePrecios, totalReal, aportadoReal,
+      interes,
+      totalNominal: saldo,
+      aportadoAcum,
+      indicePrecios,
+      totalReal,
+      aportadoReal,
       gananciaReal: totalReal - aportadoReal,
     });
-
-    // Tramo UVA constituido este mes (§5). El valor al vencer es puro ajuste por
-    // inflación: cantidadUvas * cotización del mes de vencimiento.
-    if (aUva > 0) {
-      const cotConstitucion = p.cotizacionUvaInicial * Math.pow(1 + infl, t - 1);
-      const mesVencimiento = t + plazo;
-      const cotVencimiento = p.cotizacionUvaInicial * Math.pow(1 + infl, mesVencimiento - 1);
-      const cantidadUvas = cotConstitucion > 0 ? aUva / cotConstitucion : 0;
-      tramos.push({
-        mesConstitucion: t,
-        mesConstitucionISO: aportes[i].mes,
-        montoUva: aUva,
-        cantidadUvas,
-        cotizacionConstitucion: cotConstitucion,
-        mesVencimiento,
-        mesVencimientoISO: _sumarMeses(aportes[i].mes, plazo),
-        cotizacionVencimiento: cotVencimiento,
-        valorAlVencer: cantidadUvas * cotVencimiento,
-        disponibleEnHorizonte: mesVencimiento <= N,
-      });
-    }
   }
 
   const ultima = filas[filas.length - 1] || null;
+  // Tasa real mensual: cuánto poder adquisitivo gana (o pierde) el capital una
+  // vez descontada la inflación. Con 17% TNA e inflación 1,9% mensual es
+  // NEGATIVA, y es el número más importante de toda la pantalla.
+  const tasaRealMensual = infl === 0 ? rMensual : (1 + rMensual) / (1 + infl) - 1;
+
   return {
     filas,
-    tramos,
-    parametros: { ...p, rendRealCerMensual: rendCer },
+    parametros: {
+      ...p,
+      rendMensual: rMensual,
+      tasaRealMensual,
+      tasaRealAnual: Math.pow(1 + tasaRealMensual, 12) - 1,
+      capitalInicial,
+    },
     resumen: ultima ? {
       meses: N,
+      capitalInicial,
       totalNominal: ultima.totalNominal,
       totalReal: ultima.totalReal,
       aportadoAcum: ultima.aportadoAcum,
       aportadoReal: ultima.aportadoReal,
       gananciaReal: ultima.gananciaReal,
       pctGananciaReal: ultima.aportadoReal > 0 ? (ultima.gananciaReal / ultima.aportadoReal) * 100 : 0,
+      interesesAcum: filas.reduce((s, f) => s + f.interes, 0),
     } : null,
   };
-}
-
-// Precancelar un tramo UVA: se pierde el ajuste y se cobra la TNA de
-// precancelación (§5). Sirve para mostrar el costo de romper antes de tiempo.
-function valorPrecancelado(config, montoUva, dias) {
-  const p = { ...DEFAULT_CONFIG, ...(config || {}) };
-  return (Number(montoUva) || 0) * (1 + (Number(p.tnaPrecancelacion) || 0) * (Number(dias) || 0) / 365);
 }
 
 function _sumarMeses(iso, n) {
@@ -330,34 +329,37 @@ function _sumarMeses(iso, n) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-// ─── Conciliación: proyección vs. plata realmente colocada ──────────────────
+// ─── Conciliación: lo asignado a recupero vs. lo realmente colocado ─────────
 // El punto de todo esto: que el capital del recupero no se mezcle con la caja
-// operativa. Compara lo asignado a recupero en los cierres contra lo que
-// efectivamente se colocó en instrumentos según el registro.
+// operativa del bar.
+//
+// Se separa por ORIGEN de la plata, no por instrumento. Un movimiento con
+// "MesRecupero" cargado es plata que salió del recupero de ese cierre; sin
+// MesRecupero es capital propio puesto aparte (el caso de los $15.000.000 que
+// vinieron de Galicia el 24/07/2026). Mezclarlos hacía que colocar capital
+// propio apareciera como "colocado de más respecto de lo asignado", que es una
+// alarma falsa.
 function conciliar(movimientos, recuperoPorMes) {
   const signo = t => (t === 'rescate' ? -1 : 1);   // rescate saca plata de los instrumentos
-  const porBalde = { uva: 0, cer: 0 };
-  // Cualquier bucket que no sea uva/cer (el viejo "colchón", o algo tipeado a mano
-  // en la planilla) cae acá en vez de descartarse: si se ignorara, el total colocado
-  // dejaría de coincidir con la suma por bucket y nadie se enteraría.
-  let otros = 0;
-  let colocado = 0;
+  let colocado = 0, deRecupero = 0, capitalPropio = 0;
+  let enMercadoPago = 0, enLegacy = 0;
   for (const m of movimientos) {
     if (m.tipo === 'renovacion') continue;         // no mueve capital, sólo lo reubica
     const v = signo(m.tipo) * (m.monto || 0);
     colocado += v;
-    if (porBalde[m.balde] !== undefined) porBalde[m.balde] += v;
-    else otros += v;
+    if (m.mesRecupero) deRecupero += v; else capitalPropio += v;
+    if (m.balde === BALDE_MP) enMercadoPago += v; else enLegacy += v;
   }
   const asignado = (recuperoPorMes || []).reduce((s, m) => s + (m.recuperoARS || 0), 0);
   return {
     asignadoARS: Math.round(asignado),
     colocadoARS: Math.round(colocado),
-    sinColocarARS: Math.round(asignado - colocado),
-    porBalde: {
-      uva: Math.round(porBalde.uva),
-      cer: Math.round(porBalde.cer),
-      otros: Math.round(otros),
+    deRecuperoARS: Math.round(deRecupero),
+    capitalPropioARS: Math.round(capitalPropio),
+    sinColocarARS: Math.round(asignado - deRecupero),
+    porDestino: {
+      mercadoPago: Math.round(enMercadoPago),
+      legacy: Math.round(enLegacy),
     },
     movimientos: movimientos.length,
   };
@@ -386,17 +388,16 @@ async function resumenFinanzas(recuperoPorMes = []) {
     else serie.push({ mes, monto: 0, origen: 'sin datos', notas: '' });
   }
 
-  const escalera = calcularEscalera(config, serie);
+  const proyeccion = calcularProyeccion(config, serie);
   return {
     config,
     mesInicio: inicio,
     aportes: serie,
     movimientos: movimientos.map(({ rowIndex, ...m }) => m),
-    escalera,
+    proyeccion,
     conciliacion: conciliar(movimientos, recuperoPorMes),
-    // Si la config guardada traía un reparto que no sumaba 100%, _leerConfig ya
-    // volvió al default; acá se expone para poder avisarlo en pantalla.
-    pctGuardadoInvalido: config.pctGuardadoInvalido || null,
+    // Claves de la estrategia vieja que siguen en la planilla y ya no se usan.
+    clavesObsoletas: config.clavesObsoletas || null,
   };
 }
 
@@ -481,10 +482,12 @@ async function guardarAporte(mesISO, monto, notas) {
 async function guardarMovimiento(mov) {
   if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
   const tipo = (mov.tipo || 'colocacion').toString().trim();
-  const balde = (mov.balde || '').toString().trim();
+  // El destino ya no se elige: todo va a Mercado Pago Pablo. Se acepta el campo
+  // por compatibilidad con clientes viejos, pero sólo si coincide.
+  const balde = (mov.balde || BALDE_MP).toString().trim().toLowerCase();
   const monto = Math.round(_num(mov.monto));
   if (!TIPOS.includes(tipo)) throw new Error(`Tipo inválido (${TIPOS.join(' | ')})`);
-  if (!BALDES.includes(balde)) throw new Error(`Bucket inválido (${BALDES.join(' | ')})`);
+  if (balde !== BALDE_MP) throw new Error('El único destino vigente es Mercado Pago Pablo');
   if (!(monto > 0)) throw new Error('El monto debe ser mayor a cero');
   const fecha = (mov.fecha || '').toString().trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new Error('Fecha inválida (se espera YYYY-MM-DD)');
@@ -495,7 +498,7 @@ async function guardarMovimiento(mov) {
   await _ensureHoja(api, HOJA_MOVS, HEADER_MOVS, 'A1:J1');
   const fila = [
     `f${Date.now()}`, fecha, tipo, balde, monto,
-    (mov.instrumento || '').toString().trim(),
+    (mov.instrumento || 'Mercado Pago Pablo').toString().trim(),
     (mov.comprobante || '').toString().trim(),
     mesRec,
     (mov.notas || '').toString().trim(),
@@ -539,8 +542,8 @@ async function _borrarFila(api, hoja, rowIndex) {
 function clearCache() { cache.del(CACHE_KEY); }
 
 module.exports = {
-  resumenFinanzas, calcularEscalera, valorPrecancelado, conciliar,
+  resumenFinanzas, calcularProyeccion, conciliar,
   guardarConfig, guardarAporte, guardarMovimiento, borrarMovimiento,
-  clearCache, DEFAULT_CONFIG, BALDES, TIPOS,
+  clearCache, DEFAULT_CONFIG, BALDES, BALDE_MP, BALDES_LEGACY, TIPOS,
   HOJA_CONFIG, HOJA_APORTES, HOJA_MOVS,
 };

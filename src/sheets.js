@@ -343,6 +343,9 @@ async function getResumenMensual({ mes, fechaDesde, fechaHasta } = {}) {
     const entry = meses[key];
 
     if (m.tipo === 'Ingreso') {
+      // Se agrupan las variantes por persona (Efectivo Local/Pablo/Tincho,
+      // Mercado Pago Tincho/Pablo) en un solo medio: acá interesa por dónde
+      // entró la plata, no de quién es la cuenta.
       let mp = m.medioPago;
       if (mp.toLowerCase().includes('efectivo')) mp = 'Efectivo';
       else if (mp.toLowerCase().includes('mercado pago')) mp = 'Mercado Pago';

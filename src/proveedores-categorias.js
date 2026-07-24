@@ -95,15 +95,27 @@ const KEYWORDS = {
 };
 
 // ─── Medios de pago ──────────────────────────────────────────────────────────────
-// REGLA CLAVE: "Efectivo" en una factura = "Efectivo Local" en el sistema.
-const MEDIOS_PAGO = ['Efectivo Local', 'Mercado Pago', 'Galicia', 'Echeq', 'Otro'];
+// REGLA CLAVE: el medio que sale de acá se escribe tal cual en la columna L de
+// Movimientos, y las fórmulas de la hoja Cajas suman por texto EXACTO. Un valor
+// que no sea el nombre exacto de una caja es plata que ninguna caja vuelve a
+// restar: queda invisible en el saldo calculado.
+//
+// Por eso "Efectivo" en una factura = "Efectivo Local", y cualquier "Mercado
+// Pago" se resuelve a "Mercado Pago Tincho" — la cuenta operativa del bar, la
+// única con la que se le paga a proveedores.
+//
+// "Mercado Pago Pablo" NO es una opción acá a propósito: es la cuenta del ahorro
+// / recupero de la inversión. De ahí no sale plata para pagar facturas, y todo
+// su movimiento se registra en la pestaña Finanzas, no en este circuito.
+const CAJA_MP_OPERATIVA = process.env.CAJA_MP || 'Mercado Pago Tincho';
+const MEDIOS_PAGO = ['Efectivo Local', CAJA_MP_OPERATIVA, 'Galicia', 'Echeq', 'Otro'];
 
 function normalizarMedioPago(medio) {
   const m = (medio || '').toString().trim().toLowerCase();
   if (!m) return '';
   if (m === 'efectivo' || m === 'contado efectivo' || m === 'cash') return 'Efectivo Local';
   if (m.includes('efectivo')) return 'Efectivo Local';
-  if (m.includes('mercado pago') || m === 'mp') return 'Mercado Pago';
+  if (m.includes('mercado pago') || m === 'mp') return CAJA_MP_OPERATIVA;
   if (m.includes('galicia')) return 'Galicia';
   if (m.includes('echeq') || m.includes('cheque')) return 'Echeq';
   if (m === 'contado' || m.includes('contado')) return 'Efectivo Local';

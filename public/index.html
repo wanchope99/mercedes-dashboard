@@ -825,10 +825,16 @@
   </main>
 </div>
 
-<!-- ═══ PLAN — FINANZAS (escalera de recupero) ═══ -->
+<!-- ═══ PLAN — FINANZAS (capital del recupero) ═══ -->
 <div id="tab-finanzas" class="tab-panel">
   <main>
     <div class="kpi-grid" id="fin-kpis"><div class="loading"><div class="spinner"></div> Cargando finanzas...</div></div>
+
+    <!-- La estrategia, en una frase. Que se lea antes que cualquier número. -->
+    <div class="card">
+      <div class="card-title">🎯 Estrategia</div>
+      <div id="fin-estrategia"></div>
+    </div>
 
     <!-- Trazabilidad: lo asignado a recupero vs. lo efectivamente colocado -->
     <div class="card">
@@ -842,31 +848,26 @@
     <div class="card">
       <div class="card-title">📒 Registro de movimientos
         <button class="btn btn-accent" style="float:right;font-size:12px;padding:6px 12px" onclick="toggleFinMovForm()">➕ Registrar movimiento</button>
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· cada peso que entra o sale de los instrumentos, con fecha y comprobante</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· cada peso que entra o sale de Mercado Pago Pablo, con fecha y comprobante</span>
       </div>
       <div id="fin-mov-form" style="display:none">
         <div style="font-size:12px;color:var(--text-muted);line-height:1.7;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:11px 13px;margin-bottom:14px">
-          <b>Bucket</b> = la estrategia (UVA o CER), que es lo que usa la proyección para calcular.
-          <b>Instrumento</b> = el producto concreto que contrataste en el banco. Un mismo bucket puede tener
-          varios instrumentos: el bucket UVA puede ser un PF UVA de Galicia hoy y otro de otro banco mañana.
+          Todo el capital del recupero va a <b>Mercado Pago Pablo</b>. El campo
+          <b>«Sale del recupero del mes»</b> es el que separa las dos clases de plata:
+          si lo completás, es plata que apartaste en el cierre de ese mes; si lo dejás vacío,
+          es capital propio que pusiste aparte (como los $15.000.000 que vinieron de Galicia).
         </div>
         <div class="proy-form-grid">
           <div class="form-group"><label>Fecha</label><input type="date" id="fmv-fecha"></div>
           <div class="form-group"><label>Tipo</label><select id="fmv-tipo">
-            <option value="colocacion">Colocación (entra plata al instrumento)</option>
-            <option value="rescate">Retiro / rescate (sale plata del instrumento)</option>
-            <option value="renovacion">Renovación (se reubica, no mueve capital)</option>
+            <option value="colocacion">Colocación (entra plata a la cuenta)</option>
+            <option value="rescate">Retiro / rescate (sale plata de la cuenta)</option>
             <option value="ajuste">Ajuste</option>
           </select></div>
-          <div class="form-group"><label>Bucket (estrategia)</label><select id="fmv-balde">
-            <option value="uva">UVA (plazo fijo precancelable)</option>
-            <option value="cer">CER (bonos)</option>
-          </select></div>
-          <div class="form-group"><label>Instrumento (producto concreto)</label><input id="fmv-instrumento" list="fmv-instr-list" placeholder="Ej: PF UVA precancelable 12m">
-            <datalist id="fmv-instr-list"><option>PF UVA precancelable 12m</option><option>Bono CER TX26</option><option>Bono CER TZXD7</option></datalist></div>
+          <div class="form-group"><label>Destino</label><input id="fmv-destino" value="Mercado Pago Pablo" disabled style="opacity:.6" title="Estrategia única: el 100% del recupero va acá"></div>
           <div class="form-group"><label>Monto ARS</label><input type="number" id="fmv-monto" min="0" placeholder="0"></div>
-          <div class="form-group"><label>Comprobante / N° operación</label><input id="fmv-comprobante" placeholder="Ej: Galicia op. 4471820"></div>
-          <div class="form-group"><label>Sale del recupero del mes</label><select id="fmv-mesrec" title="De qué mes salió esta plata: el mes cuyo recupero estás colocando. Sirve para saber si ya colocaste todo lo que apartaste ese mes."></select></div>
+          <div class="form-group"><label>Comprobante / N° operación</label><input id="fmv-comprobante" placeholder="Ej: transferencia Galicia → MP 4471820"></div>
+          <div class="form-group"><label>Sale del recupero del mes</label><select id="fmv-mesrec" title="De qué mes salió esta plata: el mes cuyo recupero estás colocando. Vacío = capital propio, no sale del recupero de ningún cierre."></select></div>
         </div>
         <div class="form-group"><label>Notas</label><input id="fmv-notas" placeholder="opcional"></div>
         <div id="fmv-status" style="display:none;font-size:12px;margin:10px 0"></div>
@@ -887,14 +888,7 @@
     </div>
 
     <div class="card">
-      <div class="card-title">📅 Vencimientos UVA
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· primero los reales, después los proyectados</span>
-      </div>
-      <div id="fin-vencimientos"></div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">📈 Proyección de la escalera
+      <div class="card-title">📈 Proyección
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· valor real = deflactado a pesos del primer mes</span>
       </div>
       <div class="chart-container" style="height:300px"><canvas id="chart-fin"></canvas></div>
@@ -907,34 +901,25 @@
       </div>
       <div id="fin-params" style="display:none">
         <div class="proy-form-grid">
+          <div class="form-group"><label>TNA Mercado Pago %</label><input type="number" step="0.1" id="fpa-tna-mp" onchange="saveFinParam('tnaMercadoPago', this.value/100)" title="Tasa nominal anual de la cuenta remunerada. Cambia seguido: verificala en la app de Mercado Pago."></div>
           <div class="form-group"><label>Inflación mensual %</label><input type="number" step="0.01" id="fpa-inflacion" onchange="saveFinParam('inflacionMensual', this.value/100)"></div>
-          <div class="form-group"><label>Tasa real CER anual %</label><input type="number" step="0.1" id="fpa-cer-real" onchange="saveFinParam('rendRealCerAnual', this.value/100)"></div>
-          <div class="form-group"><label>Plazo UVA (meses)</label><input type="number" min="1" id="fpa-plazo" onchange="saveFinParam('plazoUvaMeses', this.value)"></div>
-          <div class="form-group"><label>TNA precancelación %</label><input type="number" step="0.1" id="fpa-tna" onchange="saveFinParam('tnaPrecancelacion', this.value/100)"></div>
-          <div class="form-group"><label>Cotización UVA inicial</label><input type="number" step="0.01" id="fpa-uva" onchange="saveFinParam('cotizacionUvaInicial', this.value)"></div>
+          <div class="form-group"><label>Capital ya colocado (ARS)</label><input type="number" step="1000" id="fpa-capital" onchange="saveFinParam('capitalInicialARS', this.value)" title="Plata que ya está en Mercado Pago Pablo al arrancar la proyección, sin contar los aportes mensuales."></div>
           <div class="form-group"><label>Horizonte (meses)</label><input type="number" min="1" id="fpa-horizonte" onchange="saveFinParam('horizonteMeses', this.value)"></div>
         </div>
-        <div id="fin-pct-aviso" style="display:none;font-size:12px;color:var(--orange);line-height:1.6;background:rgba(224,138,92,0.10);border:1px solid var(--orange);border-radius:9px;padding:10px 12px;margin-top:14px"></div>
-        <div style="margin-top:14px;font-size:12px;color:var(--text-muted)">Reparto de cada aporte entre los dos instrumentos — poné cuánto va a UVA y el resto va a CER solo</div>
-        <div class="proy-form-grid" style="margin-top:8px">
-          <div class="form-group"><label>% UVA (plazo fijo)</label><input type="number" step="1" min="0" max="100" id="fpa-pct-uva" oninput="renderFinPctSuma()"></div>
-          <div class="form-group"><label>% CER (bonos)</label><input type="number" id="fpa-pct-cer" disabled title="Se calcula solo: es todo lo que no va a UVA" style="opacity:.6"></div>
-          <div class="form-group"><label>&nbsp;</label><button class="btn btn-accent" onclick="saveFinPcts()">Guardar reparto</button></div>
-        </div>
-        <div id="fpa-pct-status" style="font-size:12px;margin-top:8px"></div>
+        <div id="fin-obsoletas-aviso" style="display:none;font-size:12px;color:var(--text-muted);line-height:1.6;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:10px 12px;margin-top:14px"></div>
       </div>
     </div>
 
     <div style="font-size:11px;color:var(--text-muted);line-height:1.7;margin:4px 2px 8px">
       <b>Dónde se guarda todo:</b> en la misma planilla «Gestión Mercedes», en tres hojas que la app creó sola —
-      <b>Finanzas Movimientos</b> (el registro: fecha, tipo, bucket, monto, instrumento, comprobante, mes de origen y cuándo se cargó),
-      <b>Finanzas Config</b> (los parámetros de acá abajo) y <b>Finanzas Aportes</b> (sólo los meses cuyo aporte fijaste a mano;
+      <b>Finanzas Movimientos</b> (el registro: fecha, tipo, destino, monto, comprobante, mes de origen y cuándo se cargó),
+      <b>Finanzas Config</b> (los parámetros de acá arriba) y <b>Finanzas Aportes</b> (sólo los meses cuyo aporte fijaste a mano;
       el resto sale del recupero de cada cierre). Podés abrirlas y auditarlas directo en la planilla.
     </div>
     <div style="font-size:11px;color:var(--text-muted);line-height:1.7;margin:4px 2px 20px">
       Herramienta de planificación, <b>no asesoramiento financiero</b>. Los rendimientos son supuestos configurables:
-      las condiciones reales (TNA, tasa real CER, cotización UVA) hay que verificarlas en el banco al momento de invertir.
-      El escenario asume inflación constante.
+      la TNA real de la cuenta remunerada de Mercado Pago cambia seguido y hay que verificarla en la app al momento de colocar.
+      El escenario asume inflación y tasa constantes.
     </div>
   </main>
 </div>
@@ -1331,7 +1316,7 @@
         <option value="">Todas las formas de pago</option>
         <option value="Efectivo">Efectivo</option>
         <option value="Galicia">Galicia</option>
-        <option value="Mercado Pago">Mercado Pago</option>
+        <option value="Mercado Pago">Mercado Pago (Tincho y Pablo)</option>
         <option value="Echeq">Echeq</option>
       </select>
       <input type="text" id="pagos-search" placeholder="Buscar proveedor..." oninput="loadPagos()" style="width:200px" />
@@ -1418,7 +1403,7 @@
       </div>
 
       <div class="arqueo-field">
-        <label>📱 Mercado Pago</label>
+        <label>📱 Mercado Pago Tincho</label>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div>
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Saldo esperado (planilla)</div>
@@ -1465,7 +1450,7 @@
       <input type="number" id="ci-efectivo" placeholder="0" min="0" />
     </div>
     <div class="arqueo-field">
-      <label>📱 Mercado Pago final</label>
+      <label>📱 Mercado Pago Tincho final</label>
       <div id="ci-mp-hint" style="font-size:11px;color:var(--text-muted);margin-bottom:6px"></div>
       <input type="number" id="ci-mp" placeholder="0" min="0" />
     </div>
@@ -1508,7 +1493,7 @@
       <option value="Efectivo Local">Efectivo Local</option>
       <option value="Efectivo Tincho">Efectivo Tincho</option>
       <option value="Efectivo Pablo">Efectivo Pablo</option>
-      <option value="Mercado Pago">Mercado Pago</option>
+      <option value="Mercado Pago Tincho">Mercado Pago Tincho</option>
       <option value="Galicia">Galicia</option>
     </select></div>
     <div class="arqueo-field"><label>Estado</label><select id="hi-estado" style="width:100%">
@@ -1537,6 +1522,10 @@
   <main style="padding-top:24px">
     <!-- Totales -->
     <div class="kpi-grid" id="cajas-totales" style="margin-bottom:0"></div>
+
+    <!-- Aviso de plata que ninguna caja está sumando (medios de pago que no
+         coinciden exacto con el nombre de una caja). Vacío = todo bien. -->
+    <div id="cajas-huerfanos"></div>
 
     <div class="card">
       <div class="card-title">
@@ -1706,7 +1695,7 @@
         <select id="f-medio">
           <option value="Efectivo">Efectivo</option>
           <option value="Galicia">Galicia (transferencia)</option>
-          <option value="Mercado Pago">Mercado Pago</option>
+          <option value="Mercado Pago Tincho">Mercado Pago Tincho</option>
           <option value="Echeq">Echeq</option>
         </select>
       </div>
@@ -1782,7 +1771,7 @@
         <option value="Efectivo Local">Efectivo Local</option>
         <option value="Efectivo Tincho">Efectivo Tincho</option>
         <option value="Efectivo Pablo">Efectivo Pablo</option>
-        <option value="Mercado Pago">Mercado Pago</option>
+        <option value="Mercado Pago Tincho">Mercado Pago Tincho</option>
         <option value="Galicia">Galicia</option>
         <option value="Echeq">Echeq</option>
       </select>
@@ -2175,6 +2164,12 @@ async function initArqueo() {
     const { data: saldos } = await api('/api/arqueo/saldos-iniciales');
     document.getElementById('ap-efectivo-esperado').value = saldos.efectivoEsperado || '';
     document.getElementById('ap-mp-esperado').value = saldos.mpEsperado || '';
+    // Si alguna caja no se encontró por nombre en la planilla, el esperado que se
+    // muestra es 0 y no significa "no hay plata". Hay que decirlo, porque contra
+    // un esperado de 0 cualquier conteo parece un sobrante enorme.
+    if (saldos.aviso) {
+      showToast('⚠ No pude leer un saldo esperado de la hoja Cajas: ' + saldos.aviso);
+    }
   } catch(err) { /* no bloqueante */ }
 }
 
@@ -2240,7 +2235,7 @@ async function abrirCaja() {
   const errEl = document.getElementById('arqueo-error');
   errEl.textContent = '';
 
-  // La diferencia de efectivo NO se calcula acá: el server relee Cajas!F8 al abrir
+  // La diferencia de efectivo NO se calcula acá: el server relee el saldo calculado al abrir
   // y devuelve el número contra el esperado real de ese instante. El valor que hay
   // en pantalla puede ser de hace horas y F8 se mueve sola cuando se edita cualquier
   // fila de Movimientos.
@@ -2562,7 +2557,7 @@ function openArqueoDetalle(i) {
     : (a.diffAperturaEfectivo > 0 ? '+' : '') + fmt(a.diffAperturaEfectivo);
 
   const efectivo = bloque('Efectivo — la cuenta completa',
-    fila('Esperado al abrir <span style="font-size:11px">(Cajas!F8)</span>', val(a.efectivoEsperadoInicial))
+    fila('Esperado al abrir <span style="font-size:11px">(saldo calculado)</span>', val(a.efectivoEsperadoInicial))
     + fila('Contado al abrir', fmt(a.efectivoInicial))
     + fila('Diferencia de apertura', difApTxt, {
         sangria: true,
@@ -2580,14 +2575,14 @@ function openArqueoDetalle(i) {
       }));
 
   const otrasCajas = bloque('Otras cajas',
-    fila('Mercado Pago inicial', fmt(a.mpInicial))
-    + fila('Mercado Pago final', fmt(a.mpFinal))
+    fila('Mercado Pago Tincho inicial', fmt(a.mpInicial))
+    + fila('Mercado Pago Tincho final', fmt(a.mpFinal))
     + fila('Diferencia apertura MP', a.diffAperturaMP ? fmt(a.diffAperturaMP) : '✓ Coincide', { sangria: true })
     + fila('Galicia final', fmt(a.galiciaFinal), { borde: true }));
 
   // Datos de auditoría: sirven para reconstruir por qué F8 quedó donde quedó.
   const auditoria = bloque('Auditoría',
-    fila('Saldo calculado al cerrar <span style="font-size:11px">(Cajas!F8)</span>', val(a.saldoCalculadoAlCerrar))
+    fila('Saldo calculado al cerrar <span style="font-size:11px">(hoja Cajas)</span>', val(a.saldoCalculadoAlCerrar))
     + fila('Ajuste posteado en la apertura', a.ajusteApertura != null ? fmt(a.ajusteApertura) : dash)
     + fila('Continuidad con el turno anterior',
         a.diffContinuidadEfectivo == null ? dash
@@ -2685,7 +2680,7 @@ function renderConfirmCierre(diffs, motivo) {
       <h3 style="margin-bottom:8px">${cerro ? '✅ La caja cerró' : '⚠️ La caja NO cerró'}</h3>
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Esperado = saldo inicial contado en la apertura + ingresos del día según Fudo. Contado = lo que acabás de contar:</p>
       ${filaCaja('💵', 'Efectivo', diffs.efectivo)}
-      ${filaCaja('📱', 'Mercado Pago', diffs.mp)}
+      ${filaCaja('📱', 'Mercado Pago Tincho', diffs.mp)}
       ${cerro ? '' : `<p style="font-size:12px;color:var(--text-muted);margin-top:10px">Si hubo error al contar, arqueá de nuevo. Si la diferencia es real (pagos en efectivo durante el servicio, propinas, etc.), podés cerrar igual y queda registrada.</p>`}
       ${cerro ? '' : `<div style="margin-top:12px"><label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">📝 Nota: ¿por qué no cierra? (ayuda a rastrear el error después)</label><textarea id="cierre-nota" rows="2" style="width:100%;resize:vertical" placeholder="Ej: retiré $50.000 para pagar al verdulero, propinas en efectivo, etc."></textarea></div>`}`;
     actions.innerHTML = `
@@ -2709,7 +2704,7 @@ async function confirmarCierreDefinitivo() {
     const f = state.fudoCierre;
     const notaEl = document.getElementById('cierre-nota');
     const nota = notaEl ? notaEl.value.trim() : '';
-    const { data } = await api('/api/arqueo/cerrar', {
+    const res = await api('/api/arqueo/cerrar', {
       method: 'POST',
       body: JSON.stringify({
         ...state.cierrePendiente,
@@ -2720,7 +2715,10 @@ async function confirmarCierreDefinitivo() {
     closeConfirmCierre();
     closeCierreModal();
     renderEstadoArqueo({ abierta: false });
-    renderResumenCierre(data);
+    renderResumenCierre(res.data);
+    // El cierre se completó igual, pero algo secundario falló (ej: no se pudo
+    // actualizar el Saldo Real de la hoja Cajas). Que no pase desapercibido.
+    if (res.avisoCajas) showToast('⚠ ' + res.avisoCajas);
   } catch (err) {
     document.getElementById('confirm-cierre-body').innerHTML += `<div style="color:var(--red);font-size:13px;margin-top:10px">❌ ${err.message}</div>`;
     btns.forEach(b => b.disabled = false);
@@ -2752,7 +2750,7 @@ function renderResumenCierre(d) {
       <div class="resumen-cierre">
         <div class="resumen-cierre-title">📅 ${d.fecha} · ${d.apertura} → ${d.cierre} (${d.duracion})</div>
         <div class="resumen-row"><span>💵 Efectivo</span><span>${fmt(d.efectivoInicial)} → <strong>${fmt(d.efectivoFinal)}</strong> <span class="${difClass(d.difEfectivo)}">${difStr(d.difEfectivo)}</span></span></div>
-        <div class="resumen-row"><span>📱 Mercado Pago</span><span>${fmt(d.mpInicial)} → <strong>${fmt(d.mpFinal)}</strong> <span class="${difClass(d.difMP)}">${difStr(d.difMP)}</span></span></div>
+        <div class="resumen-row"><span>📱 Mercado Pago Tincho</span><span>${fmt(d.mpInicial)} → <strong>${fmt(d.mpFinal)}</strong> <span class="${difClass(d.difMP)}">${difStr(d.difMP)}</span></span></div>
         ${d.galiciaBruto > 0 ? `<div class="resumen-row"><span>🏦 Galicia Bruto</span><span><strong>${fmt(d.galiciaBruto)}</strong></span></div>` : ''}
         ${d.galiciaNeto > 0 ? `<div class="resumen-row"><span>🏦 Galicia Neto acreditado</span><span><strong>${fmt(d.galiciaNeto)}</strong></span></div>` : ''}
         ${d.impuestosGalicia > 0 ? `<div class="resumen-row"><span style="color:var(--text-muted)">📋 Impuestos Galicia</span><span style="color:var(--red)">-${fmt(d.impuestosGalicia)}</span></div>` : ''}
@@ -3417,7 +3415,19 @@ function editTC() {
   }
 }
 
-const CAJAS_ENCARGADO = ['efectivo local', 'mercado pago'];
+// Lo único que ve el encargado: las dos cajas que arquea. Mercado Pago Pablo es
+// la cuenta donde se coloca el recupero de la inversión — no es del bar.
+const CAJAS_ENCARGADO = ['efectivo local', 'mercado pago tincho'];
+
+// Para qué es cada caja. Sin esto, "Mercado Pago Tincho" y "Mercado Pago Pablo"
+// se leen como dos cuentas intercambiables y son cosas muy distintas: una es la
+// caja operativa que se arquea todas las noches y la otra es el capital del
+// recupero de la inversión, que no debe mezclarse con la plata del bar.
+const ROL_CAJA = {
+  'efectivo local':      { txt: '🔒 Se arquea todas las noches', color: 'var(--green)' },
+  'mercado pago tincho': { txt: '🔒 Se arquea todas las noches', color: 'var(--green)' },
+  'mercado pago pablo':  { txt: '💰 Capital del recupero — rinde 17% TNA', color: 'var(--accent)' },
+};
 
 async function loadCajas() {
   try {
@@ -3426,7 +3436,7 @@ async function loadCajas() {
       cajas = cajas.filter(c => CAJAS_ENCARGADO.includes((c.caja || '').toLowerCase()));
     }
     // Orden por importancia
-    const ORDEN_CAJAS = ['galicia', 'mercado pago', 'efectivo local', 'efectivo pablo', 'efectivo tincho', 'usd pablo', 'usd tincho'];
+    const ORDEN_CAJAS = ['galicia', 'mercado pago tincho', 'efectivo local', 'mercado pago pablo', 'efectivo pablo', 'efectivo tincho', 'usd pablo', 'usd tincho'];
     cajas.sort((a, b) => {
       const ia = ORDEN_CAJAS.indexOf((a.caja || '').toLowerCase().trim());
       const ib = ORDEN_CAJAS.indexOf((b.caja || '').toLowerCase().trim());
@@ -3474,6 +3484,10 @@ async function loadCajas() {
     const esAdmin = getRol() === 'admin';
     const fmtMon = (v, mon) => mon === 'USD' ? `USD ${Number(v).toLocaleString('es-AR', { minimumFractionDigits: 0 })}` : fmt(v);
     container.innerHTML = cajas.map(c => {
+      const rol = ROL_CAJA[(c.caja || '').toLowerCase().trim()];
+      const rolTag = rol
+        ? `<div style="font-size:11px;color:${rol.color};line-height:1.5;margin-top:2px">${rol.txt}</div>`
+        : '';
       // INVERTIDO: numero grande = saldo CALCULADO; REAL contado abajo en chico.
       const saldoCalc = c.saldoCalculado;
       const saldoReal = (c.saldoReal !== undefined && c.saldoReal !== 0) ? c.saldoReal : null;
@@ -3489,6 +3503,7 @@ async function loadCajas() {
         return `
           <div class="caja-card">
             <div class="caja-nombre">${c.caja}</div>
+            ${rolTag}
             <div class="caja-saldo ${isNeg ? 'neg' : ''}" style="margin-top:12px;font-size:26px">${saldoFmt}</div>
             ${realLine}
           </div>`;
@@ -3497,6 +3512,7 @@ async function loadCajas() {
         <div class="caja-card">
           <div class="caja-nombre">${c.caja}</div>
           <div class="caja-alias">${c.alias || ''}</div>
+          ${rolTag}
           <span class="caja-moneda">${c.moneda || 'ARS'}</span>
           <div class="caja-saldo ${isNeg ? 'neg' : ''}">${saldoFmt}</div>
           <div class="caja-row" style="color:var(--text-muted);font-size:11px"><span>calculado · ${equiv}</span></div>
@@ -3508,8 +3524,49 @@ async function loadCajas() {
         </div>`;
     }).join('');
 
+    if (esAdmin) loadCajasHuerfanos();
+
   } catch(err) {
     document.getElementById('cajas-grid').innerHTML = `<div style="color:var(--red)">Error: ${err.message}</div>`;
+  }
+}
+
+// Plata que ninguna caja suma: filas de Movimientos cuyo medio de pago no es el
+// nombre exacto de una caja. La planilla no avisa de esto — el saldo calculado
+// simplemente queda mal y nadie se entera. No bloquea la vista si falla.
+async function loadCajasHuerfanos() {
+  const cont = document.getElementById('cajas-huerfanos');
+  if (!cont) return;
+  try {
+    const { data } = await api('/api/cajas/medios-huerfanos');
+    if (!data.huerfanos.length) { cont.innerHTML = ''; return; }
+    const filas = data.huerfanos.map(h => `<tr>
+      <td><b>${escapeHtml(h.medio)}</b></td>
+      <td class="td-right">${h.filas}</td>
+      <td class="td-right">${h.entradas ? fmt(h.entradas) : '—'}</td>
+      <td class="td-right">${h.salidas ? fmt(h.salidas) : '—'}</td>
+      <td style="font-size:12px;color:var(--text-muted)">${h.ultimaFecha || '—'}</td>
+      <td style="font-size:12px;color:var(--text-muted)">fila ${h.ejemploFila}</td>
+    </tr>`).join('');
+    cont.innerHTML = `<div class="card" style="border-color:var(--orange)">
+      <div class="card-title" style="color:var(--orange)">⚠ Plata que ninguna caja está sumando</div>
+      <div style="font-size:13px;line-height:1.7;margin-bottom:12px">
+        Hay <b>${data.totalFilas}</b> fila${data.totalFilas !== 1 ? 's' : ''} en Movimientos cuyo
+        <b>Medio de Pago</b> no coincide exacto con el nombre de ninguna caja. Las fórmulas de la hoja
+        Cajas suman por texto exacto, así que esa plata no entra ni sale de ningún saldo calculado.
+        Corregí la columna L en la planilla para que diga el nombre exacto de la caja.
+      </div>
+      <div class="table-wrap"><table class="pagos-table" style="width:100%">
+        <thead><tr><th style="text-align:left">Medio de pago</th><th class="td-right">Filas</th>
+        <th class="td-right">Entradas</th><th class="td-right">Salidas</th>
+        <th style="text-align:left">Último</th><th style="text-align:left">Ejemplo</th></tr></thead>
+        <tbody>${filas}</tbody></table></div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:10px">
+        Cajas válidas: ${data.cajas.map(escapeHtml).join(' · ')}
+      </div>
+    </div>`;
+  } catch (e) {
+    cont.innerHTML = '';
   }
 }
 
@@ -4574,13 +4631,14 @@ async function planMoverPrioridad(id, dir) {
   await loadPlan();
 }
 
-// ═══ FINANZAS — escalera de recupero ═══════════════════════════════════════
+// ═══ FINANZAS — capital del recupero ═══════════════════════════════════════
 // Dos planos separados a propósito: la PROYECCIÓN (simulación con parámetros)
 // y el REGISTRO REAL de colocaciones, que es lo que permite demostrar que el
 // capital del recupero no se mezcló con la caja operativa del bar.
-const FIN_BALDES = { uva: 'UVA', cer: 'CER' };
+// Destinos. 'mp' es el único vigente; uva/cer quedan para leer los movimientos
+// viejos sin que aparezcan como código de bucket crudo en la tabla.
+const FIN_DESTINOS = { mp: 'Mercado Pago Pablo', uva: 'UVA (estrategia vieja)', cer: 'CER (estrategia vieja)' };
 const FIN_TIPOS = { colocacion: 'Colocación', rescate: 'Rescate', renovacion: 'Renovación', ajuste: 'Ajuste' };
-state.fin = null;
 
 async function loadFinanzas() {
   document.getElementById('fin-kpis').innerHTML = '<div class="loading"><div class="spinner"></div> Cargando finanzas...</div>';
@@ -4588,10 +4646,10 @@ async function loadFinanzas() {
     const { data } = await api('/api/finanzas');
     state.fin = data;
     renderFinKpis();
+    renderFinEstrategia();
     renderFinConciliacion();
     renderFinMovimientos();
     renderFinAportes();
-    renderFinVencimientos();
     renderFinTabla();
     renderFinChart();
     fillFinParams();
@@ -4607,44 +4665,85 @@ function finMesLabel(iso) {
 }
 
 function renderFinKpis() {
-  const f = state.fin, r = f.escalera.resumen;
+  const f = state.fin, r = f.proyeccion.resumen;
   const kpi = (label, valor, sub, color) =>
     `<div class="kpi-card ${color || ''}"><div class="kpi-label">${label}</div><div class="kpi-value" style="font-size:22px">${valor}</div><div class="kpi-sub">${sub}</div></div>`;
   if (!r) { document.getElementById('fin-kpis').innerHTML = kpi('Sin datos', '—', 'cargá aportes para proyectar', 'blue'); return; }
   const gan = Math.round(r.gananciaReal);
   document.getElementById('fin-kpis').innerHTML =
-    kpi('Proyección · total nominal al mes ' + r.meses, fmt(Math.round(r.totalNominal)), 'simulación, pesos corrientes', 'blue') +
-    kpi('Proyección · total real', fmt(Math.round(r.totalReal)), 'simulación, en pesos de hoy', 'blue') +
-    kpi('Proyección · ganancia real', (gan >= 0 ? '+' : '') + fmt(gan), (r.pctGananciaReal >= 0 ? '+' : '') + r.pctGananciaReal.toFixed(2) + '% sobre lo aportado', gan >= 0 ? 'green' : 'red') +
-    kpi('REAL · colocado hoy', fmt(f.conciliacion.colocadoARS), f.conciliacion.movimientos + ' movimiento' + (f.conciliacion.movimientos !== 1 ? 's' : '') + ' registrado' + (f.conciliacion.movimientos !== 1 ? 's' : ''), 'orange');
+    kpi('REAL · colocado hoy', fmt(f.conciliacion.colocadoARS), f.conciliacion.movimientos + ' movimiento' + (f.conciliacion.movimientos !== 1 ? 's' : '') + ' registrado' + (f.conciliacion.movimientos !== 1 ? 's' : ''), 'green') +
+    kpi('Proyección · total al mes ' + r.meses, fmt(Math.round(r.totalNominal)), 'pesos corrientes, con los intereses', 'blue') +
+    kpi('Proyección · intereses ganados', fmt(Math.round(r.interesesAcum)), 'acumulados en ' + r.meses + ' meses', 'blue') +
+    kpi('Poder adquisitivo', (gan >= 0 ? '+' : '') + fmt(gan), (r.pctGananciaReal >= 0 ? '+' : '') + r.pctGananciaReal.toFixed(1) + '% en pesos de hoy', gan >= 0 ? 'green' : 'red');
+}
+
+// La estrategia en una frase, y el número que más importa: la tasa REAL. Con la
+// TNA por debajo de la inflación es negativa, y eso tiene que estar a la vista
+// arriba de todo en vez de escondido en una columna de la tabla.
+function renderFinEstrategia() {
+  const p = state.fin.proyeccion.parametros;
+  const tna = (p.tnaMercadoPago * 100);
+  const inflAnual = (Math.pow(1 + p.inflacionMensual, 12) - 1) * 100;
+  const realAnual = p.tasaRealAnual * 100;
+  const pierde = realAnual < 0;
+  const cap = state.fin.conciliacion.colocadoARS;
+
+  document.getElementById('fin-estrategia').innerHTML =
+    `<div style="font-size:14px;line-height:1.8;margin-bottom:14px">
+       El <b>100% del capital del recupero</b> va a <b style="color:var(--accent)">Mercado Pago Pablo</b>
+       — cuenta remunerada, disponible al instante, sin plazo ni riesgo de precio.
+       Rinde <b>${tna.toFixed(1)}% TNA</b> (${(p.rendMensual * 100).toFixed(2)}% mensual).
+       Hoy hay <b>${fmt(cap)}</b> colocados según el registro.
+     </div>
+     <div style="display:flex;gap:22px;flex-wrap:wrap;padding:12px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);font-size:13px">
+       <span>Rinde <b style="color:var(--text)">${tna.toFixed(1)}%</b> anual</span>
+       <span>Inflación supuesta <b style="color:var(--text)">${inflAnual.toFixed(1)}%</b> anual</span>
+       <span>Tasa <b>real</b> <b style="color:${pierde ? 'var(--red)' : 'var(--green)'}">${realAnual >= 0 ? '+' : ''}${realAnual.toFixed(1)}%</b> anual</span>
+     </div>
+     <div style="font-size:12px;color:${pierde ? 'var(--orange)' : 'var(--text-muted)'};line-height:1.7;margin-top:12px">
+       ${pierde
+         ? `⚠ <b>La tasa no le gana a la inflación.</b> Con estos supuestos el capital pierde
+            ~${Math.abs(realAnual).toFixed(1)}% de poder adquisitivo por año: dentro de un año vas a tener
+            más pesos, pero compran menos que hoy. Es el precio de tener la plata disponible al instante
+            y sin riesgo de precio — está bien si la prioridad es liquidez, y conviene revisarlo si el
+            capital va a quedar quieto muchos meses.`
+         : `✓ Con estos supuestos la colocación le gana a la inflación y el capital mantiene su poder adquisitivo.`}
+     </div>`;
 }
 
 // Conciliación: asignado a recupero en los cierres vs. lo realmente colocado.
+// Se separa el capital propio (el que no salió del recupero de ningún cierre)
+// porque si no, poner plata de más aparecía como una alarma.
 function renderFinConciliacion() {
   const c = state.fin.conciliacion;
   const sin = c.sinColocarARS;
   const estado = sin === 0
-    ? { color: 'var(--green)', txt: '✓ Todo el recupero asignado está colocado en instrumentos.' }
+    ? { color: 'var(--green)', txt: '✓ Todo el recupero asignado en los cierres está colocado.' }
     : sin > 0
       ? { color: 'var(--orange)', txt: `⚠ Hay ${fmt(sin)} asignados al recupero que todavía NO figuran colocados. Mientras estén sin registrar, esa plata está mezclada con la caja operativa.` }
-      : { color: 'var(--red)', txt: `⚠ Hay ${fmt(-sin)} colocados de MÁS respecto de lo asignado en los cierres. Revisá si algún movimiento se cargó dos veces o si falta asignar recupero en un cierre.` };
-  const linea = (label, valor, color) =>
+      : { color: 'var(--red)', txt: `⚠ Hay ${fmt(-sin)} colocados de MÁS respecto de lo asignado en los cierres. Revisá si algún movimiento se cargó dos veces o si a alguno le falta el mes de recupero.` };
+  const linea = (label, valor, color, hint) =>
     `<div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:7px 0">
-      <span style="font-size:13px;color:var(--text-muted)">${label}</span>
+      <span style="font-size:13px;color:var(--text-muted)">${label}${hint ? `<span style="display:block;font-size:11px">${hint}</span>` : ''}</span>
       <span style="font-size:15px;font-weight:700;color:${color || 'var(--text)'};white-space:nowrap">${valor}</span>
     </div>`;
   document.getElementById('fin-conciliacion').innerHTML =
     linea('Asignado a recupero en los cierres', fmt(c.asignadoARS)) +
-    linea('Colocado en instrumentos (registro real)', '− ' + fmt(c.colocadoARS), 'var(--text-muted)') +
+    linea('Colocado que sale del recupero', '− ' + fmt(c.deRecuperoARS), 'var(--text-muted)') +
     `<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px">` +
       linea('Sin colocar', fmt(sin), estado.color) +
     `</div>` +
     `<div style="font-size:12px;color:${estado.color};line-height:1.6;margin-top:8px">${estado.txt}</div>` +
+    (c.capitalPropioARS
+      ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">` +
+        linea('Capital propio colocado aparte', fmt(c.capitalPropioARS), 'var(--accent)',
+              'no sale del recupero de ningún cierre — ej. los $15.000.000 que vinieron de Galicia') +
+        `</div>`
+      : '') +
     `<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted)">
-      <span>UVA: <b style="color:var(--text)">${fmt(c.porBalde.uva)}</b></span>
-      <span>CER: <b style="color:var(--text)">${fmt(c.porBalde.cer)}</b></span>
-      ${c.porBalde.otros ? `<span title="Movimientos cargados con un bucket que ya no existe (por ejemplo el viejo colchón). Editalos en la planilla para que queden en UVA o CER.">Fuera de UVA/CER: <b style="color:var(--orange)">${fmt(c.porBalde.otros)}</b></span>` : ''}
-      <span>${c.movimientos} movimiento${c.movimientos !== 1 ? 's' : ''} registrado${c.movimientos !== 1 ? 's' : ''}</span>
+      <span>En Mercado Pago Pablo: <b style="color:var(--text)">${fmt(c.porDestino.mercadoPago)}</b></span>
+      ${c.porDestino.legacy ? `<span title="Movimientos cargados con la estrategia vieja (UVA/CER). Siguen contando en el total; si esa plata ya se pasó a Mercado Pago Pablo, registrá el rescate y la nueva colocación.">En instrumentos viejos (UVA/CER): <b style="color:var(--orange)">${fmt(c.porDestino.legacy)}</b></span>` : ''}
+      <span>Total colocado: <b style="color:var(--text)">${fmt(c.colocadoARS)}</b></span>
     </div>`;
 }
 
@@ -4652,24 +4751,23 @@ function renderFinMovimientos() {
   const movs = (state.fin.movimientos || []).slice().sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
   const cont = document.getElementById('fin-movimientos');
   if (!movs.length) {
-    cont.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:10px 0">Todavía no hay movimientos registrados. Cada vez que coloques plata del recupero en un instrumento, registralo acá: es la prueba de que ese capital está separado de la caja del bar.</div>';
+    cont.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:10px 0">Todavía no hay movimientos registrados. Cada vez que entre o salga plata de Mercado Pago Pablo, registrala acá: es la prueba de que ese capital está separado de la caja del bar.</div>';
     return;
   }
   cont.innerHTML = `<div class="table-wrap"><table class="pagos-table" style="width:100%">
     <thead><tr>
       <th style="text-align:left">Fecha</th><th style="text-align:left">Tipo</th>
-      <th style="text-align:left">Bucket</th><th style="text-align:left">Instrumento</th>
+      <th style="text-align:left">Destino</th>
       <th class="td-right">Monto</th>
       <th style="text-align:left">Comprobante</th><th style="text-align:left">Sale del recupero de</th><th></th>
     </tr></thead><tbody>` +
     movs.map(m => `<tr>
       <td style="white-space:nowrap">${escapeHtml(m.fecha)}</td>
       <td><span class="badge ${m.tipo === 'rescate' ? 'badge-vencido' : 'badge-ok'}">${FIN_TIPOS[m.tipo] || m.tipo}</span></td>
-      <td>${FIN_BALDES[m.balde] || m.balde}</td>
-      <td>${escapeHtml(m.instrumento) || '—'}${m.notas ? `<div class="td-desc">${escapeHtml(m.notas)}</div>` : ''}</td>
+      <td${m.esLegacy ? ' style="color:var(--orange)"' : ''}>${FIN_DESTINOS[m.balde] || m.balde}${m.notas ? `<div class="td-desc">${escapeHtml(m.notas)}</div>` : ''}</td>
       <td class="td-right"><span class="td-monto" style="color:${m.tipo === 'rescate' ? 'var(--red)' : 'var(--green)'}">${m.tipo === 'rescate' ? '−' : ''}${fmt(m.monto)}</span></td>
       <td style="font-size:12px;color:var(--text-muted)">${escapeHtml(m.comprobante) || '—'}</td>
-      <td style="font-size:12px;color:var(--text-muted)">${m.mesRecupero ? finMesLabel(m.mesRecupero) : '—'}</td>
+      <td style="font-size:12px;color:var(--text-muted)">${m.mesRecupero ? finMesLabel(m.mesRecupero) : '<span title="Capital propio: no salió del recupero de ningún cierre">capital propio</span>'}</td>
       <td style="text-align:right"><button class="btn" style="padding:3px 8px;font-size:11px" title="Eliminar" onclick="deleteFinMovimiento('${m.id}')">🗑</button></td>
     </tr>`).join('') + '</tbody></table></div>';
 }
@@ -4684,15 +4782,15 @@ function renderFinAportes() {
       : '<span class="badge" style="background:var(--surface2);color:var(--text-muted)" title="Ese mes todavía no cerró y no tiene aporte fijado">sin datos</span>';
   cont.innerHTML = `<div class="table-wrap"><table class="pagos-table" style="width:100%">
     <thead><tr><th style="text-align:left">Mes</th><th style="text-align:left">Origen</th><th class="td-right">Aporte</th>
-    <th class="td-right">UVA</th><th class="td-right">CER</th><th></th></tr></thead><tbody>` +
+    <th class="td-right">Interés del mes</th><th class="td-right">Saldo acumulado</th><th></th></tr></thead><tbody>` +
     aportes.map((a, i) => {
-      const f = state.fin.escalera.filas[i] || {};
+      const f = state.fin.proyeccion.filas[i] || {};
       return `<tr>
         <td style="white-space:nowrap">${i + 1}. ${finMesLabel(a.mes)}</td>
         <td>${tag(a.origen)}</td>
         <td class="td-right"><span class="td-monto" style="cursor:pointer;border-bottom:1px dashed var(--text-muted)" title="Click para fijar el aporte de este mes a mano" onclick="finEditarAporte(this,'${a.mes}')">${fmt(a.monto)}</span></td>
-        <td class="td-right" style="color:var(--text-muted);font-size:12px">${fmt(Math.round(f.aUva || 0))}</td>
-        <td class="td-right" style="color:var(--text-muted);font-size:12px">${fmt(Math.round(f.aCer || 0))}</td>
+        <td class="td-right" style="color:var(--green);font-size:12px">+${fmt(Math.round(f.interes || 0))}</td>
+        <td class="td-right" style="color:var(--text-muted);font-size:12px">${fmt(Math.round(f.totalNominal || 0))}</td>
         <td style="text-align:right">${a.origen === 'manual' ? `<button class="btn" style="padding:3px 8px;font-size:11px" title="Volver al valor del cierre" onclick="finResetAporte('${a.mes}')">↺</button>` : ''}</td>
       </tr>`;
     }).join('') + '</tbody></table></div>';
@@ -4728,85 +4826,16 @@ async function finResetAporte(mes) {
   } catch (e) { alert('No se pudo restablecer: ' + e.message); }
 }
 
-// Suma meses a una fecha "YYYY-MM-DD" (para el vencimiento de un PF real).
-function finSumarMeses(fechaISO, n) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fechaISO || '');
-  if (!m) return '';
-  const d = new Date(Number(m[1]), Number(m[2]) - 1 + n, Number(m[3]));
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-// Dos bloques bien separados, porque mezclarlos confunde: arriba los tramos que
-// EXISTEN (salen del registro de movimientos), abajo los que la proyección
-// supone que se van a constituir si se colocan los aportes según el reparto.
-function renderFinVencimientos() {
-  const cont = document.getElementById('fin-vencimientos');
-  const plazo = Math.round(state.fin.config.plazoUvaMeses) || 12;
-  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
-
-  const reales = (state.fin.movimientos || [])
-    .filter(m => m.balde === 'uva' && m.tipo === 'colocacion')
-    .map(m => ({ ...m, vence: finSumarMeses(m.fecha, plazo) }))
-    .sort((a, b) => (a.vence || '').localeCompare(b.vence || ''));
-
-  const bloqueReal = reales.length
-    ? `<div class="table-wrap"><table class="pagos-table" style="width:100%">
-        <thead><tr><th style="text-align:left">Vence</th><th style="text-align:left">Constituido</th>
-          <th style="text-align:left">Instrumento</th><th class="td-right">Monto colocado</th><th></th></tr></thead><tbody>` +
-        reales.map((t, i) => `<tr${i === 0 ? ' style="background:var(--green-dim)"' : ''}>
-          <td style="white-space:nowrap;font-weight:${i === 0 ? '700' : '400'}">${escapeHtml(t.vence)}</td>
-          <td style="color:var(--text-muted);font-size:12px">${escapeHtml(t.fecha)}</td>
-          <td style="font-size:12px">${escapeHtml(t.instrumento) || '—'}</td>
-          <td class="td-right"><span class="td-monto">${fmt(t.monto)}</span></td>
-          <td>${i === 0 ? '<span class="badge badge-ok">próximo</span>' : ''}${t.vence && t.vence <= hoy ? ' <span class="badge badge-vencido">ya venció</span>' : ''}</td>
-        </tr>`).join('') + '</tbody></table></div>'
-    : `<div style="color:var(--text-muted);font-size:13px;padding:8px 0">
-        Todavía no hay ninguna colocación en UVA registrada, así que no hay vencimientos reales.
-        Registrala en <b>Registro de movimientos</b> y el vencimiento aparece acá automáticamente (fecha + ${plazo} meses).
-      </div>`;
-
-  const tramos = (state.fin.escalera.tramos || []).slice().sort((a, b) => a.mesVencimiento - b.mesVencimiento);
-  const dentro = tramos.filter(t => t.disponibleEnHorizonte);
-  const bloqueProy = tramos.length
-    ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
-        ${dentro.length} de ${tramos.length} tramos vencerían dentro del horizonte. A partir del mes ${plazo + 1} vence uno por mes: esa es la escalera.
-      </div>
-      <div class="table-wrap"><table class="pagos-table" style="width:100%">
-      <thead><tr><th style="text-align:left">Vencería</th><th style="text-align:left">Se constituiría</th>
-        <th class="td-right">Monto a colocar</th><th class="td-right">UVAs</th><th class="td-right">Valor al vencer</th><th></th></tr></thead><tbody>` +
-      tramos.map(t => `<tr>
-        <td style="white-space:nowrap">${finMesLabel(t.mesVencimientoISO)} <span style="color:var(--text-muted);font-size:11px">(mes ${t.mesVencimiento})</span></td>
-        <td style="color:var(--text-muted);font-size:12px">${finMesLabel(t.mesConstitucionISO)}</td>
-        <td class="td-right">${fmt(Math.round(t.montoUva))}</td>
-        <td class="td-right" style="color:var(--text-muted);font-size:12px">${t.cantidadUvas.toFixed(2)}</td>
-        <td class="td-right" style="color:var(--text-muted)">${fmt(Math.round(t.valorAlVencer))}</td>
-        <td>${t.disponibleEnHorizonte ? '' : '<span class="badge" style="background:var(--surface2);color:var(--text-muted)" title="Vencería después del horizonte proyectado">fuera de plazo</span>'}</td>
-      </tr>`).join('') + '</tbody></table></div>'
-    : '<div style="color:var(--text-muted);font-size:13px;padding:8px 0">Sin aportes cargados, no hay nada que proyectar.</div>';
-
-  cont.innerHTML =
-    `<div style="font-size:12px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Reales — de tus colocaciones registradas</div>
-     ${bloqueReal}
-     <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin:22px 0 8px;padding-top:16px;border-top:1px solid var(--border)">Proyectados — simulación, todavía no existen</div>
-     <div style="font-size:12px;color:var(--orange);line-height:1.6;margin-bottom:10px">
-       ⚠ Estos tramos <b>no son plata colocada</b>: son los que se formarían si colocaras cada aporte según el reparto
-       ${Math.round(state.fin.config.pctUva * 100)}% UVA / ${Math.round(state.fin.config.pctCer * 100)}% CER.
-       Sirven para ver el calendario de liquidez que tendrías.
-     </div>
-     ${bloqueProy}`;
-}
-
 function renderFinTabla() {
-  const filas = state.fin.escalera.filas || [];
+  const filas = state.fin.proyeccion.filas || [];
   document.getElementById('fin-tabla').innerHTML = `<div class="table-wrap"><table class="pagos-table" style="width:100%;font-size:12px">
     <thead><tr><th style="text-align:left">Mes</th><th class="td-right">Aporte</th>
-      <th class="td-right">UVA</th><th class="td-right">CER</th>
-      <th class="td-right">Total nominal</th><th class="td-right">Total real</th><th class="td-right">Ganancia real</th></tr></thead><tbody>` +
+      <th class="td-right">Interés</th><th class="td-right">Total nominal</th>
+      <th class="td-right">Total real</th><th class="td-right">Poder adquisitivo</th></tr></thead><tbody>` +
     filas.map(f => `<tr>
       <td style="white-space:nowrap">${f.mes}. ${finMesLabel(f.mesISO)}</td>
       <td class="td-right">${fmt(Math.round(f.aporte))}</td>
-      <td class="td-right" style="color:var(--text-muted)">${fmt(Math.round(f.saldoUva))}</td>
-      <td class="td-right" style="color:var(--text-muted)">${fmt(Math.round(f.saldoCer))}</td>
+      <td class="td-right" style="color:var(--green)">+${fmt(Math.round(f.interes))}</td>
       <td class="td-right">${fmt(Math.round(f.totalNominal))}</td>
       <td class="td-right" style="font-weight:600">${fmt(Math.round(f.totalReal))}</td>
       <td class="td-right" style="color:${f.gananciaReal >= 0 ? 'var(--green)' : 'var(--red)'}">${f.gananciaReal >= 0 ? '+' : ''}${fmt(Math.round(f.gananciaReal))}</td>
@@ -4814,11 +4843,11 @@ function renderFinTabla() {
 }
 
 function renderFinChart() {
-  const filas = state.fin.escalera.filas || [];
+  const filas = state.fin.proyeccion.filas || [];
   const el = document.getElementById('chart-fin');
   if (!el || !filas.length) return;
-  destroyChart('fin-escalera');
-  state.charts['fin-escalera'] = new Chart(el.getContext('2d'), {
+  destroyChart('fin-proyeccion');
+  state.charts['fin-proyeccion'] = new Chart(el.getContext('2d'), {
     data: {
       labels: filas.map(f => finMesLabel(f.mesISO)),
       datasets: [
@@ -4846,64 +4875,29 @@ function toggleFinParams() {
 function fillFinParams() {
   const c = state.fin.config;
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  set('fpa-tna-mp', +(c.tnaMercadoPago * 100).toFixed(2));
   set('fpa-inflacion', +(c.inflacionMensual * 100).toFixed(4));
-  set('fpa-cer-real', +(c.rendRealCerAnual * 100).toFixed(2));
-  set('fpa-plazo', c.plazoUvaMeses);
-  set('fpa-tna', +(c.tnaPrecancelacion * 100).toFixed(2));
-  set('fpa-uva', c.cotizacionUvaInicial);
+  set('fpa-capital', Math.round(c.capitalInicialARS));
   set('fpa-horizonte', c.horizonteMeses);
-  set('fpa-pct-uva', +(c.pctUva * 100).toFixed(2));
-  renderFinPctSuma();
 
-  // El reparto guardado en la planilla no sumaba 100% (típicamente quedó de cuando
-  // existía el colchón). Se está proyectando con el default hasta que se guarde.
-  const av = document.getElementById('fin-pct-aviso');
+  // Parámetros de la estrategia vieja que siguen guardados en la planilla. No se
+  // borran solos (la planilla es del usuario), pero conviene decir que sobran.
+  const av = document.getElementById('fin-obsoletas-aviso');
   if (av) {
-    const inv = state.fin.pctGuardadoInvalido;
-    av.style.display = inv ? '' : 'none';
-    av.innerHTML = inv
-      ? `⚠ El reparto guardado en la planilla sumaba ${inv}%, no 100%. Se está proyectando con
-         ${Math.round(c.pctUva * 100)}% UVA / ${Math.round(c.pctCer * 100)}% CER. Tocá
-         <b>Guardar reparto</b> para dejarlo fijado en la planilla y que este aviso desaparezca.`
+    const obs = state.fin.clavesObsoletas;
+    av.style.display = obs && obs.length ? '' : 'none';
+    av.innerHTML = obs && obs.length
+      ? `ℹ La hoja <b>Finanzas Config</b> todavía tiene ${obs.length} parámetro${obs.length !== 1 ? 's' : ''} de la
+         estrategia anterior (${obs.map(escapeHtml).join(', ')}). Ya no se usan y no afectan nada.
+         Podés borrar esas filas de la planilla cuando quieras.`
       : '';
   }
-}
-// Con dos buckets el reparto es un solo número: lo que no va a UVA va a CER. El
-// campo CER se muestra igual, calculado y deshabilitado, para que se vea el
-// reparto completo sin poder desbalancearlo.
-function renderFinPctSuma() {
-  const el = document.getElementById('fpa-pct-status');
-  const inUva = document.getElementById('fpa-pct-uva');
-  if (!el || !inUva) return false;
-  const uva = Number(inUva.value);
-  const ok = Number.isFinite(uva) && uva >= 0 && uva <= 100;
-  const cer = ok ? +(100 - uva).toFixed(2) : '';
-  const inCer = document.getElementById('fpa-pct-cer');
-  if (inCer) inCer.value = cer;
-  el.style.color = ok ? 'var(--green)' : 'var(--red)';
-  el.textContent = ok
-    ? `✓ ${(+uva.toFixed(2))}% UVA / ${cer}% CER`
-    : 'El % de UVA tiene que estar entre 0 y 100';
-  return ok;
 }
 async function saveFinParam(clave, valor) {
   try {
     await api('/api/finanzas/config', { method: 'PUT', body: JSON.stringify({ clave, valor: Number(valor) }) });
     await loadFinanzas();
   } catch (e) { alert('No se pudo guardar el parámetro: ' + e.message); }
-}
-async function saveFinPcts() {
-  if (!renderFinPctSuma()) return;
-  const uva = Number(document.getElementById('fpa-pct-uva').value);
-  try {
-    await api('/api/finanzas/config', { method: 'PUT', body: JSON.stringify({ pcts: {
-      uva: uva / 100, cer: (100 - uva) / 100,
-    } }) });
-    await loadFinanzas();
-  } catch (e) {
-    const el = document.getElementById('fpa-pct-status');
-    el.style.color = 'var(--red)'; el.textContent = 'Error: ' + e.message;
-  }
 }
 
 // ── Registro de movimientos reales ──
@@ -4913,18 +4907,18 @@ function toggleFinMovForm(cancel) {
   form.style.display = abrir ? '' : 'none';
   if (!abrir) return;
   document.getElementById('fmv-fecha').value = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
-  ['fmv-monto', 'fmv-instrumento', 'fmv-comprobante', 'fmv-notas'].forEach(id => document.getElementById(id).value = '');
+  ['fmv-monto', 'fmv-comprobante', 'fmv-notas'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('fmv-status').style.display = 'none';
   const sel = document.getElementById('fmv-mesrec');
-  sel.innerHTML = '<option value="">— sin especificar —</option>' +
+  sel.innerHTML = '<option value="">— capital propio (no sale del recupero) —</option>' +
     (state.fin.aportes || []).map(a => `<option value="${a.mes}">${finMesLabel(a.mes)}</option>`).join('');
 }
 async function saveFinMovimiento() {
   const status = document.getElementById('fmv-status');
   const val = id => document.getElementById(id).value;
   const body = {
-    fecha: val('fmv-fecha'), tipo: val('fmv-tipo'), balde: val('fmv-balde'),
-    monto: Number(val('fmv-monto')), instrumento: val('fmv-instrumento').trim(),
+    fecha: val('fmv-fecha'), tipo: val('fmv-tipo'), balde: 'mp',
+    monto: Number(val('fmv-monto')), instrumento: 'Mercado Pago Pablo',
     comprobante: val('fmv-comprobante').trim(), mesRecupero: val('fmv-mesrec'), notas: val('fmv-notas').trim(),
   };
   if (!(body.monto > 0)) { status.style.display = ''; status.style.color = 'var(--red)'; status.textContent = 'Ingresá un monto mayor a cero.'; return; }
@@ -5261,7 +5255,9 @@ function mapMedioOption(texto) {
   const t = (texto || '').toLowerCase();
   const candidatos = [
     { kw: 'echeq', val: 'Echeq' },
-    { kw: 'mercado', val: 'Mercado Pago' },
+    // Sólo la cuenta operativa: Mercado Pago Pablo es la del ahorro y no es una
+    // opción de estos selects, así que mapear a ella dejaría el select en blanco.
+    { kw: 'mercado', val: 'Mercado Pago Tincho' },
     { kw: 'galicia', val: 'Galicia' },
     { kw: 'efectivo', val: 'Efectivo' },
   ];
