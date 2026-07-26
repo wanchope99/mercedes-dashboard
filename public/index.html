@@ -59,6 +59,9 @@
     .filter-mode-btn.active { background: var(--accent); color: #f0e6d3; border-color: var(--accent); font-weight: 600; }
     #range-filters { display: none; align-items: center; gap: 8px; }
     #mes-filters { display: flex; align-items: center; gap: 8px; }
+    /* Switch Gráfico/Datos de Reportes: pegado a la derecha de la barra de filtros */
+    .rep-view-switch { margin-left: auto; display: flex; gap: 6px; }
+    @media (max-width: 700px) { .rep-view-switch { margin-left: 0; } }
 
     main { max-width: 1400px; margin: 0 auto; padding: 32px; display: flex; flex-direction: column; gap: 24px; }
 
@@ -563,6 +566,7 @@
 <!-- Tab nav -->
 <div class="tab-nav" id="tab-nav">
   <button class="tab-btn active" id="tab-btn-dashboard" onclick="switchGroup('dashboard', this)">📊 Dashboard</button>
+  <button class="tab-btn" id="tab-btn-reportes" onclick="switchGroup('reportes', this)">📈 Reportes</button>
   <button class="tab-btn" id="tab-btn-pagos" onclick="switchGroup('pagos', this)">💳 Pagos</button>
   <button class="tab-btn" id="tab-btn-cajas" onclick="switchGroup('cajas', this)">🏦 Cajas</button>
   <button class="tab-btn" id="tab-btn-servicios" onclick="switchGroup('servicios', this)">🍽️ Servicios</button>
@@ -642,6 +646,66 @@
     <div class="card">
       <div class="card-title">Actividad por día <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· clic para detalle</span></div>
       <div id="actividad-list"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+  </main>
+</div>
+
+<!-- ═══ REPORTES › BALANCE ═══ -->
+<!-- Mismos números que el Dashboard (/api/resumen + /api/actividad-diaria), sin
+     nada proyectado: sólo lo que ya está registrado en Movimientos. -->
+<div id="tab-reportes-balance" class="tab-panel">
+  <div class="filters-bar">
+    <button class="filter-mode-btn active" id="rep-btn-modo-mes" onclick="setRepModo('mes')">Por mes</button>
+    <button class="filter-mode-btn" id="rep-btn-modo-rango" onclick="setRepModo('rango')">Por período</button>
+    <div class="filter-sep"></div>
+    <div id="rep-mes-filters" style="display:flex;align-items:center;gap:8px">
+      <span class="filter-label">Mes</span>
+      <select id="rep-filter-mes" onchange="onRepFilterChange()"></select>
+    </div>
+    <div id="rep-range-filters" style="display:none;align-items:center;gap:8px">
+      <span class="filter-label">Desde</span>
+      <input type="date" id="rep-filter-desde" onchange="onRepFilterChange()" />
+      <span class="filter-label">Hasta</span>
+      <input type="date" id="rep-filter-hasta" onchange="onRepFilterChange()" />
+    </div>
+    <div class="rep-view-switch">
+      <button class="filter-mode-btn active" id="rep-btn-view-grafico" onclick="setRepView('grafico')">📈 Gráfico</button>
+      <button class="filter-mode-btn" id="rep-btn-view-datos" onclick="setRepView('datos')">📋 Datos</button>
+    </div>
+  </div>
+
+  <main>
+    <div class="kpi-grid" id="rep-bal-kpis"><div class="loading"><div class="spinner"></div> Cargando balance...</div></div>
+
+    <div class="card" id="rep-bal-grafico-card">
+      <div class="card-title"><span>Balance acumulado — <span id="rep-bal-titulo">…</span></span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· todo real, sin proyección</span>
+      </div>
+      <div class="chart-container" style="height:360px"><canvas id="chart-rep-balance"></canvas></div>
+      <div id="rep-bal-nota" style="font-size:11px;color:var(--text-muted);line-height:1.7;margin-top:14px"></div>
+    </div>
+
+    <div id="rep-bal-datos-card" style="display:none">
+      <div class="card">
+        <div class="card-title">Día a día
+          <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· acumulado a la derecha</span>
+        </div>
+        <div class="table-wrap">
+          <table class="prov-resumen-table">
+            <thead><tr>
+              <th>Día</th><th>Ingresos</th><th>Gastos</th><th>Resultado</th>
+              <th>Ingr. acum.</th><th>Gastos acum.</th><th>Result. acum.</th>
+            </tr></thead>
+            <tbody id="rep-bal-datos-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card" style="margin-top:24px">
+        <div class="card-title">Composición del período</div>
+        <div class="table-wrap">
+          <table class="prov-resumen-table"><tbody id="rep-bal-comp-body"></tbody></table>
+        </div>
+      </div>
     </div>
   </main>
 </div>
@@ -1915,7 +1979,7 @@ function onLoginSuccess(rol, nombre) {
     document.getElementById('last-updated').style.display = '';
     document.getElementById('btn-refresh').style.display = '';
     // Todas las tabs padre visibles
-    ['tab-btn-dashboard','tab-btn-pagos','tab-btn-cajas','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-plan'].forEach(id => {
+    ['tab-btn-dashboard','tab-btn-reportes','tab-btn-pagos','tab-btn-cajas','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-plan'].forEach(id => {
       const el = document.getElementById(id); if (el) el.style.display = '';
     });
     // Pagos: vista completa (filtros, KPIs, listado y botón Pagar)
@@ -1928,7 +1992,7 @@ function onLoginSuccess(rol, nombre) {
     checkGaliciaVencReminder(); // recordatorio de vencimiento de la tarjeta (1 vez por ciclo)
   } else {
     // Encargado: solo la tab Cajas (con submenús Cajas / Arqueo) + Pagos
-    ['tab-btn-dashboard','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-plan'].forEach(id => {
+    ['tab-btn-dashboard','tab-btn-reportes','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-plan'].forEach(id => {
       const el = document.getElementById(id); if (el) el.style.display = 'none';
     });
     document.getElementById('tab-btn-cajas').style.display = '';
@@ -2031,6 +2095,11 @@ async function checkSavedToken() {
 // directamente el panel del mismo nombre.
 const TAB_GROUPS = {
   dashboard:    { subs: null },
+  // Reportes: hoy sólo Balance. Agregar un reporte nuevo = una línea acá + su
+  // panel `tab-<id>` + su carga en cargarPanel().
+  reportes: { subs: [
+    { id: 'reportes-balance', label: '📊 Balance' },
+  ] },
   pagos:        { subs: null },
   servicios:    { subs: null },
   plan: { subs: [
@@ -2086,6 +2155,7 @@ function cargarPanel(tab) {
   }
   else if (tab === 'calculadora') loadCalculadora();
   else if (tab === 'proymes') loadProyeccionMes();
+  else if (tab === 'reportes-balance') initReporteBalance();
   else if (tab === 'inversiones') loadPlan();
   else if (tab === 'plan') loadPlan();
 }
@@ -7102,6 +7172,274 @@ async function loadProyeccionMes() {
       scales: { x: { ticks: { color: '#7878a0' }, grid: { color: 'rgba(46,46,62,.4)' } }, y: { ticks: { color: '#7878a0' }, grid: { color: 'rgba(46,46,62,.4)' }, beginAtZero: true } } },
   });
   if (typeof loadProyecciones === 'function') loadProyecciones();
+}
+
+// ─── REPORTES › BALANCE ───────────────────────────────────────────────────────
+// Lee exactamente los mismos dos endpoints que el Dashboard (/api/resumen y
+// /api/actividad-diaria) para que los números no puedan divergir, pero los
+// muestra como serie ACUMULADA día a día. Todo lo que se dibuja acá ya pasó:
+// no hay nada proyectado (para eso está Plan › Proyección Mes).
+//
+// Gastos = "comprometidos" (todo lo registrado, pagado o no), que es la misma
+// base que usa el KPI de gastos del Dashboard. Las cuotas ya vienen excluidas
+// desde sheets.js: la compra computa entera en el mes en que se hizo.
+state.repBal = { modo: 'mes', mes: null, desde: null, hasta: null, view: 'grafico', inicializado: false };
+
+const hoyISOAR = () => new Date().toLocaleDateString('en-CA', { timeZone: TZ_AR });
+
+function setRepModo(modo) {
+  state.repBal.modo = modo;
+  document.getElementById('rep-btn-modo-mes').classList.toggle('active', modo === 'mes');
+  document.getElementById('rep-btn-modo-rango').classList.toggle('active', modo === 'rango');
+  document.getElementById('rep-mes-filters').style.display = modo === 'mes' ? 'flex' : 'none';
+  document.getElementById('rep-range-filters').style.display = modo === 'rango' ? 'flex' : 'none';
+  onRepFilterChange();
+}
+
+function setRepView(view) {
+  state.repBal.view = view;
+  document.getElementById('rep-btn-view-grafico').classList.toggle('active', view === 'grafico');
+  document.getElementById('rep-btn-view-datos').classList.toggle('active', view === 'datos');
+  document.getElementById('rep-bal-grafico-card').style.display = view === 'grafico' ? '' : 'none';
+  document.getElementById('rep-bal-datos-card').style.display = view === 'datos' ? '' : 'none';
+  // Si el gráfico se recreó mientras estaba oculto quedó con tamaño 0: al
+  // volver a mostrarlo hay que pedirle que se vuelva a medir.
+  if (view === 'grafico' && state.charts['rep-balance']) state.charts['rep-balance'].resize();
+}
+
+function onRepFilterChange() {
+  state.repBal.mes = document.getElementById('rep-filter-mes').value;
+  state.repBal.desde = document.getElementById('rep-filter-desde').value;
+  state.repBal.hasta = document.getElementById('rep-filter-hasta').value;
+  loadReporteBalance();
+}
+
+function buildRepQS() {
+  const r = state.repBal;
+  if (r.modo === 'mes' && r.mes) return `?mes=${encodeURIComponent(r.mes)}`;
+  if (r.modo === 'rango' && r.desde && r.hasta) return `?desde=${r.desde}&hasta=${r.hasta}`;
+  return '';
+}
+
+// Primera apertura: llenar los selectores replicando el criterio del Dashboard
+// (mismo mes por defecto), después siempre recargar con lo que ya esté elegido.
+async function initReporteBalance() {
+  if (state.repBal.inicializado) { loadReporteBalance(); return; }
+
+  let meses = state.mesesDisponibles;
+  if (!meses || !meses.length) {
+    try { const r = await api('/api/meses'); meses = r.data; state.mesesDisponibles = meses; }
+    catch { meses = []; }
+  }
+  const sel = document.getElementById('rep-filter-mes');
+  sel.innerHTML = '<option value="">Todos</option>';
+  meses.forEach(m => { const o = document.createElement('option'); o.value = m; o.textContent = m; sel.appendChild(o); });
+  sel.value = state.mes || (meses.length ? meses[meses.length - 1] : '');
+
+  const hoy = hoyISOAR();
+  document.getElementById('rep-filter-desde').value = state.desde || (hoy.slice(0, 8) + '01');
+  document.getElementById('rep-filter-hasta').value = state.hasta || hoy;
+
+  state.repBal.inicializado = true;
+  onRepFilterChange();
+}
+
+// Rango de días a dibujar. Se toma de los datos, y si el período llega hasta el
+// mes en curso se estira hasta hoy: así se ve la meseta de los días sin
+// movimientos en vez de que la línea corte en el último movimiento cargado.
+function repRangoFechas(dias) {
+  if (!dias.length) return null;
+  const fechas = dias.map(d => d.fecha).sort();
+  let ini = fechas[0], fin = fechas[fechas.length - 1];
+  const hoy = hoyISOAR();
+  if (state.repBal.modo === 'rango') {
+    if (state.repBal.desde && state.repBal.desde < ini) ini = state.repBal.desde;
+    const tope = (state.repBal.hasta && state.repBal.hasta < hoy) ? state.repBal.hasta : hoy;
+    if (tope > fin) fin = tope;
+  } else if (hoy.slice(0, 7) === fin.slice(0, 7) && hoy > fin) {
+    fin = hoy;
+  }
+  return { ini, fin };
+}
+
+// Serie acumulada: un punto por día calendario entre ini y fin, con los días sin
+// movimiento repitiendo el acumulado anterior.
+function repSerieAcumulada(dias) {
+  const rango = repRangoFechas(dias);
+  if (!rango) return [];
+  const porFecha = {};
+  dias.forEach(d => { porFecha[d.fecha] = d; });
+
+  const serie = [];
+  let accIng = 0, accGas = 0;
+  // Mediodía local para que sumar días no se pise con horarios de verano, y el
+  // ISO se arma con los campos locales (toISOString() daría el día equivocado
+  // si el navegador está en un huso al este de Greenwich).
+  const isoLocal = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const cur = new Date(rango.ini + 'T12:00:00');
+  const fin = new Date(rango.fin + 'T12:00:00');
+  // Tope de seguridad: un rango absurdo no debe colgar el navegador.
+  for (let i = 0; i < 800 && cur <= fin; i++) {
+    const iso = isoLocal(cur);
+    const d = porFecha[iso];
+    const ing = d ? d.ingresos : 0;
+    const gas = d ? d.gastosComprometidos : 0;
+    accIng += ing; accGas += gas;
+    serie.push({
+      fecha: iso,
+      dia: cur.getDate(),
+      label: state.repBal.modo === 'mes' ? String(cur.getDate()) : `${cur.getDate()}/${cur.getMonth() + 1}`,
+      ingresos: ing, gastos: gas, resultado: ing - gas,
+      accIngresos: accIng, accGastos: accGas, accResultado: accIng - accGas,
+      conMovimiento: !!d,
+    });
+    cur.setDate(cur.getDate() + 1);
+  }
+  return serie;
+}
+
+async function loadReporteBalance() {
+  const kpis = document.getElementById('rep-bal-kpis');
+  kpis.innerHTML = '<div class="loading"><div class="spinner"></div> Cargando balance...</div>';
+  const qs = buildRepQS();
+  let resumen, dias;
+  try {
+    const [r1, r2] = await Promise.all([api(`/api/resumen${qs}`), api(`/api/actividad-diaria${qs}`)]);
+    resumen = r1.data; dias = r2.data;
+  } catch (e) {
+    kpis.innerHTML = `<div style="color:var(--red);padding:20px">Error: ${escapeHtml(e.message)}</div>`;
+    return;
+  }
+
+  const titulo = state.repBal.modo === 'mes'
+    ? (state.repBal.mes || 'todos los meses')
+    : `${state.repBal.desde || '?'} a ${state.repBal.hasta || '?'}`;
+  document.getElementById('rep-bal-titulo').textContent = titulo;
+
+  const serie = repSerieAcumulada(dias);
+  renderRepBalKPIs(resumen, serie);
+  renderRepBalChart(serie);
+  renderRepBalTabla(serie);
+  renderRepBalComposicion(resumen);
+  setRepView(state.repBal.view);
+}
+
+function renderRepBalKPIs(resumen, serie) {
+  const ingresos = resumen.reduce((s, m) => s + m.ingresos.total, 0);
+  const gastos = resumen.reduce((s, m) => s + m.gastos.total, 0);
+  const resultado = ingresos - gastos;
+  const margen = ingresos > 0 ? (resultado / ingresos) * 100 : 0;
+  const diasConIngreso = serie.filter(p => p.ingresos > 0).length;
+  const promedio = diasConIngreso > 0 ? ingresos / diasConIngreso : 0;
+
+  document.getElementById('rep-bal-kpis').innerHTML =
+    `<div class="kpi-card green"><div class="kpi-label">Ingresos</div><div class="kpi-value">${fmt(ingresos)}</div><div class="kpi-sub">${diasConIngreso} días con ingreso</div></div>`
+    + `<div class="kpi-card red"><div class="kpi-label">Gastos</div><div class="kpi-value">${fmt(gastos)}</div><div class="kpi-sub">${ingresos > 0 ? pct((gastos / ingresos) * 100) + ' de los ingresos' : 'sin ingresos en el período'}</div></div>`
+    + `<div class="kpi-card ${resultado >= 0 ? 'green' : 'red'}"><div class="kpi-label">Resultado</div><div class="kpi-value">${fmt(resultado)}</div><div class="kpi-sub">${pct(margen)} de margen</div></div>`
+    + `<div class="kpi-card blue"><div class="kpi-label">Promedio por día con ingreso</div><div class="kpi-value">${fmt(promedio)}</div><div class="kpi-sub">${serie.length} días en el período</div></div>`;
+}
+
+function renderRepBalChart(serie) {
+  destroyChart('rep-balance');
+  const nota = document.getElementById('rep-bal-nota');
+  const el = document.getElementById('chart-rep-balance');
+  if (!serie.length) {
+    nota.textContent = 'No hay movimientos registrados en este período.';
+    return;
+  }
+  const ult = serie[serie.length - 1];
+  nota.innerHTML = 'Acumulado al ' + escapeHtml(ult.fecha.split('-').reverse().join('/')) + ': ingresos <b>' + fmt(ult.accIngresos)
+    + '</b> − gastos <b>' + fmt(ult.accGastos) + '</b> = <b>' + fmt(ult.accResultado) + '</b>. '
+    + 'Los días sin movimientos mantienen el acumulado del día anterior.';
+
+  state.charts['rep-balance'] = new Chart(el.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: serie.map(p => p.label),
+      datasets: [
+        { label: 'Ingresos (acum)', data: serie.map(p => p.accIngresos), borderColor: '#4caf82', backgroundColor: 'rgba(76,175,130,0.15)', fill: true, tension: 0.1, pointRadius: 0, borderWidth: 2 },
+        { label: 'Gastos (acum)', data: serie.map(p => p.accGastos), borderColor: '#e07a7a', backgroundColor: 'rgba(224,122,122,0.10)', fill: true, tension: 0.1, pointRadius: 0, borderWidth: 2 },
+        { label: 'Resultado (acum)', data: serie.map(p => p.accResultado), borderColor: '#5c8fe0', fill: false, tension: 0.1, pointRadius: 0, borderWidth: 2, borderDash: [2, 3] },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#e8e8f0', usePointStyle: true } },
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmt(c.parsed.y)}` } },
+      },
+      scales: {
+        x: { ticks: { color: '#7878a0', maxTicksLimit: 20 }, grid: { color: 'rgba(46,46,62,.4)' } },
+        y: { ticks: { color: '#7878a0', callback: v => fmt(v) }, grid: { color: 'rgba(46,46,62,.4)' } },
+      },
+    },
+  });
+}
+
+function renderRepBalTabla(serie) {
+  const body = document.getElementById('rep-bal-datos-body');
+  // Sólo los días con movimiento: los días de relleno del gráfico no aportan
+  // nada a una tabla y la vuelven ilegible.
+  const filas = serie.filter(p => p.conMovimiento);
+  if (!filas.length) {
+    body.innerHTML = '<tr><td colspan="7" style="color:var(--text-muted);padding:14px">Sin movimientos en el período.</td></tr>';
+    return;
+  }
+  const signo = v => `<span class="${v >= 0 ? 'val-pos' : 'val-neg'}">${fmt(v)}</span>`;
+  const ult = filas[filas.length - 1];
+  body.innerHTML = filas.map(p => `<tr>
+      <td>${escapeHtml(p.fecha.split('-').reverse().join('/'))}</td>
+      <td>${p.ingresos ? fmt(p.ingresos) : '—'}</td>
+      <td>${p.gastos ? fmt(p.gastos) : '—'}</td>
+      <td>${signo(p.resultado)}</td>
+      <td style="color:var(--text-muted)">${fmt(p.accIngresos)}</td>
+      <td style="color:var(--text-muted)">${fmt(p.accGastos)}</td>
+      <td>${signo(p.accResultado)}</td>
+    </tr>`).join('')
+    + `<tr class="row-total"><td>TOTAL</td><td>${fmt(ult.accIngresos)}</td><td>${fmt(ult.accGastos)}</td><td>${signo(ult.accResultado)}</td><td></td><td></td><td></td></tr>`;
+}
+
+function renderRepBalComposicion(resumen) {
+  const body = document.getElementById('rep-bal-comp-body');
+  const sum = f => resumen.reduce((s, m) => s + (f(m) || 0), 0);
+  const ingresos = sum(m => m.ingresos.total);
+  const gastos = sum(m => m.gastos.total);
+  const fila = (label, val, base, sub) => {
+    if (!val) return '';
+    const p = base > 0 ? ` <span style="color:var(--text-muted);font-size:11px">${pct((val / base) * 100)}</span>` : '';
+    const estilo = sub ? ' style="padding-left:28px;font-weight:400;color:var(--text-muted)"' : '';
+    return `<tr><td${estilo}>${label}</td><td>${fmt(val)}${p}</td></tr>`;
+  };
+  const sec = label => `<tr class="row-header"><td colspan="2">${label}</td></tr>`;
+  const resultado = ingresos - gastos;
+
+  // Los gastos se listan por superGrupo, que es la partición que garantiza
+  // sumar exactamente el total (ver getResumenMensual en sheets.js). El detalle
+  // de Variables y Fijos va indentado debajo, como desglose informativo.
+  body.innerHTML = [
+    sec('INGRESOS · por dónde entró'),
+    fila('Efectivo', sum(m => m.ingresos.Efectivo), ingresos),
+    fila('Mercado Pago', sum(m => m.ingresos['Mercado Pago']), ingresos),
+    fila('Galicia', sum(m => m.ingresos.Galicia), ingresos),
+    fila('Otros', sum(m => m.ingresos.Otros), ingresos),
+    `<tr class="row-total"><td>Total ingresos</td><td>${fmt(ingresos)}</td></tr>`,
+    sec('GASTOS · % sobre ingresos'),
+    fila('Variables', sum(m => m.gastos.Variables), ingresos),
+    fila('Mercadería', sum(m => m.gastos.Mercaderia), ingresos, true),
+    fila('Insumos', sum(m => m.gastos.Insumos), ingresos, true),
+    fila('Personal', sum(m => m.gastos.Personal), ingresos),
+    fila('Fijos', sum(m => m.gastos.Fijos), ingresos),
+    fila('Alquiler', sum(m => m.gastos.Alquiler), ingresos, true),
+    fila('Servicios', sum(m => m.gastos.Servicios), ingresos, true),
+    fila('Fiscales', sum(m => m.gastos.Fiscales), ingresos),
+    fila('Financieros', sum(m => m.gastos.Financieros), ingresos),
+    fila('Extraordinarios', sum(m => m.gastos.Extraordinarios), ingresos),
+    fila('Equipamiento', sum(m => m.gastos.Equipamiento), ingresos),
+    fila('Otros', sum(m => m.gastos.Otros), ingresos),
+    `<tr class="row-total"><td>Total gastos</td><td>${fmt(gastos)}</td></tr>`,
+    `<tr class="row-resultado"><td>RESULTADO</td><td class="${resultado >= 0 ? 'val-pos' : 'val-neg'}">${fmt(resultado)}</td></tr>`,
+  ].join('');
 }
 
 async function loadServiciosAgregado() {
