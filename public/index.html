@@ -710,6 +710,128 @@
   </main>
 </div>
 
+<!-- ═══ REPORTES › SERVICIOS ═══ -->
+<!-- Overview histórico de los servicios (noches) leído de /api/servicios, la
+     misma fuente que la tab Servicios. Acá no se listan los servicios uno por
+     uno: se buscan los récords, los pisos y el comportamiento por día de la
+     semana. El filtro de día de la semana es 100% de cliente (no refetch). -->
+<div id="tab-reportes-servicios" class="tab-panel">
+  <div class="filters-bar">
+    <button class="filter-mode-btn active" id="rsv-btn-modo-historico" onclick="setRepServModo('historico')">Histórico</button>
+    <button class="filter-mode-btn" id="rsv-btn-modo-rango" onclick="setRepServModo('rango')">Por período</button>
+    <div id="rsv-range-filters" style="display:none;align-items:center;gap:8px">
+      <span class="filter-label">Desde</span>
+      <input type="date" id="rsv-filter-desde" onchange="onRepServPeriodoChange()" />
+      <span class="filter-label">Hasta</span>
+      <input type="date" id="rsv-filter-hasta" onchange="onRepServPeriodoChange()" />
+    </div>
+    <div class="filter-sep"></div>
+    <span class="filter-label">Día de la semana</span>
+    <select id="rsv-filter-dow" onchange="onRepServDowChange()">
+      <option value="">Todos</option>
+      <option value="1">Lunes</option>
+      <option value="2">Martes</option>
+      <option value="3">Miércoles</option>
+      <option value="4">Jueves</option>
+      <option value="5">Viernes</option>
+      <option value="6">Sábado</option>
+      <option value="0">Domingo</option>
+    </select>
+    <div class="rep-view-switch">
+      <button class="filter-mode-btn active" id="rsv-btn-view-grafico" onclick="setRepServView('grafico')">📈 Gráfico</button>
+      <button class="filter-mode-btn" id="rsv-btn-view-datos" onclick="setRepServView('datos')">📋 Datos</button>
+    </div>
+  </div>
+
+  <main>
+    <div id="rsv-scope" style="font-size:12px;color:var(--text-muted)"></div>
+
+    <div class="kpi-grid" id="rsv-kpis"><div class="loading"><div class="spinner"></div> Cargando servicios...</div></div>
+
+    <div id="rsv-grafico-card">
+      <div class="card">
+        <div class="card-title"><span>Facturación por servicio</span>
+          <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· récord en verde, piso en rojo</span>
+        </div>
+        <div class="chart-container" style="height:340px"><canvas id="chart-rsv-evolucion"></canvas></div>
+        <div id="rsv-evolucion-nota" style="font-size:11px;color:var(--text-muted);line-height:1.7;margin-top:14px"></div>
+      </div>
+
+      <div class="card" style="margin-top:24px">
+        <div class="card-title"><span>Facturación promedio por día de la semana</span>
+          <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· mejor día en verde</span>
+        </div>
+        <div class="chart-container" style="height:300px"><canvas id="chart-rsv-dow-monto"></canvas></div>
+        <div id="rsv-dow-nota" style="font-size:11px;color:var(--text-muted);line-height:1.7;margin-top:14px"></div>
+      </div>
+
+      <div class="card" style="margin-top:24px">
+        <div class="card-title"><span>Pax promedio por día de la semana</span></div>
+        <div class="chart-container" style="height:280px"><canvas id="chart-rsv-dow-pax"></canvas></div>
+      </div>
+
+      <div class="card" style="margin-top:24px">
+        <div class="card-title"><span>Comida vs bebida por día de la semana</span>
+          <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· % sobre comida + bebida</span>
+        </div>
+        <div class="chart-container" style="height:280px"><canvas id="chart-rsv-dow-cb"></canvas></div>
+      </div>
+
+      <div class="card" style="margin-top:24px">
+        <div class="card-title"><span>Distribución de servicios por facturación</span>
+          <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· cuántas noches cayeron en cada franja</span>
+        </div>
+        <div class="chart-container" style="height:280px"><canvas id="chart-rsv-distribucion"></canvas></div>
+      </div>
+    </div>
+
+    <div id="rsv-datos-card" style="display:none">
+      <div class="card">
+        <div class="card-title">Récords del período</div>
+        <div class="table-wrap">
+          <table class="prov-resumen-table"><tbody id="rsv-records-body"></tbody></table>
+        </div>
+      </div>
+      <div class="card" style="margin-top:24px">
+        <div class="card-title">Por día de la semana</div>
+        <div class="table-wrap">
+          <table class="prov-resumen-table">
+            <thead><tr>
+              <th>Día</th><th>Servicios</th><th>Facturación</th><th>Promedio</th>
+              <th>Mejor</th><th>Peor</th><th>Pax prom.</th><th>Ticket/pax</th><th>% comida</th>
+            </tr></thead>
+            <tbody id="rsv-dow-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card" style="margin-top:24px">
+        <div class="card-title">Por mes</div>
+        <div class="table-wrap">
+          <table class="prov-resumen-table">
+            <thead><tr>
+              <th>Mes</th><th>Servicios</th><th>Facturación</th><th>Promedio</th><th>Pax</th><th>Mejor servicio</th>
+            </tr></thead>
+            <tbody id="rsv-mes-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card" style="margin-top:24px">
+        <div class="card-title"><span>Ranking de servicios</span>
+          <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· top 10 y fondo 10 · clic para el detalle</span>
+        </div>
+        <div class="table-wrap">
+          <table class="prov-resumen-table">
+            <thead><tr>
+              <th>#</th><th>Fecha</th><th>Día</th><th>Pax</th><th>Facturación</th><th>Ticket/pax</th><th>% comida</th>
+            </tr></thead>
+            <tbody id="rsv-ranking-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
 <!-- ═══ PROVEEDORES TAB ═══ -->
 <div id="tab-proveedores" class="tab-panel">
   <div class="filters-bar">
@@ -2095,10 +2217,11 @@ async function checkSavedToken() {
 // directamente el panel del mismo nombre.
 const TAB_GROUPS = {
   dashboard:    { subs: null },
-  // Reportes: hoy sólo Balance. Agregar un reporte nuevo = una línea acá + su
-  // panel `tab-<id>` + su carga en cargarPanel().
+  // Agregar un reporte nuevo = una línea acá + su panel `tab-<id>` + su carga
+  // en cargarPanel().
   reportes: { subs: [
-    { id: 'reportes-balance', label: '📊 Balance' },
+    { id: 'reportes-balance',   label: '📊 Balance' },
+    { id: 'reportes-servicios', label: '🍽️ Servicios' },
   ] },
   pagos:        { subs: null },
   servicios:    { subs: null },
@@ -2156,6 +2279,7 @@ function cargarPanel(tab) {
   else if (tab === 'calculadora') loadCalculadora();
   else if (tab === 'proymes') loadProyeccionMes();
   else if (tab === 'reportes-balance') initReporteBalance();
+  else if (tab === 'reportes-servicios') initReporteServicios();
   else if (tab === 'inversiones') loadPlan();
   else if (tab === 'plan') loadPlan();
 }
@@ -7440,6 +7564,547 @@ function renderRepBalComposicion(resumen) {
     `<tr class="row-total"><td>Total gastos</td><td>${fmt(gastos)}</td></tr>`,
     `<tr class="row-resultado"><td>RESULTADO</td><td class="${resultado >= 0 ? 'val-pos' : 'val-neg'}">${fmt(resultado)}</td></tr>`,
   ].join('');
+}
+
+// ─── REPORTES › SERVICIOS ─────────────────────────────────────────────────────
+// Overview histórico de los servicios (una noche = un servicio). Lee
+// /api/servicios, exactamente la misma fuente que la tab Servicios, para que los
+// dos lugares no puedan decir cosas distintas. Este reporte no lista los
+// servicios: busca los récords, los pisos y el patrón por día de la semana.
+//
+// Dos filtros con alcances distintos a propósito:
+//   · el PERÍODO se le pide al servidor (desde/hasta) y afecta todo;
+//   · el DÍA DE LA SEMANA se aplica en el navegador sobre lo ya traído, así
+//     comparar días es instantáneo. Los cuadros "por día de la semana" NUNCA se
+//     filtran por día: si sólo mostraran el día elegido no habría con qué
+//     comparar. Ahí el día elegido se resalta en vez de aislarse.
+state.repServ = { modo: 'historico', desde: null, hasta: null, dow: '', view: 'grafico', inicializado: false, data: [], render: null, graficosSucios: false };
+
+const RSV_CHARTS = ['rsv-evolucion', 'rsv-dow-monto', 'rsv-dow-pax', 'rsv-dow-cb', 'rsv-distribucion'];
+const RSV_DOW_NOMBRES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+// La semana del bar arranca el lunes, no el domingo como getDay().
+const RSV_DOW_ORDEN = [1, 2, 3, 4, 5, 6, 0];
+const RSV_MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+// Comida naranja / bebida azul: los mismos colores que el modal de un servicio.
+const RSV_COL = { base: '#5c8fe0', max: '#4caf82', min: '#e05c5c', sel: '#e08a5c', comida: '#e08a5c', bebida: '#5c8fe0' };
+
+// El ISO se parte a mano: new Date('2026-07-12') se interpreta como UTC y en
+// Argentina cae el día anterior, que es justo el dato que este reporte usa.
+const rsvDowIdx = iso => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d).getDay(); };
+const rsvSello = iso => { const fl = fechaLabel(iso); return `${fl.dow} ${fl.dia}`; };
+const rsvMesLabel = key => { const [y, m] = key.split('-'); return `${RSV_MESES[Number(m) - 1]} ${y}`; };
+const rsvFmtCorto = n => Math.abs(n) >= 1e6 ? '$' + (n / 1e6).toFixed(1).replace('.', ',') + 'M'
+  : Math.abs(n) >= 1e3 ? '$' + Math.round(n / 1e3) + 'k' : '$' + Math.round(n);
+
+function setRepServModo(modo) {
+  state.repServ.modo = modo;
+  document.getElementById('rsv-btn-modo-historico').classList.toggle('active', modo === 'historico');
+  document.getElementById('rsv-btn-modo-rango').classList.toggle('active', modo === 'rango');
+  document.getElementById('rsv-range-filters').style.display = modo === 'rango' ? 'flex' : 'none';
+  onRepServPeriodoChange();
+}
+
+function setRepServView(view) {
+  state.repServ.view = view;
+  document.getElementById('rsv-btn-view-grafico').classList.toggle('active', view === 'grafico');
+  document.getElementById('rsv-btn-view-datos').classList.toggle('active', view === 'datos');
+  document.getElementById('rsv-grafico-card').style.display = view === 'grafico' ? '' : 'none';
+  document.getElementById('rsv-datos-card').style.display = view === 'datos' ? '' : 'none';
+  // Chart.js mide el canvas en el momento de crear el gráfico. Si el bloque está
+  // oculto (display:none) nace con ancho 0 y las barras quedan apretadas contra
+  // el eje izquierdo para siempre: resize() reacomoda los ejes pero NO las
+  // barras. Por eso los gráficos no se dibujan hasta que la vista está a la
+  // vista; mientras tanto sólo quedan marcados como pendientes.
+  if (view !== 'grafico') return;
+  if (state.repServ.graficosSucios) { state.repServ.graficosSucios = false; renderRsvGraficos(); }
+  else RSV_CHARTS.forEach(id => { if (state.charts[id]) state.charts[id].resize(); });
+}
+
+function onRepServPeriodoChange() {
+  state.repServ.desde = document.getElementById('rsv-filter-desde').value;
+  state.repServ.hasta = document.getElementById('rsv-filter-hasta').value;
+  loadReporteServicios();
+}
+
+// Cambiar de día de la semana no vuelve a pedir nada al servidor.
+function onRepServDowChange() {
+  state.repServ.dow = document.getElementById('rsv-filter-dow').value;
+  renderReporteServicios();
+}
+
+async function initReporteServicios() {
+  if (state.repServ.inicializado) { loadReporteServicios(); return; }
+  const hoy = hoyISOAR();
+  document.getElementById('rsv-filter-desde').value = hoy.slice(0, 8) + '01';
+  document.getElementById('rsv-filter-hasta').value = hoy;
+  state.repServ.inicializado = true;
+  loadReporteServicios();
+}
+
+async function loadReporteServicios() {
+  const kpis = document.getElementById('rsv-kpis');
+  kpis.innerHTML = '<div class="loading"><div class="spinner"></div> Cargando servicios...</div>';
+  const r = state.repServ;
+  let url = '/api/servicios';
+  if (r.modo === 'rango' && r.desde && r.hasta) url += `?desde=${r.desde}&hasta=${r.hasta}`;
+  try {
+    const { data } = await api(url);
+    state.repServ.data = data || [];
+  } catch (e) {
+    kpis.innerHTML = `<div style="color:var(--red);padding:20px">Error: ${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  renderReporteServicios();
+}
+
+function renderReporteServicios() {
+  const r = state.repServ;
+  const dowSel = r.dow === '' ? null : Number(r.dow);
+  // /api/servicios devuelve del más nuevo al más viejo; los gráficos de línea
+  // de tiempo necesitan el orden inverso.
+  const todos = r.data.slice().sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const servicios = dowSel === null ? todos : todos.filter(s => rsvDowIdx(s.fecha) === dowSel);
+
+  const periodo = r.modo === 'rango' && r.desde && r.hasta
+    ? `${r.desde.split('-').reverse().join('/')} a ${r.hasta.split('-').reverse().join('/')}`
+    : 'todo el histórico';
+  const filtro = dowSel === null ? 'todos los días' : `sólo ${RSV_DOW_NOMBRES[dowSel]}`;
+  document.getElementById('rsv-scope').textContent =
+    `${servicios.length} servicio${servicios.length !== 1 ? 's' : ''} · ${periodo} · ${filtro}`;
+
+  // Los cuadros por día de la semana se arman siempre con TODO el período.
+  const porDow = rsvAgruparPorDow(todos);
+
+  renderRsvKPIs(servicios);
+  renderRsvRecords(servicios, porDow);
+  renderRsvDowTabla(porDow, dowSel);
+  renderRsvMesTabla(servicios);
+  renderRsvRanking(servicios);
+
+  // Los gráficos se guardan pendientes y los dibuja setRepServView cuando el
+  // bloque está visible (ver el comentario ahí).
+  state.repServ.render = { servicios, porDow, dowSel };
+  state.repServ.graficosSucios = true;
+  setRepServView(r.view);
+}
+
+function renderRsvGraficos() {
+  const d = state.repServ.render;
+  if (!d) return;
+  renderRsvEvolucion(d.servicios);
+  renderRsvDowMonto(d.porDow, d.dowSel);
+  renderRsvDowPax(d.porDow);
+  renderRsvDowCB(d.porDow);
+  renderRsvDistribucion(d.servicios);
+}
+
+// Estadísticas de un conjunto de servicios. null si está vacío, para que cada
+// render decida qué mostrar en lugar de dividir por cero.
+function rsvStats(servicios) {
+  if (!servicios.length) return null;
+  const sum = f => servicios.reduce((s, x) => s + (f(x) || 0), 0);
+  const total = sum(x => x.total), pax = sum(x => x.pax);
+  const comida = sum(x => x.comida), bebida = sum(x => x.bebida);
+  const mejorPor = f => servicios.reduce((a, b) => (f(b) > f(a) ? b : a));
+  const peorPor = f => servicios.reduce((a, b) => (f(b) < f(a) ? b : a));
+  // El ticket se recalcula acá: un servicio sin pax cargado daría Infinity.
+  const conPax = servicios.filter(s => s.pax > 0);
+  const ordenados = servicios.map(s => s.total).sort((a, b) => a - b);
+  const mitad = Math.floor(ordenados.length / 2);
+  const baseCB = comida + bebida;
+  return {
+    n: servicios.length, total, pax, comida, bebida, propinas: sum(x => x.propinas),
+    promedio: total / servicios.length,
+    promedioPax: pax / servicios.length,
+    mediana: ordenados.length % 2 ? ordenados[mitad] : (ordenados[mitad - 1] + ordenados[mitad]) / 2,
+    ticketPax: pax > 0 ? total / pax : 0,
+    pctComida: baseCB > 0 ? (comida / baseCB) * 100 : 0,
+    pctBebida: baseCB > 0 ? (bebida / baseCB) * 100 : 0,
+    mejor: mejorPor(s => s.total), peor: peorPor(s => s.total),
+    maxPax: mejorPor(s => s.pax), minPax: peorPor(s => s.pax),
+    mejorTicket: conPax.length ? conPax.reduce((a, b) => (b.total / b.pax > a.total / a.pax ? b : a)) : null,
+  };
+}
+
+function rsvAgruparPorDow(servicios) {
+  return RSV_DOW_ORDEN.map(idx => {
+    const ss = servicios.filter(s => rsvDowIdx(s.fecha) === idx);
+    return { idx, nombre: RSV_DOW_NOMBRES[idx], servicios: ss, st: rsvStats(ss) };
+  });
+}
+
+function renderRsvKPIs(servicios) {
+  const el = document.getElementById('rsv-kpis');
+  const st = rsvStats(servicios);
+  if (!st) {
+    el.innerHTML = '<div style="color:var(--text-muted);padding:20px">No hay servicios en este período.</div>';
+    return;
+  }
+  const abrir = s => `style="cursor:pointer" onclick="openServModal('${s.fecha}', '${s.turno || ''}')" title="Ver el detalle de ese servicio"`;
+  const card = (color, label, valor, sub, s) =>
+    `<div class="kpi-card ${color}" ${s ? abrir(s) : ''}><div class="kpi-label">${label}</div>`
+    + `<div class="kpi-value">${valor}</div><div class="kpi-sub">${sub}</div></div>`;
+
+  el.innerHTML = [
+    card('green', 'Récord de facturación', fmt(st.mejor.total),
+      `${escapeHtml(rsvSello(st.mejor.fecha))} · ${st.mejor.pax} pax`, st.mejor),
+    card('blue', 'Récord de pax', st.maxPax.pax.toLocaleString('es-AR'),
+      `${escapeHtml(rsvSello(st.maxPax.fecha))} · ${fmt(st.maxPax.total)}`, st.maxPax),
+    st.mejorTicket ? card('purple', 'Mejor ticket por pax', fmt(st.mejorTicket.total / st.mejorTicket.pax),
+      `${escapeHtml(rsvSello(st.mejorTicket.fecha))} · ${st.mejorTicket.pax} pax`, st.mejorTicket) : '',
+    card('red', 'Piso de facturación', fmt(st.peor.total),
+      `${escapeHtml(rsvSello(st.peor.fecha))} · ${st.peor.pax} pax`, st.peor),
+    card('orange', 'Promedio por servicio', fmt(st.promedio),
+      `mediana ${fmt(st.mediana)} · ${Math.round(st.promedioPax)} pax prom.`),
+    card('accent', 'Total del período', fmt(st.total),
+      `${st.n} servicio${st.n !== 1 ? 's' : ''} · ${st.pax.toLocaleString('es-AR')} pax`),
+  ].join('');
+}
+
+// Opciones comunes de los gráficos de este reporte (mismo look que el resto del
+// dashboard: ejes apagados, tooltip por índice, sin puntos gordos).
+function rsvChartOpts(extra) {
+  return Object.assign({
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: false, labels: { color: '#e8e8f0', usePointStyle: true } },
+      tooltip: { callbacks: {} },
+    },
+    scales: {
+      x: { ticks: { color: '#7878a0', maxTicksLimit: 20 }, grid: { color: 'rgba(46,46,62,.4)' } },
+      y: { ticks: { color: '#7878a0', callback: v => fmt(v) }, grid: { color: 'rgba(46,46,62,.4)' } },
+    },
+  }, extra || {});
+}
+
+function renderRsvEvolucion(servicios) {
+  destroyChart('rsv-evolucion');
+  const nota = document.getElementById('rsv-evolucion-nota');
+  const st = rsvStats(servicios);
+  if (!st) { nota.textContent = 'No hay servicios para graficar en este período.'; return; }
+
+  nota.innerHTML = 'Récord <b>' + fmt(st.mejor.total) + '</b> el ' + escapeHtml(rsvSello(st.mejor.fecha))
+    + ' (' + st.mejor.pax + ' pax). Piso <b>' + fmt(st.peor.total) + '</b> el ' + escapeHtml(rsvSello(st.peor.fecha))
+    + '. Promedio <b>' + fmt(st.promedio) + '</b> y mediana <b>' + fmt(st.mediana) + '</b> sobre ' + st.n + ' servicios. '
+    + 'La mediana parte los servicios al medio: la mitad facturó menos que eso.';
+
+  const etiquetas = servicios.map(s => { const fl = fechaLabel(s.fecha); return `${fl.dow.slice(0, 3)} ${fl.dia}`; });
+  state.charts['rsv-evolucion'] = new Chart(document.getElementById('chart-rsv-evolucion').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: etiquetas,
+      datasets: [
+        {
+          label: 'Facturación del servicio', data: servicios.map(s => s.total),
+          backgroundColor: servicios.map(s => s.fecha === st.mejor.fecha ? RSV_COL.max
+            : (s.fecha === st.peor.fecha ? RSV_COL.min : RSV_COL.base)),
+          borderRadius: 4, borderSkipped: false, barPercentage: 0.85, categoryPercentage: 0.9, order: 1,
+        },
+        {
+          // order más alto = se dibuja después, así la línea del promedio queda
+          // por encima de las barras (y las barras primero en la leyenda).
+          type: 'line', label: 'Promedio del período', data: servicios.map(() => st.promedio),
+          borderColor: RSV_COL.sel, borderWidth: 2, borderDash: [4, 4], pointRadius: 0, fill: false, order: 2,
+        },
+      ],
+    },
+    options: rsvChartOpts({
+      plugins: {
+        legend: { display: true, labels: { color: '#e8e8f0', usePointStyle: true } },
+        tooltip: {
+          callbacks: {
+            label: c => `${c.dataset.label}: ${fmt(c.parsed.y)}`,
+            afterBody: items => {
+              const s = servicios[items[0].dataIndex];
+              return s ? [`${s.pax} pax · ${fmt(s.ticketPromedio)}/pax · ${s.ventas} venta${s.ventas !== 1 ? 's' : ''}`] : [];
+            },
+          },
+        },
+      },
+    }),
+  });
+}
+
+function renderRsvDowMonto(porDow, dowSel) {
+  destroyChart('rsv-dow-monto');
+  const nota = document.getElementById('rsv-dow-nota');
+  const conDatos = porDow.filter(d => d.st);
+  if (!conDatos.length) { nota.textContent = 'Sin datos por día de la semana.'; return; }
+
+  const mejor = conDatos.reduce((a, b) => (b.st.promedio > a.st.promedio ? b : a));
+  const peor = conDatos.reduce((a, b) => (b.st.promedio < a.st.promedio ? b : a));
+  nota.innerHTML = 'Mejor día: <b>' + escapeHtml(mejor.nombre) + '</b> con ' + fmt(mejor.st.promedio)
+    + ' de promedio (' + mejor.st.n + ' servicios). Peor: <b>' + escapeHtml(peor.nombre) + '</b> con '
+    + fmt(peor.st.promedio) + '. Este cuadro siempre muestra los siete días aunque haya un día filtrado arriba'
+    + (dowSel === null ? '.' : ', para poder comparar; el elegido va en naranja.');
+
+  state.charts['rsv-dow-monto'] = new Chart(document.getElementById('chart-rsv-dow-monto').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: porDow.map(d => d.nombre),
+      datasets: [{
+        label: 'Facturación promedio', data: porDow.map(d => d.st ? d.st.promedio : 0),
+        backgroundColor: porDow.map(d => d.idx === dowSel ? RSV_COL.sel : (d.idx === mejor.idx ? RSV_COL.max : RSV_COL.base)),
+        borderRadius: 4, borderSkipped: false, barPercentage: 0.7, categoryPercentage: 0.8,
+      }],
+    },
+    options: rsvChartOpts({
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: c => `Promedio: ${fmt(c.parsed.y)}`,
+            afterBody: items => {
+              const d = porDow[items[0].dataIndex];
+              if (!d || !d.st) return ['Sin servicios en este día'];
+              return [
+                `${d.st.n} servicio${d.st.n !== 1 ? 's' : ''} · total ${fmt(d.st.total)}`,
+                `Mejor: ${fmt(d.st.mejor.total)} (${fechaLabel(d.st.mejor.fecha).dia})`,
+                `Peor: ${fmt(d.st.peor.total)} (${fechaLabel(d.st.peor.fecha).dia})`,
+              ];
+            },
+          },
+        },
+      },
+    }),
+  });
+}
+
+function renderRsvDowPax(porDow) {
+  destroyChart('rsv-dow-pax');
+  state.charts['rsv-dow-pax'] = new Chart(document.getElementById('chart-rsv-dow-pax').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: porDow.map(d => d.nombre),
+      datasets: [{
+        label: 'Pax promedio', data: porDow.map(d => d.st ? Math.round(d.st.promedioPax * 10) / 10 : 0),
+        backgroundColor: RSV_COL.base, borderRadius: 4, borderSkipped: false,
+        barPercentage: 0.7, categoryPercentage: 0.8,
+      }],
+    },
+    options: rsvChartOpts({
+      scales: {
+        x: { ticks: { color: '#7878a0' }, grid: { color: 'rgba(46,46,62,.4)' } },
+        y: { ticks: { color: '#7878a0' }, grid: { color: 'rgba(46,46,62,.4)' } },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: c => `${c.parsed.y} pax promedio`,
+            afterBody: items => {
+              const d = porDow[items[0].dataIndex];
+              if (!d || !d.st) return ['Sin servicios en este día'];
+              return [`Récord: ${d.st.maxPax.pax} pax (${fechaLabel(d.st.maxPax.fecha).dia})`, `Total: ${d.st.pax} pax`];
+            },
+          },
+        },
+      },
+    }),
+  });
+}
+
+function renderRsvDowCB(porDow) {
+  destroyChart('rsv-dow-cb');
+  state.charts['rsv-dow-cb'] = new Chart(document.getElementById('chart-rsv-dow-cb').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: porDow.map(d => d.nombre),
+      datasets: [
+        { label: 'Comida', data: porDow.map(d => d.st ? Math.round(d.st.pctComida * 10) / 10 : 0), backgroundColor: RSV_COL.comida, borderRadius: 4, borderSkipped: false, barPercentage: 0.7, categoryPercentage: 0.8 },
+        { label: 'Bebida', data: porDow.map(d => d.st ? Math.round(d.st.pctBebida * 10) / 10 : 0), backgroundColor: RSV_COL.bebida, borderRadius: 4, borderSkipped: false, barPercentage: 0.7, categoryPercentage: 0.8 },
+      ],
+    },
+    options: rsvChartOpts({
+      scales: {
+        x: { stacked: true, ticks: { color: '#7878a0' }, grid: { color: 'rgba(46,46,62,.4)' } },
+        y: { stacked: true, max: 100, ticks: { color: '#7878a0', callback: v => v + '%' }, grid: { color: 'rgba(46,46,62,.4)' } },
+      },
+      plugins: {
+        legend: { display: true, labels: { color: '#e8e8f0', usePointStyle: true } },
+        tooltip: {
+          callbacks: {
+            label: c => `${c.dataset.label}: ${pct(c.parsed.y)}`,
+            afterBody: items => {
+              const d = porDow[items[0].dataIndex];
+              return d && d.st ? [`Comida ${fmt(d.st.comida)} · Bebida ${fmt(d.st.bebida)}`] : [];
+            },
+          },
+        },
+      },
+    }),
+  });
+}
+
+// Paso "redondo" (1, 2 o 5 por la potencia de 10) para que las franjas del
+// histograma se lean como números de verdad y no como 1.237.482–2.474.964.
+function rsvPasoLindo(rango) {
+  const bruto = (rango || 1) / 6;
+  const mag = Math.pow(10, Math.floor(Math.log10(bruto)));
+  const norm = bruto / mag;
+  return (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+}
+
+function renderRsvDistribucion(servicios) {
+  destroyChart('rsv-distribucion');
+  if (!servicios.length) return;
+  const totales = servicios.map(s => s.total);
+  const min = Math.min(...totales), max = Math.max(...totales);
+  const paso = rsvPasoLindo(max - min) || 1;
+  const ini = Math.floor(min / paso) * paso;
+  const nBuckets = Math.max(1, Math.min(12, Math.floor((max - ini) / paso) + 1));
+  const cuentas = new Array(nBuckets).fill(0);
+  totales.forEach(t => { cuentas[Math.min(nBuckets - 1, Math.floor((t - ini) / paso))]++; });
+
+  state.charts['rsv-distribucion'] = new Chart(document.getElementById('chart-rsv-distribucion').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: cuentas.map((_, i) => `${rsvFmtCorto(ini + i * paso)}–${rsvFmtCorto(ini + (i + 1) * paso)}`),
+      datasets: [{
+        label: 'Servicios', data: cuentas, backgroundColor: RSV_COL.base,
+        borderRadius: 4, borderSkipped: false, barPercentage: 0.9, categoryPercentage: 0.9,
+      }],
+    },
+    options: rsvChartOpts({
+      scales: {
+        x: { ticks: { color: '#7878a0' }, grid: { color: 'rgba(46,46,62,.4)' } },
+        y: { ticks: { color: '#7878a0', precision: 0 }, grid: { color: 'rgba(46,46,62,.4)' } },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: c => `${c.parsed.y} servicio${c.parsed.y !== 1 ? 's' : ''} en esta franja` } },
+      },
+    }),
+  });
+}
+
+function renderRsvRecords(servicios, porDow) {
+  const body = document.getElementById('rsv-records-body');
+  const st = rsvStats(servicios);
+  if (!st) { body.innerHTML = '<tr><td colspan="2" style="color:var(--text-muted);padding:14px">Sin servicios en el período.</td></tr>'; return; }
+
+  const sec = label => `<tr class="row-header"><td colspan="2">${label}</td></tr>`;
+  const fila = (label, valor, detalle) =>
+    `<tr><td>${label}</td><td>${valor}${detalle ? ` <span style="color:var(--text-muted);font-size:11px">${escapeHtml(detalle)}</span>` : ''}</td></tr>`;
+
+  const conDatos = porDow.filter(d => d.st);
+  const mejorDia = conDatos.length ? conDatos.reduce((a, b) => (b.st.promedio > a.st.promedio ? b : a)) : null;
+  const peorDia = conDatos.length ? conDatos.reduce((a, b) => (b.st.promedio < a.st.promedio ? b : a)) : null;
+  const masFrecuente = conDatos.length ? conDatos.reduce((a, b) => (b.st.n > a.st.n ? b : a)) : null;
+
+  // Los meses se calculan sobre los servicios filtrados, para que "mejor mes"
+  // signifique lo mismo que todo lo demás cuando hay un día seleccionado.
+  const meses = rsvAgruparPorMes(servicios);
+  const mejorMes = meses.length ? meses.reduce((a, b) => (b.st.total > a.st.total ? b : a)) : null;
+  const mejorMesProm = meses.length ? meses.reduce((a, b) => (b.st.promedio > a.st.promedio ? b : a)) : null;
+
+  body.innerHTML = [
+    sec('FACTURACIÓN'),
+    fila('Récord de un servicio', fmt(st.mejor.total), rsvSello(st.mejor.fecha)),
+    fila('Piso de un servicio', fmt(st.peor.total), rsvSello(st.peor.fecha)),
+    fila('Promedio por servicio', fmt(st.promedio), `${st.n} servicios`),
+    fila('Mediana', fmt(st.mediana), 'la mitad facturó menos que esto'),
+    fila('Total del período', fmt(st.total), st.propinas > 0 ? `+ ${fmt(st.propinas)} de propinas` : ''),
+    sec('PAX'),
+    fila('Récord de pax', st.maxPax.pax.toLocaleString('es-AR'), `${rsvSello(st.maxPax.fecha)} · ${fmt(st.maxPax.total)}`),
+    fila('Mínimo de pax', st.minPax.pax.toLocaleString('es-AR'), `${rsvSello(st.minPax.fecha)} · ${fmt(st.minPax.total)}`),
+    fila('Pax promedio por servicio', Math.round(st.promedioPax).toLocaleString('es-AR'), ''),
+    fila('Pax totales', st.pax.toLocaleString('es-AR'), ''),
+    sec('TICKET POR PAX'),
+    st.mejorTicket ? fila('Mejor ticket por pax', fmt(st.mejorTicket.total / st.mejorTicket.pax), `${rsvSello(st.mejorTicket.fecha)} · ${st.mejorTicket.pax} pax`) : '',
+    fila('Ticket promedio del período', fmt(st.ticketPax), 'facturación total ÷ pax totales'),
+    fila('Comida vs bebida', `${pct(st.pctComida)} / ${pct(st.pctBebida)}`, `${fmt(st.comida)} · ${fmt(st.bebida)}`),
+    sec('DÍAS DE LA SEMANA · sobre todo el período, sin el filtro de día'),
+    mejorDia ? fila('Mejor día por promedio', escapeHtml(mejorDia.nombre), `${fmt(mejorDia.st.promedio)} · ${mejorDia.st.n} servicios`) : '',
+    peorDia ? fila('Peor día por promedio', escapeHtml(peorDia.nombre), `${fmt(peorDia.st.promedio)} · ${peorDia.st.n} servicios`) : '',
+    masFrecuente ? fila('Día con más servicios', escapeHtml(masFrecuente.nombre), `${masFrecuente.st.n} servicios`) : '',
+    sec('MESES'),
+    mejorMes ? fila('Mejor mes por facturación', escapeHtml(rsvMesLabel(mejorMes.key)), fmt(mejorMes.st.total)) : '',
+    mejorMesProm ? fila('Mejor mes por promedio', escapeHtml(rsvMesLabel(mejorMesProm.key)), `${fmt(mejorMesProm.st.promedio)} por servicio`) : '',
+  ].join('');
+}
+
+function rsvAgruparPorMes(servicios) {
+  const porMes = {};
+  servicios.forEach(s => { (porMes[s.fecha.slice(0, 7)] = porMes[s.fecha.slice(0, 7)] || []).push(s); });
+  return Object.keys(porMes).sort().map(key => ({ key, st: rsvStats(porMes[key]) }));
+}
+
+function renderRsvDowTabla(porDow, dowSel) {
+  const body = document.getElementById('rsv-dow-body');
+  const conDatos = porDow.filter(d => d.st);
+  if (!conDatos.length) { body.innerHTML = '<tr><td colspan="9" style="color:var(--text-muted);padding:14px">Sin servicios en el período.</td></tr>'; return; }
+  const mejor = conDatos.reduce((a, b) => (b.st.promedio > a.st.promedio ? b : a));
+
+  const filas = porDow.map(d => {
+    if (!d.st) return `<tr style="opacity:.5"><td>${escapeHtml(d.nombre)}</td><td>0</td><td colspan="7" style="text-align:left;color:var(--text-muted)">Sin servicios</td></tr>`;
+    const destacado = d.idx === dowSel ? ' style="background:rgba(224,138,92,.08)"' : '';
+    const marca = d.idx === mejor.idx ? ' <span style="color:var(--green)">▲</span>' : '';
+    const chico = txt => `<span style="color:var(--text-muted);font-size:11px">${escapeHtml(txt)}</span>`;
+    return `<tr${destacado}>
+      <td>${escapeHtml(d.nombre)}${marca}</td>
+      <td>${d.st.n}</td>
+      <td>${fmt(d.st.total)}</td>
+      <td>${fmt(d.st.promedio)}</td>
+      <td>${fmt(d.st.mejor.total)} ${chico(fechaLabel(d.st.mejor.fecha).dia)}</td>
+      <td>${fmt(d.st.peor.total)} ${chico(fechaLabel(d.st.peor.fecha).dia)}</td>
+      <td>${Math.round(d.st.promedioPax)}</td>
+      <td>${fmt(d.st.ticketPax)}</td>
+      <td>${pct(d.st.pctComida)}</td>
+    </tr>`;
+  }).join('');
+
+  const tot = rsvStats(porDow.flatMap(d => d.servicios));
+  body.innerHTML = filas + (tot ? `<tr class="row-total">
+      <td>TOTAL</td><td>${tot.n}</td><td>${fmt(tot.total)}</td><td>${fmt(tot.promedio)}</td>
+      <td>${fmt(tot.mejor.total)}</td><td>${fmt(tot.peor.total)}</td>
+      <td>${Math.round(tot.promedioPax)}</td><td>${fmt(tot.ticketPax)}</td><td>${pct(tot.pctComida)}</td>
+    </tr>` : '');
+}
+
+function renderRsvMesTabla(servicios) {
+  const body = document.getElementById('rsv-mes-body');
+  const meses = rsvAgruparPorMes(servicios);
+  if (!meses.length) { body.innerHTML = '<tr><td colspan="6" style="color:var(--text-muted);padding:14px">Sin servicios en el período.</td></tr>'; return; }
+  body.innerHTML = meses.map(m => `<tr>
+      <td>${escapeHtml(rsvMesLabel(m.key))}</td>
+      <td>${m.st.n}</td>
+      <td>${fmt(m.st.total)}</td>
+      <td>${fmt(m.st.promedio)}</td>
+      <td>${m.st.pax.toLocaleString('es-AR')}</td>
+      <td>${fmt(m.st.mejor.total)} <span style="color:var(--text-muted);font-size:11px">${escapeHtml(rsvSello(m.st.mejor.fecha))}</span></td>
+    </tr>`).join('');
+}
+
+function renderRsvRanking(servicios) {
+  const body = document.getElementById('rsv-ranking-body');
+  if (!servicios.length) { body.innerHTML = '<tr><td colspan="7" style="color:var(--text-muted);padding:14px">Sin servicios en el período.</td></tr>'; return; }
+  const orden = servicios.slice().sort((a, b) => b.total - a.total);
+  const N = 10;
+  const top = orden.slice(0, N);
+  // Si hay pocos servicios el ranking completo ya está arriba: no repetirlo.
+  const fondo = orden.length > N * 2 ? orden.slice(-N) : orden.slice(N);
+
+  const fila = (s, pos) => {
+    const fl = fechaLabel(s.fecha);
+    const badge = s.turno === 'almuerzo' ? ' <span class="badge badge-almuerzo">Almuerzo</span>' : '';
+    return `<tr style="cursor:pointer" onclick="openServModal('${s.fecha}', '${s.turno || ''}')">
+      <td>${pos}</td>
+      <td>${escapeHtml(fl.dia)}${badge}</td>
+      <td>${escapeHtml(fl.dow)}</td>
+      <td>${s.pax}</td>
+      <td>${fmt(s.total)}</td>
+      <td>${fmt(s.ticketPromedio)}</td>
+      <td>${pct(s.pctComida)}</td>
+    </tr>`;
+  };
+  const sec = label => `<tr class="row-header"><td colspan="7">${label}</td></tr>`;
+
+  body.innerHTML = sec(`TOP ${top.length} · los mejores servicios`)
+    + top.map((s, i) => fila(s, i + 1)).join('')
+    + (fondo.length ? sec(`FONDO ${fondo.length} · los más flojos`)
+      + fondo.map(s => fila(s, orden.indexOf(s) + 1)).join('') : '');
 }
 
 async function loadServiciosAgregado() {
