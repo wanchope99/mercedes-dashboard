@@ -4513,14 +4513,16 @@ function renderPlanKpis() {
 // El fondo que viene de los cierres (roi.fondoExtraordinariasARS) es lo APARTADO.
 // Los ítems del plan vinculados a un gasto real ya salieron de ese pozo, así que
 // lo que queda para planificar es el bruto menos lo ejecutado.
+// Un ítem "ya salió del pozo" si está marcado hecho o si está vinculado a un
+// Movimiento real (vincular sin marcar hecho también significa que ya se pagó).
+function planEjecutado(i) {
+  return i.estado === 'hecho' || !!i.movimientoFila;
+}
 function planEjecutadoARS() {
-  return state.plan.items.reduce((s, i) => s + (i.movimientoFila ? (i.costoReal || 0) : 0), 0);
+  return state.plan.items.reduce((s, i) => s + (planEjecutado(i) ? planMontoItem(i) : 0), 0);
 }
 function planFondoBrutoARS() {
   return (state.plan.roi && state.plan.roi.fondoExtraordinariasARS) || 0;
-}
-function planFondoDisponibleARS() {
-  return planFondoBrutoARS() - planEjecutadoARS();
 }
 // Monto con el que cuenta un ítem: el real si está vinculado, si no el estimado.
 function planMontoItem(i) {
@@ -4568,21 +4570,25 @@ function renderPlanTimeline() {
   // Presupuesto real = fondo extraordinarias acumulado en los cierres. Es un pozo
   // ÚNICO compartido: cada ítem asignado a un mes lo consume, y lo que queda arrastra
   // a los meses siguientes (por eso el "restante" baja mes a mes).
-  // Los ítems ya ejecutados (vinculados a un Movimiento real) ya salieron del
-  // pozo: se descuentan una sola vez acá, y en su mes se muestran como hechos
-  // sin volver a consumir fondo.
-  const fondoTotal = planFondoDisponibleARS();
-  let consumido = 0;
-  cont.innerHTML = meses.map(iso => {
+  // Cada mes se muestra en bruto y se descuenta a la vista: presupuesto que entra
+  // → lo YA ejecutado ese mes → lo planeado que falta → restante. Lo ejecutado en
+  // meses que no están en la ventana (pasados o sin agendar) no se puede itemizar
+  // acá, así que se descuenta antes de entrar al primer mes.
+  const ejecutadoDelMes = iso => state.plan.items
+    .filter(i => i.mesObjetivo === iso && planEjecutado(i))
+    .reduce((s, i) => s + planMontoItem(i), 0);
+  const ejecutadoVisible = meses.reduce((s, iso) => s + ejecutadoDelMes(iso), 0);
+  let disponible = planFondoBrutoARS() - (planEjecutadoARS() - ejecutadoVisible);
+  cont.innerHTML = meses.map((iso, idx) => {
     const delMes = state.plan.items.filter(i => i.mesObjetivo === iso);
-    const items = delMes.filter(i => i.estado !== 'hecho');    // pendientes: consumen fondo
-    const hechos = delMes.filter(i => i.estado === 'hecho');   // ya ejecutados
+    const items = delMes.filter(i => !planEjecutado(i));    // pendientes: falta gastarlos
+    const hechos = delMes.filter(planEjecutado);            // ya ejecutados
     const asignado = items.reduce((s, i) => s + (i.costoEstimado || 0), 0);
     const ejecutadoMes = hechos.reduce((s, i) => s + planMontoItem(i), 0);
-    const disponibleAntes = fondoTotal - consumido;   // fondo disponible al entrar al mes
-    consumido += asignado;
-    const disponibleDespues = fondoTotal - consumido; // remanente que arrastra al mes siguiente
-    const over = asignado > disponibleAntes;          // se pasa del fondo disponible
+    const disponibleAntes = disponible;               // presupuesto al entrar al mes
+    const disponibleDespues = disponibleAntes - ejecutadoMes - asignado; // arrastra al mes siguiente
+    disponible = disponibleDespues;
+    const over = (ejecutadoMes + asignado) > disponibleAntes; // se pasa del fondo disponible
     const proy = (state.plan.proy || []).find(x => { const [y, m] = iso.split('-').map(Number); return x.mes === MESES_PROY[m - 1] && x.anio === y; });
     // Si el toggle está ON, proy.resultado ya incluye el capex del plan; si está OFF, lo restamos
     // para mostrar el impacto. Sólo lo PENDIENTE: lo ejecutado ya está en los movimientos reales.
@@ -4617,15 +4623,15 @@ function renderPlanTimeline() {
       </div>`;
     return `<div class="card" style="margin:0;padding:22px 24px">
       <div style="font-weight:700;font-size:19px;margin-bottom:14px">${planMesLabel(iso)}</div>
-      ${linea('Presupuesto mensual', fmt(Math.round(disponibleAntes)))}
-      <div style="margin-top:7px">${linea('Inversiones planeadas', (asignado > 0 ? '− ' : '') + fmt(asignado), { color: 'var(--text-muted)' })}</div>
+      ${linea(idx === 0 ? 'Presupuesto disponible' : 'Arrastre del mes anterior', fmt(Math.round(disponibleAntes)))}
+      ${ejecutadoMes > 0 ? `<div style="margin-top:7px">${linea('Ya ejecutado', '− ' + fmt(Math.round(ejecutadoMes)), { color: 'var(--green)' })}</div>` : ''}
+      <div style="margin-top:7px">${linea('Falta ejecutar (planeado)', (asignado > 0 ? '− ' : '') + fmt(asignado), { color: 'var(--text-muted)' })}</div>
       <div style="margin-top:11px;padding-top:11px;border-top:1px solid var(--border)">
         ${linea('Presupuesto restante', fmt(Math.round(disponibleDespues)) +
           (over ? ' <span class="badge badge-vencido" style="margin-left:6px;vertical-align:middle">Excede</span>'
                 : (asignado > 0 ? ' <span class="badge badge-ok" style="margin-left:6px;vertical-align:middle">OK</span>' : '')),
           { big: true, color: disponibleDespues < 0 ? 'var(--red)' : 'var(--green)' })}
       </div>
-      ${ejecutadoMes > 0 ? `<div style="margin-top:9px;font-size:12px;color:var(--text-muted)">✓ ${fmt(Math.round(ejecutadoMes))} ya ejecutado este mes (ya descontado del presupuesto)</div>` : ''}
       ${chips}
       ${proy ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted);line-height:1.7">
         Resultado proyectado: <strong style="color:${resultadoConPlan >= 0 ? 'var(--green)' : 'var(--red)'}">${fmt(Math.round(resultadoConPlan))}</strong>${asignado > 0 ? ` <span>(con esta inversión)</span>` : ''}<br>
