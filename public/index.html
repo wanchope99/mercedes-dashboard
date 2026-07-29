@@ -2242,10 +2242,12 @@ const TAB_GROUPS = {
     { id: 'costos-resumen', label: '📊 Costos' },
     { id: 'costos-config',  label: '⚙️ Configuración' },
   ] },
+  // Historial de Arqueos lee /api/arqueo/historial, que es adminOnly: si el
+  // encargado veía el submenú, sólo conseguía un error de permisos. No se le arma.
   cajas:  { subs: [
     { id: 'cajas',  label: '🏦 Cajas' },
     { id: 'arqueo', label: '🗃️ Arqueo de Caja' },
-    { id: 'historial-arqueos', label: '📋 Historial de Arqueos' },
+    { id: 'historial-arqueos', label: '📋 Historial de Arqueos', soloAdmin: true },
   ] },
   // soloAdmin: el submenú no se le arma al encargado. Charly entra a Stocks pero
   // sólo ve Gestión de Bebidas (y ahí, sólo el circulante — ver loadVinos).
