@@ -988,7 +988,7 @@
   <main style="padding-top:24px">
     <div class="card" id="vinos-card">
       <div class="card-title">🥂 Gestión de bebidas
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· stock, plata inmovilizada y rotación · datos de Fudo</span>
+        <span id="vinos-subtitulo" style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· stock, plata inmovilizada y rotación · datos de Fudo</span>
         <span style="float:right">
           <label class="switch" style="margin-right:12px" title="Filtrar el listado para ver únicamente los vinos">
             <input type="checkbox" id="vinos-solo-vino" onchange="loadVinos()"><span class="switch-track"></span><span class="switch-label">🍷 Solo vinos</span>
@@ -1646,9 +1646,12 @@
       <div id="ci-galicia-hint" style="font-size:11px;color:var(--text-muted);margin-bottom:6px"></div>
       <input type="number" id="ci-galicia" placeholder="0" min="0" title="Ingresá el total bruto acreditado en Galicia antes de impuestos" />
       <div style="margin-top:10px;padding:12px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
-        <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px">Total Neto Acreditado</label>
+        <label onclick="openAyudaNetoGalicia()" title="Cómo se carga este campo"
+               style="font-size:12px;color:var(--orange);display:inline-block;margin-bottom:6px;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">
+          Total Neto Acreditado ⓘ
+        </label>
         <input type="number" id="ci-galicia-neto" placeholder="0" min="0" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:6px;font-size:16px;font-family:inherit;outline:none;" />
-        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Los impuestos (Bruto − Neto) se registrarán como Gasto · Fiscales</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Copialo tal cual del resumen de Nave. La comisión (Bruto − Neto) se registra sola como Gasto · Financieros.</div>
       </div>
     </div>
     <div id="cierre-error" style="color:var(--red);font-size:13px;margin-bottom:12px;text-align:center"></div>
@@ -2113,11 +2116,14 @@ function onLoginSuccess(rol, nombre) {
     refreshProvBadge(); // badge de pendientes de proveedores
     checkGaliciaVencReminder(); // recordatorio de vencimiento de la tarjeta (1 vez por ciclo)
   } else {
-    // Encargado: solo la tab Cajas (con submenús Cajas / Arqueo) + Pagos
-    ['tab-btn-dashboard','tab-btn-reportes','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-plan'].forEach(id => {
+    // Encargado: Cajas (con submenús Cajas / Arqueo) + Pagos + Stocks.
+    // Stocks se le abre sólo por Gestión de Bebidas: los otros dos submenús están
+    // marcados soloAdmin en TAB_GROUPS y la tabla se recorta en loadVinos().
+    ['tab-btn-dashboard','tab-btn-reportes','tab-btn-servicios','tab-btn-costos','tab-btn-plan'].forEach(id => {
       const el = document.getElementById(id); if (el) el.style.display = 'none';
     });
     document.getElementById('tab-btn-cajas').style.display = '';
+    document.getElementById('tab-btn-stocks').style.display = '';
     // Pagos visible solo para registrar una compra nueva: sin listado, KPIs ni "Pagar"
     document.getElementById('tab-btn-pagos').style.display = '';
     document.getElementById('pagos-filtros-admin-label').style.display = 'none';
@@ -2241,10 +2247,12 @@ const TAB_GROUPS = {
     { id: 'arqueo', label: '🗃️ Arqueo de Caja' },
     { id: 'historial-arqueos', label: '📋 Historial de Arqueos' },
   ] },
+  // soloAdmin: el submenú no se le arma al encargado. Charly entra a Stocks pero
+  // sólo ve Gestión de Bebidas (y ahí, sólo el circulante — ver loadVinos).
   stocks: { subs: [
-    { id: 'proveedores',   label: '🛒 Proveedores' },
-    { id: 'comportamiento', label: '📈 Comportamiento de Stocks' },
-    { id: 'vinos', label: '🥂 Gestión de Bebidas' },
+    { id: 'proveedores',    label: '🛒 Proveedores', soloAdmin: true },
+    { id: 'comportamiento', label: '📈 Comportamiento de Stocks', soloAdmin: true },
+    { id: 'vinos',          label: '🥂 Gestión de Bebidas' },
   ] },
 };
 
@@ -2300,14 +2308,18 @@ function switchGroup(group, btn) {
 
   const cfg = TAB_GROUPS[group];
   const subnav = document.getElementById('subtab-nav');
+  // Los submenús marcados soloAdmin no se le arman al encargado.
+  const subs = cfg && cfg.subs
+    ? cfg.subs.filter(s => !s.soloAdmin || getRol() === 'admin')
+    : null;
 
-  if (cfg && cfg.subs) {
+  if (subs && subs.length) {
     // Renderizar la sub-barra y abrir el primer submenú.
     subnav.style.display = 'flex';
-    subnav.innerHTML = cfg.subs.map((s, i) =>
+    subnav.innerHTML = subs.map((s, i) =>
       `<button class="subtab-btn ${i === 0 ? 'active' : ''}" id="subtab-${s.id}" onclick="switchSub('${s.id}', this)">${s.label}</button>`
     ).join('');
-    activarPanel(cfg.subs[0].id);
+    activarPanel(subs[0].id);
   } else {
     // Sin submenús: ocultar sub-barra y abrir el panel directo.
     subnav.style.display = 'none';
@@ -2541,6 +2553,35 @@ async function openCierreModal() {
 
 function closeCierreModal() {
   document.getElementById('cierre-modal-overlay').classList.remove('open');
+}
+
+// ─── Ayuda del campo "Total Neto Acreditado" ──────────────────────────────────
+// El Bruto viene precargado de Fudo; el Neto se carga a mano. La comisión NO se
+// tipea: sale de Bruto − Neto. Entonces un dedazo en el neto se convierte 1:1 en
+// un gasto Financieros. El 28/07/2026 se cargó neto = 1 contra un bruto de
+// $1.285.500 y quedó una comisión de $1.285.499 — el servicio entero
+// contabilizado como comisión. La app NO estima ni sugiere el neto a propósito:
+// el único número válido es el del resumen de Nave. Esto explica de dónde sacarlo.
+function openAyudaNetoGalicia() {
+  openDetalleModal('🏦 Total Neto Acreditado', `
+    <div style="font-size:14px;line-height:1.7">
+      <p style="margin-bottom:12px">Este número <b>se copia del resumen de Nave</b>, no se estima ni se calcula a ojo.</p>
+      <div style="background:rgba(224,92,92,0.10);border:1px solid var(--red);border-radius:8px;padding:12px 14px;margin-bottom:12px">
+        <b>No pongas un número al azar, ni un redondeo, ni lo dejes en cualquier valor.</b>
+        La app le resta el neto al bruto y lo que da lo registra como comisión del posnet.
+        Un neto mal cargado se convierte en un gasto falso por ese mismo monto.
+      </div>
+      <p style="margin-bottom:8px"><b>Qué hacer:</b></p>
+      <ol style="margin:0 0 12px 20px;padding:0">
+        <li style="margin-bottom:6px">Abrí el resumen de <b>Nave</b> del día.</li>
+        <li style="margin-bottom:6px">Buscá el <b>total neto acreditado</b> (lo que Galicia deposita, ya descontada la comisión).</li>
+        <li style="margin-bottom:6px">Copialo acá <b>tal cual</b>, sin redondear.</li>
+      </ol>
+      <p style="color:var(--text-muted);font-size:13px">
+        Si en este momento no tenés el resumen de Nave a mano, <b>dejá el campo vacío</b> y avisale a Gonza.
+        Es preferible cargar la comisión después que cargarla mal.
+      </p>
+    </div>`);
 }
 
 // ─── Gasto rápido: hielo ──────────────────────────────────────────────────────
@@ -2853,12 +2894,26 @@ async function cerrarCaja() {
       };
     }
   }
-  renderConfirmCierre(diffs, motivo);
+  renderConfirmCierre(diffs, motivo, { bruto: galicia, neto: galiciaNeto });
 }
 
-function renderConfirmCierre(diffs, motivo) {
+function renderConfirmCierre(diffs, motivo, galicia) {
   const body = document.getElementById('confirm-cierre-body');
   const actions = document.getElementById('confirm-cierre-actions');
+
+  // Galicia no entra en la verificación contra Fudo (no se cuenta, se lee de Nave).
+  // Se repiten acá los dos valores TAL CUAL SE CARGARON — sin calcular ni estimar
+  // la comisión — para que el neto pase por delante de los ojos antes de escribir.
+  const bloqueGalicia = !(galicia && galicia.bruto > 0) ? '' : `
+    <div style="margin-top:12px;padding:10px 12px;border-radius:8px;font-size:13px;
+                background:var(--surface2);border:1px solid ${galicia.neto > 0 ? 'var(--border)' : '#e0c95c'}">
+      <div style="display:flex;justify-content:space-between;gap:10px">
+        <span>🏦 Galicia</span>
+        <span style="text-align:right;font-size:12px;color:var(--text-muted)">
+          bruto ${fmt(galicia.bruto)} · neto ${galicia.neto > 0 ? fmt(galicia.neto) : '—'}</span>
+      </div>
+      ${galicia.neto > 0 ? '' : `<div style="margin-top:4px;color:#e0c95c">⚠️ Sin Total Neto Acreditado: no se va a registrar la comisión de Galicia.</div>`}
+    </div>`;
   const filaCaja = (icono, nombre, d) => {
     const ok = Math.abs(d.diff) <= TOLERANCIA_CIERRE;
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(46,46,62,0.4);font-size:13px">
@@ -2881,6 +2936,7 @@ function renderConfirmCierre(diffs, motivo) {
         <h3 style="margin-bottom:8px">⚠️ No se pudo verificar el cierre</h3>
         <p style="font-size:13px;color:var(--text-muted)">No pude leer la planilla o las ventas del día de Fudo. Podés cerrar igual: se registrará lo contado tal cual.</p>`;
     }
+    body.innerHTML += bloqueGalicia;
     actions.innerHTML = `
       <button class="btn" onclick="closeConfirmCierre()">🔄 Arquear nuevamente</button>
       <button class="btn btn-accent" onclick="confirmarCierreDefinitivo()">Cerrar igual</button>`;
@@ -2892,6 +2948,7 @@ function renderConfirmCierre(diffs, motivo) {
       ${filaCaja('💵', 'Efectivo', diffs.efectivo)}
       ${filaCaja('📱', 'Mercado Pago Tincho', diffs.mp)}
       ${cerro ? '' : `<p style="font-size:12px;color:var(--text-muted);margin-top:10px">Si hubo error al contar, arqueá de nuevo. Si la diferencia es real (pagos en efectivo durante el servicio, propinas, etc.), podés cerrar igual y queda registrada.</p>`}
+      ${bloqueGalicia}
       ${cerro ? '' : `<div style="margin-top:12px"><label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">📝 Nota: ¿por qué no cierra? (ayuda a rastrear el error después)</label><textarea id="cierre-nota" rows="2" style="width:100%;resize:vertical" placeholder="Ej: retiré $50.000 para pagar al verdulero, propinas en efectivo, etc."></textarea></div>`}`;
     actions.innerHTML = `
       <button class="btn" onclick="closeConfirmCierre()">🔄 Arquear nuevamente</button>
@@ -2925,10 +2982,11 @@ async function confirmarCierreDefinitivo() {
     closeConfirmCierre();
     closeCierreModal();
     renderEstadoArqueo({ abierta: false });
-    renderResumenCierre(res.data);
     // El cierre se completó igual, pero algo secundario falló (ej: no se pudo
-    // actualizar el Saldo Real de la hoja Cajas). Que no pase desapercibido.
-    if (res.avisoCajas) showToast('⚠ ' + res.avisoCajas);
+    // actualizar el Saldo Real de la hoja Cajas, o la comisión de Galicia no se
+    // registró por venir mal cargada). Los avisos van en el resumen, que queda en
+    // pantalla: el toast dura 2,5s, se pisa con el siguiente y es fácil perdérselo.
+    renderResumenCierre(res.data, [res.avisoCajas, res.avisoGalicia].filter(Boolean));
   } catch (err) {
     document.getElementById('confirm-cierre-body').innerHTML += `<div style="color:var(--red);font-size:13px;margin-top:10px">❌ ${err.message}</div>`;
     btns.forEach(b => b.disabled = false);
@@ -2951,19 +3009,25 @@ function kpiDeltaSpan(v, inverted, suffix) {
   return ` <span class="${cls}">${v > 0 ? '+' : ''}${v.toFixed(1)}${suffix} vs mes anterior</span>`;
 }
 
-function renderResumenCierre(d) {
+function renderResumenCierre(d, avisos = []) {
   const el = document.getElementById('arqueo-ultimo-resumen');
   el.style.display = 'block';
+  const bloqueAvisos = avisos.length ? `
+      <div style="margin-bottom:12px">${avisos.map(a =>
+        `<div style="background:rgba(214,86,86,0.10);border:1px solid var(--red);border-radius:8px;
+                     padding:10px 12px;font-size:12px;line-height:1.5;margin-bottom:8px">⚠️ ${escapeHtml(a)}</div>`
+      ).join('')}</div>` : '';
   el.innerHTML = `
     <div class="arqueo-card">
       <div class="arqueo-card-title">✅ Resumen del servicio</div>
+      ${bloqueAvisos}
       <div class="resumen-cierre">
         <div class="resumen-cierre-title">📅 ${d.fecha} · ${d.apertura} → ${d.cierre} (${d.duracion})</div>
         <div class="resumen-row"><span>💵 Efectivo</span><span>${fmt(d.efectivoInicial)} → <strong>${fmt(d.efectivoFinal)}</strong> <span class="${difClass(d.difEfectivo)}">${difStr(d.difEfectivo)}</span></span></div>
         <div class="resumen-row"><span>📱 Mercado Pago Tincho</span><span>${fmt(d.mpInicial)} → <strong>${fmt(d.mpFinal)}</strong> <span class="${difClass(d.difMP)}">${difStr(d.difMP)}</span></span></div>
         ${d.galiciaBruto > 0 ? `<div class="resumen-row"><span>🏦 Galicia Bruto</span><span><strong>${fmt(d.galiciaBruto)}</strong></span></div>` : ''}
         ${d.galiciaNeto > 0 ? `<div class="resumen-row"><span>🏦 Galicia Neto acreditado</span><span><strong>${fmt(d.galiciaNeto)}</strong></span></div>` : ''}
-        ${d.impuestosGalicia > 0 ? `<div class="resumen-row"><span style="color:var(--text-muted)">📋 Impuestos Galicia</span><span style="color:var(--red)">-${fmt(d.impuestosGalicia)}</span></div>` : ''}
+        ${d.impuestosGalicia > 0 ? `<div class="resumen-row"><span style="color:var(--text-muted)">📋 Comisión Galicia</span><span style="color:var(--red)">-${fmt(d.impuestosGalicia)}</span></div>` : ''}
       </div>
     </div>
   `;
@@ -6289,24 +6353,34 @@ async function loadVinos() {
   catch (e) { body.innerHTML = '<tr><td style="color:var(--red);padding:14px">Error: '+escapeHtml(e.message)+'</td></tr>'; return; }
   _vinosData = data;
 
+  // El encargado ve el CIRCULANTE, no la plata: qué hay, cuánto sale por semana,
+  // cuántos días dura y qué está por faltar. Sin KPIs arriba y sin las columnas de
+  // costo / precio / margen / inmovilizado. El server ya no le manda esos campos
+  // (ver vinosSoloCirculante en server.js); esto es sólo la pantalla.
+  const esAdmin = getRol() === 'admin';
   const t = data.totales;
   const ck = 'cursor:pointer';
-  if (kpis) kpis.innerHTML =
+  if (kpis) kpis.innerHTML = !esAdmin ? '' :
     '<div class="kpi-card blue" style="'+ck+'" onclick="openVinosModal(\'inmovilizado\')" title="Ver detalle"><div class="kpi-label">Plata inmovilizada ›</div><div class="kpi-value">'+fmt(t.plataInmovilizada)+'</div><div class="kpi-sub">'+t.stockTotal+' botellas · '+t.items+' etiquetas</div></div>'
     + '<div class="kpi-card green" style="'+ck+'" onclick="openVinosModal(\'valor\')" title="Ver detalle"><div class="kpi-label">Valor a precio de venta ›</div><div class="kpi-value">'+fmt(t.valorVentaStock)+'</div><div class="kpi-sub">margen potencial '+fmt(t.margenPotencial)+'</div></div>'
     + '<div class="kpi-card '+(t.enQuiebre>0?'red':'green')+'" style="'+ck+'" onclick="openVinosModal(\'quiebre\')" title="Ver detalle"><div class="kpi-label">En quiebre ›</div><div class="kpi-value">'+t.enQuiebre+'</div><div class="kpi-sub">sin stock o bajo mínimo</div></div>'
     + '<div class="kpi-card orange" style="'+ck+'" onclick="openVinosModal(\'agotarse\')" title="Ver detalle"><div class="kpi-label">Por agotarse ›</div><div class="kpi-value">'+t.porAgotarse+'</div><div class="kpi-sub">≤ 7 días · '+t.sobrestock+' con sobrestock</div></div>';
+
+  const subtitulo = document.getElementById('vinos-subtitulo');
+  if (subtitulo) subtitulo.textContent = esAdmin
+    ? '· stock, plata inmovilizada y rotación · datos de Fudo'
+    : '· qué hay, cuánto sale por semana y cuánto dura · datos de Fudo';
 
   head.innerHTML = '<tr>'
     + '<th style="text-align:left">Bebida</th><th style="text-align:left">Categoría</th>'
     + '<th style="text-align:right">Stock</th>'
     + '<th style="text-align:right">Vta/sem</th>'
     + '<th style="text-align:right">Días cob.</th>'
-    + '<th style="text-align:right">Costo</th><th style="text-align:right">Precio</th><th style="text-align:right">Margen</th>'
-    + '<th style="text-align:right">Inmovilizado</th>'
+    + (esAdmin ? '<th style="text-align:right">Costo</th><th style="text-align:right">Precio</th><th style="text-align:right">Margen</th><th style="text-align:right">Inmovilizado</th>' : '')
     + '<th style="text-align:left">Alerta</th></tr>';
 
-  if (!data.items.length) { body.innerHTML = '<tr><td colspan="10" style="color:var(--text-muted);padding:14px">No se encontraron bebidas con alcohol con stock en Fudo.</td></tr>'; return; }
+  const nCols = esAdmin ? 10 : 6;
+  if (!data.items.length) { body.innerHTML = '<tr><td colspan="'+nCols+'" style="color:var(--text-muted);padding:14px">No se encontraron bebidas con alcohol con stock en Fudo.</td></tr>'; return; }
 
   const badge = a => {
     const m = {
@@ -6328,10 +6402,12 @@ async function loadVinos() {
       + '<td style="text-align:right;font-weight:600">'+(it.stock==null?'—':it.stock)+'</td>'
       + '<td style="text-align:right">'+it.porSemana+'</td>'
       + '<td style="text-align:right">'+cob+'</td>'
-      + '<td style="text-align:right;color:var(--text-muted)">'+(it.cost==null?'—':fmt(it.cost))+'</td>'
-      + '<td style="text-align:right">'+(it.price==null?'—':fmt(it.price))+'</td>'
-      + '<td style="text-align:right">'+(it.margenPct==null?'—':it.margenPct+'%')+'</td>'
-      + '<td style="text-align:right">'+(it.valorCosto==null?'—':fmt(it.valorCosto))+'</td>'
+      + (esAdmin
+        ? '<td style="text-align:right;color:var(--text-muted)">'+(it.cost==null?'—':fmt(it.cost))+'</td>'
+          + '<td style="text-align:right">'+(it.price==null?'—':fmt(it.price))+'</td>'
+          + '<td style="text-align:right">'+(it.margenPct==null?'—':it.margenPct+'%')+'</td>'
+          + '<td style="text-align:right">'+(it.valorCosto==null?'—':fmt(it.valorCosto))+'</td>'
+        : '')
       + '<td style="text-align:left">'+badge(it.alerta)+'</td>'
       + '</tr>';
   }).join('');

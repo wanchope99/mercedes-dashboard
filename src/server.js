@@ -307,9 +307,15 @@ async function postearAjusteEfectivo(sheets, { diferencia, esperado, contado, en
 
   // A:Fecha B:Mes C:Tipo D:Estado E:Venc F:Cuotas G:Extraord H:ID I:Proveedor
   // J:Categoría K:Descripción L:Medio M:EntradaARS N:EntradaUSD O:SalidaARS P:SalidaUSD
+  //
+  // Categoría = "Otros": la hoja Movimientos tiene una lista de validación en la
+  // columna J y "Ajuste de Caja" NO está en ella — escribirlo dejaba la celda en
+  // rojo/inválida. El ajuste se identifica por el Proveedor (columna I), que sí es
+  // texto libre. Para el dashboard no cambia nada: getSuperGrupo() manda todo lo
+  // que no reconoce al superGrupo "Otros", que es donde ya venía cayendo.
   const row = [
     fecha, mesesNombres[mesNum - 1], sobra ? 'Ingreso' : 'Gasto', 'Pagado', '', '', '', '',
-    'Ajuste de Caja', 'Ajuste de Caja', descripcion,
+    'Ajuste de Caja', 'Otros', descripcion,
     CAJA_EFECTIVO,
     sobra ? monto : '', '', sobra ? '' : monto, '',
   ];
@@ -535,7 +541,28 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   const galiciaNetoVal = Number(galiciaNeto) || 0;
   // Avisos no fatales del cierre (ver paso 1b): el cierre igual se completa.
   let avisoCajas = null;
-  const impuestos = galiciaBruto > galiciaNetoVal ? galiciaBruto - galiciaNetoVal : 0;
+  let avisoGalicia = null;
+  let impuestos = galiciaBruto > galiciaNetoVal ? galiciaBruto - galiciaNetoVal : 0;
+
+  // Guarda contra el "Neto Acreditado" mal tipeado. El campo Neto se carga a mano
+  // (el Bruto viene precargado de Fudo), así que un blanco o un dedazo se traduce
+  // 1:1 en la comisión: el 28/07/2026 se cargó neto = 1 contra un bruto de
+  // $1.285.500 y quedó un gasto Financieros de $1.285.499 — el servicio entero
+  // contabilizado como comisión. Una comisión de posnet real anda en pocos puntos;
+  // por encima de este techo no es una comisión cara, es un dato equivocado, así
+  // que NO se escribe la fila de gasto (el ingreso bruto sí) y se avisa. Perder la
+  // comisión de un día y cargarla después es infinitamente más barato que meter un
+  // gasto falso del tamaño de la venta en el resultado del mes.
+  const COMISION_GALICIA_TECHO = 0.5;
+  if (impuestos > 0 && impuestos > galiciaBruto * COMISION_GALICIA_TECHO) {
+    avisoGalicia =
+      `No se registró la comisión de Galicia: el Neto Acreditado cargado (${fmtARS(galiciaNetoVal)}) ` +
+      `daría una comisión de ${fmtARS(impuestos)} sobre un bruto de ${fmtARS(galiciaBruto)} ` +
+      `(${Math.round((impuestos / galiciaBruto) * 100)}%), lo que no es posible. ` +
+      `El ingreso bruto sí quedó registrado. Revisá el neto en Nave y cargá la comisión a mano.`;
+    console.error('[cierre] ' + avisoGalicia);
+    impuestos = 0;
+  }
 
   try {
     const auth = getAuth();
@@ -708,7 +735,7 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   estadoCaja = { abierta: false, apertura: null, encargado: null, efectivoInicial: null, mpInicial: null, gastosSesion: [] };
   guardarEstadoCaja(estadoCaja); // respaldo en planilla, no bloquea la respuesta
 
-  res.json({ ok: true, data: resumen, avisoCajas });
+  res.json({ ok: true, data: resumen, avisoCajas, avisoGalicia });
 });
 
 // POST /api/gastos-rapidos — gasto pagado en el momento (ej: hielo al empezar
@@ -788,11 +815,42 @@ app.get('/api/arqueo/fudo-hoy', authMiddleware, async (req, res) => {
 
 // ─── Healthcheck público (para Railway) ──────────────────────────────────────
 // ─── Gestión de Vinos / bebida con alcohol: inventario + rotación ──────────────
-app.get('/api/vinos', authMiddleware, adminOnly, async (req, res) => {
+//
+// El encargado (Charly) también entra acá, pero sólo a la parte de CIRCULANTE:
+// qué bebidas hay, cuánto se vende por semana y cuántos días dura el stock. Nada
+// de plata — ni costo, ni precio, ni margen, ni plata inmovilizada.
+//
+// El recorte se hace ACÁ y no en la pantalla a propósito: ocultar las columnas en
+// el HTML deja la respuesta completa a un F12 de distancia. Lo que el rol no puede
+// ver, no sale del servidor.
+function vinosSoloCirculante(data) {
+  return {
+    ventanaDias: data.ventanaDias, desde: data.desde, hasta: data.hasta,
+    generado: data.generado,
+    totales: {
+      items: data.totales.items,
+      stockTotal: data.totales.stockTotal,
+      enQuiebre: data.totales.enQuiebre,
+      porAgotarse: data.totales.porAgotarse,
+      sobrestock: data.totales.sobrestock,
+    },
+    items: (data.items || []).map(it => ({
+      id: it.id, nombre: it.nombre, categoria: it.categoria, esVino: it.esVino,
+      stock: it.stock, minStock: it.minStock,
+      vendidasVentana: it.vendidasVentana, porSemana: it.porSemana,
+      diasCobertura: it.diasCobertura, alerta: it.alerta,
+    })),
+    porCategoria: (data.porCategoria || []).map(c => ({
+      categoria: c.categoria, items: c.items, stock: c.stock,
+    })),
+  };
+}
+
+app.get('/api/vinos', authMiddleware, async (req, res) => {
   try {
     const { desde, hasta, soloVino } = req.query;
     const data = await vinos.analizarVinos({ desde, hasta, soloVino: soloVino === '1' || soloVino === 'true' });
-    res.json({ ok: true, data });
+    res.json({ ok: true, data: req.user.rol === 'admin' ? data : vinosSoloCirculante(data) });
   } catch (err) {
     console.error('Error /api/vinos:', err.message);
     res.status(500).json({ ok: false, error: err.message });
