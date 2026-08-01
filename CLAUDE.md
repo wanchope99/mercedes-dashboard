@@ -79,6 +79,19 @@ Note this strategy's nominal rate is **below** the assumed inflation, so real va
 4. `src/unidades.js` normalizes purchase units to a base unit (e.g. "Caja x6" → 6 bottles) so purchased-vs-sold quantities are comparable.
 5. Anything the pipeline can't resolve confidently (category, payment method, product match, unit factor) is queued as "pendiente" for a human to confirm via Telegram reply or the app's panel — never silently guessed.
 
+### Propinas: deliberately outside the ledger
+
+`src/propinas.js` splits the week's **digital** tips among the staff. Cash tips are handed out at the bar and never enter the app. The digital ones land in two accounts, `Galicia` and `Brubank`, so the module's real job is not the division (it's equal shares) but deciding **which account each transfer comes out of**.
+
+Two things make it different from every other module here:
+
+1. **It writes nothing to `Movimientos` and never reads `Cajas`.** Tips are third-party money passing through; putting them in the ledger would move the bar's balance by money that isn't the bar's. Known and accepted consequence: while unpaid tips sit in the Galicia bank account, the real bank balance runs above that caja's "Saldo Calculado" by exactly that amount. `Brubank` is not a caja at all and exists nowhere else in the app.
+2. **`calcularReparto()` is pure and is the only place that divides anything** — the browser never computes a share, it renders what `POST /api/propinas/calcular` returns, so what you see is what gets saved and transferred.
+
+The assignment algorithm relies on all shares being equal: order the people, then drain Galicia before Brubank. That leaves at most **one** person paid with two transfers (the one straddling the boundary), which is the minimum possible. Preferences are honored purely by that ordering — Galicia-preferrers first, no-preference next, Brubank-preferrers last. Rounding is always **down** to the chosen unit (default $100); rounding up would make the shares exceed the money in the accounts and the last transfer would bounce. The leftover is reported as `sobrante` and stays in the account.
+
+Persistence: three sheets in `SPREADSHEET_ID`, auto-created on first use — `Propinas Personas` (the roster + each person's preferred account), `Propinas Repartos` (one row per weekly split) and `Propinas Detalle` (one row per person per split). Admin-only; the whole tab is hidden from the `encargado` and every `/api/propinas/*` route is `adminOnly`.
+
 ### Other independent modules
 
 - `src/vinos.js` / `src/stocks.js` — wine/beverage inventory, stock rotation, and days-of-coverage analysis, cross-referencing Fudo stock+cost+price against recent sales velocity.

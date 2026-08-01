@@ -282,6 +282,50 @@
     .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
     #modal-status { font-size: 12px; color: var(--text-muted); padding: 8px 0; display: none; }
 
+    /* ── Propinas ── */
+    #prop-persona-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 320; align-items: center; justify-content: center; }
+    #prop-persona-overlay.open { display: flex; }
+    #prop-persona-overlay .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; width: 460px; max-width: 95vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 24px 64px rgba(0,0,0,0.5); }
+    #prop-persona-overlay .modal-title { font-size: 17px; font-weight: 600; margin-bottom: 22px; }
+    /* .btn-acento es propio de esta pantalla: en el resto de la app se usa
+       .btn-primary, que en realidad nunca se definió en el CSS y se ve igual
+       que un .btn común. No se toca eso acá para no cambiar pantallas viejas. */
+    /* Naranja y no var(--accent): el accent es un marrón muy oscuro, ilegible
+       como fondo de un botón. */
+    .btn-acento { background: var(--orange); border-color: var(--orange); color: #17171f; font-weight: 600; }
+    .btn-acento:hover { filter: brightness(1.08); background: var(--orange); }
+    .btn-acento:disabled { opacity: 0.4; cursor: default; filter: none; }
+    .prop-persona-row { display: grid; grid-template-columns: 26px 1fr auto auto; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); margin-bottom: 8px; }
+    .prop-persona-row.inactiva { opacity: 0.45; }
+    .prop-persona-nombre { font-size: 14px; font-weight: 500; }
+    .prop-persona-acciones { display: flex; gap: 6px; }
+    .prop-persona-acciones button { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 13px; padding: 4px 6px; border-radius: 6px; font-family: inherit; }
+    .prop-persona-acciones button:hover { background: var(--border); color: var(--text); }
+    .prop-cuenta-tag { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+    .prop-cuenta-tag.galicia { background: var(--orange-dim); color: var(--orange); border: 1px solid rgba(224,138,92,0.4); }
+    .prop-cuenta-tag.brubank { background: rgba(160,92,224,0.15); color: var(--purple); border: 1px solid rgba(160,92,224,0.4); }
+    .prop-cuenta-tag.libre { background: var(--surface); color: var(--text-muted); border: 1px solid var(--border); }
+    .prop-cuentas-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .prop-transfer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(46,46,62,0.5); font-size: 14px; }
+    .prop-transfer:last-child { border-bottom: none; }
+    .prop-transfer-monto { font-weight: 700; color: var(--green); white-space: nowrap; }
+    .prop-parcial { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--orange); border: 1px solid rgba(224,138,92,0.4); background: var(--orange-dim); border-radius: 4px; padding: 1px 5px; margin-left: 6px; }
+    .prop-aviso { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 10px; font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
+    .prop-aviso.partido { background: var(--orange-dim); border: 1px solid rgba(224,138,92,0.35); }
+    .prop-aviso.preferencia { background: rgba(160,92,224,0.1); border: 1px solid rgba(160,92,224,0.35); }
+    .prop-aviso.sobrante { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); }
+    .prop-error { padding: 14px 16px; border-radius: 10px; background: var(--red-dim); border: 1px solid var(--red); color: var(--red); font-size: 13px; line-height: 1.6; }
+    .prop-hist-item { border: 1px solid var(--border); border-radius: 10px; background: var(--surface2); margin-bottom: 10px; overflow: hidden; }
+    .prop-hist-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; cursor: pointer; }
+    .prop-hist-head:hover { background: var(--border); }
+    .prop-hist-fecha { font-size: 14px; font-weight: 600; }
+    .prop-hist-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .prop-hist-body { padding: 0 16px 16px; display: none; }
+    .prop-hist-item.abierto .prop-hist-body { display: block; }
+    @media (max-width: 900px) {
+      .prop-cuentas-grid { grid-template-columns: 1fr; }
+    }
+
     .loading { display: flex; align-items: center; justify-content: center; height: 120px; color: var(--text-muted); font-size: 14px; gap: 12px; }
     .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -572,6 +616,7 @@
   <button class="tab-btn" id="tab-btn-servicios" onclick="switchGroup('servicios', this)">🍽️ Servicios</button>
   <button class="tab-btn" id="tab-btn-stocks" onclick="switchGroup('stocks', this)">📦 Stocks <span id="prov-badge" class="prov-badge" style="display:none">0</span></button>
   <button class="tab-btn" id="tab-btn-costos" onclick="switchGroup('costos', this)">🧮 Costos</button>
+  <button class="tab-btn" id="tab-btn-propinas" onclick="switchGroup('propinas', this)">💸 Propinas</button>
   <button class="tab-btn" id="tab-btn-plan" onclick="switchGroup('plan', this)">🗓️ Plan</button>
 </div>
 
@@ -830,6 +875,100 @@
       </div>
     </div>
   </main>
+</div>
+
+<!-- ═══ PROPINAS › REPARTO ═══ -->
+<!-- Reparto semanal de las propinas DIGITALES (las de efectivo se entregan en
+     mano en la barra y no pasan por acá). La plata está en dos cuentas, Galicia
+     y Brubank, así que además de dividir hay que decidir de qué cuenta sale cada
+     transferencia. Todo el cálculo lo hace el server (/api/propinas/calcular):
+     acá no se divide nada, para que lo que se ve sea exactamente lo que se
+     guarda. Ver src/propinas.js. -->
+<div id="tab-propinas" class="tab-panel">
+  <main>
+    <div class="card">
+      <div class="card-title"><span>Reparto de propinas</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· sólo las digitales · no toca la contabilidad del bar</span>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label>💳 Plata en Galicia</label>
+          <input type="text" id="prop-saldo-galicia" inputmode="decimal" placeholder="0" oninput="onPropinasInput()" />
+        </div>
+        <div class="form-group">
+          <label>🟣 Plata en Brubank</label>
+          <input type="text" id="prop-saldo-brubank" inputmode="decimal" placeholder="0" oninput="onPropinasInput()" />
+        </div>
+        <div class="form-group">
+          <label>Semana / período <span style="color:var(--text-muted);font-weight:400">(opcional)</span></label>
+          <input type="text" id="prop-periodo" placeholder="Ej: 28/7 al 3/8" />
+        </div>
+        <div class="form-group">
+          <label>Redondear la parte de cada uno a</label>
+          <select id="prop-redondeo" onchange="onPropinasInput()">
+            <option value="1">$1 — al peso exacto</option>
+            <option value="100" selected>$100</option>
+            <option value="1000">$1.000</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="prop-total-linea" style="margin-top:18px;padding:14px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;font-size:14px"></div>
+    </div>
+
+    <div class="card" style="margin-top:24px">
+      <div class="card-title"><span>Quiénes cobran</span>
+        <button class="btn" onclick="openPropinaPersonaModal()">+ Agregar persona</button>
+      </div>
+      <div id="prop-equipo-nota" style="font-size:11px;color:var(--text-muted);line-height:1.7;margin-bottom:14px">
+        Destildá a quien no cobre esta semana. El orden importa sólo cuando la cuenta preferida no alcanza para todos: se respeta de arriba hacia abajo.
+      </div>
+      <div id="prop-equipo-list"><div class="loading"><div class="spinner"></div> Cargando equipo...</div></div>
+    </div>
+
+    <div id="prop-resultado"></div>
+  </main>
+</div>
+
+<!-- ═══ PROPINAS › HISTORIAL ═══ -->
+<div id="tab-propinas-historial" class="tab-panel">
+  <main>
+    <div class="card">
+      <div class="card-title"><span>Repartos anteriores</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· más nuevo primero</span>
+      </div>
+      <div id="prop-historial"><div class="loading"><div class="spinner"></div> Cargando historial...</div></div>
+    </div>
+  </main>
+</div>
+
+<!-- Modal: alta/edición de una persona del equipo de propinas -->
+<div class="modal-overlay" id="prop-persona-overlay">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-title" id="prop-persona-titulo">Agregar persona</div>
+    <div class="form-grid" style="grid-template-columns:1fr">
+      <div class="form-group full">
+        <label>Nombre</label>
+        <input type="text" id="prop-persona-nombre" placeholder="Ej: Pablo" />
+      </div>
+      <div class="form-group full">
+        <label>Cuenta preferida</label>
+        <select id="prop-persona-prefiere">
+          <option value="">Sin preferencia — la que toque</option>
+          <option value="Galicia">Galicia</option>
+          <option value="Brubank">Brubank</option>
+        </select>
+        <span style="font-size:11px;color:var(--text-muted);line-height:1.6;margin-top:4px">
+          Se le paga de esa cuenta siempre que alcance. Si no alcanza, se completa con la otra y el reparto te lo avisa.
+        </span>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closePropinaPersonaModal()">Cancelar</button>
+      <button class="btn btn-primary" id="prop-persona-guardar" onclick="guardarPropinaPersona()">Guardar</button>
+    </div>
+  </div>
 </div>
 
 <!-- ═══ PROVEEDORES TAB ═══ -->
@@ -2104,7 +2243,7 @@ function onLoginSuccess(rol, nombre) {
     document.getElementById('last-updated').style.display = '';
     document.getElementById('btn-refresh').style.display = '';
     // Todas las tabs padre visibles
-    ['tab-btn-dashboard','tab-btn-reportes','tab-btn-pagos','tab-btn-cajas','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-plan'].forEach(id => {
+    ['tab-btn-dashboard','tab-btn-reportes','tab-btn-pagos','tab-btn-cajas','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-propinas','tab-btn-plan'].forEach(id => {
       const el = document.getElementById(id); if (el) el.style.display = '';
     });
     // Pagos: vista completa (filtros, KPIs, listado y botón Pagar)
@@ -2119,7 +2258,7 @@ function onLoginSuccess(rol, nombre) {
     // Encargado: Cajas (con submenús Cajas / Arqueo) + Pagos + Stocks.
     // Stocks se le abre sólo por Gestión de Bebidas: los otros dos submenús están
     // marcados soloAdmin en TAB_GROUPS y la tabla se recorta en loadVinos().
-    ['tab-btn-dashboard','tab-btn-reportes','tab-btn-servicios','tab-btn-costos','tab-btn-plan'].forEach(id => {
+    ['tab-btn-dashboard','tab-btn-reportes','tab-btn-servicios','tab-btn-costos','tab-btn-propinas','tab-btn-plan'].forEach(id => {
       const el = document.getElementById(id); if (el) el.style.display = 'none';
     });
     document.getElementById('tab-btn-cajas').style.display = '';
@@ -2242,6 +2381,11 @@ const TAB_GROUPS = {
     { id: 'costos-resumen', label: '📊 Costos' },
     { id: 'costos-config',  label: '⚙️ Configuración' },
   ] },
+  // Todo /api/propinas/* es adminOnly: la tab entera está oculta para el encargado.
+  propinas: { subs: [
+    { id: 'propinas',           label: '💸 Reparto' },
+    { id: 'propinas-historial', label: '📋 Historial' },
+  ] },
   // Historial de Arqueos lee /api/arqueo/historial, que es adminOnly: si el
   // encargado veía el submenú, sólo conseguía un error de permisos. No se le arma.
   cajas:  { subs: [
@@ -2290,6 +2434,8 @@ function cargarPanel(tab) {
   else if (tab === 'proymes') loadProyeccionMes();
   else if (tab === 'reportes-balance') initReporteBalance();
   else if (tab === 'reportes-servicios') initReporteServicios();
+  else if (tab === 'propinas') loadPropinas();
+  else if (tab === 'propinas-historial') loadPropinasHistorial();
   else if (tab === 'inversiones') loadPlan();
   else if (tab === 'plan') loadPlan();
 }
@@ -8215,6 +8361,368 @@ async function loadServiciosAgregado() {
     + '<div class="card"><div class="card-title">Top productos del periodo</div>'
     + miniTabla([{label:'Producto'},{label:'Categoria'},{label:'Unid.',align:'right'},{label:'Monto',align:'right'}], topRows) + '</div>';
 }
+
+// ═══ PROPINAS ═══════════════════════════════════════════════════════════════
+// Reparto semanal de las propinas digitales. Ver src/propinas.js.
+//
+// Regla de esta pantalla: acá NO se divide plata. Cada vez que cambia un saldo o
+// la lista de gente se le pide el plan al server (/api/propinas/calcular) y se
+// dibuja lo que devuelve. Si el navegador calculara por su cuenta, lo que ves en
+// pantalla y lo que se guarda podrían no ser lo mismo — y lo que se ve es lo que
+// se termina transfiriendo de verdad.
+
+const propinasState = {
+  personas: [],       // equipo completo, como está en la planilla
+  inactivos: {},      // nombre → true si se destildó para esta semana (no se persiste)
+  plan: null,         // último plan devuelto por el server
+  editando: null,     // nombre original mientras se edita una persona
+  debounce: null,
+  cargando: false,
+};
+
+// Acepta "150.000", "150000", "150000,50" y "$150.000".
+function parsePropinaMonto(v) {
+  const s = String(v == null ? '' : v).replace(/[^0-9.,-]/g, '').trim();
+  if (!s) return 0;
+  // Formato argentino: el punto separa miles y la coma decimales.
+  const n = Number(s.replace(/\./g, '').replace(',', '.'));
+  return Number.isFinite(n) ? n : 0;
+}
+
+async function loadPropinas() {
+  const cont = document.getElementById('prop-equipo-list');
+  try {
+    const { data } = await api('/api/propinas');
+    propinasState.personas = data.personas || [];
+    // Quien está marcado como inactivo en la planilla arranca destildado.
+    propinasState.personas.forEach(p => { if (!p.activo) propinasState.inactivos[p.nombre] = true; });
+    renderPropinasEquipo();
+    recalcularPropinas();
+  } catch (e) {
+    cont.innerHTML = '<div class="prop-error">No se pudo cargar el equipo: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function propinasSeleccionadas() {
+  return propinasState.personas.filter(p => !propinasState.inactivos[p.nombre]);
+}
+
+function renderPropinasEquipo() {
+  const cont = document.getElementById('prop-equipo-list');
+  if (!propinasState.personas.length) {
+    cont.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:16px 0">'
+      + 'Todavía no hay nadie cargado. Agregá al equipo con el botón de arriba — queda guardado y no hay que volver a escribirlo cada semana.</div>';
+    return;
+  }
+  cont.innerHTML = propinasState.personas.map(p => {
+    const inactiva = !!propinasState.inactivos[p.nombre];
+    const tag = p.prefiere
+      ? `<span class="prop-cuenta-tag ${p.prefiere.toLowerCase()}">prefiere ${escapeHtml(p.prefiere)}</span>`
+      : '<span class="prop-cuenta-tag libre">sin preferencia</span>';
+    const n = encodeURIComponent(p.nombre);
+    return `<div class="prop-persona-row${inactiva ? ' inactiva' : ''}">
+      <input type="checkbox" ${inactiva ? '' : 'checked'} onchange="togglePropinaPersona('${n}')" title="¿Cobra esta semana?" />
+      <span class="prop-persona-nombre">${escapeHtml(p.nombre)}</span>
+      ${tag}
+      <span class="prop-persona-acciones">
+        <button onclick="openPropinaPersonaModal('${n}')" title="Editar">✏️</button>
+        <button onclick="borrarPropinaPersona('${n}')" title="Sacar del equipo">🗑️</button>
+      </span>
+    </div>`;
+  }).join('');
+}
+
+function togglePropinaPersona(nombreEnc) {
+  const nombre = decodeURIComponent(nombreEnc);
+  propinasState.inactivos[nombre] = !propinasState.inactivos[nombre];
+  renderPropinasEquipo();
+  recalcularPropinas();
+}
+
+// Rebote corto: se recalcula mientras se tipea el saldo sin pegarle al server en
+// cada tecla.
+function onPropinasInput() {
+  clearTimeout(propinasState.debounce);
+  propinasState.debounce = setTimeout(recalcularPropinas, 350);
+}
+
+async function recalcularPropinas() {
+  const cont = document.getElementById('prop-resultado');
+  const linea = document.getElementById('prop-total-linea');
+  const galicia = parsePropinaMonto(document.getElementById('prop-saldo-galicia').value);
+  const brubank = parsePropinaMonto(document.getElementById('prop-saldo-brubank').value);
+  const redondeo = Number(document.getElementById('prop-redondeo').value) || 100;
+  const personas = propinasSeleccionadas().map(p => ({ nombre: p.nombre, prefiere: p.prefiere }));
+
+  linea.innerHTML = `<strong>Total a repartir: ${fmt(galicia + brubank)}</strong>`
+    + `<span style="color:var(--text-muted)"> · Galicia ${fmt(galicia)} + Brubank ${fmt(brubank)}`
+    + ` · ${personas.length} persona${personas.length === 1 ? '' : 's'}</span>`;
+
+  // Estado incompleto: no es un error, todavía no terminó de cargar los datos.
+  if (!personas.length || galicia + brubank <= 0) {
+    propinasState.plan = null;
+    cont.innerHTML = '';
+    return;
+  }
+
+  propinasState.cargando = true;
+  try {
+    const { data } = await api('/api/propinas/calcular', {
+      method: 'POST',
+      body: JSON.stringify({ saldoGalicia: galicia, saldoBrubank: brubank, personas, redondeo }),
+    });
+    propinasState.plan = data;
+    renderPropinasPlan(data);
+  } catch (e) {
+    propinasState.plan = null;
+    cont.innerHTML = '<div class="card" style="margin-top:24px"><div class="prop-error">' + escapeHtml(e.message) + '</div></div>';
+  } finally {
+    propinasState.cargando = false;
+  }
+}
+
+function renderPropinasPlan(r) {
+  const cont = document.getElementById('prop-resultado');
+
+  const kpis = '<div class="kpi-grid" style="margin-top:24px">'
+    + `<div class="kpi-card green"><div class="kpi-label">Le toca a cada uno</div><div class="kpi-value">${fmt(r.porPersona)}</div><div class="kpi-sub">${r.cantidadPersonas} persona${r.cantidadPersonas === 1 ? '' : 's'}</div></div>`
+    + `<div class="kpi-card blue"><div class="kpi-label">Total a repartir</div><div class="kpi-value">${fmt(r.total)}</div><div class="kpi-sub">Galicia ${fmt(r.saldoGalicia)} + Brubank ${fmt(r.saldoBrubank)}</div></div>`
+    + `<div class="kpi-card"><div class="kpi-label">Transferencias a hacer</div><div class="kpi-value">${r.porCuenta.reduce((s, c) => s + c.transferencias.length, 0)}</div><div class="kpi-sub">${r.personas.filter(p => p.partido).length} partida${r.personas.filter(p => p.partido).length === 1 ? '' : 's'} en dos</div></div>`
+    + `<div class="kpi-card orange"><div class="kpi-label">Sobrante</div><div class="kpi-value">${fmt(r.sobrante)}</div><div class="kpi-sub">queda en la cuenta</div></div>`
+    + '</div>';
+
+  const avisos = r.avisos.length
+    ? '<div style="margin-top:24px">' + r.avisos.map(a => {
+        const icono = a.tipo === 'partido' ? '✂️' : a.tipo === 'preferencia' ? '🔀' : 'ℹ️';
+        return `<div class="prop-aviso ${a.tipo}"><span>${icono}</span><span>${escapeHtml(a.mensaje)}</span></div>`;
+      }).join('') + '</div>'
+    : '';
+
+  // El plan agrupado por cuenta es la vista principal: así se ejecuta después,
+  // sentado en el homebanking de una cuenta a la vez.
+  const cuentas = '<div class="prop-cuentas-grid" style="margin-top:24px">' + r.porCuenta.map(c => {
+    const emoji = c.cuenta === 'Galicia' ? '💳' : '🟣';
+    const filas = c.transferencias.length
+      ? c.transferencias.map(t => `<div class="prop-transfer">
+          <span>${escapeHtml(t.nombre)}${t.parcial ? '<span class="prop-parcial">parcial</span>' : ''}</span>
+          <span class="prop-transfer-monto">${fmt(t.monto)}</span>
+        </div>`).join('')
+      : '<div style="color:var(--text-muted);font-size:13px;padding:12px 0">No sale ninguna transferencia de esta cuenta.</div>';
+    return `<div class="card">
+      <div class="card-title"><span>${emoji} Desde ${escapeHtml(c.cuenta)}</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">${c.transferencias.length} transferencia${c.transferencias.length === 1 ? '' : 's'}</span>
+      </div>
+      ${filas}
+      <div class="prop-transfer" style="border-top:1px solid var(--border);margin-top:8px;padding-top:12px;font-weight:700">
+        <span>Sale de ${escapeHtml(c.cuenta)}</span><span>${fmt(c.usado)}</span>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:8px">Tenías ${fmt(c.saldoInicial)} · queda ${fmt(c.restante)}</div>
+    </div>`;
+  }).join('') + '</div>';
+
+  const tabla = `<div class="card" style="margin-top:24px">
+    <div class="card-title">Persona por persona</div>
+    <div class="table-wrap"><table class="prov-resumen-table">
+      <thead><tr><th>Persona</th><th>Le toca</th><th>Desde Galicia</th><th>Desde Brubank</th></tr></thead>
+      <tbody>${r.personas.map(p => `<tr>
+        <td>${escapeHtml(p.nombre)}${p.partido ? '<span class="prop-parcial">2 transf.</span>' : ''}</td>
+        <td>${fmt(p.total)}</td>
+        <td${p.galicia > 0 ? '' : ' style="color:var(--text-muted)"'}>${p.galicia > 0 ? fmt(p.galicia) : '—'}</td>
+        <td${p.brubank > 0 ? '' : ' style="color:var(--text-muted)"'}>${p.brubank > 0 ? fmt(p.brubank) : '—'}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </div>`;
+
+  const acciones = `<div class="card" style="margin-top:24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+    <button class="btn btn-acento" onclick="guardarPropinaReparto(this)">✓ Guardar este reparto</button>
+    <button class="btn" onclick="copiarPropinaPlan(this)">📋 Copiar plan</button>
+    <span style="font-size:11px;color:var(--text-muted);line-height:1.6;flex:1;min-width:240px">
+      Guardar sólo deja constancia de lo repartido en la planilla. No mueve plata, no toca la contabilidad del bar ni las cajas.
+    </span>
+  </div>`;
+
+  cont.innerHTML = kpis + avisos + cuentas + tabla + acciones;
+}
+
+// Texto plano para pegar en WhatsApp: la lista de transferencias tal cual hay
+// que hacerlas.
+function planPropinaComoTexto(r) {
+  const periodo = document.getElementById('prop-periodo').value.trim();
+  const lineas = [];
+  lineas.push('PROPINAS' + (periodo ? ' — ' + periodo : ''));
+  lineas.push(`Total ${fmt(r.total)} entre ${r.cantidadPersonas} = ${fmt(r.porPersona)} c/u`);
+  lineas.push('');
+  r.porCuenta.forEach(c => {
+    if (!c.transferencias.length) return;
+    lineas.push(`Desde ${c.cuenta}:`);
+    c.transferencias.forEach(t => lineas.push(`  ${t.nombre}: ${fmt(t.monto)}${t.parcial ? ' (parcial)' : ''}`));
+    lineas.push('');
+  });
+  if (r.sobrante > 0) lineas.push(`Sobrante que queda en la cuenta: ${fmt(r.sobrante)}`);
+  return lineas.join('\n').trim();
+}
+
+async function copiarPropinaPlan(btn) {
+  if (!propinasState.plan) return;
+  try {
+    await navigator.clipboard.writeText(planPropinaComoTexto(propinasState.plan));
+    const txt = btn.textContent;
+    btn.textContent = '✓ Copiado';
+    setTimeout(() => { btn.textContent = txt; }, 1800);
+  } catch (e) {
+    showToast('No se pudo copiar: ' + e.message);
+  }
+}
+
+async function guardarPropinaReparto(btn) {
+  if (!propinasState.plan) return;
+  const galicia = parsePropinaMonto(document.getElementById('prop-saldo-galicia').value);
+  const brubank = parsePropinaMonto(document.getElementById('prop-saldo-brubank').value);
+  const redondeo = Number(document.getElementById('prop-redondeo').value) || 100;
+  const personas = propinasSeleccionadas().map(p => ({ nombre: p.nombre, prefiere: p.prefiere }));
+  if (!confirm(`¿Guardar el reparto de ${fmt(propinasState.plan.total)} entre ${personas.length} personas?\n\nQueda registrado en la planilla. No mueve plata.`)) return;
+
+  btn.disabled = true;
+  const txt = btn.textContent;
+  btn.textContent = 'Guardando...';
+  try {
+    await api('/api/propinas/repartos', {
+      method: 'POST',
+      body: JSON.stringify({
+        saldoGalicia: galicia, saldoBrubank: brubank, personas, redondeo,
+        periodo: document.getElementById('prop-periodo').value.trim(),
+      }),
+    });
+    showToast('Reparto guardado');
+    document.getElementById('prop-saldo-galicia').value = '';
+    document.getElementById('prop-saldo-brubank').value = '';
+    document.getElementById('prop-periodo').value = '';
+    recalcularPropinas();
+  } catch (e) {
+    showToast('Error: ' + e.message, 4000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = txt;
+  }
+}
+
+// ─── Equipo: alta / edición / baja ──────────────────────────────────────────
+function openPropinaPersonaModal(nombreEnc) {
+  const nombre = nombreEnc ? decodeURIComponent(nombreEnc) : '';
+  const p = nombre ? propinasState.personas.find(x => x.nombre === nombre) : null;
+  propinasState.editando = p ? p.nombre : null;
+  document.getElementById('prop-persona-titulo').textContent = p ? 'Editar persona' : 'Agregar persona';
+  document.getElementById('prop-persona-nombre').value = p ? p.nombre : '';
+  document.getElementById('prop-persona-prefiere').value = p ? (p.prefiere || '') : '';
+  document.getElementById('prop-persona-overlay').classList.add('open');
+  document.getElementById('prop-persona-nombre').focus();
+}
+
+function closePropinaPersonaModal() {
+  document.getElementById('prop-persona-overlay').classList.remove('open');
+  propinasState.editando = null;
+}
+
+async function guardarPropinaPersona() {
+  const nombre = document.getElementById('prop-persona-nombre').value.trim();
+  if (!nombre) { showToast('Falta el nombre'); return; }
+  const btn = document.getElementById('prop-persona-guardar');
+  btn.disabled = true;
+  try {
+    await api('/api/propinas/personas', {
+      method: 'POST',
+      body: JSON.stringify({
+        nombre,
+        prefiere: document.getElementById('prop-persona-prefiere').value,
+        nombreOriginal: propinasState.editando || '',
+      }),
+    });
+    // Un renombre tiene que arrastrar el "no cobra esta semana" al nombre nuevo.
+    if (propinasState.editando && propinasState.editando !== nombre && propinasState.inactivos[propinasState.editando]) {
+      delete propinasState.inactivos[propinasState.editando];
+      propinasState.inactivos[nombre] = true;
+    }
+    closePropinaPersonaModal();
+    await loadPropinas();
+    showToast('Guardado');
+  } catch (e) {
+    showToast('Error: ' + e.message, 4000);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function borrarPropinaPersona(nombreEnc) {
+  const nombre = decodeURIComponent(nombreEnc);
+  if (!confirm(`¿Sacar a ${nombre} del equipo de propinas?\n\nLos repartos ya guardados no se tocan.`)) return;
+  try {
+    await api('/api/propinas/personas/' + encodeURIComponent(nombre), { method: 'DELETE' });
+    delete propinasState.inactivos[nombre];
+    await loadPropinas();
+    showToast('Eliminado');
+  } catch (e) {
+    showToast('Error: ' + e.message, 4000);
+  }
+}
+
+// ─── Historial ──────────────────────────────────────────────────────────────
+async function loadPropinasHistorial() {
+  const cont = document.getElementById('prop-historial');
+  cont.innerHTML = '<div class="loading"><div class="spinner"></div> Cargando historial...</div>';
+  let repartos;
+  try { repartos = (await api('/api/propinas')).data.repartos || []; }
+  catch (e) { cont.innerHTML = '<div class="prop-error">' + escapeHtml(e.message) + '</div>'; return; }
+
+  if (!repartos.length) {
+    cont.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:16px 0">Todavía no se guardó ningún reparto.</div>';
+    return;
+  }
+
+  cont.innerHTML = repartos.map((r, i) => {
+    const fechaLabel = r.fecha ? new Date(r.fecha + 'T12:00:00').toLocaleDateString('es-AR') : '—';
+    const partidos = (r.personas || []).filter(p => p.partido).length;
+    const detalle = (r.personas || []).map(p => `<tr>
+        <td>${escapeHtml(p.nombre)}</td><td>${fmt(p.total)}</td>
+        <td${p.galicia > 0 ? '' : ' style="color:var(--text-muted)"'}>${p.galicia > 0 ? fmt(p.galicia) : '—'}</td>
+        <td${p.brubank > 0 ? '' : ' style="color:var(--text-muted)"'}>${p.brubank > 0 ? fmt(p.brubank) : '—'}</td>
+      </tr>`).join('');
+    return `<div class="prop-hist-item" id="prop-hist-${i}">
+      <div class="prop-hist-head" onclick="document.getElementById('prop-hist-${i}').classList.toggle('abierto')">
+        <div>
+          <div class="prop-hist-fecha">${fechaLabel}${r.periodo ? ' · ' + escapeHtml(r.periodo) : ''}</div>
+          <div class="prop-hist-meta">${fmt(r.total)} entre ${r.cantidadPersonas} · ${fmt(r.porPersona)} c/u${partidos ? ` · ${partidos} pago${partidos === 1 ? '' : 's'} partido${partidos === 1 ? '' : 's'}` : ''}${r.sobrante > 0 ? ` · sobrante ${fmt(r.sobrante)}` : ''}</div>
+        </div>
+        <span style="color:var(--text-muted);font-size:12px">ver ▾</span>
+      </div>
+      <div class="prop-hist-body">
+        <div class="table-wrap"><table class="prov-resumen-table">
+          <thead><tr><th>Persona</th><th>Le tocó</th><th>Galicia</th><th>Brubank</th></tr></thead>
+          <tbody>${detalle}</tbody>
+        </table></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap">
+          <span style="font-size:11px;color:var(--text-muted)">Saldos del día: Galicia ${fmt(r.saldoGalicia)} · Brubank ${fmt(r.saldoBrubank)} · redondeo a ${fmt(r.redondeo)}</span>
+          <button class="btn" onclick="borrarPropinaReparto('${escapeHtml(r.id)}')">🗑️ Eliminar</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function borrarPropinaReparto(id) {
+  if (!confirm('¿Eliminar este reparto del historial?\n\nSe borra el registro, no se deshace ninguna transferencia.')) return;
+  try {
+    await api('/api/propinas/repartos/' + encodeURIComponent(id), { method: 'DELETE' });
+    showToast('Reparto eliminado');
+    loadPropinasHistorial();
+  } catch (e) {
+    showToast('Error: ' + e.message, 4000);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const ov = document.getElementById('prop-persona-overlay');
+  if (ov) ov.addEventListener('click', function (e) { if (e.target === this) closePropinaPersonaModal(); });
+});
 
 // Arrancar: verificar token guardado o mostrar login
 checkSavedToken();

@@ -24,6 +24,7 @@ const plan = require('./plan');
 const tc = require('./tc');
 const roi = require('./roi');
 const finanzas = require('./finanzas');
+const propinas = require('./propinas');
 const stockBebidas = require('./stock-bebidas');
 const { iniciarCron } = require('./cron');
 const { cargarEstadoCaja, guardarEstadoCaja } = require('./estado-caja');
@@ -1602,6 +1603,51 @@ app.put('/api/plan/config', authMiddleware, adminOnly, async (req, res) => {
     await plan.guardarConfig(clave, valor);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─── Propinas — reparto semanal de las propinas digitales (solo admin) ───────
+// Deliberadamente aislado del ledger: ninguno de estos endpoints escribe en
+// Movimientos ni toca la hoja Cajas. La propina es plata de terceros que está
+// de paso; meterla en el ledger movería el balance del bar. Ver src/propinas.js.
+app.get('/api/propinas', authMiddleware, adminOnly, async (req, res) => {
+  try { res.json({ ok: true, data: await propinas.listPropinas() }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Calcula el plan de transferencias sin guardar nada. Es el endpoint que usa la
+// pantalla mientras se tocan los saldos o se saca gente de la lista.
+app.post('/api/propinas/calcular', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { saldoGalicia, saldoBrubank, personas, redondeo } = req.body;
+    res.json({ ok: true, data: propinas.calcularReparto({ saldoGalicia, saldoBrubank, personas, redondeo }) });
+  } catch (err) {
+    // Los errores del cálculo son de validación (saldos en cero, sin gente, no
+    // alcanza para la unidad de redondeo), no fallas del servidor.
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// Guarda el reparto ya ejecutado. El plan se recalcula adentro a partir de los
+// saldos y la gente: no se guardan los montos que mandó el navegador.
+app.post('/api/propinas/repartos', authMiddleware, adminOnly, async (req, res) => {
+  try { res.json({ ok: true, data: await propinas.guardarReparto(req.body) }); }
+  catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.delete('/api/propinas/repartos/:id', authMiddleware, adminOnly, async (req, res) => {
+  try { await propinas.deleteReparto(req.params.id); res.json({ ok: true, message: 'Reparto eliminado' }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Equipo: alta, edición (incluye renombrar vía nombreOriginal) y baja.
+app.post('/api/propinas/personas', authMiddleware, adminOnly, async (req, res) => {
+  try { res.json({ ok: true, data: await propinas.guardarPersona(req.body) }); }
+  catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.delete('/api/propinas/personas/:nombre', authMiddleware, adminOnly, async (req, res) => {
+  try { await propinas.deletePersona(req.params.nombre); res.json({ ok: true, message: 'Persona eliminada' }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 // ─── Finanzas — capital del recupero (solo admin) ───────────────────────────
