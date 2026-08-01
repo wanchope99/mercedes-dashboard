@@ -295,7 +295,9 @@
     .btn-acento { background: var(--orange); border-color: var(--orange); color: #17171f; font-weight: 600; }
     .btn-acento:hover { filter: brightness(1.08); background: var(--orange); }
     .btn-acento:disabled { opacity: 0.4; cursor: default; filter: none; }
-    .prop-persona-row { display: grid; grid-template-columns: 26px 1fr auto auto; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); margin-bottom: 8px; }
+    .prop-persona-row { display: grid; grid-template-columns: 26px 1fr auto auto; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); margin-bottom: 8px; cursor: pointer; }
+    .prop-persona-row:hover { border-color: #5a5a7a; }
+    .prop-persona-row input[type="checkbox"] { width: 17px; height: 17px; cursor: pointer; accent-color: var(--green); }
     .prop-persona-row.inactiva { opacity: 0.45; }
     .prop-persona-nombre { font-size: 14px; font-weight: 500; }
     .prop-persona-acciones { display: flex; gap: 6px; }
@@ -919,12 +921,18 @@
 
     <div class="card" style="margin-top:24px">
       <div class="card-title"><span>Quiénes cobran</span>
-        <button class="btn" onclick="openPropinaPersonaModal()">+ Agregar persona</button>
+        <button class="btn" id="prop-btn-editar-equipo" onclick="togglePropinaEdicionEquipo()" style="font-size:12px;padding:6px 12px">⚙️ Editar equipo</button>
       </div>
       <div id="prop-equipo-nota" style="font-size:11px;color:var(--text-muted);line-height:1.7;margin-bottom:14px">
-        Destildá a quien no cobre esta semana. El orden importa sólo cuando la cuenta preferida no alcanza para todos: se respeta de arriba hacia abajo.
+        Están todos tildados. Destildá sólo a quien no cobre esta semana.
       </div>
       <div id="prop-equipo-list"><div class="loading"><div class="spinner"></div> Cargando equipo...</div></div>
+      <div id="prop-equipo-acciones" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);align-items:center;gap:12px;flex-wrap:wrap">
+        <button class="btn" onclick="openPropinaPersonaModal()">+ Agregar persona</button>
+        <span style="font-size:11px;color:var(--text-muted);line-height:1.6;flex:1;min-width:240px">
+          El equipo queda guardado, no hay que cargarlo cada semana. El orden sólo importa cuando la cuenta preferida no alcanza para todos: se respeta de arriba hacia abajo.
+        </span>
+      </div>
     </div>
 
     <div id="prop-resultado"></div>
@@ -8376,6 +8384,7 @@ const propinasState = {
   inactivos: {},      // nombre → true si se destildó para esta semana (no se persiste)
   plan: null,         // último plan devuelto por el server
   editando: null,     // nombre original mientras se edita una persona
+  editandoEquipo: false, // modo "editar equipo": muestra alta/edición/baja
   debounce: null,
   cargando: false,
 };
@@ -8407,28 +8416,48 @@ function propinasSeleccionadas() {
   return propinasState.personas.filter(p => !propinasState.inactivos[p.nombre]);
 }
 
+// La lista arranca en modo simple: sólo nombres para tildar/destildar. Cambiar
+// el equipo es raro (alguien entra o se va), así que los botones de editar y
+// borrar aparecen recién al apretar "Editar equipo".
+function togglePropinaEdicionEquipo() {
+  propinasState.editandoEquipo = !propinasState.editandoEquipo;
+  const btn = document.getElementById('prop-btn-editar-equipo');
+  btn.textContent = propinasState.editandoEquipo ? '✓ Listo' : '⚙️ Editar equipo';
+  document.getElementById('prop-equipo-acciones').style.display = propinasState.editandoEquipo ? 'flex' : 'none';
+  document.getElementById('prop-equipo-nota').style.display = propinasState.editandoEquipo ? 'none' : '';
+  renderPropinasEquipo();
+}
+
 function renderPropinasEquipo() {
   const cont = document.getElementById('prop-equipo-list');
+  const editando = propinasState.editandoEquipo;
   if (!propinasState.personas.length) {
     cont.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:16px 0">'
-      + 'Todavía no hay nadie cargado. Agregá al equipo con el botón de arriba — queda guardado y no hay que volver a escribirlo cada semana.</div>';
+      + 'No hay nadie cargado. Entrá a "Editar equipo" para agregar gente.</div>';
     return;
   }
   cont.innerHTML = propinasState.personas.map(p => {
     const inactiva = !!propinasState.inactivos[p.nombre];
+    // En modo simple sólo se muestra la preferencia si la tiene: decir "sin
+    // preferencia" en cinco de seis filas es ruido.
     const tag = p.prefiere
-      ? `<span class="prop-cuenta-tag ${p.prefiere.toLowerCase()}">prefiere ${escapeHtml(p.prefiere)}</span>`
-      : '<span class="prop-cuenta-tag libre">sin preferencia</span>';
+      ? `<span class="prop-cuenta-tag ${p.prefiere.toLowerCase()}">cobra de ${escapeHtml(p.prefiere)}</span>`
+      : (editando ? '<span class="prop-cuenta-tag libre">sin preferencia</span>' : '<span></span>');
     const n = encodeURIComponent(p.nombre);
-    return `<div class="prop-persona-row${inactiva ? ' inactiva' : ''}">
+    // preventDefault: los botones viven dentro del <label>, así que sin esto un
+    // clic en "editar" además tildaría/destildaría a la persona.
+    const acciones = editando
+      ? `<span class="prop-persona-acciones">
+          <button type="button" onclick="event.preventDefault();event.stopPropagation();openPropinaPersonaModal('${n}')" title="Editar">✏️</button>
+          <button type="button" onclick="event.preventDefault();event.stopPropagation();borrarPropinaPersona('${n}')" title="Sacar del equipo">🗑️</button>
+        </span>`
+      : '<span></span>';
+    return `<label class="prop-persona-row${inactiva ? ' inactiva' : ''}">
       <input type="checkbox" ${inactiva ? '' : 'checked'} onchange="togglePropinaPersona('${n}')" title="¿Cobra esta semana?" />
       <span class="prop-persona-nombre">${escapeHtml(p.nombre)}</span>
       ${tag}
-      <span class="prop-persona-acciones">
-        <button onclick="openPropinaPersonaModal('${n}')" title="Editar">✏️</button>
-        <button onclick="borrarPropinaPersona('${n}')" title="Sacar del equipo">🗑️</button>
-      </span>
-    </div>`;
+      ${acciones}
+    </label>`;
   }).join('');
 }
 

@@ -64,6 +64,18 @@ const CUENTAS = ['Galicia', 'Brubank'];
 const REDONDEO_DEFAULT = 100;
 const REDONDEOS_VALIDOS = [1, 100, 1000];
 
+// El equipo que cobra propina siempre es el mismo, así que la hoja arranca ya
+// cargada y no hay que dar de alta a nadie a mano. Se escribe UNA sola vez,
+// cuando la hoja se crea: si después se saca a alguien, no vuelve a aparecer.
+const PERSONAS_DEFAULT = [
+  { nombre: 'Ezequiel', prefiere: '' },
+  { nombre: 'Juan', prefiere: '' },
+  { nombre: 'Griselda', prefiere: '' },
+  { nombre: 'Charly', prefiere: '' },
+  { nombre: 'Pablo', prefiere: 'Galicia' },
+  { nombre: 'Lucas', prefiere: '' },
+];
+
 // ═══════════════════════════════════════════════════════════════════════════
 // El cálculo — función pura, sin I/O. Es la parte que se testea sola.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -286,6 +298,8 @@ function _sheets() {
   return google.sheets({ version: 'v4', auth });
 }
 
+// Devuelve true sólo si tuvo que CREAR la hoja (false si ya existía). Eso es lo
+// que distingue "primer uso" de "el usuario vació la hoja a propósito".
 async function _ensureHoja(api, titulo, header, rango) {
   try {
     await api.spreadsheets.batchUpdate({
@@ -298,9 +312,23 @@ async function _ensureHoja(api, titulo, header, rango) {
       valueInputOption: 'RAW',
       requestBody: { values: [header] },
     });
+    return true;
   } catch (e) {
     if (!String(e.message || '').toLowerCase().includes('already exists')) throw e;
+    return false;
   }
+}
+
+// Carga el equipo por defecto en una hoja recién creada.
+async function _sembrarPersonas(api) {
+  const ahora = new Date().toISOString();
+  await api.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${HOJA_PERSONAS}!A:D`,
+    valueInputOption: 'RAW',
+    requestBody: { values: PERSONAS_DEFAULT.map(p => [p.nombre, p.prefiere, 'TRUE', ahora]) },
+  });
+  return PERSONAS_DEFAULT.map((p, i) => ({ ...p, activo: true, rowIndex: i + 2 }));
 }
 
 function _num(v) { return Number(String(v == null ? '' : v).replace(/[^0-9.-]/g, '')) || 0; }
@@ -317,7 +345,15 @@ async function _leerHoja(api, hoja, rango, header, rangoHeader) {
 }
 
 async function _leerPersonas(api) {
-  const rows = await _leerHoja(api, HOJA_PERSONAS, 'A:D', HEADER_PERSONAS, 'A1:D1');
+  let rows;
+  try {
+    const res = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${HOJA_PERSONAS}!A:D` });
+    rows = res.data.values || [];
+  } catch (e) {
+    // No existe la hoja: es el primer uso, se crea y se siembra el equipo.
+    const creada = await _ensureHoja(api, HOJA_PERSONAS, HEADER_PERSONAS, 'A1:D1');
+    return creada ? await _sembrarPersonas(api) : [];
+  }
   const out = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
@@ -566,6 +602,6 @@ module.exports = {
   listPropinas, guardarPersona, deletePersona,
   guardarReparto, deleteReparto,
   clearCache,
-  CUENTAS, REDONDEOS_VALIDOS, REDONDEO_DEFAULT,
+  CUENTAS, REDONDEOS_VALIDOS, REDONDEO_DEFAULT, PERSONAS_DEFAULT,
   HOJA_PERSONAS, HOJA_REPARTOS, HOJA_DETALLE,
 };

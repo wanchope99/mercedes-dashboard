@@ -92,6 +92,8 @@ The assignment algorithm relies on all shares being equal: order the people, the
 
 Persistence: three sheets in `SPREADSHEET_ID`, auto-created on first use — `Propinas Personas` (the roster + each person's preferred account), `Propinas Repartos` (one row per weekly split) and `Propinas Detalle` (one row per person per split). Admin-only; the whole tab is hidden from the `encargado` and every `/api/propinas/*` route is `adminOnly`.
 
+The roster is the same people every week, so `Propinas Personas` is seeded with `PERSONAS_DEFAULT` — but only at the moment the sheet is **created**, never when it merely reads back empty, so removing someone doesn't resurrect them next load. The UI reflects that: the normal weekly action is just unticking whoever didn't work, and add/edit/delete are hidden behind an "Editar equipo" toggle. Unticking is in-memory only and resets on reload; the `Activo` column is the persistent version of the same idea.
+
 ### Other independent modules
 
 - `src/vinos.js` / `src/stocks.js` — wine/beverage inventory, stock rotation, and days-of-coverage analysis, cross-referencing Fudo stock+cost+price against recent sales velocity.
