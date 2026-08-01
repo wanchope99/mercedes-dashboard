@@ -573,6 +573,23 @@
     .switch input:checked ~ .switch-label { color:var(--orange); font-weight:600; }
     .switch:hover .switch-track { border-color:var(--orange); }
 
+    /* ── Barra inferior (sólo teléfono; el @media de abajo la enciende) ── */
+    #bottom-nav { display: none; grid-auto-flow: column; grid-auto-columns: 1fr;
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 300;
+      background: var(--surface); border-top: 1px solid var(--border);
+      padding-bottom: env(safe-area-inset-bottom); }
+    .bn-btn { position: relative; background: none; border: none; color: var(--text-muted);
+      font-family: inherit; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 3px; min-height: 56px; padding: 6px 2px; cursor: pointer; }
+    .bn-ico { font-size: 19px; line-height: 1; }
+    .bn-lbl { font-size: 10px; letter-spacing: .02em; }
+    .bn-btn.active { color: var(--orange); }
+    .bn-badge { position: absolute; top: 4px; right: 50%; margin-right: -22px; }
+    /* Las secciones que no entran en la barra, dentro de la hoja "Más". */
+    .mas-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .mas-item { display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 6px; padding: 16px 6px; font-size: 12px; min-height: 78px; }
+
     /* ══════════════════════════════════════════════════════════════════════
        TELÉFONO — 640px
        ══════════════════════════════════════════════════════════════════════
@@ -605,9 +622,47 @@
       #btn-refresh { font-size: 0; padding: 8px 12px; }
       #btn-refresh .refresh-icon { font-size: 15px; }
 
-      .tab-nav { padding: 0 8px; }
-      .subtab-nav.has-subs { padding: 0 8px; }
       .filters-bar, .pagos-filters { padding: 10px 14px; gap: 8px; }
+
+      /* ── Navegación ──
+         Arriba desaparece la barra de secciones (la reemplaza la de abajo) y
+         quedan sólo los submenús, como chips que se deslizan. */
+      .tab-nav { display: none; }
+      #bottom-nav { display: grid; }
+      /* Que la barra fija de abajo no tape el final del contenido. */
+      body { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+      .subtab-nav.has-subs { padding: 8px 12px; gap: 8px; background: var(--surface); }
+      .subtab-btn { border: 1px solid var(--border); border-radius: 99px; padding: 9px 14px;
+        min-height: 44px; font-size: 13px; }
+      .subtab-btn.active { background: var(--orange-dim); color: var(--orange);
+        border-color: var(--orange); border-bottom-color: var(--orange); }
+
+      /* ── Gráficos ──
+         Los ~12 gráficos traen la altura en un style inline, así que un
+         !important acá vale más que 12 ediciones que el próximo gráfico nuevo
+         vuelve a romper. 230px deja entrar el gráfico, su título y el borde de
+         la tarjeta siguiente. */
+      .chart-container { height: 230px !important; }
+
+      /* ── Tamaño mínimo para el dedo ──
+         Varios de estos botones traen el padding en un style inline (hay íconos
+         de 2px 7px, ~26x20px). No se les puede ganar por especificidad, pero no
+         hace falta: min-height y min-width son OTRAS propiedades, así que el
+         padding inline no las pisa. */
+      .btn, .filter-mode-btn, .subtab-btn, .pv-btn, .prov-copy-btn, .btn-close,
+      .proy-var-del, .prop-persona-acciones button, .prov-notif-btn {
+        min-height: 44px; min-width: 44px;
+        display: inline-flex; align-items: center; justify-content: center;
+      }
+      /* Varias de estas acciones son destructivas y su única pista es el title=,
+         que en una pantalla táctil no existe. Separarlas para no tocar la de al lado. */
+      .plan-acciones .btn + .btn, td .btn + .btn { margin-left: 10px; }
+
+      /* iOS hace zoom solo al enfocar un campo de menos de 16px. */
+      input, select, textarea,
+      .form-group input, .form-group select, .form-group textarea {
+        font-size: 16px; min-height: 44px;
+      }
     }
   </style>
 </head>
@@ -665,18 +720,12 @@
   </div>
 </header>
 
-<!-- Tab nav -->
-<div class="tab-nav" id="tab-nav">
-  <button class="tab-btn active" id="tab-btn-dashboard" onclick="switchGroup('dashboard', this)">📊 Dashboard</button>
-  <button class="tab-btn" id="tab-btn-reportes" onclick="switchGroup('reportes', this)">📈 Reportes</button>
-  <button class="tab-btn" id="tab-btn-pagos" onclick="switchGroup('pagos', this)">💳 Pagos</button>
-  <button class="tab-btn" id="tab-btn-cajas" onclick="switchGroup('cajas', this)">🏦 Cajas</button>
-  <button class="tab-btn" id="tab-btn-servicios" onclick="switchGroup('servicios', this)">🍽️ Servicios</button>
-  <button class="tab-btn" id="tab-btn-stocks" onclick="switchGroup('stocks', this)">📦 Stocks <span id="prov-badge" class="prov-badge" style="display:none">0</span></button>
-  <button class="tab-btn" id="tab-btn-costos" onclick="switchGroup('costos', this)">🧮 Costos</button>
-  <button class="tab-btn" id="tab-btn-propinas" onclick="switchGroup('propinas', this)">💸 Propinas</button>
-  <button class="tab-btn" id="tab-btn-plan" onclick="switchGroup('plan', this)">🗓️ Plan</button>
-</div>
+<!-- Las dos barras las arma renderNav() desde TAB_GROUPS, que es la fuente única.
+     La de arriba se usa en la computadora; la de abajo, en el teléfono. La de
+     arriba NO se borra en el teléfono, sólo se oculta: así setNavActivo no
+     necesita ramas y girar a horizontal la devuelve intacta. -->
+<div class="tab-nav" id="tab-nav"></div>
+<nav id="bottom-nav" aria-label="Secciones"></nav>
 
 <!-- Sub-navegación: aparece cuando la tab padre tiene submenús (Cajas, Stocks) -->
 <div class="subtab-nav" id="subtab-nav"></div>
@@ -2245,6 +2294,45 @@ const state = {
 const MQ_PHONE = window.matchMedia('(max-width: 640px)');
 function esPhone() { return MQ_PHONE.matches; }
 
+// ─── Gráficos al cambiar de tamaño (girar el teléfono) ───────────────────────
+// Chart.js ya observa el tamaño del canvas, así que los gráficos VISIBLES se
+// reacomodan solos. El problema son los que están en un panel oculto: se miden
+// como 0 de ancho y quedan mal para siempre. Peor todavía si NACIERON ocultos,
+// porque ahí resize() reacomoda los ejes pero no la geometría de las barras
+// (ver el comentario de setRepServView).
+//
+// Entonces: al cambiar el tamaño se redibujan los visibles y se anotan los
+// ocultos como "sucios"; se arreglan cuando su panel se muestra (activarPanel).
+const _graficosSucios = new Set();
+const _canvasVisible = el => !!(el && el.offsetParent !== null);
+
+function marcarGraficosSucios() {
+  Object.keys(state.charts || {}).forEach(id => {
+    const c = state.charts[id];
+    if (!c || !c.canvas) return;
+    if (_canvasVisible(c.canvas)) c.resize(); else _graficosSucios.add(id);
+  });
+}
+
+function refrescarGraficosVisibles() {
+  _graficosSucios.forEach(id => {
+    const c = (state.charts || {})[id];
+    if (!c || !c.canvas) { _graficosSucios.delete(id); return; }
+    if (_canvasVisible(c.canvas)) { c.resize(); _graficosSucios.delete(id); }
+  });
+}
+
+// Un solo listener de resize en toda la app. Con rebote, porque en iOS la barra
+// de direcciones que aparece y desaparece dispara resize todo el tiempo.
+let _resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => {
+    marcarGraficosSucios();
+    if (typeof updateHistArqueosNav === 'function') updateHistArqueosNav();
+  }, 180);
+});
+
 // ─── Zona horaria: toda la app muestra horarios en Buenos Aires, Argentina ──────
 const TZ_AR = 'America/Argentina/Buenos_Aires';
 const fechaAR = (d = new Date(), opts = {}) => new Date(d).toLocaleDateString('es-AR', { timeZone: TZ_AR, ...opts });
@@ -2312,13 +2400,13 @@ function onLoginSuccess(rol, nombre) {
   document.getElementById('login-screen').classList.remove('active');
   document.getElementById('header-usuario').textContent = `👤 ${nombre}`;
 
+  // Las barras se arman según el rol desde TAB_GROUPS. Tiene que correr ANTES de
+  // cualquier switchGroup, porque es quien crea los botones.
+  renderNav();
+
   if (rol === 'admin') {
     document.getElementById('last-updated').style.display = '';
     document.getElementById('btn-refresh').style.display = '';
-    // Todas las tabs padre visibles
-    ['tab-btn-dashboard','tab-btn-reportes','tab-btn-pagos','tab-btn-cajas','tab-btn-servicios','tab-btn-stocks','tab-btn-costos','tab-btn-propinas','tab-btn-plan'].forEach(id => {
-      const el = document.getElementById(id); if (el) el.style.display = '';
-    });
     // Pagos: vista completa (filtros, KPIs, listado y botón Pagar)
     document.getElementById('pagos-filtros-admin-label').style.display = '';
     document.getElementById('pagos-filtros-admin').style.display = 'contents';
@@ -2328,23 +2416,18 @@ function onLoginSuccess(rol, nombre) {
     refreshProvBadge(); // badge de pendientes de proveedores
     checkGaliciaVencReminder(); // recordatorio de vencimiento de la tarjeta (1 vez por ciclo)
   } else {
-    // Encargado: Cajas (con submenús Cajas / Arqueo) + Pagos + Stocks.
+    // Encargado: Cajas (con submenús Cajas / Arqueo) + Pagos + Stocks. Qué ve y
+    // qué no lo decide el soloAdmin de TAB_GROUPS, ya aplicado por renderNav().
     // Stocks se le abre sólo por Gestión de Bebidas: los otros dos submenús están
-    // marcados soloAdmin en TAB_GROUPS y la tabla se recorta en loadVinos().
-    ['tab-btn-dashboard','tab-btn-reportes','tab-btn-servicios','tab-btn-costos','tab-btn-propinas','tab-btn-plan'].forEach(id => {
-      const el = document.getElementById(id); if (el) el.style.display = 'none';
-    });
-    document.getElementById('tab-btn-cajas').style.display = '';
-    document.getElementById('tab-btn-stocks').style.display = '';
+    // marcados soloAdmin y la tabla se recorta en loadVinos().
     // Pagos visible solo para registrar una compra nueva: sin listado, KPIs ni "Pagar"
-    document.getElementById('tab-btn-pagos').style.display = '';
     document.getElementById('pagos-filtros-admin-label').style.display = 'none';
     document.getElementById('pagos-filtros-admin').style.display = 'none';
     document.getElementById('btn-pagar-pendiente').style.display = 'none';
     document.getElementById('pagos-admin-panel').style.display = 'none';
     // Abrir Cajas → y dentro, el submenú Arqueo directamente
-    switchGroup('cajas', document.getElementById('tab-btn-cajas'));
-    switchSub('arqueo', document.getElementById('subtab-arqueo'));
+    switchGroup('cajas');
+    switchSub('arqueo');
   }
 }
 
@@ -2433,47 +2516,128 @@ async function checkSavedToken() {
 // ─── Tabs y submenús ──────────────────────────────────────────────────────────
 // Estructura: cada "grupo" (tab padre) puede tener submenús. Si no tiene, abre
 // directamente el panel del mismo nombre.
+// ─── Navegación: fuente ÚNICA de verdad ──────────────────────────────────────
+// Acá vive todo lo que define una sección: su nombre, si el encargado la ve, sus
+// submenús y qué lugar ocupa en la barra inferior del teléfono. Antes esto
+// estaba escrito en TRES lugares (este objeto, los botones en el HTML y dos
+// listas de ids dentro de onLoginSuccess), así que agregar una sección obligaba
+// a tocar los tres y olvidarse de uno era un agujero de permisos.
+//
+// Para agregar una sección: una entrada acá + su panel `tab-<id>` + su carga en
+// cargarPanel(). Nada más.
+//
+// El ORDEN de este objeto es el orden de la barra de arriba en la computadora.
+//
+// Campos:
+//   label      texto de la barra de arriba (con emoji)
+//   icono      ícono suelto para la barra de abajo del teléfono
+//   corto      texto corto para la barra de abajo (entra en ~60px)
+//   soloAdmin  el encargado no ve la sección
+//   phonePrio  posición fija en la barra de abajo; sin esto va adentro de "Más"
+//   subs       submenús (cada uno también puede ser soloAdmin)
 const TAB_GROUPS = {
-  dashboard:    { subs: null },
+  dashboard: { label: '📊 Dashboard', icono: '📊', corto: 'Inicio', soloAdmin: true, phonePrio: 1, subs: null },
   // Agregar un reporte nuevo = una línea acá + su panel `tab-<id>` + su carga
   // en cargarPanel().
-  reportes: { subs: [
+  reportes: { label: '📈 Reportes', icono: '📈', corto: 'Reportes', soloAdmin: true, subs: [
     { id: 'reportes-balance',   label: '📊 Balance' },
     { id: 'reportes-servicios', label: '🍽️ Servicios' },
   ] },
-  pagos:        { subs: null },
-  servicios:    { subs: null },
-  plan: { subs: [
+  pagos: { label: '💳 Pagos', icono: '💳', corto: 'Pagos', subs: null },
+  // Historial de Arqueos lee /api/arqueo/historial, que es adminOnly: si el
+  // encargado veía el submenú, sólo conseguía un error de permisos. No se le arma.
+  cajas: { label: '🏦 Cajas', icono: '🏦', corto: 'Cajas', subs: [
+    { id: 'cajas',  label: '🏦 Cajas' },
+    { id: 'arqueo', label: '🗃️ Arqueo de Caja' },
+    { id: 'historial-arqueos', label: '📋 Historial de Arqueos', soloAdmin: true },
+  ] },
+  servicios: { label: '🍽️ Servicios', icono: '🍽️', corto: 'Servicios', soloAdmin: true, phonePrio: 2, subs: null },
+  // soloAdmin (en los subs): Charly entra a Stocks pero sólo ve Gestión de
+  // Bebidas, y ahí sólo el circulante — ver loadVinos.
+  stocks: { label: '📦 Stocks', icono: '📦', corto: 'Stocks', phonePrio: 3, badge: true, subs: [
+    { id: 'proveedores',    label: '🛒 Proveedores', soloAdmin: true },
+    { id: 'comportamiento', label: '📈 Comportamiento de Stocks', soloAdmin: true },
+    { id: 'vinos',          label: '🥂 Gestión de Bebidas' },
+  ] },
+  costos: { label: '🧮 Costos', icono: '🧮', corto: 'Costos', soloAdmin: true, subs: [
+    { id: 'costos-resumen', label: '📊 Costos' },
+    { id: 'costos-config',  label: '⚙️ Configuración' },
+  ] },
+  // Todo /api/propinas/* es adminOnly: la tab entera está oculta para el encargado.
+  propinas: { label: '💸 Propinas', icono: '💸', corto: 'Propinas', soloAdmin: true, subs: [
+    { id: 'propinas',           label: '💸 Reparto' },
+    { id: 'propinas-historial', label: '📋 Historial' },
+  ] },
+  plan: { label: '🗓️ Plan', icono: '🗓️', corto: 'Plan', soloAdmin: true, subs: [
     { id: 'plan',        label: '📋 Resumen' },
     { id: 'calculadora', label: '🧮 Calculadora' },
     { id: 'inversiones', label: '🛠️ Inversiones' },
     { id: 'finanzas',    label: '🏦 Finanzas' },
     { id: 'proymes',     label: '📅 Proyección Mes' },
   ] },
-  costos: { subs: [
-    { id: 'costos-resumen', label: '📊 Costos' },
-    { id: 'costos-config',  label: '⚙️ Configuración' },
-  ] },
-  // Todo /api/propinas/* es adminOnly: la tab entera está oculta para el encargado.
-  propinas: { subs: [
-    { id: 'propinas',           label: '💸 Reparto' },
-    { id: 'propinas-historial', label: '📋 Historial' },
-  ] },
-  // Historial de Arqueos lee /api/arqueo/historial, que es adminOnly: si el
-  // encargado veía el submenú, sólo conseguía un error de permisos. No se le arma.
-  cajas:  { subs: [
-    { id: 'cajas',  label: '🏦 Cajas' },
-    { id: 'arqueo', label: '🗃️ Arqueo de Caja' },
-    { id: 'historial-arqueos', label: '📋 Historial de Arqueos', soloAdmin: true },
-  ] },
-  // soloAdmin: el submenú no se le arma al encargado. Charly entra a Stocks pero
-  // sólo ve Gestión de Bebidas (y ahí, sólo el circulante — ver loadVinos).
-  stocks: { subs: [
-    { id: 'proveedores',    label: '🛒 Proveedores', soloAdmin: true },
-    { id: 'comportamiento', label: '📈 Comportamiento de Stocks', soloAdmin: true },
-    { id: 'vinos',          label: '🥂 Gestión de Bebidas' },
-  ] },
 };
+
+// Secciones que el rol actual puede ver, en el orden de TAB_GROUPS.
+function gruposVisibles() {
+  return Object.entries(TAB_GROUPS)
+    .filter(([, cfg]) => !cfg.soloAdmin || getRol() === 'admin')
+    .map(([id, cfg]) => ({ id, ...cfg }));
+}
+
+// Reparto de la barra inferior del teléfono: hasta 4 botones. Si sobran
+// secciones, el cuarto lugar lo ocupa "Más". La regla es genérica a propósito —
+// el encargado ve 3 secciones y le entran todas sin "Más", sin listas aparte.
+function itemsBottomNav() {
+  const visibles = gruposVisibles();
+  if (visibles.length <= 4) return { fijos: visibles, resto: [] };
+  const fijos = visibles.slice().sort((a, b) => (a.phonePrio || 99) - (b.phonePrio || 99)).slice(0, 3);
+  return { fijos, resto: visibles.filter(g => !fijos.includes(g)) };
+}
+
+// Dibuja las DOS barras (la de arriba y la de abajo) desde los mismos datos.
+function renderNav() {
+  const visibles = gruposVisibles();
+  const badge = g => g.badge ? ' <span id="prov-badge" class="prov-badge" style="display:none">0</span>' : '';
+
+  document.getElementById('tab-nav').innerHTML = visibles.map(g =>
+    `<button class="tab-btn" id="tab-btn-${g.id}" data-group="${g.id}" onclick="switchGroup('${g.id}')">${g.label}${badge(g)}</button>`
+  ).join('');
+
+  const { fijos, resto } = itemsBottomNav();
+  const btnAbajo = (id, icono, texto, conBadge) =>
+    `<button class="bn-btn" data-group="${id}" onclick="${id === '__mas' ? 'abrirMasSheet()' : `switchGroup('${id}')`}">
+       <span class="bn-ico">${icono}</span><span class="bn-lbl">${texto}</span>${
+       conBadge ? '<span id="prov-badge-bn" class="prov-badge bn-badge" style="display:none">0</span>' : ''}</button>`;
+  document.getElementById('bottom-nav').innerHTML =
+    fijos.map(g => btnAbajo(g.id, g.icono, g.corto, g.badge)).join('')
+    + (resto.length ? btnAbajo('__mas', '☰', 'Más', false) : '');
+
+  setNavActivo(state.grupoActivo || visibles[0]?.id);
+}
+
+// Marca la sección abierta en las dos barras. Se deriva del ID del grupo y no
+// del nodo que clickeó el usuario: así cualquier camino de navegación (clic,
+// switchTab, el switchGroup automático del login) deja todo sincronizado sin
+// que cada uno tenga que acordarse de avisar.
+function setNavActivo(group) {
+  if (!group) return;
+  state.grupoActivo = group;
+  const enMas = itemsBottomNav().resto.some(g => g.id === group);
+  document.querySelectorAll('#tab-nav .tab-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.group === group));
+  document.querySelectorAll('#bottom-nav .bn-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.group === group || (enMas && b.dataset.group === '__mas')));
+}
+
+// "Más": el resto de las secciones, en la misma hoja inferior que usa el resto
+// de la app (openDetalleModal), para no inventar un componente nuevo.
+function abrirMasSheet() {
+  const { resto } = itemsBottomNav();
+  openDetalleModal('Secciones', '<div class="mas-grid">' + resto.map(g =>
+    `<button class="btn mas-item" onclick="closeDetalleModal();switchGroup('${g.id}')">
+       <span style="font-size:22px">${g.icono}</span><span>${g.corto}</span></button>`
+  ).join('') + '</div>');
+}
 
 // Carga de cada panel cuando se activa.
 function cargarPanel(tab) {
@@ -2519,13 +2683,16 @@ function activarPanel(tab) {
   const panel = document.getElementById('tab-' + tab);
   if (panel) panel.classList.add('active');
   cargarPanel(tab);
+  // Único punto por el que un panel pasa a estar visible: es acá donde hay que
+  // recuperar los gráficos que quedaron mal medidos mientras estaban ocultos.
+  refrescarGraficosVisibles();
 }
 
-// Clic en una tab PADRE (barra superior).
-function switchGroup(group, btn) {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-  else document.getElementById('tab-btn-' + group)?.classList.add('active');
+// Clic en una tab PADRE. Sirve para las dos barras (arriba en la computadora,
+// abajo en el teléfono). El segundo parámetro se ignora — quedó por compatibilidad
+// con los onclick viejos que pasaban `this`; el activo se deriva del id.
+function switchGroup(group, _btn) {
+  setNavActivo(group);
 
   const cfg = TAB_GROUPS[group];
   const subnav = document.getElementById('subtab-nav');
@@ -2553,7 +2720,14 @@ function switchGroup(group, btn) {
 // Clic en un SUBMENÚ.
 function switchSub(sub, btn) {
   document.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
+  const activo = btn || document.getElementById('subtab-' + sub);
+  if (activo) {
+    activo.classList.add('active');
+    // En el teléfono la tira de submenús se desliza: si el elegido quedó fuera
+    // de la vista, centrarlo. Sin esto se puede tocar un submenú y no ver cuál
+    // quedó marcado.
+    if (esPhone()) activo.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+  }
   activarPanel(sub);
 }
 
@@ -2561,12 +2735,12 @@ function switchSub(sub, btn) {
 // correcto (si el tab es un submenú, activa su grupo padre y luego el submenú).
 function switchTab(tab, btn) {
   // ¿Es una tab padre directa?
-  if (TAB_GROUPS[tab]) { switchGroup(tab, document.getElementById('tab-btn-' + tab)); return; }
+  if (TAB_GROUPS[tab]) { switchGroup(tab); return; }
   // ¿Es un submenú? Buscar su grupo padre.
   for (const [group, cfg] of Object.entries(TAB_GROUPS)) {
     if (cfg.subs && cfg.subs.some(s => s.id === tab)) {
-      switchGroup(group, document.getElementById('tab-btn-' + group));
-      switchSub(tab, document.getElementById('subtab-' + tab));
+      switchGroup(group);
+      switchSub(tab);
       return;
     }
   }
@@ -2983,7 +3157,6 @@ function updateHistArqueosNav() {
 document.addEventListener('DOMContentLoaded', function () {
   const sc = document.getElementById('hist-arqueos-scroll');
   if (sc) sc.addEventListener('scroll', updateHistArqueosNav);
-  window.addEventListener('resize', updateHistArqueosNav);
 });
 
 // Detalle de un arqueo: la cuenta completa del efectivo más todo lo que no entra
@@ -6370,11 +6543,13 @@ async function loadProvSerie() {
 async function refreshProvBadge() {
   try {
     const { count } = await api('/api/proveedores/pendientes/count');
-    [['prov-badge', count], ['prov-badge-2', count]].forEach(([id, c]) => {
+    // prov-badge = barra de arriba · prov-badge-bn = barra de abajo del teléfono
+    // · prov-badge-2 = el botón "Pendientes" adentro del panel de Proveedores.
+    ['prov-badge', 'prov-badge-bn', 'prov-badge-2'].forEach(id => {
       const el = document.getElementById(id);
       if (!el) return;
-      el.textContent = c;
-      el.style.display = c > 0 ? 'inline-flex' : 'none';
+      el.textContent = count;
+      el.style.display = count > 0 ? 'inline-flex' : 'none';
     });
   } catch (e) { /* no bloqueante */ }
 }
