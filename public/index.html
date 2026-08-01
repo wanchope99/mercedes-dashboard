@@ -18,6 +18,10 @@
       --purple: #a05ce0; --radius: 12px;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    /* Red de contención: si algo se pasa de ancho, que no arrastre la página.
+       `clip` y no `hidden` porque hidden crea un contenedor de scroll y rompe el
+       position:sticky del header. */
+    html, body { overflow-x: clip; }
     body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
 
     header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 32px; display: flex; align-items: center; justify-content: space-between; height: 64px; position: sticky; top: 0; z-index: 100; }
@@ -32,16 +36,31 @@
     .btn-accent:hover { background: #6b3530; }
 
     /* Tabs */
-    .tab-nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 32px; display: flex; align-items: center; gap: 0; }
-    .tab-btn { padding: 14px 20px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text-muted); border-bottom: 2px solid transparent; transition: all 0.15s; background: none; border-top: none; border-left: none; border-right: none; font-family: inherit; white-space: nowrap; }
+    /* Las dos tiras de navegación se desbordan a sí mismas, NO al documento. Sin
+       el overflow-x, los 9 botones (que son white-space:nowrap y por eso no
+       pueden encogerse) miden ~1050px y hacen scrollear la PÁGINA ENTERA de
+       costado: por eso en el teléfono se veía todo corrido. Va fuera de la media
+       query a propósito — también desborda en un teléfono horizontal (844px) y
+       en una tablet, y arriba de 1100px no hay desbordamiento, así que no cambia
+       nada en el escritorio. */
+    .tab-nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 32px; display: flex; align-items: center; gap: 0;
+      overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+    .tab-nav::-webkit-scrollbar { display: none; }
+    .tab-btn { padding: 14px 20px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text-muted); border-bottom: 2px solid transparent; transition: all 0.15s; background: none; border-top: none; border-left: none; border-right: none; font-family: inherit; white-space: nowrap; flex: 0 0 auto; }
     .tab-btn:hover { color: var(--text); }
     .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
     .tab-panel { display: none; }
     .tab-panel.active { display: block; }
 
     /* Sub-navegación (submenús de una tab padre) */
-    .subtab-nav { background: var(--surface2); border-bottom: 1px solid var(--border); padding: 0 32px; display: flex; align-items: center; gap: 0; }
-    .subtab-btn { padding: 11px 18px; cursor: pointer; font-size: 12px; font-weight: 500; color: var(--text-muted); border-bottom: 2px solid transparent; transition: all 0.15s; background: none; border-top: none; border-left: none; border-right: none; font-family: inherit; white-space: nowrap; }
+    /* El display lo maneja la clase .has-subs y no un style inline, para que las
+       media queries puedan gobernarlo (un inline les gana siempre). Lo pone y lo
+       saca switchGroup(). */
+    .subtab-nav { background: var(--surface2); border-bottom: 1px solid var(--border); padding: 0 32px; display: none; align-items: center; gap: 0;
+      overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+    .subtab-nav.has-subs { display: flex; }
+    .subtab-nav::-webkit-scrollbar { display: none; }
+    .subtab-btn { padding: 11px 18px; cursor: pointer; font-size: 12px; font-weight: 500; color: var(--text-muted); border-bottom: 2px solid transparent; transition: all 0.15s; background: none; border-top: none; border-left: none; border-right: none; font-family: inherit; white-space: nowrap; flex: 0 0 auto; }
     .subtab-btn:hover { color: var(--text); }
     .subtab-btn.active { color: var(--orange); border-bottom-color: var(--orange); }
 
@@ -553,6 +572,43 @@
     .switch .switch-label { font-size:11px; color:var(--text-muted); text-transform:none; letter-spacing:0; transition:color .18s; }
     .switch input:checked ~ .switch-label { color:var(--orange); font-weight:600; }
     .switch:hover .switch-track { border-color:var(--orange); }
+
+    /* ══════════════════════════════════════════════════════════════════════
+       TELÉFONO — 640px
+       ══════════════════════════════════════════════════════════════════════
+       TODAS las reglas de teléfono viven acá abajo, en un solo bloque. Es a
+       propósito: tener un único lugar es lo que evita que el CSS de mobile se
+       desparrame por el archivo a medida que se agregan pantallas.
+
+       Por qué 640 y no 700/900:
+         · El bloque de 900px de más arriba ya hace lo que un teléfono quiere
+           (main con menos padding, .charts-row y .form-grid a una columna). Como
+           el archivo es desktop-first, un teléfono matchea LOS DOS bloques y
+           este SUMA en vez de reemplazar. No hay que tocar nada de 900.
+         · Una tablet vertical (768px) tiene que seguir viéndose como escritorio,
+           así que el corte no puede subir.
+         · Ningún teléfono vertical pasa de 430px, así que sobran ~200px de aire.
+
+       Si este número cambia, cambiarlo también en la constante MQ_PHONE del JS.
+       ══════════════════════════════════════════════════════════════════════ */
+    @media (max-width: 640px) {
+      /* ── Barras superiores: menos padding lateral, todo más compacto ── */
+      /* El header tiene que entrar en una línea. Sobra el nombre del bar (ya está
+         el logo) y el nombre del usuario, que no aportan nada parado en la calle.
+         "Actualizar" queda como ícono solo. */
+      header { padding: 0 12px; height: 52px; gap: 10px; }
+      .logo-mark { width: 30px; height: 30px; font-size: 14px; }
+      .logo-text { display: none; }
+      .header-right { gap: 8px; }
+      #header-usuario { display: none; }
+      #last-updated { font-size: 11px; }
+      #btn-refresh { font-size: 0; padding: 8px 12px; }
+      #btn-refresh .refresh-icon { font-size: 15px; }
+
+      .tab-nav { padding: 0 8px; }
+      .subtab-nav.has-subs { padding: 0 8px; }
+      .filters-bar, .pagos-filters { padding: 10px 14px; gap: 8px; }
+    }
   </style>
 </head>
 <body>
@@ -623,7 +679,7 @@
 </div>
 
 <!-- Sub-navegación: aparece cuando la tab padre tiene submenús (Cajas, Stocks) -->
-<div class="subtab-nav" id="subtab-nav" style="display:none"></div>
+<div class="subtab-nav" id="subtab-nav"></div>
 
 <!-- ═══ DASHBOARD TAB ═══ -->
 <div id="tab-dashboard" class="tab-panel active">
@@ -2178,7 +2234,16 @@ const state = {
   token: null, rol: null, nombre: null,
   // Arqueo
   timerInterval: null,
+  // Nav (ver setNavActivo): el grupo abierto se guarda por id, no por nodo DOM,
+  // así cualquier camino de navegación deja las dos barras sincronizadas.
+  grupoActivo: null,
 };
+
+// ─── Modo teléfono ───────────────────────────────────────────────────────────
+// Único lugar del JS donde vive el breakpoint. Tiene que coincidir con el
+// @media (max-width: 640px) del final de la hoja de estilos.
+const MQ_PHONE = window.matchMedia('(max-width: 640px)');
+function esPhone() { return MQ_PHONE.matches; }
 
 // ─── Zona horaria: toda la app muestra horarios en Buenos Aires, Argentina ──────
 const TZ_AR = 'America/Argentina/Buenos_Aires';
@@ -2470,15 +2535,16 @@ function switchGroup(group, btn) {
     : null;
 
   if (subs && subs.length) {
-    // Renderizar la sub-barra y abrir el primer submenú.
-    subnav.style.display = 'flex';
+    // Renderizar la sub-barra y abrir el primer submenú. Se usa la clase y no
+    // style.display para que el CSS pueda gobernar la barra en el teléfono.
+    subnav.classList.add('has-subs');
     subnav.innerHTML = subs.map((s, i) =>
       `<button class="subtab-btn ${i === 0 ? 'active' : ''}" id="subtab-${s.id}" onclick="switchSub('${s.id}', this)">${s.label}</button>`
     ).join('');
     activarPanel(subs[0].id);
   } else {
     // Sin submenús: ocultar sub-barra y abrir el panel directo.
-    subnav.style.display = 'none';
+    subnav.classList.remove('has-subs');
     subnav.innerHTML = '';
     activarPanel(group);
   }
