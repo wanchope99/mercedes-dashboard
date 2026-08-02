@@ -94,6 +94,21 @@ Persistence: three sheets in `SPREADSHEET_ID`, auto-created on first use — `Pr
 
 The roster is the same people every week, so `Propinas Personas` is seeded with `PERSONAS_DEFAULT` — but only at the moment the sheet is **created**, never when it merely reads back empty, so removing someone doesn't resurrect them next load. The UI reflects that: the normal weekly action is just unticking whoever didn't work, and add/edit/delete are hidden behind an "Editar equipo" toggle. Unticking is in-memory only and resets on reload; the `Activo` column is the persistent version of the same idea.
 
+### The phone opens on a curated home screen, the desktop does not
+
+On a phone (≤640px) both roles land on `tab-inicio`: four big buttons for what actually gets done daily, plus the bottom bar. On desktop that screen does not exist — the top bar already shows all ten sections, so a screen that leads to four of them would be a step backwards. The `soloPhone` flag on a `TAB_GROUPS` entry is what keeps `inicio` out of the top bar while `gruposVisibles(true)` puts it in the bottom one; that flag is the only place the two bars differ.
+
+The four buttons come from `HOME_TELEFONO`, a hand-written per-role list, **deliberately not derived from `TAB_GROUPS`**. The whole point is that they are few and the right ones, which is a judgment call, not something computable from the menu. A button's `tab` may name a group (`dashboard`) or a submenu (`arqueo`) — `switchTab` resolves both — or carry an `accion` that opens something without navigating.
+
+Two consequences worth knowing before touching this:
+
+- `phonePrio` is now `?? 99`, not `|| 99`. `inicio` has priority `0`, and under `||` that fell through to 99 and put the home button last.
+- Adding `inicio` costs a slot in the bottom bar's three fixed positions. `cajas` carries `phonePrio: 4` purely so the nightly arqueo stays in the `encargado`'s bar instead of being pushed into "Más"; it never reaches the admin's bar, whose 0-1-2 slots are already taken.
+
+The "Anotar" button opens a bottom sheet that POSTs to the same `/api/mantenimiento` as the section, asking only for text and urgency — the sector is filled in later from the section, because having to pick one now is exactly what stops anything being logged mid-service. The sheet stays open if the save fails; closing it would leave the impression the item was recorded.
+
+`MQ_PHONE`'s change listener moves off `inicio` when the viewport grows, otherwise the active panel would be one the desktop CSS hides — a blank screen.
+
 ### Mantenimiento: the fix-it list, also outside the ledger
 
 `src/mantenimiento.js` is a notebook for things that break during service (a bulb, a leaking tap). Like Propinas it writes nothing to `Movimientos` and never reads `Cajas` — noting "the extractor needs replacing" is not having spent the money. If an item turns out to be a real investment it gets loaded into Plan de Inversiones by hand; there is deliberately no automatic link, because two lists describing the same spend is how it gets counted twice.

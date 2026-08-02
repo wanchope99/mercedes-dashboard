@@ -635,6 +635,44 @@
     .mas-item { display: flex; flex-direction: column; align-items: center; justify-content: center;
       gap: 6px; padding: 16px 6px; font-size: 12px; min-height: 78px; }
 
+    /* ── Inicio (teléfono) ── */
+    /* El panel entero está apagado por defecto y sólo lo enciende el @media de
+       640px: en la computadora esta pantalla no existe. */
+    #tab-inicio.active { display: none; }
+    .inicio-saludo { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+    .inicio-saludo span { display: block; font-size: 13px; font-weight: 400; color: var(--text-muted); margin-top: 4px; }
+    .inicio-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
+    .inicio-btn { display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
+      gap: 2px; text-align: left; min-height: 116px; padding: 18px 16px; cursor: pointer;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+      color: var(--text); font-family: inherit; position: relative; overflow: hidden; }
+    .inicio-btn::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--border); }
+    .inicio-btn.acento::before { background: var(--orange); }
+    .inicio-btn:active { border-color: var(--orange); }
+    .inicio-ico { font-size: 26px; line-height: 1; margin-bottom: 8px; }
+    .inicio-titulo { font-size: 15px; font-weight: 600; }
+    .inicio-sub { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+    .inicio-pie { font-size: 12px; color: var(--text-muted); text-align: center; margin-top: 22px; line-height: 1.6; }
+
+    /* ── Hoja rápida "Anotar" ── */
+    /* Sube desde abajo, que es donde está el pulgar y de donde viene el teclado. */
+    #anotar-sheet-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.72);
+      z-index: 900; align-items: flex-end; justify-content: center; }
+    #anotar-sheet-overlay.open { display: flex; }
+    .anotar-sheet { background: var(--surface); border: 1px solid var(--border); border-bottom: none;
+      border-radius: 18px 18px 0 0; padding: 10px 20px calc(20px + env(safe-area-inset-bottom));
+      width: 100%; max-width: 520px; box-shadow: 0 -12px 48px rgba(0,0,0,0.5); }
+    .anotar-sheet-handle { width: 38px; height: 4px; border-radius: 99px; background: var(--border); margin: 0 auto 16px; }
+    .anotar-sheet-titulo { font-size: 16px; font-weight: 600; margin-bottom: 14px; }
+    #anotar-sheet-texto { width: 100%; font-size: 16px; padding: 12px 14px; }
+    .anotar-sheet-prios { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+    .anotar-prio { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted);
+      border-radius: 9px; padding: 10px 4px; font-size: 12px; font-family: inherit; cursor: pointer; min-height: 44px; }
+    .anotar-prio.sel { border-color: var(--orange); color: var(--text); background: var(--orange-dim); font-weight: 600; }
+    .anotar-sheet-msg { font-size: 12px; min-height: 16px; margin-top: 10px; }
+    .anotar-sheet-acciones { display: flex; gap: 10px; margin-top: 14px; }
+    .anotar-sheet-acciones .btn { flex: 1; min-height: 46px; }
+
     /* ══════════════════════════════════════════════════════════════════════
        TELÉFONO — 640px
        ══════════════════════════════════════════════════════════════════════
@@ -674,6 +712,9 @@
          quedan sólo los submenús, como chips que se deslizan. */
       .tab-nav { display: none; }
       #bottom-nav { display: grid; }
+      /* Inicio sólo existe acá. La sub-barra ya queda vacía sola: Inicio no tiene
+         submenús y switchGroup le saca la clase has-subs. */
+      #tab-inicio.active { display: block; }
       /* Que la barra fija de abajo no tape el final del contenido. */
       body { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
       .subtab-nav.has-subs { padding: 8px 12px; gap: 8px; background: var(--surface); }
@@ -774,6 +815,39 @@
 
 <!-- Sub-navegación: aparece cuando la tab padre tiene submenús (Cajas, Stocks) -->
 <div class="subtab-nav" id="subtab-nav"></div>
+
+<!-- ═══ INICIO (sólo teléfono) ═══ -->
+<!-- La pantalla que se abre al entrar desde el teléfono: cuatro botones grandes
+     con lo que se hace todos los días, para no tener que pensar por dónde entrar.
+     No existe en la computadora (el CSS la esconde) — ahí la barra de arriba con
+     las 10 secciones ya cumple ese papel. Los botones salen de HOME_TELEFONO. -->
+<div id="tab-inicio" class="tab-panel">
+  <main>
+    <div id="inicio-saludo" class="inicio-saludo"></div>
+    <div id="inicio-grid" class="inicio-grid"></div>
+    <div class="inicio-pie">Todo lo demás está en la barra de abajo, en <strong>Más</strong>.</div>
+  </main>
+</div>
+
+<!-- Hoja rápida para anotar un arreglo sin salir de Inicio. Es el mismo POST que
+     la sección Mantenimiento; acá se pide lo mínimo (qué pasó + qué tan urgente)
+     porque el punto es que se pueda cargar en medio del servicio. El sector se
+     completa después desde la sección. -->
+<div id="anotar-sheet-overlay">
+  <div class="anotar-sheet">
+    <div class="anotar-sheet-handle"></div>
+    <div class="anotar-sheet-titulo">🔧 ¿Qué hay que arreglar?</div>
+    <input type="text" id="anotar-sheet-texto" maxlength="140" autocomplete="off"
+           placeholder="Ej: se quemó la lámpara del baño"
+           onkeydown="if(event.key==='Enter')guardarAnotarSheet()" />
+    <div class="anotar-sheet-prios" id="anotar-sheet-prios"></div>
+    <div id="anotar-sheet-msg" class="anotar-sheet-msg"></div>
+    <div class="anotar-sheet-acciones">
+      <button class="btn" onclick="cerrarAnotarSheet()">Cancelar</button>
+      <button class="btn btn-acento" id="anotar-sheet-guardar" onclick="guardarAnotarSheet()">Anotar</button>
+    </div>
+  </div>
+</div>
 
 <!-- ═══ DASHBOARD TAB ═══ -->
 <div id="tab-dashboard" class="tab-panel active">
@@ -2538,11 +2612,27 @@ function onLoginSuccess(rol, nombre) {
     document.getElementById('pagos-filtros-admin').style.display = 'none';
     document.getElementById('btn-pagar-pendiente').style.display = 'none';
     document.getElementById('pagos-admin-panel').style.display = 'none';
-    // Abrir Cajas → y dentro, el submenú Arqueo directamente
-    switchGroup('cajas');
-    switchSub('arqueo');
+    // Abrir Cajas → y dentro, el submenú Arqueo directamente. En el teléfono no:
+    // ahí se entra por Inicio, y Arqueo es uno de sus cuatro botones.
+    if (!esPhone()) {
+      switchGroup('cajas');
+      switchSub('arqueo');
+    }
   }
+
+  // En el teléfono la app abre en Inicio, para los dos roles. En la computadora
+  // Inicio no existe y cada rol arranca donde arrancaba antes.
+  if (esPhone()) switchGroup('inicio');
 }
+
+// Si se pasa de teléfono a pantalla grande (girar una tablet, agrandar la
+// ventana) estando en Inicio, hay que salir: Inicio no se dibuja fuera del
+// teléfono y quedaría un panel activo invisible, o sea la pantalla en blanco.
+MQ_PHONE.addEventListener('change', e => {
+  if (!e.matches && state.grupoActivo === 'inicio') {
+    switchGroup(getRol() === 'admin' ? 'dashboard' : 'cajas');
+  }
+});
 
 function doLogout() {
   state.token = null; state.rol = null; state.nombre = null;
@@ -2649,7 +2739,12 @@ async function checkSavedToken() {
 //   phonePrio  posición fija en la barra de abajo; sin esto va adentro de "Más"
 //   subs       submenús (cada uno también puede ser soloAdmin)
 const TAB_GROUPS = {
-  dashboard: { label: '📊 Dashboard', icono: '📊', corto: 'Inicio', soloAdmin: true, phonePrio: 1, subs: null },
+  // Inicio no va en la barra de arriba: en la computadora esa barra ya muestra
+  // las 10 secciones de una, así que una pantalla que sólo lleva a cuatro sería
+  // un paso de más. soloPhone la deja fuera de la barra de arriba pero adentro
+  // de la de abajo. phonePrio 0 la fija como primer botón.
+  inicio: { label: '🏠 Inicio', icono: '🏠', corto: 'Inicio', soloPhone: true, phonePrio: 0, subs: null },
+  dashboard: { label: '📊 Dashboard', icono: '📊', corto: 'Números', soloAdmin: true, phonePrio: 1, subs: null },
   // Agregar un reporte nuevo = una línea acá + su panel `tab-<id>` + su carga
   // en cargarPanel().
   reportes: { label: '📈 Reportes', icono: '📈', corto: 'Reportes', soloAdmin: true, subs: [
@@ -2659,7 +2754,10 @@ const TAB_GROUPS = {
   pagos: { label: '💳 Pagos', icono: '💳', corto: 'Pagos', subs: null },
   // Historial de Arqueos lee /api/arqueo/historial, que es adminOnly: si el
   // encargado veía el submenú, sólo conseguía un error de permisos. No se le arma.
-  cajas: { label: '🏦 Cajas', icono: '🏦', corto: 'Cajas', subs: [
+  // phonePrio 4: no le alcanza para entrar en la barra del admin (que ya llena
+  // sus 3 lugares con 0-1-2), pero sí en la del encargado, donde el arqueo de
+  // cada noche es lo primero que abre. Sin esto, Inicio lo empujaba a "Más".
+  cajas: { label: '🏦 Cajas', icono: '🏦', corto: 'Cajas', phonePrio: 4, subs: [
     { id: 'cajas',  label: '🏦 Cajas' },
     { id: 'arqueo', label: '🗃️ Arqueo de Caja' },
     { id: 'historial-arqueos', label: '📋 Historial de Arqueos', soloAdmin: true },
@@ -2695,9 +2793,12 @@ const TAB_GROUPS = {
 };
 
 // Secciones que el rol actual puede ver, en el orden de TAB_GROUPS.
-function gruposVisibles() {
+// `incluirSoloPhone` distingue las dos barras: la de abajo lleva Inicio, la de
+// arriba no. Es el único lugar donde las dos difieren.
+function gruposVisibles(incluirSoloPhone) {
   return Object.entries(TAB_GROUPS)
     .filter(([, cfg]) => !cfg.soloAdmin || getRol() === 'admin')
+    .filter(([, cfg]) => incluirSoloPhone || !cfg.soloPhone)
     .map(([id, cfg]) => ({ id, ...cfg }));
 }
 
@@ -2705,9 +2806,9 @@ function gruposVisibles() {
 // secciones, el cuarto lugar lo ocupa "Más". La regla es genérica a propósito —
 // el encargado ve 3 secciones y le entran todas sin "Más", sin listas aparte.
 function itemsBottomNav() {
-  const visibles = gruposVisibles();
+  const visibles = gruposVisibles(true);
   if (visibles.length <= 4) return { fijos: visibles, resto: [] };
-  const fijos = visibles.slice().sort((a, b) => (a.phonePrio || 99) - (b.phonePrio || 99)).slice(0, 3);
+  const fijos = visibles.slice().sort((a, b) => (a.phonePrio ?? 99) - (b.phonePrio ?? 99)).slice(0, 3);
   return { fijos, resto: visibles.filter(g => !fijos.includes(g)) };
 }
 
@@ -2758,7 +2859,8 @@ function abrirMasSheet() {
 
 // Carga de cada panel cuando se activa.
 function cargarPanel(tab) {
-  if (tab === 'pagos') { if (state.rol === 'admin') loadPagos(); }
+  if (tab === 'inicio') renderInicio();
+  else if (tab === 'pagos') { if (state.rol === 'admin') loadPagos(); }
   else if (tab === 'cajas') loadCajas();
   else if (tab === 'arqueo') initArqueo();
   else if (tab === 'historial-arqueos') loadHistorialArqueos();
@@ -9112,6 +9214,114 @@ async function borrarPropinaReparto(id) {
 document.addEventListener('DOMContentLoaded', () => {
   const ov = document.getElementById('prop-persona-overlay');
   if (ov) ov.addEventListener('click', function (e) { if (e.target === this) closePropinaPersonaModal(); });
+});
+
+// ═══ INICIO (teléfono) ══════════════════════════════════════════════════════
+// Cuatro botones con lo que se hace todos los días, para entrar sin pensar.
+// Es una lista curada a mano, NO se deriva de TAB_GROUPS: el punto de la
+// pantalla es que sean pocos y los correctos, y eso es una decisión, no algo
+// que se pueda calcular del menú.
+//
+// `tab` puede ser un grupo ('dashboard') o un submenú ('arqueo'): switchTab
+// resuelve los dos. `accion` abre algo sin cambiar de pantalla.
+const HOME_TELEFONO = {
+  admin: [
+    { tab: 'dashboard',  icono: '📊', titulo: 'Dashboard', sub: 'los números del mes' },
+    { accion: 'anotar',  icono: '🔧', titulo: 'Anotar',    sub: 'algo para arreglar', acento: true },
+    { tab: 'servicios',  icono: '🍽️', titulo: 'Servicios', sub: 'cómo vienen las noches' },
+    { tab: 'stocks',     icono: '📦', titulo: 'Stocks',    sub: 'bebidas y proveedores' },
+  ],
+  // El encargado abre la app para dos cosas: arquear la caja y cargar algo.
+  // Por eso Arqueo va primero y en su lugar no hay Dashboard, que no ve.
+  encargado: [
+    { tab: 'arqueo',     icono: '🗃️', titulo: 'Arqueo',    sub: 'abrir y cerrar la caja' },
+    { accion: 'anotar',  icono: '🔧', titulo: 'Anotar',    sub: 'algo para arreglar', acento: true },
+    { tab: 'pagos',      icono: '💳', titulo: 'Pagos',     sub: 'cargar una compra' },
+    { tab: 'stocks',     icono: '📦', titulo: 'Stocks',    sub: 'gestión de bebidas' },
+  ],
+};
+
+function renderInicio() {
+  const hora = Number(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires', hour: 'numeric', hour12: false }));
+  const saludo = hora < 6 ? 'Buenas noches' : hora < 13 ? 'Buen día' : hora < 20 ? 'Buenas tardes' : 'Buenas noches';
+  const fecha = new Date().toLocaleDateString('es-AR', {
+    timeZone: 'America/Argentina/Buenos_Aires', weekday: 'long', day: 'numeric', month: 'long',
+  });
+  document.getElementById('inicio-saludo').innerHTML =
+    `${saludo}, ${escapeHtml(state.nombre || '')}<span>${escapeHtml(fecha)}</span>`;
+
+  const items = HOME_TELEFONO[getRol() === 'admin' ? 'admin' : 'encargado'] || [];
+  document.getElementById('inicio-grid').innerHTML = items.map(b => {
+    const accion = b.accion === 'anotar' ? 'abrirAnotarSheet()' : `switchTab('${b.tab}')`;
+    return `<button class="inicio-btn${b.acento ? ' acento' : ''}" onclick="${accion}">
+      <span class="inicio-ico">${b.icono}</span>
+      <span class="inicio-titulo">${escapeHtml(b.titulo)}</span>
+      <span class="inicio-sub">${escapeHtml(b.sub)}</span>
+    </button>`;
+  }).join('');
+}
+
+// ─── Hoja rápida para anotar un arreglo ─────────────────────────────────────
+// Guarda contra el mismo endpoint que la sección Mantenimiento. Pide sólo el
+// texto y la urgencia: el sector se completa después, desde la sección, porque
+// tener que elegirlo ahora es justo lo que hace que no se anote nada.
+const anotarSheet = { prioridad: 'normal' };
+
+function abrirAnotarSheet() {
+  anotarSheet.prioridad = 'normal';
+  document.getElementById('anotar-sheet-texto').value = '';
+  document.getElementById('anotar-sheet-msg').innerHTML = '';
+  document.getElementById('anotar-sheet-prios').innerHTML =
+    ['urgente', 'normal', 'baja'].map(p =>
+      `<button class="anotar-prio${p === 'normal' ? ' sel' : ''}" data-prio="${p}" onclick="elegirPrioridadSheet('${p}')">${MANT_PRIO_LABEL[p]}</button>`
+    ).join('');
+  document.getElementById('anotar-sheet-overlay').classList.add('open');
+  // El foco va después de mostrar la hoja: enfocar un campo escondido no abre
+  // el teclado en iOS.
+  setTimeout(() => document.getElementById('anotar-sheet-texto').focus(), 50);
+}
+
+function cerrarAnotarSheet() {
+  document.getElementById('anotar-sheet-overlay').classList.remove('open');
+}
+
+function elegirPrioridadSheet(p) {
+  anotarSheet.prioridad = p;
+  document.querySelectorAll('#anotar-sheet-prios .anotar-prio').forEach(b =>
+    b.classList.toggle('sel', b.dataset.prio === p));
+}
+
+async function guardarAnotarSheet() {
+  const input = document.getElementById('anotar-sheet-texto');
+  const msg = document.getElementById('anotar-sheet-msg');
+  const btn = document.getElementById('anotar-sheet-guardar');
+  const titulo = input.value.trim();
+  if (!titulo) {
+    msg.innerHTML = '<span style="color:var(--orange)">Escribí qué hay que arreglar.</span>';
+    input.focus();
+    return;
+  }
+
+  btn.disabled = true;
+  msg.innerHTML = '<span style="color:var(--text-muted)">Anotando...</span>';
+  try {
+    await api('/api/mantenimiento', {
+      method: 'POST',
+      body: JSON.stringify({ titulo, prioridad: anotarSheet.prioridad }),
+    });
+    cerrarAnotarSheet();
+    showToast('✓ Anotado. Lo ves en Mantenimiento.');
+  } catch (e) {
+    // La hoja NO se cierra si falló: cerrarla dejaría creyendo que quedó cargado.
+    msg.innerHTML = '<span style="color:var(--red)">' + escapeHtml(e.message) + '</span>';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const ov = document.getElementById('anotar-sheet-overlay');
+  if (ov) ov.addEventListener('click', function (e) { if (e.target === this) cerrarAnotarSheet(); });
 });
 
 // ═══ MANTENIMIENTO ══════════════════════════════════════════════════════════
