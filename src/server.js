@@ -25,6 +25,7 @@ const tc = require('./tc');
 const roi = require('./roi');
 const finanzas = require('./finanzas');
 const propinas = require('./propinas');
+const mantenimiento = require('./mantenimiento');
 const stockBebidas = require('./stock-bebidas');
 const { iniciarCron } = require('./cron');
 const { cargarEstadoCaja, guardarEstadoCaja } = require('./estado-caja');
@@ -1648,6 +1649,79 @@ app.post('/api/propinas/personas', authMiddleware, adminOnly, async (req, res) =
 app.delete('/api/propinas/personas/:nombre', authMiddleware, adminOnly, async (req, res) => {
   try { await propinas.deletePersona(req.params.nombre); res.json({ ok: true, message: 'Persona eliminada' }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─── Mantenimiento — la libreta de lo que hay que arreglar ──────────────────
+// A diferencia de casi todo lo demás, el ENCARGADO entra acá: es el que está en
+// el salón cuando se quema la lámpara, y si tiene que avisar para que otro lo
+// anote, no se anota. Puede leer, agregar y mover el estado de algo; no puede
+// borrar ni reescribir lo que anotó otro (ver CAMPOS_ENCARGADO).
+// Igual que Propinas, no escribe en Movimientos ni toca Cajas. Ver
+// src/mantenimiento.js.
+const CAMPOS_ENCARGADO = ['estado', 'notas'];
+
+app.get('/api/mantenimiento', authMiddleware, async (req, res) => {
+  try { res.json({ ok: true, data: await mantenimiento.listMantenimiento() }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post('/api/mantenimiento', authMiddleware, async (req, res) => {
+  try {
+    // Quién lo reportó lo pone el server desde el token, no el navegador.
+    const data = await mantenimiento.crearItem({ ...req.body, reportadoPor: req.user.nombre, origen: 'app' });
+    res.json({ ok: true, data });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.put('/api/mantenimiento/:id', authMiddleware, async (req, res) => {
+  try {
+    const permitidos = req.user.rol === 'admin' ? null : CAMPOS_ENCARGADO;
+    res.json({ ok: true, data: await mantenimiento.actualizarItem(req.params.id, req.body, permitidos) });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.delete('/api/mantenimiento/:id', authMiddleware, adminOnly, async (req, res) => {
+  try { await mantenimiento.deleteItem(req.params.id); res.json({ ok: true, message: 'Arreglo eliminado' }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Entrada del bot de Telegram. Mismo esquema que /api/proveedores/ingest: token
+// de servicio en el header X-Ingest-Token, o un usuario logueado.
+// El token se comparte con el de proveedores porque es el mismo bot y la misma
+// frontera de confianza — así no hay que configurar una variable nueva en
+// Railway. MANTENIMIENTO_INGEST_TOKEN existe por si algún día se quieren separar.
+function ingestAuthMantenimiento(req, res, next) {
+  const svcToken = process.env.MANTENIMIENTO_INGEST_TOKEN || process.env.PROVEEDORES_INGEST_TOKEN;
+  const provided = req.headers['x-ingest-token'] || (req.body && req.body.ingestToken);
+  if (svcToken && provided && provided === svcToken) return next();
+  return authMiddleware(req, res, next);
+}
+
+app.post('/api/mantenimiento/ingest', ingestAuthMantenimiento, async (req, res) => {
+  try {
+    const { titulo, sector, prioridad, notas, reportadoPor } = req.body || {};
+    const data = await mantenimiento.crearItem({
+      titulo, sector, prioridad, notas,
+      // Con token de servicio no hay req.user: el nombre lo manda el bot.
+      reportadoPor: req.user ? req.user.nombre : reportadoPor,
+      origen: req.user ? 'app' : 'telegram',
+    });
+    res.json({ ok: true, data });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+// Lo que sigue abierto, para que el bot pueda contestar "qué falta arreglar".
+app.get('/api/mantenimiento/pendientes', ingestAuthMantenimiento, async (req, res) => {
+  try { res.json({ ok: true, data: await mantenimiento.pendientes() }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Cambio de prioridad desde los botones que el bot manda apenas se anota algo.
+app.put('/api/mantenimiento/ingest/:id', ingestAuthMantenimiento, async (req, res) => {
+  try {
+    const permitidos = req.user && req.user.rol !== 'admin' ? CAMPOS_ENCARGADO : null;
+    res.json({ ok: true, data: await mantenimiento.actualizarItem(req.params.id, req.body, permitidos) });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
 });
 
 // ─── Finanzas — capital del recupero (solo admin) ───────────────────────────

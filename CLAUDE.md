@@ -94,6 +94,18 @@ Persistence: three sheets in `SPREADSHEET_ID`, auto-created on first use — `Pr
 
 The roster is the same people every week, so `Propinas Personas` is seeded with `PERSONAS_DEFAULT` — but only at the moment the sheet is **created**, never when it merely reads back empty, so removing someone doesn't resurrect them next load. The UI reflects that: the normal weekly action is just unticking whoever didn't work, and add/edit/delete are hidden behind an "Editar equipo" toggle. Unticking is in-memory only and resets on reload; the `Activo` column is the persistent version of the same idea.
 
+### Mantenimiento: the fix-it list, also outside the ledger
+
+`src/mantenimiento.js` is a notebook for things that break during service (a bulb, a leaking tap). Like Propinas it writes nothing to `Movimientos` and never reads `Cajas` — noting "the extractor needs replacing" is not having spent the money. If an item turns out to be a real investment it gets loaded into Plan de Inversiones by hand; there is deliberately no automatic link, because two lists describing the same spend is how it gets counted twice.
+
+Three things that differ from the rest of the app:
+
+1. **The `encargado` can use it.** He is the one on the floor when something breaks, and a flow that requires telling the admin so *they* can write it down is a flow where nothing gets written down. He can read, add, and move an item's state; he cannot delete or rewrite what someone else logged. That is enforced by `CAMPOS_ENCARGADO` in `server.js` (a whitelist passed as `actualizarItem`'s third argument), not by hiding buttons — the browser hides them too, but the server is what decides.
+2. **The Telegram bot is a second entry point.** `/arreglo <texto>` → `POST /api/mantenimiento/ingest`, `/pendientes` → `GET /api/mantenimiento/pendientes`. The item is saved immediately at priority `normal` and the bot then offers buttons to change it; asking for sector and priority *before* saving is what stops it being used mid-service. Ingest auth is the same shared-secret pattern as `/api/proveedores/ingest` and reuses `PROVEEDORES_INGEST_TOKEN` (same bot, same trust boundary) unless `MANTENIMIENTO_INGEST_TOKEN` is set.
+3. **Weeks are ISO weeks (Mon–Sun)**, via the pure `semanaDe()`. It is the same week Propinas splits tips over, so the two screens never disagree about which week something belongs to. The week is written into the sheet rather than derived on read, so the sheet is readable on its own in Google Sheets.
+
+Persistence: one auto-created sheet in `SPREADSHEET_ID`, `Mantenimiento`, columns A–L. Filtering and grouping happen entirely in the browser off a single `GET /api/mantenimiento` — the list is short by nature and a round-trip per click would buy nothing.
+
 ### Other independent modules
 
 - `src/vinos.js` / `src/stocks.js` — wine/beverage inventory, stock rotation, and days-of-coverage analysis, cross-referencing Fudo stock+cost+price against recent sales velocity.

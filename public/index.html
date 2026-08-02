@@ -347,6 +347,51 @@
       .prop-cuentas-grid { grid-template-columns: 1fr; }
     }
 
+    /* ── Mantenimiento ── */
+    #mant-edit-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 320; align-items: center; justify-content: center; }
+    #mant-edit-overlay.open { display: flex; }
+    #mant-edit-overlay .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; width: 520px; max-width: 95vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 24px 64px rgba(0,0,0,0.5); }
+    #mant-edit-overlay .modal-title { font-size: 17px; font-weight: 600; margin-bottom: 22px; }
+    #mant-edit-overlay label { font-size: 12px; font-weight: 500; color: var(--text-muted); display: block; margin-bottom: 6px; }
+    #mant-edit-overlay select { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family: inherit; outline: none; width: 100%; }
+    /* El campo de texto se come todo el ancho: es lo único que hay que escribir,
+       el resto son selects que ya vienen con un valor razonable puesto. */
+    .mant-alta { display: grid; grid-template-columns: 1fr 150px 175px auto; gap: 10px; align-items: center; }
+    /* Sin esto los select no achican por debajo de su texto y se salen de la
+       tarjeta en el teléfono, donde comparten fila. */
+    .mant-alta > * { min-width: 0; }
+    .mant-filtros { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+    .mant-filtros select { min-width: 170px; }
+    .mant-grupo { margin-bottom: 22px; }
+    .mant-grupo:last-child { margin-bottom: 0; }
+    .mant-grupo-titulo { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+    .mant-grupo-titulo .mant-grupo-n { background: var(--surface2); border: 1px solid var(--border); border-radius: 99px; padding: 1px 8px; font-size: 11px; letter-spacing: 0; }
+    .mant-item { display: grid; grid-template-columns: 6px 1fr auto; gap: 12px; align-items: center; border: 1px solid var(--border); background: var(--surface2); border-radius: 10px; padding: 12px 14px 12px 0; margin-bottom: 8px; overflow: hidden; }
+    .mant-item.resuelto { opacity: 0.5; }
+    .mant-item.resuelto .mant-item-titulo { text-decoration: line-through; }
+    /* La barrita de color al costado es la prioridad: se ve de un vistazo sin leer. */
+    .mant-franja { align-self: stretch; margin: -12px 0; }
+    .mant-franja.urgente { background: var(--red); }
+    .mant-franja.normal { background: var(--orange); }
+    .mant-franja.baja { background: var(--border); }
+    .mant-item-titulo { font-size: 14px; font-weight: 500; line-height: 1.4; }
+    .mant-item-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .mant-tag { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap; background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); }
+    .mant-tag.urgente { background: var(--red-dim); color: var(--red); border-color: var(--red); }
+    .mant-tag.encurso { background: var(--orange-dim); color: var(--orange); border-color: rgba(224,138,92,0.4); }
+    .mant-acciones { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+    .mant-acciones button { background: none; border: 1px solid var(--border); color: var(--text-muted); cursor: pointer; font-size: 12px; padding: 5px 10px; border-radius: 7px; font-family: inherit; white-space: nowrap; }
+    .mant-acciones button:hover { background: var(--border); color: var(--text); }
+    .mant-acciones button.ok:hover { border-color: var(--green); color: var(--green); }
+    .mant-vacio { color: var(--text-muted); font-size: 13px; padding: 24px 0; text-align: center; line-height: 1.7; }
+    @media (max-width: 900px) {
+      .mant-alta { grid-template-columns: 1fr 1fr; }
+      .mant-alta input, .mant-alta button { grid-column: 1 / -1; }
+      .mant-filtros select { min-width: 0; flex: 1; }
+      .mant-item { grid-template-columns: 6px 1fr; }
+      .mant-acciones { grid-column: 2; justify-content: flex-start; }
+    }
+
     .loading { display: flex; align-items: center; justify-content: center; height: 120px; color: var(--text-muted); font-size: 14px; gap: 12px; }
     .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -1080,6 +1125,74 @@
     <div class="modal-actions">
       <button class="btn" onclick="closePropinaPersonaModal()">Cancelar</button>
       <button class="btn btn-primary" id="prop-persona-guardar" onclick="guardarPropinaPersona()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MANTENIMIENTO ═══ -->
+<!-- La libreta de lo que hay que arreglar. Se anota en dos segundos durante el
+     servicio (acá o por Telegram) y después se ordena por semana o prioridad.
+     El encargado entra: puede agregar y mover estados, no borrar. No toca la
+     contabilidad del bar. Ver src/mantenimiento.js. -->
+<div id="tab-mantenimiento" class="tab-panel">
+  <main>
+    <div class="card">
+      <div class="card-title"><span>Anotar algo para arreglar</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· también podés mandarlo por Telegram con /arreglo</span>
+      </div>
+      <div class="mant-alta">
+        <input type="text" id="mant-titulo" maxlength="140" placeholder="Ej: se quemó la lámpara del baño de mujeres"
+               onkeydown="if(event.key==='Enter')crearMantenimiento(this)" />
+        <select id="mant-sector"></select>
+        <select id="mant-prioridad"></select>
+        <button class="btn btn-acento" onclick="crearMantenimiento(this)">+ Anotar</button>
+      </div>
+      <div id="mant-alta-msg" style="font-size:12px;margin-top:10px;min-height:16px"></div>
+    </div>
+
+    <div class="kpi-grid" id="mant-kpis" style="margin-top:24px"></div>
+
+    <div class="card" style="margin-top:24px">
+      <div class="card-title"><span>Lista</span></div>
+      <div class="mant-filtros">
+        <select id="mant-f-estado" onchange="renderMantenimiento()">
+          <option value="abiertos">Lo que falta hacer</option>
+          <option value="todos">Todo, incluso lo resuelto</option>
+          <option value="resuelto">Sólo lo resuelto</option>
+        </select>
+        <select id="mant-f-sector" onchange="renderMantenimiento()"></select>
+        <select id="mant-agrupar" onchange="renderMantenimiento()">
+          <option value="semana">Agrupar por semana</option>
+          <option value="prioridad">Agrupar por prioridad</option>
+          <option value="sector">Agrupar por sector</option>
+        </select>
+      </div>
+      <div id="mant-lista"><div class="loading"><div class="spinner"></div> Cargando...</div></div>
+    </div>
+  </main>
+</div>
+
+<!-- Modal: editar un arreglo ya anotado (solo admin) -->
+<div class="modal-overlay" id="mant-edit-overlay">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-title">Editar arreglo</div>
+    <div class="form-grid" style="grid-template-columns:1fr">
+      <div class="form-group full">
+        <label>Qué hay que arreglar</label>
+        <input type="text" id="mant-e-titulo" maxlength="140" />
+      </div>
+      <div class="form-group full" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label>Sector</label><select id="mant-e-sector"></select></div>
+        <div><label>Prioridad</label><select id="mant-e-prioridad"></select></div>
+      </div>
+      <div class="form-group full">
+        <label>Notas</label>
+        <textarea id="mant-e-notas" rows="3" maxlength="1000" placeholder="Ej: llamar a Ramón, el electricista"></textarea>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeMantenimientoEdit()">Cancelar</button>
+      <button class="btn btn-primary" id="mant-e-guardar" onclick="guardarMantenimientoEdit()">Guardar</button>
     </div>
   </div>
 </div>
@@ -2559,6 +2672,10 @@ const TAB_GROUPS = {
     { id: 'comportamiento', label: '📈 Comportamiento de Stocks', soloAdmin: true },
     { id: 'vinos',          label: '🥂 Gestión de Bebidas' },
   ] },
+  // Sin soloAdmin a propósito: el encargado es el que está en el salón cuando se
+  // rompe algo. Puede anotar y mover estados; borrar y editar es sólo del admin,
+  // y eso lo hace cumplir el server, no el botón que se le esconde.
+  mantenimiento: { label: '🔧 Mantenimiento', icono: '🔧', corto: 'Arreglos', subs: null },
   costos: { label: '🧮 Costos', icono: '🧮', corto: 'Costos', soloAdmin: true, subs: [
     { id: 'costos-resumen', label: '📊 Costos' },
     { id: 'costos-config',  label: '⚙️ Configuración' },
@@ -2671,6 +2788,7 @@ function cargarPanel(tab) {
   else if (tab === 'proymes') loadProyeccionMes();
   else if (tab === 'reportes-balance') initReporteBalance();
   else if (tab === 'reportes-servicios') initReporteServicios();
+  else if (tab === 'mantenimiento') loadMantenimiento();
   else if (tab === 'propinas') loadPropinas();
   else if (tab === 'propinas-historial') loadPropinasHistorial();
   else if (tab === 'inversiones') loadPlan();
@@ -8754,9 +8872,11 @@ async function recalcularPropinas() {
 function renderPropinasPlan(r) {
   const cont = document.getElementById('prop-resultado');
 
+  // Orden a propósito: primero el total que se reparte, después la parte de cada
+  // uno. Se lee como se piensa — cuánta plata hay y recién ahí en cuánto se divide.
   const kpis = '<div class="kpi-grid" style="margin-top:24px">'
-    + `<div class="kpi-card green"><div class="kpi-label">Le toca a cada uno</div><div class="kpi-value">${fmt(r.porPersona)}</div><div class="kpi-sub">${r.cantidadPersonas} persona${r.cantidadPersonas === 1 ? '' : 's'}</div></div>`
     + `<div class="kpi-card blue"><div class="kpi-label">Total a repartir</div><div class="kpi-value">${fmt(r.total)}</div><div class="kpi-sub">Galicia ${fmt(r.saldoGalicia)} + Brubank ${fmt(r.saldoBrubank)}</div></div>`
+    + `<div class="kpi-card green"><div class="kpi-label">Le toca a cada uno</div><div class="kpi-value">${fmt(r.porPersona)}</div><div class="kpi-sub">${r.cantidadPersonas} persona${r.cantidadPersonas === 1 ? '' : 's'}</div></div>`
     + `<div class="kpi-card"><div class="kpi-label">Transferencias a hacer</div><div class="kpi-value">${r.porCuenta.reduce((s, c) => s + c.transferencias.length, 0)}</div><div class="kpi-sub">${r.personas.filter(p => p.partido).length} partida${r.personas.filter(p => p.partido).length === 1 ? '' : 's'} en dos</div></div>`
     + `<div class="kpi-card orange"><div class="kpi-label">Sobrante</div><div class="kpi-value">${fmt(r.sobrante)}</div><div class="kpi-sub">queda en la cuenta</div></div>`
     + '</div>';
@@ -8992,6 +9112,262 @@ async function borrarPropinaReparto(id) {
 document.addEventListener('DOMContentLoaded', () => {
   const ov = document.getElementById('prop-persona-overlay');
   if (ov) ov.addEventListener('click', function (e) { if (e.target === this) closePropinaPersonaModal(); });
+});
+
+// ═══ MANTENIMIENTO ══════════════════════════════════════════════════════════
+// La libreta de lo que hay que arreglar. Ver src/mantenimiento.js.
+//
+// Todo se trae de una sola llamada a /api/mantenimiento y se guarda acá; los
+// filtros y el agrupado son puro render en el navegador, sin volver al server.
+// La lista es corta por naturaleza (lo que se rompe en un bar), así que pedirle
+// al server que filtre sería una vuelta de red por cada clic sin ganar nada.
+
+const mantState = { items: [], meta: null, editando: null, msgTimer: null };
+
+const MANT_PRIO_LABEL = { urgente: '🔴 Urgente', normal: '🟡 Normal', baja: '🟢 Puede esperar' };
+const MANT_ESTADO_LABEL = { pendiente: 'Pendiente', 'en curso': 'En curso', resuelto: 'Resuelto' };
+
+function mantEsAdmin() { return getRol() === 'admin'; }
+
+async function loadMantenimiento() {
+  const cont = document.getElementById('mant-lista');
+  try {
+    const { data } = await api('/api/mantenimiento');
+    mantState.items = data.items || [];
+    mantState.meta = data;
+    poblarMantenimientoSelects(data);
+    renderMantenimientoKpis(data.resumen, data.semanaActual);
+    renderMantenimiento();
+  } catch (e) {
+    cont.innerHTML = '<div class="prop-error">No se pudo cargar: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+// Las listas de sectores/prioridades las manda el server. Si mañana se agrega un
+// sector, aparece solo en los tres selects sin tocar el HTML.
+function poblarMantenimientoSelects(data) {
+  const opciones = (arr, sel) => arr.map(v =>
+    `<option value="${escapeHtml(v)}"${v === sel ? ' selected' : ''}>${escapeHtml(MANT_PRIO_LABEL[v] || v)}</option>`).join('');
+
+  const setSi = (id, html) => { const el = document.getElementById(id); if (el && !el.dataset.listo) { el.innerHTML = html; el.dataset.listo = '1'; } };
+  setSi('mant-sector', opciones(data.sectores, 'Otros'));
+  setSi('mant-prioridad', opciones(data.prioridades, 'normal'));
+  setSi('mant-e-sector', opciones(data.sectores));
+  setSi('mant-e-prioridad', opciones(data.prioridades));
+  setSi('mant-f-sector', '<option value="">Todos los sectores</option>' + opciones(data.sectores));
+}
+
+function renderMantenimientoKpis(r, semana) {
+  document.getElementById('mant-kpis').innerHTML =
+      `<div class="kpi-card red"><div class="kpi-label">Urgentes</div><div class="kpi-value">${r.urgentes}</div><div class="kpi-sub">frenan el servicio</div></div>`
+    + `<div class="kpi-card orange"><div class="kpi-label">Sin resolver</div><div class="kpi-value">${r.pendientes}</div><div class="kpi-sub">${r.enCurso} en curso</div></div>`
+    + `<div class="kpi-card green"><div class="kpi-label">Resueltos esta semana</div><div class="kpi-value">${r.resueltosSemana}</div><div class="kpi-sub">${escapeHtml(semana.label)}</div></div>`;
+}
+
+function renderMantenimiento() {
+  const cont = document.getElementById('mant-lista');
+  const fEstado = document.getElementById('mant-f-estado').value;
+  const fSector = document.getElementById('mant-f-sector').value;
+  const agrupar = document.getElementById('mant-agrupar').value;
+
+  const items = mantState.items.filter(i =>
+    (fEstado === 'todos' || (fEstado === 'resuelto' ? i.estado === 'resuelto' : i.estado !== 'resuelto'))
+    && (!fSector || i.sector === fSector));
+
+  if (!items.length) {
+    cont.innerHTML = '<div class="mant-vacio">'
+      + (mantState.items.length ? 'Nada acá con esos filtros.' : 'Todavía no hay nada anotado.<br>Cuando algo se rompa, escribilo arriba — o mandale <strong>/arreglo lo que sea</strong> al bot de Telegram.')
+      + '</div>';
+    return;
+  }
+
+  // Clave y título de cada grupo según el agrupado elegido. El orden lo define
+  // `orden`: las semanas van de la más nueva a la más vieja, las prioridades y
+  // los sectores en el orden natural de sus listas.
+  const clave = {
+    semana:    i => i.semana || 'sin-fecha',
+    prioridad: i => i.prioridad,
+    sector:    i => i.sector,
+  }[agrupar];
+  const titulo = {
+    semana:    i => i.semanaLabel || 'Sin fecha',
+    prioridad: i => MANT_PRIO_LABEL[i.prioridad] || i.prioridad,
+    sector:    i => i.sector,
+  }[agrupar];
+
+  const grupos = new Map();
+  items.forEach(i => {
+    const k = clave(i);
+    if (!grupos.has(k)) grupos.set(k, { titulo: titulo(i), items: [] });
+    grupos.get(k).items.push(i);
+  });
+
+  const orden = agrupar === 'semana'
+    ? [...grupos.keys()].sort().reverse()
+    : [...grupos.keys()].sort((a, b) => {
+        const lista = agrupar === 'prioridad' ? mantState.meta.prioridades : mantState.meta.sectores;
+        return lista.indexOf(a) - lista.indexOf(b);
+      });
+
+  cont.innerHTML = orden.map(k => {
+    const g = grupos.get(k);
+    return `<div class="mant-grupo">
+      <div class="mant-grupo-titulo">${escapeHtml(g.titulo)}<span class="mant-grupo-n">${g.items.length}</span></div>
+      ${g.items.map(filaMantenimiento).join('')}
+    </div>`;
+  }).join('');
+}
+
+function filaMantenimiento(i) {
+  const id = escapeHtml(i.id);
+  const resuelto = i.estado === 'resuelto';
+  const fecha = i.fecha ? new Date(i.fecha + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }) : '—';
+
+  const meta = [
+    `<span class="mant-tag">${escapeHtml(i.sector)}</span>`,
+    i.prioridad === 'urgente' && !resuelto ? '<span class="mant-tag urgente">urgente</span>' : '',
+    i.estado === 'en curso' ? '<span class="mant-tag encurso">en curso</span>' : '',
+    `<span>${fecha}${i.reportadoPor ? ' · ' + escapeHtml(i.reportadoPor) : ''}${i.origen === 'telegram' ? ' · 📱' : ''}</span>`,
+    resuelto && i.resuelto ? `<span>✓ ${new Date(i.resuelto + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}</span>` : '',
+    i.notas ? `<span title="${escapeHtml(i.notas)}">📝 ${escapeHtml(i.notas.slice(0, 60))}${i.notas.length > 60 ? '…' : ''}</span>` : '',
+  ].filter(Boolean).join('');
+
+  // Los botones de borrar/editar sólo se le dibujan al admin, pero quien manda
+  // es el server: el encargado sólo puede cambiar estado y notas aunque fuerce
+  // el request. Ver CAMPOS_ENCARGADO en server.js.
+  const acciones = resuelto
+    ? `<button onclick="cambiarEstadoMantenimiento('${id}','pendiente')">↩ Reabrir</button>`
+    : [
+        i.estado !== 'en curso' ? `<button onclick="cambiarEstadoMantenimiento('${id}','en curso')">▸ En curso</button>` : '',
+        `<button class="ok" onclick="cambiarEstadoMantenimiento('${id}','resuelto')">✓ Resuelto</button>`,
+      ].filter(Boolean).join('');
+
+  const admin = mantEsAdmin()
+    ? `<button onclick="openMantenimientoEdit('${id}')">✏️</button>`
+      + `<button onclick="borrarMantenimiento('${id}')">🗑️</button>`
+    : '';
+
+  return `<div class="mant-item${resuelto ? ' resuelto' : ''}">
+    <div class="mant-franja ${escapeHtml(i.prioridad)}"></div>
+    <div>
+      <div class="mant-item-titulo">${escapeHtml(i.titulo)}</div>
+      <div class="mant-item-meta">${meta}</div>
+    </div>
+    <div class="mant-acciones">${acciones}${admin}</div>
+  </div>`;
+}
+
+// ─── Alta rápida ────────────────────────────────────────────────────────────
+// El "✓ Anotado" se borra solo a los 2,5s. Ese timer hay que cancelarlo en cada
+// mensaje nuevo: anotando dos cosas seguidas, el timer del primero llegaba a
+// borrar el mensaje del segundo — incluido un mensaje de error.
+function mantMensaje(html) {
+  clearTimeout(mantState.msgTimer);
+  mantState.msgTimer = null;
+  document.getElementById('mant-alta-msg').innerHTML = html;
+}
+
+async function crearMantenimiento(btn) {
+  const input = document.getElementById('mant-titulo');
+  const titulo = input.value.trim();
+  if (!titulo) { mantMensaje('<span style="color:var(--orange)">Escribí qué hay que arreglar.</span>'); input.focus(); return; }
+
+  btn.disabled = true;
+  mantMensaje('<span style="color:var(--text-muted)">Anotando...</span>');
+  try {
+    await api('/api/mantenimiento', {
+      method: 'POST',
+      body: JSON.stringify({
+        titulo,
+        sector: document.getElementById('mant-sector').value,
+        prioridad: document.getElementById('mant-prioridad').value,
+      }),
+    });
+    // Se limpia sólo el texto: sector y prioridad quedan como estaban porque lo
+    // normal es anotar dos o tres cosas seguidas del mismo lado del local.
+    input.value = '';
+    mantMensaje('<span style="color:var(--green)">✓ Anotado.</span>');
+    mantState.msgTimer = setTimeout(() => { document.getElementById('mant-alta-msg').innerHTML = ''; }, 2500);
+    input.focus();
+    await loadMantenimiento();
+  } catch (e) {
+    mantMensaje('<span style="color:var(--red)">' + escapeHtml(e.message) + '</span>');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function cambiarEstadoMantenimiento(id, estado) {
+  try {
+    await api('/api/mantenimiento/' + encodeURIComponent(id), {
+      method: 'PUT',
+      body: JSON.stringify({ estado }),
+    });
+    await loadMantenimiento();
+  } catch (e) {
+    showToast('Error: ' + e.message, 4000);
+  }
+}
+
+async function borrarMantenimiento(id) {
+  const it = mantState.items.find(x => x.id === id);
+  if (!confirm(`¿Borrar "${it ? it.titulo : 'este arreglo'}" de la lista?\n\nSi ya está hecho, mejor marcalo como resuelto: así queda el registro.`)) return;
+  try {
+    await api('/api/mantenimiento/' + encodeURIComponent(id), { method: 'DELETE' });
+    showToast('Eliminado');
+    await loadMantenimiento();
+  } catch (e) {
+    showToast('Error: ' + e.message, 4000);
+  }
+}
+
+// ─── Edición (solo admin) ───────────────────────────────────────────────────
+function openMantenimientoEdit(id) {
+  const it = mantState.items.find(x => x.id === id);
+  if (!it) return;
+  mantState.editando = id;
+  document.getElementById('mant-e-titulo').value = it.titulo;
+  document.getElementById('mant-e-sector').value = it.sector;
+  document.getElementById('mant-e-prioridad').value = it.prioridad;
+  document.getElementById('mant-e-notas').value = it.notas || '';
+  document.getElementById('mant-edit-overlay').classList.add('open');
+  document.getElementById('mant-e-titulo').focus();
+}
+
+function closeMantenimientoEdit() {
+  document.getElementById('mant-edit-overlay').classList.remove('open');
+  mantState.editando = null;
+}
+
+async function guardarMantenimientoEdit() {
+  if (!mantState.editando) return;
+  const titulo = document.getElementById('mant-e-titulo').value.trim();
+  if (!titulo) { showToast('El título no puede quedar vacío'); return; }
+  const btn = document.getElementById('mant-e-guardar');
+  btn.disabled = true;
+  try {
+    await api('/api/mantenimiento/' + encodeURIComponent(mantState.editando), {
+      method: 'PUT',
+      body: JSON.stringify({
+        titulo,
+        sector: document.getElementById('mant-e-sector').value,
+        prioridad: document.getElementById('mant-e-prioridad').value,
+        notas: document.getElementById('mant-e-notas').value,
+      }),
+    });
+    closeMantenimientoEdit();
+    await loadMantenimiento();
+    showToast('Guardado');
+  } catch (e) {
+    showToast('Error: ' + e.message, 4000);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const ov = document.getElementById('mant-edit-overlay');
+  if (ov) ov.addEventListener('click', function (e) { if (e.target === this) closeMantenimientoEdit(); });
 });
 
 // Arrancar: verificar token guardado o mostrar login

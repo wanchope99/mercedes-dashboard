@@ -1,11 +1,12 @@
 """
-Bar Proveedores Bot (cliente delgado)
---------------------------------------
-Recibe una foto de factura/remito en Telegram y la reenvía a la app
-mercedes-dashboard. TODA la inteligencia (extracción con Claude, normalización,
-inferencia de categorías y escritura en Google Sheets) vive en la app.
+Bar Mercedes Bot (cliente delgado)
+-----------------------------------
+Hace dos cosas, las dos con el mismo patrón: recibe algo por Telegram y lo
+reenvía a la app mercedes-dashboard. TODA la inteligencia (extracción con
+Claude, normalización, inferencia de categorías y escritura en Google Sheets)
+vive en la app.
 
-Flujo:
+1) FACTURAS — una foto de factura/remito:
   1. Martin/Pablo manda una foto al bot.
   2. El bot la descarga y la POSTea a  POST /api/proveedores/ingest.
   3. La app responde:
@@ -16,6 +17,13 @@ Flujo:
                                junta las respuestas y llama a
                                POST /api/proveedores/pendientes/<id>/resolver.
   4. Lo que el usuario no resuelva por Telegram queda en el panel de la app.
+
+2) MANTENIMIENTO — lo que hay que arreglar:
+  · /arreglo se quemó la lámpara del baño  → POST /api/mantenimiento/ingest
+  · /pendientes                            → GET  /api/mantenimiento/pendientes
+  Se anota en el acto con prioridad normal y el bot ofrece tres botones para
+  corregirla. Anotar primero y afinar después es a propósito: si hay que elegir
+  sector y prioridad ANTES de que quede guardado, en pleno servicio no se anota.
 
 El bot NO accede a Google Sheets ni a la API de Claude: solo habla con la app
 mediante un token de servicio (PROVEEDORES_INGEST_TOKEN).
@@ -86,6 +94,38 @@ async def post_resolver(pendiente_id: str, resoluciones: dict) -> dict:
         )
         r.raise_for_status()
         return r.json()
+
+
+# ── Mantenimiento ─────────────────────────────────────────────────────
+async def post_arreglo(titulo: str, quien: str) -> dict:
+    """Anota algo para arreglar. El sector y la prioridad los pone la app por
+    defecto (Otros / normal): se ajustan después, con los botones o en la app."""
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as cli:
+        r = await cli.post(
+            f"{APP_BASE_URL}/api/mantenimiento/ingest",
+            json={"titulo": titulo, "reportadoPor": quien},
+            headers=_headers(),
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def put_arreglo(item_id: str, cambios: dict) -> dict:
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as cli:
+        r = await cli.put(
+            f"{APP_BASE_URL}/api/mantenimiento/ingest/{item_id}",
+            json=cambios,
+            headers=_headers(),
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def get_arreglos_pendientes() -> list:
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as cli:
+        r = await cli.get(f"{APP_BASE_URL}/api/mantenimiento/pendientes", headers=_headers())
+        r.raise_for_status()
+        return r.json().get("data", [])
 
 
 # ── Auth ──────────────────────────────────────────────────────────────
@@ -274,10 +314,118 @@ async def finalizar(update_or_query, context):
 # ── Handlers ──────────────────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Hola! Mandame una foto de una factura o remito y la cargo en la "
-        "planilla de Compras.\n\nSi algún dato no queda claro, te pregunto acá "
-        "mismo antes de guardarlo."
+        "👋 Hola! Hago dos cosas:\n\n"
+        "📸 *Facturas* — mandame una foto de una factura o remito y la cargo en "
+        "la planilla de Compras. Si algún dato no queda claro, te pregunto acá "
+        "mismo antes de guardarlo.\n\n"
+        "🔧 *Arreglos* — `/arreglo se quemó la lámpara del baño` y queda anotado "
+        "en la lista de mantenimiento. `/pendientes` para ver qué falta hacer.",
+        parse_mode="Markdown",
     )
+
+
+# ── Mantenimiento ─────────────────────────────────────────────────────
+PRIO_BOTONES = [("🔴 Urgente", "urgente"), ("🟡 Normal", "normal"), ("🟢 Puede esperar", "baja")]
+PRIO_EMOJI = {"urgente": "🔴", "normal": "🟡", "baja": "🟢"}
+
+
+def _quien(update: Update) -> str:
+    u = update.effective_user
+    return u.username or u.first_name or ""
+
+
+def _md(texto: str) -> str:
+    """Escapa lo que escribió la persona antes de meterlo en un mensaje Markdown.
+
+    Sin esto, un `/arreglo cambiar el foco *ya*` rompe el parser de Telegram y el
+    mensaje no se envía: el arreglo QUEDÓ guardado pero el bot parece haber
+    fallado, que es la peor combinación posible.
+    """
+    for c in ("_", "*", "`", "["):
+        texto = texto.replace(c, "\\" + c)
+    return texto
+
+
+async def cmd_arreglo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update):
+        await update.message.reply_text("⛔ No tenés permiso para usar este bot.")
+        return
+
+    texto = " ".join(context.args).strip() if context.args else ""
+    if not texto:
+        # Sin texto: se pide y se captura el próximo mensaje (ver on_text).
+        context.chat_data["esperando_arreglo"] = True
+        await update.message.reply_text("🔧 ¿Qué hay que arreglar? Escribilo en el próximo mensaje.")
+        return
+
+    await _guardar_arreglo(update, context, texto)
+
+
+async def _guardar_arreglo(update: Update, context: ContextTypes.DEFAULT_TYPE, texto: str):
+    try:
+        resp = await post_arreglo(texto, _quien(update))
+    except httpx.HTTPStatusError as e:
+        log.exception("HTTP error arreglo")
+        await update.message.reply_text(f"❌ La app respondió con error ({e.response.status_code}).")
+        return
+    except Exception as e:
+        log.exception("Error anotando arreglo")
+        await update.message.reply_text(f"❌ Error: {e}")
+        return
+
+    item = resp.get("data", {}) or {}
+    item_id = item.get("id", "")
+    botones = [[
+        InlineKeyboardButton(label, callback_data=f"m|{item_id}|{valor}")
+        for label, valor in PRIO_BOTONES
+    ]]
+    await update.message.reply_text(
+        f"✅ Anotado: *{_md(item.get('titulo') or texto)}*\n"
+        f"Quedó como 🟡 normal. ¿Cambiás la prioridad?",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(botones),
+    )
+
+
+async def cmd_pendientes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update):
+        await update.message.reply_text("⛔ No tenés permiso para usar este bot.")
+        return
+    try:
+        items = await get_arreglos_pendientes()
+    except Exception as e:
+        log.exception("Error leyendo pendientes")
+        await update.message.reply_text(f"❌ Error: {e}")
+        return
+
+    if not items:
+        await update.message.reply_text("✨ No hay nada pendiente de arreglar.")
+        return
+
+    lineas = [f"🔧 *{len(items)} cosa(s) para arreglar:*", ""]
+    for it in items:
+        emoji = PRIO_EMOJI.get(it.get("prioridad"), "🟡")
+        curso = " _(en curso)_" if it.get("estado") == "en curso" else ""
+        lineas.append(f"{emoji} {_md(it.get('titulo') or '?')} — {_md(it.get('sector') or '?')}{curso}")
+    lineas.append("")
+    lineas.append("_Para marcarlas como resueltas, entrá a Mantenimiento en la app._")
+    await update.message.reply_text("\n".join(lineas), parse_mode="Markdown")
+
+
+async def on_boton_prioridad(query, context) -> bool:
+    """Botones de prioridad de un arreglo. Devuelve True si manejó el callback."""
+    if not query.data.startswith("m|"):
+        return False
+    _, item_id, prioridad = query.data.split("|", 2)
+    try:
+        await put_arreglo(item_id, {"prioridad": prioridad})
+    except Exception as e:
+        log.exception("Error cambiando prioridad")
+        await query.edit_message_text(f"❌ No pude cambiar la prioridad: {e}")
+        return True
+    emoji = PRIO_EMOJI.get(prioridad, "")
+    await query.edit_message_text(f"✅ Anotado como {emoji} *{prioridad}*.", parse_mode="Markdown")
+    return True
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -366,6 +514,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
+    # Mantenimiento primero: su callback_data tiene 3 partes, no 4, así que el
+    # split de abajo reventaría. Además no depende de chat_data, así que sigue
+    # funcionando aunque el chat esté en medio de confirmar una factura.
+    if await on_boton_prioridad(query, context):
+        return
+
     pend = context.chat_data.get("pend")
     if not pend:
         await query.edit_message_text("Esta confirmación ya expiró. Mandá la foto de nuevo si hace falta.")
@@ -396,6 +551,16 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # "/arreglo" sin texto deja el chat esperando el próximo mensaje. Se chequea
+    # antes que las dudas de factura porque es lo que se acaba de pedir.
+    if context.chat_data.pop("esperando_arreglo", False):
+        texto = (update.message.text or "").strip()
+        if not texto:
+            await update.message.reply_text("No entendí. Probá con /arreglo y qué hay que arreglar.")
+            return
+        await _guardar_arreglo(update, context, texto)
+        return
+
     pend = context.chat_data.get("pend")
     if not pend or not pend.get("esperando_texto"):
         return  # texto suelto sin contexto: ignorar
@@ -429,6 +594,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("arreglo", cmd_arreglo))
+    app.add_handler(CommandHandler("pendientes", cmd_pendientes))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.Document.IMAGE, handle_photo))
     app.add_handler(CallbackQueryHandler(on_button))
