@@ -4567,8 +4567,11 @@ function editorTC(ctx, fila, usd, tcVigente, sinConfirmar) {
     </div>`;
 }
 
+// Un cambio o un fondeo sin TC NO se marca: tiene el fallback y esta bien asi,
+// porque su TC no mueve ningun numero que se reporte. El chip igual se muestra y
+// se puede editar — lo que no hace es reclamar.
 function chipTC(m, usd) {
-  const sinConfirmar = !m.tcConfirmado;
+  const sinConfirmar = !m.tcConfirmado && m.tcRelevante;
   const txt = sinConfirmar
     ? `TC $${Number(m.tcUsd).toLocaleString('es-AR')} sin confirmar`
     : `TC $${Number(m.tcUsd).toLocaleString('es-AR')}`;

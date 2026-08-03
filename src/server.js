@@ -1312,11 +1312,16 @@ app.post('/api/pagos/pagar', authMiddleware, adminOnly, async (req, res) => {
 // GET /api/movimientos/tc-pendientes — filas en dólares que todavía se valúan al
 // fallback. Alimenta el panel de Cajas: sin esta lista, encontrarlas obligaría a
 // abrir día por día en el dashboard buscando el chip marcado.
+//
+// Sólo filas con tcRelevante: los cambios y fondeos quedan afuera porque su TC no
+// mueve ningún número reportado (ver el comentario en sheets.js). Siguen siendo
+// editables desde el detalle del día si alguna vez hace falta; lo que no hacen es
+// pedirlo.
 app.get('/api/movimientos/tc-pendientes', authMiddleware, adminOnly, async (req, res) => {
   try {
     const movs = await getMovimientos();
     const pendientes = movs
-      .filter(m => m.tieneUSD && !m.tcConfirmado)
+      .filter(m => m.tcRelevante && !m.tcConfirmado)
       .map(m => {
         const usd = m.entradaUSD || m.salidaUSD;
         return {

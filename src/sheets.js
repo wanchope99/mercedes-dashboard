@@ -226,6 +226,17 @@ async function getMovimientos() {
     const entradaTotal = entradaARS + (entradaUSD * tcUsd);
     const salidaTotal  = salidaARS  + (salidaUSD  * tcUsd);
 
+    // Cambios y fondeos quedan FUERA del circuito de "cargá el TC". No es que no
+    // tengan uno: es que no cambia ningún número que se reporte. Son plata pasando
+    // de un bolsillo a otro — filtrarOperativos() ya los saca del resultado, y el
+    // saldo de una caja en dólares se lleva en dólares, así que el TC no lo toca.
+    // Pedir el TC de los 14 cambios seria trabajo cuyo unico efecto es tacharlos
+    // de una lista. La condicion es la MISMA que filtrarOperativos, a proposito:
+    // si algun dia cambia que entra y que no en el resultado, esto la sigue sola.
+    const esCambioFila = categoria === 'Cambio';
+    const esFondeoFila = tipo === 'Otros';
+    const tcRelevante = tieneUSD && !esCambioFila && !esFondeoFila;
+
     // Cuotas (columnas F y H)
     const cuotasInfo = parseCuotas(row[5], estado);
     const cuotaId = (row[7] || '').toString().trim();
@@ -263,6 +274,8 @@ async function getMovimientos() {
       tieneUSD,
       tcUsd: tieneUSD ? tcUsd : null,
       tcConfirmado: tieneUSD ? tcConfirmado : true,
+      // Si vale false, la fila puede tener TC pero la app no lo reclama.
+      tcRelevante,
       pagado: estado.toLowerCase() === 'pagado',
       diaSemana: DIAS_SEMANA[fecha.getDay()],
       // Flags para filtrar
