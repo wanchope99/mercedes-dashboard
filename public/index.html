@@ -5824,14 +5824,20 @@ function renderFinConciliacion() {
       : '') +
     renderPozoReal() +
     `<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted)">
-      <span>Según el registro: <b style="color:var(--text)">${fmt(c.valorRegistroARS)}</b></span>
+      <span title="Sólo lo asentado en Finanzas Movimientos: colocaciones e intereses. Las transferencias entre cajas viven en Movimientos como tipo Cambio y no se duplican acá.">Asentado en el registro: <b style="color:var(--text)">${fmt(c.valorRegistroARS)}</b></span>
       ${c.porDestino.legacy ? `<span title="Movimientos cargados con la estrategia vieja (UVA/CER). Si esa plata ya se pasó a Mercado Pago Pablo, registrá el rescate y la nueva colocación.">En instrumentos viejos (UVA/CER): <b style="color:var(--orange)">${fmt(c.porDestino.legacy)}</b></span>` : ''}
     </div>`;
 }
 
 // El pozo vale lo que dice el saldo de la caja, no lo que alguien alcanzó a
-// asentar en el registro. Se muestran las dos cosas y la diferencia entre ellas:
-// esa brecha ES el dato — dice cuánto falta cargar.
+// asentar en el registro.
+//
+// Y la diferencia entre los dos NO es un error: acá se mostraba como "lo que
+// falta asentar" y estaba mal. Las transferencias entre cajas se cargan en
+// Movimientos como tipo Cambio -los $6.000.000 de Galicia a MP Pablo son eso- y
+// ahí quedan bien. Copiarlas al registro seria seguir la misma plata dos veces,
+// que es como se termina contando de más. El registro responde otra cosa: de qué
+// cierre salió cada peso, y eso ya se controla arriba con asignado vs colocado.
 //
 // Las salidas van en su propia línea porque de esta cuenta Pablo paga gastos del
 // bar. Dentro del saldo solo, esa mezcla no se ve.
@@ -5851,7 +5857,6 @@ function renderPozoReal() {
     </div>`;
   }
 
-  const brecha = p.saldoARS - c.valorRegistroARS;
   const nGastos = (p.salidas || []).length;
 
   return `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">` +
@@ -5879,13 +5884,6 @@ function renderPozoReal() {
                    <div style="font-size:11px;color:var(--text-muted)">${escapeHtml(s.categoria || '')}</div></td>
                <td class="td-right" style="white-space:nowrap">${fmt(s.montoARS)}</td></tr>`).join('')}
              </tbody></table></div>
-         </div>`
-      : '') +
-    (Math.abs(brecha) >= 1
-      ? `<div style="font-size:12px;color:var(--orange);line-height:1.6;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
-           El registro de movimientos de acá abajo dice <b>${fmt(c.valorRegistroARS)}</b>, o sea
-           <b>${fmt(Math.abs(brecha))}</b> ${brecha > 0 ? 'menos' : 'más'} que el saldo real.
-           El saldo manda; la diferencia es lo que falta asentar en el registro.
          </div>`
       : '') +
     `</div>`;
