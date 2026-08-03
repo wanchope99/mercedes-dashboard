@@ -5752,8 +5752,8 @@ function renderFinKpis() {
   if (!r) { document.getElementById('fin-kpis').innerHTML = kpi('Sin datos', '—', 'cargá aportes para proyectar', 'blue'); return; }
   const gan = Math.round(r.gananciaReal);
   document.getElementById('fin-kpis').innerHTML =
-    kpi('REAL · valor del pozo hoy', fmt(f.conciliacion.valorRealARS),
-        fmt(f.conciliacion.colocadoARS) + ' colocados' + (f.conciliacion.interesesARS ? ' + ' + fmt(f.conciliacion.interesesARS) + ' de intereses' : ''), 'green') +
+    kpi('REAL · valor del pozo hoy', fmt((f.pozo && f.pozo.saldoARS) || 0),
+        f.pozo && f.pozo.encontrada ? 'saldo de la caja ' + escapeHtml(f.pozo.caja) : '⚠ no se encontró la caja', 'green') +
     kpi('Proyección · total al mes ' + r.meses, fmt(Math.round(r.totalNominal)), 'pesos corrientes, con los intereses', 'blue') +
     kpi('Proyección · intereses ganados', fmt(Math.round(r.interesesAcum)), 'acumulados en ' + r.meses + ' meses', 'blue') +
     kpi('Poder adquisitivo', (gan >= 0 ? '+' : '') + fmt(gan), (r.pctGananciaReal >= 0 ? '+' : '') + r.pctGananciaReal.toFixed(1) + '% en pesos de hoy', gan >= 0 ? 'green' : 'red');
@@ -5768,7 +5768,7 @@ function renderFinEstrategia() {
   const inflAnual = (Math.pow(1 + p.inflacionMensual, 12) - 1) * 100;
   const realAnual = p.tasaRealAnual * 100;
   const pierde = realAnual < 0;
-  const cap = state.fin.conciliacion.valorRealARS;   // capital + lo que ya rindió
+  const cap = (state.fin.pozo && state.fin.pozo.saldoARS) || 0;   // saldo real de la caja
 
   document.getElementById('fin-estrategia').innerHTML =
     `<div style="font-size:14px;line-height:1.8;margin-bottom:14px">
@@ -5822,22 +5822,78 @@ function renderFinConciliacion() {
               'no sale del recupero de ningún cierre — ej. los $15.000.000 que vinieron de Galicia') +
         `</div>`
       : '') +
-    // El interés va aparte del capital: no es plata que alguien puso, es lo que
-    // rindió la que ya estaba. Sumado abajo da lo que el pozo vale de verdad.
-    `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">` +
-      linea('Capital colocado', fmt(c.colocadoARS), 'var(--text)') +
-      linea('Intereses acreditados', (c.interesesARS ? '+ ' : '') + fmt(c.interesesARS), c.interesesARS ? 'var(--green)' : 'var(--text-muted)',
-            c.interesesARS
-              ? 'lo que pagó la cuenta remunerada, registrado a medida que se acredita'
-              : 'todavía no se registró ningún interés acreditado') +
-      `<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px">` +
-        linea('Valor real del pozo hoy', fmt(c.valorRealARS), 'var(--accent)', 'capital + intereses, según el registro') +
-      `</div>` +
-    `</div>` +
+    renderPozoReal() +
     `<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted)">
-      <span>En Mercado Pago Pablo: <b style="color:var(--text)">${fmt(c.porDestino.mercadoPago)}</b></span>
-      ${c.porDestino.legacy ? `<span title="Movimientos cargados con la estrategia vieja (UVA/CER). Siguen contando en el total; si esa plata ya se pasó a Mercado Pago Pablo, registrá el rescate y la nueva colocación.">En instrumentos viejos (UVA/CER): <b style="color:var(--orange)">${fmt(c.porDestino.legacy)}</b></span>` : ''}
+      <span>Según el registro: <b style="color:var(--text)">${fmt(c.valorRegistroARS)}</b></span>
+      ${c.porDestino.legacy ? `<span title="Movimientos cargados con la estrategia vieja (UVA/CER). Si esa plata ya se pasó a Mercado Pago Pablo, registrá el rescate y la nueva colocación.">En instrumentos viejos (UVA/CER): <b style="color:var(--orange)">${fmt(c.porDestino.legacy)}</b></span>` : ''}
     </div>`;
+}
+
+// El pozo vale lo que dice el saldo de la caja, no lo que alguien alcanzó a
+// asentar en el registro. Se muestran las dos cosas y la diferencia entre ellas:
+// esa brecha ES el dato — dice cuánto falta cargar.
+//
+// Las salidas van en su propia línea porque de esta cuenta Pablo paga gastos del
+// bar. Dentro del saldo solo, esa mezcla no se ve.
+function renderPozoReal() {
+  const p = state.fin.pozo;
+  const c = state.fin.conciliacion;
+  const linea = (label, valor, color, hint) =>
+    `<div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:7px 0">
+      <span style="font-size:13px;color:var(--text-muted)">${label}${hint ? `<span style="display:block;font-size:11px">${hint}</span>` : ''}</span>
+      <span style="font-size:15px;font-weight:700;color:${color || 'var(--text)'};white-space:nowrap">${valor}</span>
+    </div>`;
+
+  if (!p || !p.encontrada) {
+    return `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--red);line-height:1.6">
+      ⚠ No se encontró la caja <b>Mercado Pago Pablo</b> en la hoja Cajas, así que no se puede
+      mostrar cuánto vale el pozo. Si la renombraste, avisá para actualizar el nombre.
+    </div>`;
+  }
+
+  const brecha = p.saldoARS - c.valorRegistroARS;
+  const nGastos = (p.salidas || []).length;
+
+  return `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">` +
+    linea('Entradas al pozo', fmt(p.entradasARS), 'var(--text)', 'colocaciones e intereses acreditados') +
+    linea('Salidas', '− ' + fmt(p.salidasARS), p.salidasARS ? 'var(--orange)' : 'var(--text-muted)',
+          nGastos ? `${nGastos} pago${nGastos !== 1 ? 's' : ''} de gastos del bar hechos desde esta cuenta` : '') +
+    `<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px">` +
+      linea('Valor del pozo hoy', fmt(p.saldoARS), 'var(--accent)', `saldo calculado de la caja ${escapeHtml(p.caja)}`) +
+    `</div>` +
+    (p.salidasARS
+      ? `<div style="font-size:12px;color:var(--orange);line-height:1.6;margin-top:8px">
+           ⚠ De esta cuenta se pagaron <b>${fmt(p.salidasARS)}</b> de gastos del bar.
+           No es plata que se perdió del pozo — es plata del bar que salió por esta ventanilla —
+           pero significa que la cuenta <b>no es sólo</b> capital del recupero.
+           <span style="cursor:pointer;text-decoration:underline" onclick="toggleSalidasPozo()">ver el detalle</span>
+         </div>
+         <div id="pozo-salidas" style="display:none;margin-top:10px">
+           <div class="table-wrap"><table class="pagos-table" style="width:100%">
+             <thead><tr><th style="text-align:left">Fila</th><th style="text-align:left">Fecha</th>
+             <th style="text-align:left">Concepto</th><th class="td-right">Monto</th></tr></thead>
+             <tbody>${(p.salidas || []).map(s => `<tr>
+               <td style="font-size:12px;color:var(--text-muted)">fila ${s.rowIndex}</td>
+               <td style="white-space:nowrap">${escapeHtml(s.fecha || '')}</td>
+               <td>${escapeHtml([s.proveedor, s.descripcion].filter(Boolean).join(' · ') || '—')}
+                   <div style="font-size:11px;color:var(--text-muted)">${escapeHtml(s.categoria || '')}</div></td>
+               <td class="td-right" style="white-space:nowrap">${fmt(s.montoARS)}</td></tr>`).join('')}
+             </tbody></table></div>
+         </div>`
+      : '') +
+    (Math.abs(brecha) >= 1
+      ? `<div style="font-size:12px;color:var(--orange);line-height:1.6;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+           El registro de movimientos de acá abajo dice <b>${fmt(c.valorRegistroARS)}</b>, o sea
+           <b>${fmt(Math.abs(brecha))}</b> ${brecha > 0 ? 'menos' : 'más'} que el saldo real.
+           El saldo manda; la diferencia es lo que falta asentar en el registro.
+         </div>`
+      : '') +
+    `</div>`;
+}
+
+function toggleSalidasPozo() {
+  const el = document.getElementById('pozo-salidas');
+  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
 }
 
 function renderFinMovimientos() {

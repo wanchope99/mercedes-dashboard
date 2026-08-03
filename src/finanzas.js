@@ -4,8 +4,21 @@
 // ver roi.js) no se deja quieta en la caja operativa: se coloca en una cuenta
 // aparte que rinde. Desde el 24/07/2026 la estrategia es UNA SOLA:
 //
-//   · 100% a MERCADO PAGO PABLO — cuenta remunerada, rinde tnaMercadoPago (17%
-//     TNA al 24/07/2026), liquidez inmediata, sin plazo ni riesgo de precio.
+//   · 100% a MERCADO PAGO PABLO — cuenta remunerada, rinde tnaMercadoPago (17,5%
+//     TNA al 03/08/2026), liquidez inmediata, sin plazo ni riesgo de precio.
+//
+// CUÁNTO VALE EL POZO NO SE SUMA ACÁ: se lee del saldo de la caja "Mercado Pago
+// Pablo" en la hoja Cajas, que la planilla ya calcula sobre Movimientos. Antes se
+// derivaba sumando el registro manual de abajo y el resultado quedaba viejo: al
+// 03/08/2026 el registro daba $15.092.924 contra $20.570.325 reales, porque le
+// faltaban una colocación de $6.000.000 y $522.599 de salidas que nadie cargó.
+// El saldo de la caja no se puede desactualizar — sale de los mismos movimientos
+// que todo el resto de la app.
+//
+// Esa cuenta ADEMÁS se usa para pagar gastos del bar (Pablo saca de ahí). Así que
+// no es un pozo puro: el desglose muestra las salidas operativas por separado en
+// lugar de dejarlas escondidas dentro de un saldo. El registro de movimientos
+// sigue existiendo, pero para otra pregunta: de qué cierre salió cada peso.
 //
 // Antes había dos buckets (UVA + CER) con una escalera de plazos escalonados.
 // Se sacó a propósito: obligaba a mantener un reparto, un calendario de
@@ -74,7 +87,7 @@ const TIPOS = ['colocacion', 'rescate', 'renovacion', 'ajuste', 'interes'];
 // Mercado Pago Pablo para arrancar la colocación.
 const DEFAULT_CONFIG = {
   inflacionMensual: 0.019,
-  tnaMercadoPago: 0.17,
+  tnaMercadoPago: 0.175,
   capitalInicialARS: 15000000,
   horizonteMeses: 24,
   mesInicio: '',   // "YYYY-MM"; vacío = el primer mes con recupero
@@ -371,8 +384,10 @@ function conciliar(movimientos, recuperoPorMes) {
     capitalPropioARS: Math.round(capitalPropio),
     sinColocarARS: Math.round(asignado - deRecupero),
     interesesARS: Math.round(intereses),
-    // Lo que el pozo vale de verdad hoy: lo puesto más lo que rindió.
-    valorRealARS: Math.round(colocado + intereses),
+    // Lo que dice el REGISTRO. No es lo que el pozo vale -eso sale del saldo de
+    // la caja- sino lo que alguien alcanzó a asentar. La diferencia entre los dos
+    // es justamente lo que falta cargar, y por eso se expone en vez de esconderse.
+    valorRegistroARS: Math.round(colocado + intereses),
     porDestino: {
       mercadoPago: Math.round(enMercadoPago),
       legacy: Math.round(enLegacy),
@@ -381,11 +396,52 @@ function conciliar(movimientos, recuperoPorMes) {
   };
 }
 
+// ─── El pozo real: sale del saldo de la caja, no de sumar el registro ────────
+//
+// La caja se busca por NOMBRE. En la hoja Cajas las filas se mueven -el 24/07/2026
+// se insertó una y todo lo de abajo bajó un lugar- así que cualquier referencia
+// fija (Cajas!F3) tarde o temprano lee la cuenta de otro.
+const CAJA_POZO = 'Mercado Pago Pablo';
+
+// Las salidas de esa cuenta son gastos del bar que Pablo paga desde ahí. No es
+// plata que "se perdió" del pozo: es plata del bar que salió por esa ventanilla.
+// Se muestran aparte justamente porque el saldo solo no deja verlo.
+async function _pozoReal() {
+  const { getCajas, getMovimientos } = require('./sheets');
+  const norm = s => (s || '').toString().trim().toLowerCase();
+
+  const cajas = await getCajas().catch(() => []);
+  const caja = cajas.find(c => norm(c.caja) === norm(CAJA_POZO));
+  if (!caja) {
+    return { encontrada: false, caja: CAJA_POZO, saldoARS: 0, entradasARS: 0, salidasARS: 0, salidas: [] };
+  }
+
+  const movs = await getMovimientos().catch(() => []);
+  const salidas = movs
+    .filter(m => norm(m.medioPago) === norm(CAJA_POZO) && (m.salidaARS || 0) > 0)
+    .map(m => ({
+      rowIndex: m.rowIndex, fecha: m.fechaStr, tipo: m.tipo, categoria: m.categoria,
+      proveedor: m.proveedor, descripcion: m.descripcion, montoARS: m.salidaARS,
+    }))
+    .sort((a, b) => b.rowIndex - a.rowIndex);
+
+  return {
+    encontrada: true,
+    caja: caja.caja,
+    saldoARS: Math.round(caja.saldoCalculado || 0),
+    saldoRealARS: Math.round(caja.saldoReal || 0),
+    entradasARS: Math.round(caja.entradas || 0),
+    salidasARS: Math.round(caja.salidas || 0),
+    salidas,
+  };
+}
+
 // ─── API pública ────────────────────────────────────────────────────────────
 // Arma la vista completa. `recuperoPorMes` viene de roi.js (server.js lo inyecta
 // para no crear una dependencia circular finanzas ↔ roi ↔ plan).
 async function resumenFinanzas(recuperoPorMes = []) {
   const { config, aportes, movimientos } = await _load();
+  const pozo = await _pozoReal();
   const overrides = new Map(aportes.map(a => [a.mes, a]));
   const recuperoMap = new Map((recuperoPorMes || []).map(m => [m.iso, m]));
 
@@ -411,6 +467,7 @@ async function resumenFinanzas(recuperoPorMes = []) {
     aportes: serie,
     movimientos: movimientos.map(({ rowIndex, ...m }) => m),
     proyeccion,
+    pozo,
     conciliacion: conciliar(movimientos, recuperoPorMes),
     // Claves de la estrategia vieja que siguen en la planilla y ya no se usan.
     clavesObsoletas: config.clavesObsoletas || null,

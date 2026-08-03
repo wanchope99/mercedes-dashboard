@@ -61,9 +61,17 @@ The two arqueo cajas are `CAJA_EFECTIVO` / `CAJA_MP` in `server.js`, overridable
 
 ### Finanzas: the recovery capital sits in one account
 
-`src/finanzas.js` models where the money set aside each month for investment recovery (`roi.js`) actually goes. Since 2026-07-24 the strategy is a single destination: 100% into `Mercado Pago Pablo`, a remunerated account at `tnaMercadoPago` (17% TNA), seeded with ARS 15M moved over from Galicia. It replaced a two-bucket UVA+CER ladder; movements recorded under the old `uva`/`cer` buckets are still read and shown, never migrated or dropped.
+`src/finanzas.js` models where the money set aside each month for investment recovery (`roi.js`) actually goes. Since 2026-07-24 the strategy is a single destination: 100% into `Mercado Pago Pablo`, a remunerated account at `tnaMercadoPago` (17.5% TNA), seeded with ARS 15M moved over from Galicia. It replaced a two-bucket UVA+CER ladder; movements recorded under the old `uva`/`cer` buckets are still read and shown, never migrated or dropped.
 
-Two deliberately separate planes: the **projection** (`calcularProyeccion`, pure, derives everything from parameters) and the **real registry** (`Finanzas Movimientos` sheet — the audit trail proving recovery capital never mixed with the bar's operating cash). `conciliar()` compares them, splitting placements by whether they carry a `MesRecupero` (money from a month's close) or not (own capital placed alongside, like the initial 15M).
+**What the pot is worth is read from the `Cajas` sheet, never summed from the registry.** `_pozoReal()` resolves the `Mercado Pago Pablo` caja *by name* (the row moves — see the `Cajas` section above) and takes its Saldo Calculado, which the spreadsheet already derives from `Movimientos`. Deriving it by summing `Finanzas Movimientos` is what the code used to do and it silently went stale: on 2026-08-03 the registry said ARS 15,092,924 against a real ARS 20,570,325, missing a 6M placement and 522,599 of withdrawals nobody had entered. A hand-kept registry cannot be the source of a number that must be right.
+
+**That account is not a pure recovery pot.** Pablo also pays bar expenses out of it (meat, vegetables, a wage — ARS 522,599 across 10 rows as of 2026-08-03). So the earlier claim that this registry proves recovery capital never mixed with operating cash is **false in practice**; the UI now shows those withdrawals on their own line instead of letting them hide inside the balance.
+
+The registry (`Finanzas Movimientos`) stays, but for a different question: *which close did each peso come from*. `conciliar()` splits placements by whether they carry a `MesRecupero` (money from a month's close) or not (own capital placed alongside, like the initial 15M), and reports `valorRegistroARS` — deliberately named so nobody mistakes it for the pot's value. The gap between it and the caja balance is surfaced, because that gap is exactly what still needs entering.
+
+Movement types: `colocacion`, `rescate`, `renovacion`, `ajuste`, `interes`. **`interes` is excluded from `colocado`** — every other type carries a +1 sign, so counting interest as placed money would invent capital nobody contributed and drive `sinColocar` negative, firing the very false alarm that splitting out capital propio exists to prevent.
+
+The third plane is the **projection** (`calcularProyeccion`, pure, derives everything from parameters) — it estimates interest from the TNA, while the caja balance shows what the account actually paid.
 
 Note this strategy's nominal rate is **below** the assumed inflation, so real value declines. That is intentional — liquidity over inflation protection — and the UI surfaces the negative real rate rather than burying it.
 
