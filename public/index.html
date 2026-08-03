@@ -4544,9 +4544,23 @@ async function spinRefresh(btn, fn) {
   }
 }
 
+// El botón "Actualizar" tiene un solo trabajo que no hace ninguna otra pantalla:
+// vaciar el caché del server (node-cache, 120s sobre las hojas) para que la
+// próxima lectura vaya a Google Sheets de verdad. Va por api() y no por fetch()
+// pelado porque /api/refresh es adminOnly: sin el header Authorization devuelve
+// 401, y un 401 no hace fallar a fetch(). El botón giraba, recargaba la pantalla
+// contra el caché intacto y volvía a pintar los mismos números viejos — un valor
+// corregido a mano en la planilla seguía sin aparecer por más clics que se le
+// dieran. Si el vaciado falla hay que decirlo: recargar y callarse es
+// exactamente lo que hacía creer que los datos estaban frescos.
 function refreshData() {
   return spinRefresh(document.getElementById('btn-refresh'), async () => {
-    await fetch('/api/refresh', { method: 'POST' });
+    try {
+      await api('/api/refresh', { method: 'POST' });
+    } catch (e) {
+      alert('No se pudo vaciar el caché del servidor: ' + e.message +
+            '\nLos números pueden seguir siendo los de antes.');
+    }
     await loadAll();
     if (document.getElementById('tab-pagos').classList.contains('active')) loadPagos();
     if (document.getElementById('tab-cajas').classList.contains('active')) loadCajas();
