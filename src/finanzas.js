@@ -63,7 +63,11 @@ const HEADER_MOVS = ['ID', 'Fecha', 'Tipo', 'Bucket', 'MontoARS', 'Instrumento',
 const BALDE_MP = 'mp';
 const BALDES = [BALDE_MP];
 const BALDES_LEGACY = ['uva', 'cer'];
-const TIPOS = ['colocacion', 'rescate', 'renovacion', 'ajuste'];
+// "interes" es lo que la cuenta remunerada pagó: NO es plata colocada, es lo que
+// rindió la que ya estaba. Se registra a medida que se acredita, y como cada
+// acreditación sube el saldo sobre el que Mercado Pago calcula la siguiente, el
+// registro compone solo — no hay que proyectar nada acá.
+const TIPOS = ['colocacion', 'rescate', 'renovacion', 'ajuste', 'interes'];
 
 // Defaults al 24/07/2026: inflación INDEC jun-2026, TNA de la cuenta remunerada
 // de Mercado Pago, y los $15.000.000 que ese día se pasaron de Galicia a
@@ -341,13 +345,22 @@ function _sumarMeses(iso, n) {
 // alarma falsa.
 function conciliar(movimientos, recuperoPorMes) {
   const signo = t => (t === 'rescate' ? -1 : 1);   // rescate saca plata de los instrumentos
-  let colocado = 0, deRecupero = 0, capitalPropio = 0;
+  let colocado = 0, deRecupero = 0, capitalPropio = 0, intereses = 0;
   let enMercadoPago = 0, enLegacy = 0;
   for (const m of movimientos) {
     if (m.tipo === 'renovacion') continue;         // no mueve capital, sólo lo reubica
     const v = signo(m.tipo) * (m.monto || 0);
-    colocado += v;
-    if (m.mesRecupero) deRecupero += v; else capitalPropio += v;
+    if (m.tipo === 'interes') {
+      // El interés queda FUERA de "colocado" a propósito. Sumarlo ahí haría
+      // aparecer capital propio que nadie puso, y "sin colocar" se volvería
+      // negativo solo — la alarma de "colocado de más" que este mismo cálculo
+      // separa el capital propio para evitar.
+      intereses += v;
+    } else {
+      colocado += v;
+      if (m.mesRecupero) deRecupero += v; else capitalPropio += v;
+    }
+    // El destino sí lleva todo: es lo que hay en la cuenta, puesto o generado.
     if (m.balde === BALDE_MP) enMercadoPago += v; else enLegacy += v;
   }
   const asignado = (recuperoPorMes || []).reduce((s, m) => s + (m.recuperoARS || 0), 0);
@@ -357,6 +370,9 @@ function conciliar(movimientos, recuperoPorMes) {
     deRecuperoARS: Math.round(deRecupero),
     capitalPropioARS: Math.round(capitalPropio),
     sinColocarARS: Math.round(asignado - deRecupero),
+    interesesARS: Math.round(intereses),
+    // Lo que el pozo vale de verdad hoy: lo puesto más lo que rindió.
+    valorRealARS: Math.round(colocado + intereses),
     porDestino: {
       mercadoPago: Math.round(enMercadoPago),
       legacy: Math.round(enLegacy),

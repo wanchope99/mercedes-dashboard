@@ -1504,6 +1504,7 @@
           <div class="form-group"><label>Tipo</label><select id="fmv-tipo">
             <option value="colocacion">Colocación (entra plata a la cuenta)</option>
             <option value="rescate">Retiro / rescate (sale plata de la cuenta)</option>
+            <option value="interes">Interés acreditado (lo que rindió la cuenta)</option>
             <option value="ajuste">Ajuste</option>
           </select></div>
           <div class="form-group"><label>Destino</label><input id="fmv-destino" value="Mercado Pago Pablo" disabled style="opacity:.6" title="Estrategia única: el 100% del recupero va acá"></div>
@@ -5718,7 +5719,7 @@ async function planMoverPrioridad(id, dir) {
 // Destinos. 'mp' es el único vigente; uva/cer quedan para leer los movimientos
 // viejos sin que aparezcan como código de bucket crudo en la tabla.
 const FIN_DESTINOS = { mp: 'Mercado Pago Pablo', uva: 'UVA (estrategia vieja)', cer: 'CER (estrategia vieja)' };
-const FIN_TIPOS = { colocacion: 'Colocación', rescate: 'Rescate', renovacion: 'Renovación', ajuste: 'Ajuste' };
+const FIN_TIPOS = { colocacion: 'Colocación', rescate: 'Rescate', renovacion: 'Renovación', ajuste: 'Ajuste', interes: 'Interés' };
 
 async function loadFinanzas() {
   document.getElementById('fin-kpis').innerHTML = '<div class="loading"><div class="spinner"></div> Cargando finanzas...</div>';
@@ -5751,7 +5752,8 @@ function renderFinKpis() {
   if (!r) { document.getElementById('fin-kpis').innerHTML = kpi('Sin datos', '—', 'cargá aportes para proyectar', 'blue'); return; }
   const gan = Math.round(r.gananciaReal);
   document.getElementById('fin-kpis').innerHTML =
-    kpi('REAL · colocado hoy', fmt(f.conciliacion.colocadoARS), f.conciliacion.movimientos + ' movimiento' + (f.conciliacion.movimientos !== 1 ? 's' : '') + ' registrado' + (f.conciliacion.movimientos !== 1 ? 's' : ''), 'green') +
+    kpi('REAL · valor del pozo hoy', fmt(f.conciliacion.valorRealARS),
+        fmt(f.conciliacion.colocadoARS) + ' colocados' + (f.conciliacion.interesesARS ? ' + ' + fmt(f.conciliacion.interesesARS) + ' de intereses' : ''), 'green') +
     kpi('Proyección · total al mes ' + r.meses, fmt(Math.round(r.totalNominal)), 'pesos corrientes, con los intereses', 'blue') +
     kpi('Proyección · intereses ganados', fmt(Math.round(r.interesesAcum)), 'acumulados en ' + r.meses + ' meses', 'blue') +
     kpi('Poder adquisitivo', (gan >= 0 ? '+' : '') + fmt(gan), (r.pctGananciaReal >= 0 ? '+' : '') + r.pctGananciaReal.toFixed(1) + '% en pesos de hoy', gan >= 0 ? 'green' : 'red');
@@ -5766,14 +5768,14 @@ function renderFinEstrategia() {
   const inflAnual = (Math.pow(1 + p.inflacionMensual, 12) - 1) * 100;
   const realAnual = p.tasaRealAnual * 100;
   const pierde = realAnual < 0;
-  const cap = state.fin.conciliacion.colocadoARS;
+  const cap = state.fin.conciliacion.valorRealARS;   // capital + lo que ya rindió
 
   document.getElementById('fin-estrategia').innerHTML =
     `<div style="font-size:14px;line-height:1.8;margin-bottom:14px">
        El <b>100% del capital del recupero</b> va a <b style="color:var(--accent)">Mercado Pago Pablo</b>
        — cuenta remunerada, disponible al instante, sin plazo ni riesgo de precio.
        Rinde <b>${tna.toFixed(1)}% TNA</b> (${(p.rendMensual * 100).toFixed(2)}% mensual).
-       Hoy hay <b>${fmt(cap)}</b> colocados según el registro.
+       Según el registro el pozo vale hoy <b>${fmt(cap)}</b>.
      </div>
      <div style="display:flex;gap:22px;flex-wrap:wrap;padding:12px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);font-size:13px">
        <span>Rinde <b style="color:var(--text)">${tna.toFixed(1)}%</b> anual</span>
@@ -5820,10 +5822,21 @@ function renderFinConciliacion() {
               'no sale del recupero de ningún cierre — ej. los $15.000.000 que vinieron de Galicia') +
         `</div>`
       : '') +
+    // El interés va aparte del capital: no es plata que alguien puso, es lo que
+    // rindió la que ya estaba. Sumado abajo da lo que el pozo vale de verdad.
+    `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">` +
+      linea('Capital colocado', fmt(c.colocadoARS), 'var(--text)') +
+      linea('Intereses acreditados', (c.interesesARS ? '+ ' : '') + fmt(c.interesesARS), c.interesesARS ? 'var(--green)' : 'var(--text-muted)',
+            c.interesesARS
+              ? 'lo que pagó la cuenta remunerada, registrado a medida que se acredita'
+              : 'todavía no se registró ningún interés acreditado') +
+      `<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px">` +
+        linea('Valor real del pozo hoy', fmt(c.valorRealARS), 'var(--accent)', 'capital + intereses, según el registro') +
+      `</div>` +
+    `</div>` +
     `<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted)">
       <span>En Mercado Pago Pablo: <b style="color:var(--text)">${fmt(c.porDestino.mercadoPago)}</b></span>
       ${c.porDestino.legacy ? `<span title="Movimientos cargados con la estrategia vieja (UVA/CER). Siguen contando en el total; si esa plata ya se pasó a Mercado Pago Pablo, registrá el rescate y la nueva colocación.">En instrumentos viejos (UVA/CER): <b style="color:var(--orange)">${fmt(c.porDestino.legacy)}</b></span>` : ''}
-      <span>Total colocado: <b style="color:var(--text)">${fmt(c.colocadoARS)}</b></span>
     </div>`;
 }
 
