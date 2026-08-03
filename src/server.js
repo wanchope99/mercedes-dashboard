@@ -8,7 +8,7 @@ const {
   getMovimientos, getResumenMensual, getActividadPorDia,
   getActividadPorDiaSemana, getCajas, getMovimientosCambio,
   getComprasEnCuotas,
-  getMeses, getCategorias, clearCache,
+  getMeses, getCategorias, clearCache, TC_FALLBACK,
 } = require('./sheets');
 const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos, getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy, probeStock, probeStockMovements, getVentasItems, getVentasConCosto } = require('./fudo');
 const vinos = require('./vinos');
@@ -1306,6 +1306,43 @@ app.post('/api/pagos/pagar', authMiddleware, adminOnly, async (req, res) => {
       }
     }
     res.json({ ok: true, message: `${m.proveedor} marcado como Pagado`, proveedor: m.proveedor, monto: m.salidaARS, medio, registradoEnSesion });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// GET /api/movimientos/tc-pendientes — filas en dólares que todavía se valúan al
+// fallback. Alimenta el panel de Cajas: sin esta lista, encontrarlas obligaría a
+// abrir día por día en el dashboard buscando el chip marcado.
+app.get('/api/movimientos/tc-pendientes', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const movs = await getMovimientos();
+    const pendientes = movs
+      .filter(m => m.tieneUSD && !m.tcConfirmado)
+      .map(m => {
+        const usd = m.entradaUSD || m.salidaUSD;
+        return {
+          rowIndex: m.rowIndex,
+          fecha: m.fecha.toISOString().split('T')[0],
+          fechaStr: m.fechaStr,
+          mes: m.mes,
+          tipo: m.tipo,
+          proveedor: m.proveedor,
+          descripcion: m.descripcion,
+          medioPago: m.medioPago,
+          usd,
+          esEntrada: m.entradaUSD > 0,
+          tcUsd: m.tcUsd,                          // el fallback con el que se valúa hoy
+          arsProvisorio: Math.round(usd * m.tcUsd),
+        };
+      })
+      .sort((a, b) => b.fecha.localeCompare(a.fecha));   // lo más reciente primero
+    res.json({
+      ok: true,
+      data: {
+        pendientes,
+        tcFallback: TC_FALLBACK,
+        totalUSD: pendientes.reduce((s, p) => s + p.usd, 0),
+      },
+    });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 

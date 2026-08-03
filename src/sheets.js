@@ -534,4 +534,5 @@ module.exports = {
   getActividadPorDiaSemana, getCajas, getMovimientosCambio,
   getComprasEnCuotas,
   getMeses, getCategorias, clearCache,
+  TC_FALLBACK,
 };

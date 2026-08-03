@@ -2171,6 +2171,7 @@
     <!-- Aviso de plata que ninguna caja está sumando (medios de pago que no
          coinciden exacto con el nombre de una caja). Vacío = todo bien. -->
     <div id="cajas-huerfanos"></div>
+    <div id="tc-pendientes"></div>
 
     <div class="card">
       <div class="card-title">
@@ -4430,7 +4431,7 @@ async function loadCajas() {
         </div>`;
     }).join('');
 
-    if (esAdmin) loadCajasHuerfanos();
+    if (esAdmin) { loadCajasHuerfanos(); loadTCPendientes(); }
 
   } catch(err) {
     document.getElementById('cajas-grid').innerHTML = `<div style="color:var(--red)">Error: ${err.message}</div>`;
@@ -4536,49 +4537,61 @@ function openDrawerFecha(fechaISO) {
 
 // ─── TC por fila ──────────────────────────────────────────────────────────────
 // La columna Q de Movimientos (el TC de cada fila en dolares) esta OCULTA en la
-// planilla: cargarla ahi seria ir a buscar la fila a mano entre mil y pico. El
-// unico lugar donde se ve y se edita es este chip, en el detalle del dia.
+// planilla: cargarla ahi seria ir a buscar la fila a mano entre mil y pico.
+//
+// Se edita desde dos lugares, con el MISMO editor: el chip en el detalle del dia
+// (cuando ya estas mirando ese movimiento) y la lista de pendientes en Cajas
+// (cuando querés despacharlos todos juntos). Por eso todo lleva un `ctx`: las dos
+// pantallas pueden estar en el DOM a la vez -el drawer no se desmonta al cerrarse-
+// y sin el prefijo los ids se pisarian y el editor abierto seria el del otro lado.
 //
 // Una fila sin TC propio se valua igual (al fallback historico, para que ningun
 // numero viejo se mueva) pero sale marcada. Eso es a proposito: el problema que
 // origino todo esto no fue que faltara el TC, fue que se convertia a uno inventado
 // sin decirlo.
-function chipTC(m, usd) {
-  const cls = m.tcConfirmado ? '' : 'sin-confirmar';
-  const txt = m.tcConfirmado
-    ? `TC $${Number(m.tcUsd).toLocaleString('es-AR')}`
-    : `TC $${Number(m.tcUsd).toLocaleString('es-AR')} sin confirmar`;
-  return `<div class="mov-tc ${cls}" onclick="toggleTC(${m.rowIndex})" title="Tipo de cambio de esta fila">
-      ${m.tcConfirmado ? '' : '⚠ '}${txt}
-    </div>
-    <div class="mov-tc-editor" id="tc-ed-${m.rowIndex}" style="display:none">
+function editorTC(ctx, fila, usd, tcVigente, sinConfirmar) {
+  const k = `${ctx}-${fila}`;
+  return `<div class="mov-tc-editor" id="tc-ed-${k}" style="display:none">
       <div class="tc-fila">
         <span style="font-size:12px;color:var(--text-muted)">USD ${usd.toLocaleString('es-AR')} a</span>
-        <input type="number" inputmode="decimal" id="tc-in-${m.rowIndex}" value="${m.tcUsd}"
-               oninput="previewTC(${m.rowIndex}, ${usd})" onkeydown="if(event.key==='Enter')guardarTC(${m.rowIndex}, ${usd})">
+        <input type="number" inputmode="decimal" id="tc-in-${k}" value="${tcVigente}"
+               oninput="previewTC('${ctx}', ${fila}, ${usd})"
+               onkeydown="if(event.key==='Enter')guardarTC('${ctx}', ${fila}, ${usd})">
         <span style="font-size:12px;color:var(--text-muted)">$/USD</span>
-        <button class="btn" style="font-size:12px;padding:6px 14px" onclick="guardarTC(${m.rowIndex}, ${usd})">Guardar</button>
+        <button class="btn" style="font-size:12px;padding:6px 14px"
+                onclick="guardarTC('${ctx}', ${fila}, ${usd})">Guardar</button>
       </div>
-      <div class="mov-tc-equiv" id="tc-eq-${m.rowIndex}"></div>
-      ${m.tcConfirmado ? '' : `<div class="mov-tc-equiv">Todavía no tiene TC propio: se está valuando al ${Number(m.tcUsd).toLocaleString('es-AR')} que la app usaba para todo. Poné el de ese día.</div>`}
-      <div class="mov-tc-error" id="tc-err-${m.rowIndex}"></div>
+      <div class="mov-tc-equiv" id="tc-eq-${k}"></div>
+      ${sinConfirmar ? `<div class="mov-tc-equiv">Todavía no tiene TC propio: se está valuando al ${Number(tcVigente).toLocaleString('es-AR')} que la app usaba para todo. Poné el de ese día.</div>` : ''}
+      <div class="mov-tc-error" id="tc-err-${k}"></div>
     </div>`;
 }
 
-function toggleTC(fila) {
-  const ed = document.getElementById('tc-ed-' + fila);
+function chipTC(m, usd) {
+  const sinConfirmar = !m.tcConfirmado;
+  const txt = sinConfirmar
+    ? `TC $${Number(m.tcUsd).toLocaleString('es-AR')} sin confirmar`
+    : `TC $${Number(m.tcUsd).toLocaleString('es-AR')}`;
+  return `<div class="mov-tc ${sinConfirmar ? 'sin-confirmar' : ''}" onclick="toggleTC('dia', ${m.rowIndex})" title="Tipo de cambio de esta fila">
+      ${sinConfirmar ? '⚠ ' : ''}${txt}
+    </div>
+    ${editorTC('dia', m.rowIndex, usd, m.tcUsd, sinConfirmar)}`;
+}
+
+function toggleTC(ctx, fila) {
+  const ed = document.getElementById(`tc-ed-${ctx}-${fila}`);
   if (!ed) return;
   const abierto = ed.style.display !== 'none';
   ed.style.display = abierto ? 'none' : '';
   if (!abierto) {
-    const inp = document.getElementById('tc-in-' + fila);
+    const inp = document.getElementById(`tc-in-${ctx}-${fila}`);
     if (inp) { inp.focus(); inp.select(); }
   }
 }
 
-function previewTC(fila, usd) {
-  const inp = document.getElementById('tc-in-' + fila);
-  const eq = document.getElementById('tc-eq-' + fila);
+function previewTC(ctx, fila, usd) {
+  const inp = document.getElementById(`tc-in-${ctx}-${fila}`);
+  const eq = document.getElementById(`tc-eq-${ctx}-${fila}`);
   if (!inp || !eq) return;
   const tc = Number(inp.value);
   eq.textContent = (Number.isFinite(tc) && tc > 0)
@@ -4589,9 +4602,9 @@ function previewTC(fila, usd) {
 // Guarda y RECARGA. El TC cambia el valor en pesos de la fila, y con eso los
 // ingresos del dia, el total del mes y todo lo que cuelga de ahi: dejar la
 // pantalla como estaba mostraria un total que ya no es el que hay en la planilla.
-async function guardarTC(fila, usd) {
-  const inp = document.getElementById('tc-in-' + fila);
-  const err = document.getElementById('tc-err-' + fila);
+async function guardarTC(ctx, fila, usd) {
+  const inp = document.getElementById(`tc-in-${ctx}-${fila}`);
+  const err = document.getElementById(`tc-err-${ctx}-${fila}`);
   const tc = Number(inp.value);
   err.style.display = 'none';
   if (!Number.isFinite(tc) || tc <= 0) {
@@ -4606,12 +4619,66 @@ async function guardarTC(fila, usd) {
     });
     const fechaAbierta = state.drawerFecha;
     await loadAll();
-    if (fechaAbierta) openDrawerFecha(fechaAbierta);
+    if (document.getElementById('tc-pendientes')) await loadTCPendientes();
+    if (ctx === 'dia' && fechaAbierta) openDrawerFecha(fechaAbierta);
   } catch (e) {
     // El editor queda abierto con lo tipeado: cerrarlo daria por guardado algo
     // que no se guardo.
     err.textContent = 'No se pudo guardar: ' + e.message;
     err.style.display = '';
+  }
+}
+
+// ─── Lista de filas en dolares sin TC confirmado ──────────────────────────────
+// Vive en Cajas, al lado del watchdog de medios huerfanos: son la misma familia
+// de aviso -plata que la app no esta pudiendo valuar bien- y conviene que haya un
+// solo lugar donde mirar si algo esta torcido. A diferencia del watchdog, este se
+// arregla acá mismo: cada fila trae su editor.
+//
+// Si no hay pendientes no dibuja nada. Una tarjeta que dice "0 pendientes" es
+// ruido permanente a cambio de una tranquilidad que ya da su ausencia.
+async function loadTCPendientes() {
+  const cont = document.getElementById('tc-pendientes');
+  if (!cont) return;
+  try {
+    const { data } = await api('/api/movimientos/tc-pendientes');
+    if (!data.pendientes.length) { cont.innerHTML = ''; return; }
+
+    const filas = data.pendientes.map(p => {
+      const signo = p.esEntrada ? '+' : '−';
+      const detalle = [p.proveedor, p.descripcion].filter(Boolean).join(' · ');
+      return `<tr>
+        <td style="font-size:12px;color:var(--text-muted);white-space:nowrap">fila ${p.rowIndex}</td>
+        <td style="white-space:nowrap">${escapeHtml(p.fechaStr || '')}<div style="font-size:11px;color:var(--text-muted)">${escapeHtml(p.mes || '')}</div></td>
+        <td>${escapeHtml(detalle || '—')}<div style="font-size:11px;color:var(--text-muted)">${escapeHtml(p.medioPago || '')}</div></td>
+        <td class="td-right" style="white-space:nowrap"><b>${signo}USD ${p.usd.toLocaleString('es-AR')}</b></td>
+        <td class="td-right" style="white-space:nowrap;color:var(--text-muted)">${fmt(p.arsProvisorio)}<div style="font-size:11px">a $${p.tcUsd.toLocaleString('es-AR')} provisorio</div></td>
+        <td class="td-right"><button class="btn" style="font-size:12px;padding:6px 12px" onclick="toggleTC('lista', ${p.rowIndex})">Cargar TC</button></td>
+      </tr>
+      <tr><td colspan="6" style="padding:0 8px 8px">${editorTC('lista', p.rowIndex, p.usd, p.tcUsd, true)}</td></tr>`;
+    }).join('');
+
+    cont.innerHTML = `<div class="card" style="border-color:var(--accent)">
+      <div class="card-title" style="color:var(--accent)">⚠ Movimientos en dólares sin tipo de cambio</div>
+      <div style="font-size:13px;line-height:1.7;margin-bottom:12px">
+        Hay <b>${data.pendientes.length}</b> fila${data.pendientes.length !== 1 ? 's' : ''}
+        (<b>USD ${data.totalUSD.toLocaleString('es-AR')}</b> en total) que se están valuando al
+        <b>$${data.tcFallback.toLocaleString('es-AR')}</b> que la app usaba para todo, porque todavía no
+        tienen el suyo. No están mal sumadas —,se suman igual que siempre— pero ese no es
+        necesariamente el cambio al que se movió esa plata. Cargá el de cada día y el número
+        deja de ser una aproximación.
+      </div>
+      <div class="table-wrap"><table class="pagos-table" style="width:100%">
+        <thead><tr>
+          <th style="text-align:left">Fila</th><th style="text-align:left">Fecha</th>
+          <th style="text-align:left">Concepto</th><th class="td-right">Dólares</th>
+          <th class="td-right">Valuado hoy</th><th></th>
+        </tr></thead>
+        <tbody>${filas}</tbody></table></div>
+    </div>`;
+  } catch (e) {
+    cont.innerHTML = `<div class="card" style="border-color:var(--red)">
+      <div style="color:var(--red);font-size:13px">No se pudo leer los movimientos en dólares: ${escapeHtml(e.message)}</div></div>`;
   }
 }
 
