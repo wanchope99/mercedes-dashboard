@@ -1309,6 +1309,57 @@ app.post('/api/pagos/pagar', authMiddleware, adminOnly, async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// PUT /api/movimientos/:fila/tc — carga el tipo de cambio de UNA fila (columna Q).
+//
+// La columna Q está oculta en la planilla a propósito: el TC no es un dato que se
+// mire, es uno que hay que poder cargar sin que estorbe. Por eso el único lugar
+// donde se edita es acá, desde el detalle del día en la app. Si en vez de esto se
+// dejara la columna a la vista, cargarla sería ir a buscar la fila a mano en 1.055
+// filas de Movimientos.
+//
+// No se acepta un TC sobre una fila sin importe en dólares: sería un número
+// colgado que no valúa nada y que la próxima lectura ignoraría igual.
+app.put('/api/movimientos/:fila/tc', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const idx = parseInt(req.params.fila);
+    if (!idx || idx < 3) return res.status(400).json({ ok: false, error: 'Fila inválida' });
+
+    const tc = Number(req.body?.tc);
+    if (!Number.isFinite(tc) || tc <= 0) {
+      return res.status(400).json({ ok: false, error: 'El tipo de cambio tiene que ser un número mayor que cero' });
+    }
+
+    // Releer la fila: confirma que sigue siendo la que el usuario tenía en pantalla
+    // y que efectivamente mueve dólares.
+    const movs = await getMovimientos();
+    const m = movs.find(x => x.rowIndex === idx);
+    if (!m) return res.status(404).json({ ok: false, error: 'No se encontró esa fila. Refrescá la página e intentá de nuevo.' });
+    if (!m.tieneUSD) {
+      return res.status(400).json({ ok: false, error: `"${m.proveedor || 'Esa fila'}" no tiene importe en dólares, así que no lleva tipo de cambio.` });
+    }
+
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `Movimientos!Q${idx}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [[tc]] },
+    });
+    clearCache();
+
+    const usd = m.entradaUSD || m.salidaUSD;
+    res.json({
+      ok: true,
+      fila: idx,
+      tc,
+      usd,
+      ars: Math.round(usd * tc),
+      message: `USD ${usd} a $${tc.toLocaleString('es-AR')} = $${Math.round(usd * tc).toLocaleString('es-AR')}`,
+    });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // Sin adminOnly: el formulario "Nueva compra" del encargado necesita esta
 // referencia (plazo, forma de pago) para autocompletar, aunque no vea el listado de pagos.
 app.get('/api/proveedores', authMiddleware, async (req, res) => {

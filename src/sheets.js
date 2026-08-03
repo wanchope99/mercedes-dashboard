@@ -6,9 +6,23 @@ const cache = new NodeCache({ stdTTL: 120 });
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 if (!SPREADSHEET_ID) throw new Error('Falta variable de entorno SPREADSHEET_ID');
 
-// Tipo de cambio USD/ARS — idealmente esto viene de la planilla (Summary!B37)
-// Por ahora usamos el valor de la planilla: 1425
-const TC_USD = 1425;
+// ─── Tipo de cambio USD/ARS: uno por fila, no uno global ──────────────────────
+//
+// Cada fila de Movimientos lleva SU propio tipo de cambio en la columna Q, que
+// está oculta en la planilla y se carga desde la app (PUT /api/movimientos/:fila/tc).
+//
+// Antes había acá un único TC_USD = 1425 aplicado a las 35 filas en dólares de
+// toda la historia. Con la volatilidad del peso eso no describe nada: la seña en
+// dólares del servicio del 01/08/2026 se tomó a 1.500 (Fudo la registró en
+// $300.000), y valuarla a 1.425 daba $285.000 — el dashboard mostraba $6.967
+// menos que Fudo para ese mismo servicio.
+//
+// TC_FALLBACK es SÓLO para las filas que todavía no tienen TC propio. Vale
+// exactamente lo que valía la constante vieja, así que introducir la columna no
+// mueve ni un número histórico. Las filas que caen en el fallback viajan con
+// tcConfirmado=false y la app las muestra marcadas: el TC puede faltar, pero
+// nunca se convierte a un número inventado en silencio.
+const TC_FALLBACK = 1425;
 
 // Mapeo de categorías a grupos del reporte
 const CATEGORIA_GRUPO = {
@@ -64,8 +78,8 @@ function getAuth() {
   });
 }
 
-async function getSheetRows(sheetName) {
-  const cacheKey = `rows_${sheetName}`;
+async function getSheetRows(sheetName, columnas = 'A:P') {
+  const cacheKey = `rows_${sheetName}_${columnas}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
@@ -73,7 +87,7 @@ async function getSheetRows(sheetName) {
   const sheets = google.sheets({ version: 'v4', auth });
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A:P`,
+    range: `${sheetName}!${columnas}`,
   });
   const rows = response.data.values || [];
   cache.set(cacheKey, rows);
@@ -164,7 +178,9 @@ function parseCuotas(cuotasRaw, estado) {
 
 // ─── Movimientos ──────────────────────────────────────────────────────────────
 async function getMovimientos() {
-  const rows = await getSheetRows('Movimientos');
+  // Hasta Q: la columna del TC por fila. Si la planilla todavía no la tiene, las
+  // filas llegan cortas y row[16] queda undefined → fallback, sin romper nada.
+  const rows = await getSheetRows('Movimientos', 'A:Q');
 
   let headerIdx = -1;
   for (let i = 0; i < rows.length; i++) {
@@ -185,7 +201,8 @@ async function getMovimientos() {
 
     // Columnas: A Fecha, B Mes, C Tipo, D Estado, E Vencimiento, F Cuotas,
     // G Extraodinario, H ID Compra, I Proveedor, J Categoría, K Descripción,
-    // L Medio de pago, M Entrada ARS, N Entrada USD, O Salida ARS, P Salida USD
+    // L Medio de pago, M Entrada ARS, N Entrada USD, O Salida ARS, P Salida USD,
+    // Q TC USD (oculta en la planilla, se carga desde la app)
     const fecha = parseDate(row[0]);
     const tipo = (row[2] || '').trim();       // Gasto, Ingreso, Otros
     const estado = (row[3] || '').trim();
@@ -199,9 +216,15 @@ async function getMovimientos() {
     const salidaARS  = parseAmount(row[14]);
     const salidaUSD  = parseAmount(row[15]);
 
-    // Convertir USD a ARS para totales
-    const entradaTotal = entradaARS + (entradaUSD * TC_USD);
-    const salidaTotal  = salidaARS  + (salidaUSD  * TC_USD);
+    // Convertir USD a ARS con el TC de ESTA fila (col Q). Sin TC propio se usa
+    // el fallback, pero la fila queda marcada para que la app lo pida.
+    const tieneUSD = entradaUSD > 0 || salidaUSD > 0;
+    const tcFila = parseAmount(row[16]);
+    const tcConfirmado = tcFila > 0;
+    const tcUsd = tcConfirmado ? tcFila : TC_FALLBACK;
+
+    const entradaTotal = entradaARS + (entradaUSD * tcUsd);
+    const salidaTotal  = salidaARS  + (salidaUSD  * tcUsd);
 
     // Cuotas (columnas F y H)
     const cuotasInfo = parseCuotas(row[5], estado);
@@ -233,8 +256,13 @@ async function getMovimientos() {
       entradaUSD,
       salidaARS,
       salidaUSD,
-      entradaTotal,   // ARS + USD*TC
-      salidaTotal,    // ARS + USD*TC
+      entradaTotal,   // ARS + USD*TC de la fila
+      salidaTotal,    // ARS + USD*TC de la fila
+      // TC: sólo tiene sentido en filas con importe en dólares. En el resto se
+      // manda tcConfirmado=true para que la app no marque lo que no hay que cargar.
+      tieneUSD,
+      tcUsd: tieneUSD ? tcUsd : null,
+      tcConfirmado: tieneUSD ? tcConfirmado : true,
       pagado: estado.toLowerCase() === 'pagado',
       diaSemana: DIAS_SEMANA[fecha.getDay()],
       // Flags para filtrar
