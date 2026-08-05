@@ -3691,7 +3691,9 @@ async function init() {
     const sel = document.getElementById('filter-mes');
     meses.forEach(m => { const o = document.createElement('option'); o.value = m; o.textContent = m; sel.appendChild(o); });
     // Por defecto: el mes calendario en curso. Si no existe en la planilla,
-    // el último mes pasado con movimientos (las cuotas futuras crean meses futuros).
+    // el último mes pasado con movimientos (la lista puede traer meses futuros:
+    // vencimientos cargados a mano, o cuotas viejas anteriores a que el Mes de la
+    // cuota pasara a ser el de la compra).
     if (meses.length > 0) {
       const nombresMeses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
       const idxActual = new Date().getMonth();

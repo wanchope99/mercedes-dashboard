@@ -1197,15 +1197,21 @@ app.post('/api/pagos', authMiddleware, async (req, res) => {
       const montoCuota = Math.round(total / nCuotas);  // cuotas enteras (ARS)
       const cuotaId = `${proveedor}-${fecha}`.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '');
       const descBase = descripcion || proveedor;
+      // El Mes (col B) de TODAS las filas de la compra es el de la compra, no el del
+      // vencimiento de cada cuota: a nivel negocio el gasto se devengó entero cuando se
+      // compró. La col A (Fecha) y la E (Vencimiento) son las que dicen qué día sale la
+      // plata de la caja. Poner el mes del vencimiento partía una compra de agosto en
+      // Agosto/Septiembre/Octubre e inventaba meses futuros en los filtros.
+      const mesCompra = mes || mesDeFecha(fecha);
       // Fila madre: estado "En cuotas", medio de pago vacío, col F = total de cuotas, col H = ID
-      values = [[fecha, mes||'', 'Gasto', 'En cuotas', '', String(nCuotas), '', cuotaId, proveedor, categoria||'', `${descBase} — Total en ${nCuotas} cuotas`, '', '', '', total, '']];
+      values = [[fecha, mesCompra, 'Gasto', 'En cuotas', '', String(nCuotas), '', cuotaId, proveedor, categoria||'', `${descBase} — Total en ${nCuotas} cuotas`, '', '', '', total, '']];
       for (let i = 1; i <= nCuotas; i++) {
         const venc = addMonthsDDMM(vencimiento, i - 1);
         // Ajuste última cuota para que la suma cierre exacta con el total
         const monto = i === nCuotas ? total - montoCuota * (nCuotas - 1) : montoCuota;
         // Medio de pago vacío hasta que se pague (las fórmulas de Cajas suman por medio):
-        // al marcarla Pagado se completa el medio, la fecha real y el mes.
-        values.push([venc, mesDeFecha(venc), 'Gasto', 'A pagar', venc, `${i}/${nCuotas}`, '', cuotaId, proveedor, categoria||'', `${descBase} — Cuota ${i}/${nCuotas}${medioPago ? ' ('+medioPago+')' : ''}`, '', '', '', monto, '']);
+        // al marcarla Pagado se completa el medio. El mes NO se toca al pagar.
+        values.push([venc, mesCompra, 'Gasto', 'A pagar', venc, `${i}/${nCuotas}`, '', cuotaId, proveedor, categoria||'', `${descBase} — Cuota ${i}/${nCuotas}${medioPago ? ' ('+medioPago+')' : ''}`, '', '', '', monto, '']);
       }
     } else {
       // Pagado: sin vencimiento (ya salió de caja) · A pagar: con vencimiento
