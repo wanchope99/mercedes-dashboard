@@ -42,22 +42,31 @@ npm run dev
 
 ### Usuarios
 
-**Este repositorio es público: ninguna contraseña real va en el código.** Cada
-cuenta se habilita seteando su variable en Railway; la que no tiene variable
-seteada, no existe y no se puede usar para entrar.
+**Este repositorio es público: ninguna contraseña ni secreto va en el código.**
+No hay valores por defecto. Cada cuenta se habilita seteando su variable; la que
+no la tiene, no existe y no se puede usar para entrar.
 
-| Variable | Usuario | Rol |
+| Variable | Para qué | Si falta |
 |---|---|---|
-| `ADMIN_PASSWORD` | `admin` | admin |
-| `CHARLY_PASSWORD` | `charly` | encargado |
-| `PABLO_PASSWORD` | `pablo` | admin |
-| `TINCHO_PASSWORD` | `tincho` | admin |
+| `JWT_SECRET` | Firma los tokens de sesión | **El server no arranca** |
+| `ADMIN_PASSWORD` | Usuario `admin` (rol admin) | La cuenta no existe |
+| `CHARLY_PASSWORD` | Usuario `charly` (rol encargado) | La cuenta no existe |
+| `PABLO_PASSWORD` | Usuario `pablo` (rol admin) | La cuenta no existe |
+| `TINCHO_PASSWORD` | Usuario `tincho` (rol admin) | La cuenta no existe |
 
-`admin` y `charly` tienen un valor por defecto en el código (`admin123` /
-`charly123`) que quedó de la primera versión. **Como el repo es público, esos
-valores son de dominio público**: si `ADMIN_PASSWORD` no está seteada en
-Railway, cualquiera que conozca la URL entra como administrador. Setear las dos
-variables, o sacar los defaults.
+`JWT_SECRET` tiene que ser largo y aleatorio, y **no se comparte con nadie**:
+quien la tenga puede firmarse un token que diga `rol: admin` y entrar sin
+contraseña. Cambiarla cierra todas las sesiones abiertas — no hacerlo en medio
+del servicio, o quien esté cerrando la caja queda afuera a mitad de camino.
+
+Al arrancar, el server lista en el log qué cuentas quedaron habilitadas y cuál
+falta por qué variable. Una cuenta sin su variable se ve, desde la pantalla de
+login, igual que una contraseña mal tipeada; ese log es la diferencia entre "me
+equivoqué al escribirla" y "esa cuenta no existe en este deploy".
+
+El login admite 10 intentos fallidos por IP y usuario cada 15 minutos, y 30 por
+usuario (la segunda cubeta existe porque la IP se puede falsificar). Un login
+correcto borra lo acumulado.
 
 ## Estructura del proyecto
 

@@ -44,7 +44,20 @@ app.set('trust proxy', 1);
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
-const JWT_SECRET = process.env.JWT_SECRET || 'mercedes-secret-2026';
+// Sin default a propósito. El repositorio es público: un JWT_SECRET escrito acá
+// no es una red de seguridad, es la llave publicada — con ella cualquiera se
+// firma un token que diga `rol: admin` y entra sin necesitar ninguna contraseña.
+// Por eso el server NO arranca sin esta variable: quedarse sin app avisa; quedar
+// abierto con una llave conocida no avisa nunca.
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error(
+    'FALTA JWT_SECRET.\n' +
+    'El server no arranca sin ella: es la clave con la que se firman los tokens de sesión.\n' +
+    'Cargala en Railway (Settings -> Variables) o en el .env local. Un valor largo y aleatorio.'
+  );
+  process.exit(1);
+}
 
 // Usuarios: credenciales desde variables de entorno.
 //
@@ -63,10 +76,23 @@ function _registrarUsuario(clave, { password, rol, nombre }) {
   USUARIOS[clave] = { password, rol, nombre };
 }
 
-_registrarUsuario('admin',  { password: process.env.ADMIN_PASSWORD  || 'admin123',  rol: 'admin',     nombre: 'Administrador' });
-_registrarUsuario('charly', { password: process.env.CHARLY_PASSWORD || 'charly123', rol: 'encargado', nombre: 'Charly' });
-_registrarUsuario('pablo',  { password: process.env.PABLO_PASSWORD,  rol: 'admin',  nombre: 'Pablo' });
-_registrarUsuario('tincho', { password: process.env.TINCHO_PASSWORD, rol: 'admin',  nombre: 'Tincho' });
+_registrarUsuario('admin',  { password: process.env.ADMIN_PASSWORD,  rol: 'admin',     nombre: 'Administrador' });
+_registrarUsuario('charly', { password: process.env.CHARLY_PASSWORD, rol: 'encargado', nombre: 'Charly' });
+_registrarUsuario('pablo',  { password: process.env.PABLO_PASSWORD,  rol: 'admin',     nombre: 'Pablo' });
+_registrarUsuario('tincho', { password: process.env.TINCHO_PASSWORD, rol: 'admin',     nombre: 'Tincho' });
+
+// Se listan al arrancar (sin las claves). Una cuenta sin su variable no se crea,
+// y eso desde afuera se ve igual que una contraseña mal tipeada: este log es la
+// diferencia entre "me equivoqué al escribirla" y "esa cuenta no existe acá".
+const _cuentas = Object.keys(USUARIOS);
+if (!_cuentas.length) {
+  console.error('NO HAY NINGUNA CUENTA HABILITADA. Cargá al menos ADMIN_PASSWORD; nadie puede entrar.');
+} else {
+  console.log(`Cuentas habilitadas: ${_cuentas.join(', ')}`);
+  for (const [clave, envVar] of [['admin', 'ADMIN_PASSWORD'], ['charly', 'CHARLY_PASSWORD'], ['pablo', 'PABLO_PASSWORD'], ['tincho', 'TINCHO_PASSWORD']]) {
+    if (!USUARIOS[clave]) console.warn(`  · "${clave}" deshabilitado: falta ${envVar}`);
+  }
+}
 
 // ─── Límite de intentos de login ──────────────────────────────────────────────
 //
