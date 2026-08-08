@@ -568,6 +568,21 @@ async function resumenFinanzas(recuperoPorMes = []) {
   // Los flujos sólo sirven para devengar; no se mandan al browser.
   const { flujos, ...pozoPublico } = pozo;
   const intereses = calcularIntereses(flujos || [], { tna: config.tnaMercadoPago });
+
+  // Cuánto vale el pozo en dólares. El ARS/USD se mueve rápido, así que NUNCA se
+  // asume un valor fijo: sale en vivo del blue (tc.js, cache de 10 min, con
+  // fallback marcado `stale` si la consulta falla). Es el mismo módulo que usa
+  // roi.js, así que las dos pantallas valúan con el MISMO número — dos fuentes
+  // darían dos respuestas para la misma pregunta.
+  const blue = await require('./tc').getDolarBlue().catch(() => null);
+  const enUSD = ars => (blue && blue.tc > 0 ? Math.round((ars || 0) / blue.tc) : null);
+  const dolar = blue
+    ? {
+        tc: blue.tc, compra: blue.compra, venta: blue.venta,
+        fecha: blue.fecha, fuente: blue.fuente, stale: !!blue.stale,
+        pozoUSD: enUSD(pozoPublico.saldoARS),
+      }
+    : null;
   return {
     config,
     mesInicio: inicio,
@@ -576,6 +591,7 @@ async function resumenFinanzas(recuperoPorMes = []) {
     proyeccion,
     pozo: pozoPublico,
     intereses,
+    dolar,
     conciliacion: conciliar(movimientos, recuperoPorMes),
     // Claves de la estrategia vieja que siguen en la planilla y ya no se usan.
     clavesObsoletas: config.clavesObsoletas || null,

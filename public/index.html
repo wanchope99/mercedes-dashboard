@@ -5756,9 +5756,29 @@ function renderFinKpis() {
   document.getElementById('fin-kpis').innerHTML =
     kpi('REAL · valor del pozo hoy', fmt((f.pozo && f.pozo.saldoARS) || 0),
         f.pozo && f.pozo.encontrada ? 'saldo de la caja ' + escapeHtml(f.pozo.caja) : '⚠ no se encontró la caja', 'green') +
+    finKpiDolar(kpi) +
     kpi('Proyección · total al mes ' + r.meses, fmt(Math.round(r.totalNominal)), 'pesos corrientes, con los intereses', 'blue') +
     kpi('Proyección · intereses ganados', fmt(Math.round(r.interesesAcum)), 'acumulados en ' + r.meses + ' meses', 'blue') +
     kpi('Poder adquisitivo', (gan >= 0 ? '+' : '') + fmt(gan), (r.pctGananciaReal >= 0 ? '+' : '') + r.pctGananciaReal.toFixed(1) + '% en pesos de hoy', gan >= 0 ? 'green' : 'red');
+}
+
+// El pozo en dólares. El ARS/USD se mueve rápido, así que el TC sale en vivo del
+// blue y NUNCA se asume fijo — por eso la card dice siempre con qué número y de
+// cuándo está convertido: un valor en dólares sin decir a qué cambio no se puede
+// comprobar contra nada. Si la consulta falló, la card lo dice en vez de mostrar
+// un número que parece en vivo y no lo es.
+function finKpiDolar(kpi) {
+  const d = state.fin.dolar;
+  if (!d || !(d.pozoUSD > 0)) {
+    return kpi('Pozo en USD', '—', '⚠ no se pudo obtener el dólar blue', 'red');
+  }
+  const usd = 'US$ ' + new Intl.NumberFormat('es-AR').format(d.pozoUSD);
+  const cuando = d.fecha ? new Date(d.fecha).toLocaleString('es-AR', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }) : '';
+  return d.stale
+    ? kpi('Pozo en USD', usd, `⚠ blue no disponible — convertido a ${fmt(d.tc)} de respaldo`, 'red')
+    : kpi('Pozo en USD', usd, `blue ${fmt(d.tc)} · ${escapeHtml(cuando)}`, 'green');
 }
 
 // La estrategia en una frase, y el número que más importa: la tasa REAL. Con la
