@@ -1127,6 +1127,17 @@
      transferencia. Todo el cálculo lo hace el server (/api/propinas/calcular):
      acá no se divide nada, para que lo que se ve sea exactamente lo que se
      guarda. Ver src/propinas.js. -->
+<div id="tab-informes" class="tab-panel">
+  <main>
+    <div class="card">
+      <div class="card-title"><span>Informes</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· se generan solos · sólo leen, no tocan la planilla</span>
+      </div>
+      <div id="informes-contenido"><div class="loading"><div class="spinner"></div> Cargando informes...</div></div>
+    </div>
+  </main>
+</div>
+
 <div id="tab-propinas" class="tab-panel">
   <main>
     <div class="card">
@@ -2563,6 +2574,8 @@ const pct = n => `${n.toFixed(1)}%`;
 function getToken() { return state.token || localStorage.getItem('mb_token'); }
 function getRol() { return state.rol || localStorage.getItem('mb_rol'); }
 function getNombre() { return state.nombre || localStorage.getItem('mb_nombre'); }
+// Quién es, no qué rol tiene. Lo usa el informe diario, que va a una persona.
+function getUsuario() { return state.usuario || localStorage.getItem('mb_usuario'); }
 
 async function api(path, opts = {}) {
   const token = getToken();
@@ -2590,9 +2603,11 @@ async function doLogin() {
     if (!json.ok) { errEl.textContent = json.error; return; }
 
     state.token = json.token;
+    state.usuario = json.usuario;
     state.rol = json.rol;
     state.nombre = json.nombre;
     localStorage.setItem('mb_token', json.token);
+    localStorage.setItem('mb_usuario', json.usuario || '');
     localStorage.setItem('mb_rol', json.rol);
     localStorage.setItem('mb_nombre', json.nombre);
 
@@ -2654,8 +2669,9 @@ MQ_PHONE.addEventListener('change', e => {
 });
 
 function doLogout() {
-  state.token = null; state.rol = null; state.nombre = null;
+  state.token = null; state.rol = null; state.nombre = null; state.usuario = null;
   localStorage.removeItem('mb_token');
+  localStorage.removeItem('mb_usuario');
   localStorage.removeItem('mb_rol');
   localStorage.removeItem('mb_nombre');
   if (state.timerInterval) clearInterval(state.timerInterval);
@@ -2802,6 +2818,12 @@ const TAB_GROUPS = {
     { id: 'propinas',           label: '💸 Reparto' },
     { id: 'propinas-historial', label: '📋 Historial' },
   ] },
+  // El informe diario lo lee una sola persona. `soloUsuario` es el único
+  // permiso de la app que mira quién sos y no qué rol tenés — los tres logins
+  // de admin son equivalentes, así que soloAdmin no alcanzaría para separarlos.
+  // Esconderlo acá es cosmética: quien decide es soloDestinatarioInformes en el
+  // servidor, igual que con todo lo de Charly.
+  informes: { label: '🔎 Informe', icono: '🔎', corto: 'Informe', soloAdmin: true, soloUsuario: 'tincho', subs: null },
   plan: { label: '🗓️ Plan', icono: '🗓️', corto: 'Plan', soloAdmin: true, subs: [
     { id: 'plan',        label: '📋 Resumen' },
     { id: 'calculadora', label: '🧮 Calculadora' },
@@ -2817,6 +2839,9 @@ const TAB_GROUPS = {
 function gruposVisibles(incluirSoloPhone) {
   return Object.entries(TAB_GROUPS)
     .filter(([, cfg]) => !cfg.soloAdmin || getRol() === 'admin')
+    // soloUsuario: secciones de una persona, no de un rol. Los tres logins de
+    // admin tienen los mismos permisos, así que el rol no los distingue.
+    .filter(([, cfg]) => !cfg.soloUsuario || getUsuario() === cfg.soloUsuario)
     .filter(([, cfg]) => incluirSoloPhone || !cfg.soloPhone)
     .map(([id, cfg]) => ({ id, ...cfg }));
 }
@@ -2910,6 +2935,7 @@ function cargarPanel(tab) {
   else if (tab === 'reportes-balance') initReporteBalance();
   else if (tab === 'reportes-servicios') initReporteServicios();
   else if (tab === 'mantenimiento') loadMantenimiento();
+  else if (tab === 'informes') loadInformes();
   else if (tab === 'propinas') loadPropinas();
   else if (tab === 'propinas-historial') loadPropinasHistorial();
   else if (tab === 'inversiones') loadPlan();
@@ -5915,6 +5941,148 @@ function renderPozoReal() {
 function toggleSalidasPozo() {
   const el = document.getElementById('pozo-salidas');
   if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+// ─── Informes automáticos ───────────────────────────────────────────────────
+//
+// Tres agentes dejan acá su informe: la plata y el salón cada domingo, y el
+// balance ejecutivo el día 1. Esta pantalla sólo los muestra — no analiza nada.
+//
+// Un informe sin hallazgos NO es un error y se muestra como lo que es: la
+// respuesta correcta de una semana en la que no pasó nada. Si esta pantalla lo
+// tratara como un fracaso, el agente aprendería a llenarlo.
+const INFORME_SEVERIDAD = {
+  alta:  { color: 'var(--red)',    etiqueta: 'Alta' },
+  media: { color: 'var(--orange)', etiqueta: 'Media' },
+  baja:  { color: 'var(--text-muted)', etiqueta: 'Baja' },
+};
+const INFORME_TIPOS = {
+  movimientos: { icono: '💸', titulo: 'La plata de la semana', cadencia: 'domingos' },
+  servicios:   { icono: '🍽️', titulo: 'El salón de la semana', cadencia: 'domingos' },
+  mensual:     { icono: '📊', titulo: 'Balance del mes',        cadencia: 'día 1' },
+};
+
+async function loadInformes() {
+  const cont = document.getElementById('informes-contenido');
+  cont.innerHTML = '<div class="loading"><div class="spinner"></div> Cargando informes...</div>';
+  try {
+    const { data } = await api('/api/informes');
+    state.informes = data || [];
+    if (!state.informeTipo) state.informeTipo = 'movimientos';
+    renderInformes();
+  } catch (err) {
+    cont.innerHTML = `<div style="color:var(--red);padding:20px">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function verInformeTipo(tipo) { state.informeTipo = tipo; renderInformes(); }
+
+function renderInformes() {
+  const cont = document.getElementById('informes-contenido');
+  const todos = state.informes || [];
+  const tipo = state.informeTipo || 'movimientos';
+  const meta = INFORME_TIPOS[tipo];
+  const lista = todos.filter(i => i.tipo === tipo);
+
+  // Los tres chips arriba, con un punto cuando hay algo sin leer.
+  const chips = Object.entries(INFORME_TIPOS).map(([t, m]) => {
+    const suyos = todos.filter(i => i.tipo === t);
+    const sinLeer = suyos.some(i => !i.leidos.includes(getUsuario()));
+    const activo = t === tipo;
+    return `<button onclick="verInformeTipo('${t}')" style="border:1px solid ${activo ? 'var(--accent)' : 'var(--border)'};
+      background:${activo ? 'var(--accent)' : 'transparent'};color:${activo ? '#fff' : 'var(--text)'};
+      border-radius:999px;padding:7px 14px;font-size:13px;cursor:pointer;white-space:nowrap;min-height:36px">
+      ${m.icono} ${escapeHtml(m.titulo)}${sinLeer && !activo ? ' <span style="color:var(--orange)">●</span>' : ''}
+    </button>`;
+  }).join('');
+
+  const generar = `<button class="btn btn-secondary" onclick="generarInformeAhora('${tipo}', this)">Generar el de ahora</button>`;
+  const cabecera = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">${chips}</div>`;
+
+  if (!lista.length) {
+    cont.innerHTML = cabecera + `<div style="padding:8px 0;line-height:1.7">
+      <div style="font-size:14px">Todavía no hay ningún informe de <b>${escapeHtml(meta.titulo.toLowerCase())}</b>.</div>
+      <div style="font-size:12px;color:var(--text-muted);margin:8px 0 14px">
+        Se genera solo (${escapeHtml(meta.cadencia)}). La primera vez se crea sola una pestaña
+        <b>Informes</b> en la planilla — es esperado, no un error.
+      </div>${generar}</div>`;
+    return;
+  }
+
+  const inf = lista[0];
+  const sev = INFORME_SEVERIDAD[inf.severidad] || INFORME_SEVERIDAD.baja;
+  const hallazgos = inf.hallazgos || [];
+  const leido = inf.leidos.includes(getUsuario());
+  // En el balance mensual la severidad es importancia para el negocio, no
+  // gravedad de un problema: pintarlo de rojo diría algo que no es.
+  const esBalance = tipo === 'mensual';
+  const colorBarra = esBalance ? 'var(--accent)' : (hallazgos.length ? sev.color : 'var(--green)');
+
+  cont.innerHTML = cabecera +
+    `<div style="border-left:3px solid ${colorBarra};padding-left:14px;margin-bottom:6px">
+      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">
+        ${escapeHtml(inf.periodo)}${!esBalance && hallazgos.length ? ` · severidad ${sev.etiqueta.toLowerCase()}` : ''}
+      </div>
+      <div style="font-size:17px;font-weight:700;line-height:1.4;margin:6px 0 4px">${escapeHtml(inf.titular)}</div>
+      ${inf.resumen ? `<div style="font-size:14px;line-height:1.75;color:var(--text-muted);margin-top:8px">${escapeHtml(inf.resumen)}</div>` : ''}
+    </div>` +
+    (hallazgos.length
+      ? hallazgos.map(h => `
+        <div style="padding:14px 0 14px 14px;border-top:1px solid var(--border);margin-top:10px">
+          <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap">
+            ${esBalance ? '' : `<span style="font-size:11px;font-weight:700;color:${(INFORME_SEVERIDAD[h.severidad] || sev).color};text-transform:uppercase">${escapeHtml(h.severidad)}</span>`}
+            <span style="font-size:15px;font-weight:700">${escapeHtml(h.titulo)}</span>
+          </div>
+          <div style="font-size:13px;line-height:1.7;margin-top:6px">${escapeHtml(h.quePasa)}</div>
+          <div style="font-size:13px;line-height:1.7;color:var(--text-muted);margin-top:4px">${escapeHtml(h.porQueImporta)}</div>
+          ${(h.referencias || []).length || !esBalance ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px">
+            confianza ${escapeHtml(h.confianza)}${(h.referencias || []).length ? ` · ${escapeHtml((h.referencias || []).join(', '))}` : ''}
+          </div>` : ''}
+        </div>`).join('')
+      : `<div style="padding:14px 0 4px 14px;font-size:13px;color:var(--green);line-height:1.7">
+           ✓ No encontró nada que valga tu atención esta semana. La mayoría de las semanas es así —
+           el informe sale vacío a propósito en vez de inventar un hallazgo para tener algo que mostrar.
+         </div>`) +
+    `<div style="margin-top:16px;padding:12px 14px;background:var(--bg-alt,rgba(127,127,127,.08));border-radius:8px">
+      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Lo que haría</div>
+      <div style="font-size:14px;line-height:1.6;margin-top:4px">${escapeHtml(inf.loQueHariaHoy)}</div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center">
+      ${leido ? '<span style="font-size:12px;color:var(--text-muted)">✓ Leído</span>'
+              : `<button class="btn btn-secondary" onclick="marcarInformeLeido('${escapeHtml(inf.tipo)}','${escapeHtml(inf.periodo)}', this)">Marcar como leído</button>`}
+      ${generar}
+      <span style="font-size:11px;color:var(--text-muted)">${escapeHtml(inf.modelo || '')}</span>
+    </div>` +
+    (lista.length > 1
+      ? `<div style="margin-top:18px;padding-top:12px;border-top:1px solid var(--border)">
+           <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Anteriores</div>
+           ${lista.slice(1).map(x => `
+             <div style="display:flex;gap:10px;align-items:baseline;padding:6px 0;font-size:13px">
+               <span style="color:var(--text-muted);white-space:nowrap;font-size:12px">${escapeHtml(x.periodo)}</span>
+               <span>${escapeHtml(x.titular)}</span>
+             </div>`).join('')}
+         </div>`
+      : '');
+}
+
+async function marcarInformeLeido(tipo, periodo, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Marcando...'; }
+  try {
+    await api('/api/informes/leido', { method: 'POST', body: JSON.stringify({ tipo, periodo }) });
+    await loadInformes();
+  } catch (err) {
+    alert('No se pudo marcar: ' + err.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Marcar como leído'; }
+  }
+}
+
+async function generarInformeAhora(tipo, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Analizando...'; }
+  try {
+    await api('/api/informes/generar', { method: 'POST', body: JSON.stringify({ tipo }) });
+    await loadInformes();
+  } catch (err) { alert('No se pudo generar: ' + err.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = 'Generar el de ahora'; } }
 }
 
 // ─── Control del rendimiento ────────────────────────────────────────────────

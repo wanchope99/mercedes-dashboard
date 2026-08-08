@@ -143,6 +143,28 @@ Three things that differ from the rest of the app:
 
 Persistence: one auto-created sheet in `SPREADSHEET_ID`, `Mantenimiento`, columns A–L. Filtering and grouping happen entirely in the browser off a single `GET /api/mantenimiento` — the list is short by nature and a round-trip per click would buy nothing.
 
+### Informes automáticos: el código calcula, el modelo interpreta
+
+`src/informes.js` is the core; `informe-movimientos.js`, `informe-servicios.js` and `informe-mensual.js` are the three analysts, registered in `ANALISTAS`. Adding a fourth agent is adding a file and one line — nothing in the core changes. Shared math/date helpers live in `informes-util.js` **specifically to avoid a circular require**: the core loads the analysts, so an analyst importing helpers back from the core would receive a half-built module.
+
+**The split is the whole design.** The analyst (pure, testable, no network beyond its one read) computes every number — medians, deviations, duplicates, gaps — and emits signals carrying their exact figures and source row. The model receives only those signals and is told, in the shared system prompt, that it may not calculate anything. It never sees the raw ledger or the raw Fudo days. A model summing a thousand rows gets it wrong, and a fabricated number in a money report is worse than no report.
+
+**Comparisons are always against a trailing median, never a mean and never year-over-year.** Two reasons, both load-bearing here: at ~1.9% monthly inflation a rising peso figure is the normal state, not a finding, and a trailing median drifts with it; and a mean is dragged by exactly the outlier you're trying to detect. `informe-servicios` additionally compares **every day against the same weekday** — in a bar the same cover count is a record on a Tuesday and a disaster on a Saturday.
+
+**An empty report is a correct answer, and the prompts say so explicitly.** Most weeks nothing anomalous happens. An agent obliged to find something invents findings, and two weeks later nobody reads it — which is the worst failure mode, because the week something real happens it goes unread too. The UI renders the empty case as a green confirmation, not as an error. The monthly balance is the deliberate exception: it always has content.
+
+**Month totals group by the `Mes` column, never by date** — same as `getResumenMensual` and every screen. This is not a stylistic choice: grouping July 2026 by date gives a result of ARS 9,596,477 and June 11,671,035 ("July was worse"), while grouping by `Mes` gives 12,826,657 and 6,327,289 ("July more than doubled June"). The conclusion inverts. Income happens to be identical either way; only expenses move, because instalments and deferred payments deliberately carry a `Mes` different from their `Fecha` (see the Fecha/Mes section above). A regression test pins the monthly analyst's figures to `getResumenMensual`'s. The salón side still aggregates by date because Fudo has no `Mes` column — that is correct and is why the two are computed separately.
+
+`informe-servicios` analyses **up to the previous day**, never the day it runs (`corteEfectivo`). It fires Sunday 10:00 but Sunday's service happens Sunday night — counting it added a zero-revenue day to the week's average and flagged "didn't open" against a service that hadn't started.
+
+Schedules (all `America/Argentina/Buenos_Aires`, all overridable by env): movimientos Sun 10:00, servicios Sun 10:15, mensual the 1st at 10:30. Deliberately staggered — each reads a different source and makes its own model call, so overlapping them only buys contention. **There is no startup catch-up**, unlike the stock snapshot: that one needs a gap-free series, a report doesn't, and firing one on every restart would spend model calls nobody asked for. `generarInforme` is idempotent on `(tipo, periodo)`.
+
+Model: `claude-opus-5` with structured outputs (one schema for all three, so one screen renders all three) and server-side refusal fallbacks, wrapped so a beta-flag change degrades to a plain call instead of no report. **No prompt caching** — the cache lives 5 minutes and these run weekly, so it would only ever pay the write premium.
+
+**Visibility is per-user, not per-role** — the only such permission in the app. `INFORMES_DESTINATARIO` (default `tincho`) gates `soloDestinatarioInformes` on the server and `soloUsuario` on the tab; the three admin logins are otherwise identical, so `soloAdmin` could not distinguish them. Note this means the `admin` account does **not** see the reports.
+
+All three analysts are **read-only**: no informe ever writes to `Movimientos`.
+
 ### Other independent modules
 
 - `src/vinos.js` / `src/stocks.js` — wine/beverage inventory, stock rotation, and days-of-coverage analysis, cross-referencing Fudo stock+cost+price against recent sales velocity.

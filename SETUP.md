@@ -68,6 +68,26 @@ El login admite 10 intentos fallidos por IP y usuario cada 15 minutos, y 30 por
 usuario (la segunda cubeta existe porque la IP se puede falsificar). Un login
 correcto borra lo acumulado.
 
+
+### Informes automáticos
+
+Tres agentes escriben en la sección Informes de la app. Variables opcionales:
+
+| Variable | Para qué | Default |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | **Requerida.** Sin ella los informes no se generan (el extractor de facturas ya la usa) | — |
+| `INFORMES_DESTINATARIO` | Qué usuario los ve. **Ojo: `admin` no los ve** salvo que se ponga acá | `tincho` |
+| `INFORMES_MODEL` | Modelo | `claude-opus-5` |
+| `INFORME_MOVIMIENTOS_CRON` | Cuándo sale el de la plata | `0 10 * * 0` (domingos 10:00) |
+| `INFORME_SERVICIOS_CRON` | Cuándo sale el del salón | `15 10 * * 0` (domingos 10:15) |
+| `INFORME_MENSUAL_CRON` | Cuándo sale el balance | `30 10 1 * *` (día 1, 10:30) |
+
+Horario: America/Argentina/Buenos_Aires. La primera vez se crea sola una hoja
+`Informes` en la planilla — es esperado, no un error.
+
+Los tres informes sólo **LEEN**: ninguno escribe en `Movimientos`. Y ninguno
+calcula: los números los hace el código y el modelo sólo los interpreta.
+
 ## Estructura del proyecto
 
 ```

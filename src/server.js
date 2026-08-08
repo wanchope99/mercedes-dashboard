@@ -24,6 +24,7 @@ const plan = require('./plan');
 const tc = require('./tc');
 const roi = require('./roi');
 const finanzas = require('./finanzas');
+const informes = require('./informes');
 const propinas = require('./propinas');
 const mantenimiento = require('./mantenimiento');
 const stockBebidas = require('./stock-bebidas');
@@ -175,6 +176,20 @@ function adminOnly(req, res, next) {
   next();
 }
 
+// El informe diario va a UNA persona, no a un rol. Es el primer permiso de esta
+// app que mira quién es el usuario en vez de qué rol tiene: los tres logins de
+// admin tienen exactamente los mismos permisos, así que el rol no alcanza para
+// distinguirlos. Va por variable de entorno para poder cambiar el destinatario
+// sin tocar código.
+const INFORMES_DESTINATARIO = (process.env.INFORMES_DESTINATARIO || 'tincho').toLowerCase();
+
+function soloDestinatarioInformes(req, res, next) {
+  if (req.user?.usuario !== INFORMES_DESTINATARIO) {
+    return res.status(403).json({ ok: false, error: 'Sin permisos' });
+  }
+  next();
+}
+
 // ─── Login ────────────────────────────────────────────────────────────────────
 app.post('/api/login', (req, res) => {
   const { usuario, password } = req.body;
@@ -216,7 +231,9 @@ app.post('/api/login', (req, res) => {
     JWT_SECRET,
     { expiresIn: '24h' }
   );
-  res.json({ ok: true, token, rol: user.rol, nombre: user.nombre });
+  // `usuario` viaja al browser porque hay pantallas que se muestran por persona
+  // y no por rol (el informe diario). El permiso real lo decide el servidor.
+  res.json({ ok: true, token, usuario: nombreUsuario, rol: user.rol, nombre: user.nombre });
 });
 
 // Verificar token vigente
@@ -1888,6 +1905,34 @@ app.put('/api/mantenimiento/:id', authMiddleware, async (req, res) => {
     const permitidos = req.user.rol === 'admin' ? null : CAMPOS_ENCARGADO;
     res.json({ ok: true, data: await mantenimiento.actualizarItem(req.params.id, req.body, permitidos) });
   } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+// ─── Informe diario ─────────────────────────────────────────────────────────
+// Va a una sola persona (INFORMES_DESTINATARIO). Ver src/informes.js.
+app.get('/api/informes', authMiddleware, soloDestinatarioInformes, async (req, res) => {
+  try { res.json({ ok: true, data: await informes.listarInformes({ limite: 30 }) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post('/api/informes/leido', authMiddleware, soloDestinatarioInformes, async (req, res) => {
+  try {
+    const { tipo, periodo } = req.body || {};
+    res.json({ ok: true, data: await informes.marcarLeido({ tipo, periodo, usuario: req.user.usuario }) });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+// Generar a mano: sirve para probar sin esperar al domingo, y para el balance
+// de un mes viejo (`hasta` = cualquier día del mes SIGUIENTE al que se quiere
+// analizar). Sin `forzar` no regenera un período ya hecho, así apretar el botón
+// dos veces no gasta dos llamadas al modelo.
+app.post('/api/informes/generar', authMiddleware, soloDestinatarioInformes, async (req, res) => {
+  try {
+    const { tipo, hasta, forzar } = req.body || {};
+    if (!informes.TIPOS.includes(tipo)) {
+      return res.status(400).json({ ok: false, error: `Tipo inválido (${informes.TIPOS.join(' | ')})` });
+    }
+    res.json({ ok: true, data: await informes.generarInforme(tipo, { hasta, forzar: !!forzar }) });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 app.delete('/api/mantenimiento/:id', authMiddleware, adminOnly, async (req, res) => {
