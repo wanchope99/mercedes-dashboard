@@ -37,6 +37,11 @@ app.use(cors());
 // Las fotos de facturas viajan en base64 dentro del JSON → subir el límite.
 app.use(express.json({ limit: '25mb' }));
 
+// Railway pone un proxy adelante, así que sin esto `req.ip` es SIEMPRE la IP del
+// proxy: el límite de intentos de login contaría a todo el mundo en el mismo
+// bucket y el primero que se equivoque diez veces deja afuera a los demás.
+app.set('trust proxy', 1);
+
 // ─── Config ───────────────────────────────────────────────────────────────────
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const JWT_SECRET = process.env.JWT_SECRET || 'mercedes-secret-2026';
@@ -62,6 +67,49 @@ _registrarUsuario('admin',  { password: process.env.ADMIN_PASSWORD  || 'admin123
 _registrarUsuario('charly', { password: process.env.CHARLY_PASSWORD || 'charly123', rol: 'encargado', nombre: 'Charly' });
 _registrarUsuario('pablo',  { password: process.env.PABLO_PASSWORD,  rol: 'admin',  nombre: 'Pablo' });
 _registrarUsuario('tincho', { password: process.env.TINCHO_PASSWORD, rol: 'admin',  nombre: 'Tincho' });
+
+// ─── Límite de intentos de login ──────────────────────────────────────────────
+//
+// El login no tenía ningún freno: se podían probar contraseñas de a miles. Con
+// la app en una URL pública, la fuerza de la clave era lo único que paraba a un
+// script.
+//
+// Se cuentan sólo los intentos FALLIDOS, en dos cubetas a la vez:
+//
+//   · por IP + usuario — el freno real. 10 intentos cada 15 minutos.
+//   · por usuario solo — 30 cada 15 minutos. Existe porque la IP se puede
+//     falsificar: detrás de un proxy, `req.ip` sale del header X-Forwarded-For y
+//     alguien que lo rote se renueva la cubeta de IP cada vez. La de usuario no
+//     se puede esquivar, porque para probar una clave hay que nombrar la cuenta.
+//
+// Los 30 por usuario son deliberadamente holgados: es un número al que una
+// persona real no llega tipeando mal, así que nadie deja afuera a Charly en
+// medio del servicio a propósito. Un login correcto borra las dos cubetas.
+//
+// En memoria, como el resto del estado de esta app. Se pierde si el server
+// reinicia — aceptable: reiniciar no es algo que un atacante pueda provocar.
+const LOGIN_MAX_POR_IP = 10;
+const LOGIN_MAX_POR_USUARIO = 30;
+const LOGIN_VENTANA_MS = 15 * 60 * 1000;
+const intentosLogin = new Map();
+
+function _cubeta(clave) {
+  const b = intentosLogin.get(clave);
+  if (!b || Date.now() > b.hasta) return null;   // vencida = como si no existiera
+  return b;
+}
+
+function _sumarFallo(clave) {
+  const b = _cubeta(clave);
+  if (b) b.fallos++;
+  else intentosLogin.set(clave, { fallos: 1, hasta: Date.now() + LOGIN_VENTANA_MS });
+
+  // Purga perezosa: sin esto el Map crece sin techo con cada IP que pruebe algo.
+  if (intentosLogin.size > 5000) {
+    const ahora = Date.now();
+    for (const [k, v] of intentosLogin) if (ahora > v.hasta) intentosLogin.delete(k);
+  }
+}
 
 // Estado de caja en memoria (persiste mientras el servidor esté corriendo)
 let estadoCaja = {
@@ -104,14 +152,39 @@ function adminOnly(req, res, next) {
 // ─── Login ────────────────────────────────────────────────────────────────────
 app.post('/api/login', (req, res) => {
   const { usuario, password } = req.body;
-  const user = USUARIOS[(usuario || '').toString().toLowerCase()];
+  const nombreUsuario = (usuario || '').toString().toLowerCase();
+  const clavePorIp = `ip:${req.ip}|${nombreUsuario}`;
+  const clavePorUsuario = `usr:${nombreUsuario}`;
+
+  const porIp = _cubeta(clavePorIp);
+  const porUsuario = _cubeta(clavePorUsuario);
+  if ((porIp && porIp.fallos >= LOGIN_MAX_POR_IP) ||
+      (porUsuario && porUsuario.fallos >= LOGIN_MAX_POR_USUARIO)) {
+    const hasta = Math.max(porIp ? porIp.hasta : 0, porUsuario ? porUsuario.hasta : 0);
+    const segundos = Math.max(1, Math.ceil((hasta - Date.now()) / 1000));
+    const minutos = Math.ceil(segundos / 60);
+    res.set('Retry-After', String(segundos));
+    return res.status(429).json({
+      ok: false,
+      error: `Demasiados intentos fallidos. Probá de nuevo en ${minutos} minuto${minutos !== 1 ? 's' : ''}.`,
+    });
+  }
+
+  const user = USUARIOS[nombreUsuario];
   // Se exige que la contraseña venga y no esté vacía. Sin este chequeo, un
   // usuario sin clave configurada más un body sin `password` comparaba
   // undefined contra undefined y dejaba entrar. USUARIOS además se crea sin
   // prototipo, así que pedir el usuario "constructor" no devuelve nada.
   if (!user || !user.password || typeof password !== 'string' || !password || user.password !== password) {
+    _sumarFallo(clavePorIp);
+    _sumarFallo(clavePorUsuario);
     return res.status(401).json({ ok: false, error: 'Usuario o contraseña incorrectos' });
   }
+
+  // Entró bien: se borra lo acumulado para que equivocarse un par de veces antes
+  // de acertar no deje al usuario a mitad de camino del bloqueo.
+  intentosLogin.delete(clavePorIp);
+  intentosLogin.delete(clavePorUsuario);
   const token = jwt.sign(
     { usuario: usuario.toLowerCase(), rol: user.rol, nombre: user.nombre },
     JWT_SECRET,
