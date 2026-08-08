@@ -41,19 +41,27 @@ app.use(express.json({ limit: '25mb' }));
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const JWT_SECRET = process.env.JWT_SECRET || 'mercedes-secret-2026';
 
-// Usuarios: credenciales desde variables de entorno
-const USUARIOS = {
-  admin: {
-    password: process.env.ADMIN_PASSWORD || 'admin123',
-    rol: 'admin',
-    nombre: 'Administrador',
-  },
-  charly: {
-    password: process.env.CHARLY_PASSWORD || 'charly123',
-    rol: 'encargado',
-    nombre: 'Charly',
-  },
-};
+// Usuarios: credenciales desde variables de entorno.
+//
+// ESTE REPOSITORIO ES PÚBLICO (ver .gitignore). Ninguna contraseña real va acá
+// adentro: se configuran como variables de entorno en Railway. Los usuarios que
+// no tienen su variable seteada simplemente NO existen — mejor que no poder
+// entrar es que exista una cuenta cuya clave está publicada.
+//
+// `pablo` y `tincho` son cuentas propias con los mismos permisos que admin. Son
+// separadas y no un login compartido porque el JWT lleva el `usuario`, que es lo
+// que después permite mandarle notificaciones a cada uno por su lado.
+const USUARIOS = Object.create(null);
+
+function _registrarUsuario(clave, { password, rol, nombre }) {
+  if (!password) return;   // sin contraseña configurada, la cuenta no se crea
+  USUARIOS[clave] = { password, rol, nombre };
+}
+
+_registrarUsuario('admin',  { password: process.env.ADMIN_PASSWORD  || 'admin123',  rol: 'admin',     nombre: 'Administrador' });
+_registrarUsuario('charly', { password: process.env.CHARLY_PASSWORD || 'charly123', rol: 'encargado', nombre: 'Charly' });
+_registrarUsuario('pablo',  { password: process.env.PABLO_PASSWORD,  rol: 'admin',  nombre: 'Pablo' });
+_registrarUsuario('tincho', { password: process.env.TINCHO_PASSWORD, rol: 'admin',  nombre: 'Tincho' });
 
 // Estado de caja en memoria (persiste mientras el servidor esté corriendo)
 let estadoCaja = {
@@ -96,8 +104,12 @@ function adminOnly(req, res, next) {
 // ─── Login ────────────────────────────────────────────────────────────────────
 app.post('/api/login', (req, res) => {
   const { usuario, password } = req.body;
-  const user = USUARIOS[usuario?.toLowerCase()];
-  if (!user || user.password !== password) {
+  const user = USUARIOS[(usuario || '').toString().toLowerCase()];
+  // Se exige que la contraseña venga y no esté vacía. Sin este chequeo, un
+  // usuario sin clave configurada más un body sin `password` comparaba
+  // undefined contra undefined y dejaba entrar. USUARIOS además se crea sin
+  // prototipo, así que pedir el usuario "constructor" no devuelve nada.
+  if (!user || !user.password || typeof password !== 'string' || !password || user.password !== password) {
     return res.status(401).json({ ok: false, error: 'Usuario o contraseña incorrectos' });
   }
   const token = jwt.sign(

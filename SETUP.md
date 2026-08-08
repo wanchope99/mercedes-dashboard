@@ -40,6 +40,25 @@ npm run dev
      ```
 4. Railway detecta `railway.toml` y hace el deploy automáticamente
 
+### Usuarios
+
+**Este repositorio es público: ninguna contraseña real va en el código.** Cada
+cuenta se habilita seteando su variable en Railway; la que no tiene variable
+seteada, no existe y no se puede usar para entrar.
+
+| Variable | Usuario | Rol |
+|---|---|---|
+| `ADMIN_PASSWORD` | `admin` | admin |
+| `CHARLY_PASSWORD` | `charly` | encargado |
+| `PABLO_PASSWORD` | `pablo` | admin |
+| `TINCHO_PASSWORD` | `tincho` | admin |
+
+`admin` y `charly` tienen un valor por defecto en el código (`admin123` /
+`charly123`) que quedó de la primera versión. **Como el repo es público, esos
+valores son de dominio público**: si `ADMIN_PASSWORD` no está seteada en
+Railway, cualquiera que conozca la URL entra como administrador. Setear las dos
+variables, o sacar los defaults.
+
 ## Estructura del proyecto
 
 ```
