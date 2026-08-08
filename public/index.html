@@ -5825,6 +5825,7 @@ function renderFinConciliacion() {
         `</div>`
       : '') +
     renderPozoReal() +
+    renderInteresDevengado() +
     `<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted)">
       <span title="Sólo lo asentado en Finanzas Movimientos: colocaciones e intereses. Las transferencias entre cajas viven en Movimientos como tipo Cambio y no se duplican acá.">Asentado en el registro: <b style="color:var(--text)">${fmt(c.valorRegistroARS)}</b></span>
       ${c.porDestino.legacy ? `<span title="Movimientos cargados con la estrategia vieja (UVA/CER). Si esa plata ya se pasó a Mercado Pago Pablo, registrá el rescate y la nueva colocación.">En instrumentos viejos (UVA/CER): <b style="color:var(--orange)">${fmt(c.porDestino.legacy)}</b></span>` : ''}
@@ -5893,6 +5894,101 @@ function renderPozoReal() {
 
 function toggleSalidasPozo() {
   const el = document.getElementById('pozo-salidas');
+  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+// ─── Control del rendimiento ────────────────────────────────────────────────
+//
+// Para qué está: saber cuánto hay en Mercado Pago Pablo sin tener que abrir la
+// cuenta ni darle el acceso a nadie. Se calcula el interés que la cuenta TENDRÍA
+// que haber pagado (TNA/365 por día, capitalizando los días hábiles) y se compara
+// contra lo que efectivamente se cargó como "Rendimientos MP" en Movimientos.
+//
+// El devengado NO se asienta como movimiento: los rendimientos reales ya entran
+// al ledger y el saldo de la caja los tiene adentro, así que escribir también el
+// calculado contaría la misma plata dos veces. Acá sólo se compara.
+function renderInteresDevengado() {
+  const i = state.fin.intereses;
+  const p = state.fin.pozo;
+  if (!i || !i.desde) return '';
+
+  const linea = (label, valor, color, hint) =>
+    `<div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:7px 0">
+      <span style="font-size:13px;color:var(--text-muted)">${label}${hint ? `<span style="display:block;font-size:11px">${hint}</span>` : ''}</span>
+      <span style="font-size:15px;font-weight:700;color:${color || 'var(--text)'};white-space:nowrap">${valor}</span>
+    </div>`;
+
+  // Lo devengado en días que todavía no llegaron a un hábil no es un faltante:
+  // todavía no le toca acreditarse. Sólo el resto es "esto debería estar cargado".
+  const faltaCargar = i.diferenciaARS - i.sinAcreditarARS;
+  const avisoInteres = faltaCargar > 1000
+    ? `<div style="font-size:12px;color:var(--orange);line-height:1.6;margin-top:8px">
+         ⚠ Hay <b>${fmt(faltaCargar)}</b> de rendimientos que la cuenta ya tendría que haber pagado
+         y que no figuran en Movimientos. Lo más probable es que estén acreditados en Mercado Pago
+         y falte cargarlos — entrá a la cuenta, mirá los rendimientos y cargalos como una entrada
+         a <b>${escapeHtml((p && p.caja) || 'Mercado Pago Pablo')}</b>.
+       </div>`
+    : faltaCargar < -1000
+      ? `<div style="font-size:12px;color:var(--red);line-height:1.6;margin-top:8px">
+           ⚠ Se cargaron <b>${fmt(-faltaCargar)}</b> más de rendimientos de los que la cuenta
+           tendría que haber pagado al ${(i.tna * 100).toFixed(1)}% TNA. O la tasa cambió y hay que
+           actualizarla en "Ajustar parámetros", o algún rendimiento se cargó dos veces.
+         </div>`
+      : `<div style="font-size:12px;color:var(--green);line-height:1.6;margin-top:8px">
+           ✓ Lo acreditado coincide con lo que la cuenta tendría que haber pagado.
+         </div>`;
+
+  // El contraste que importa: lo que debería haber contra lo que Pablo dice que hay.
+  const real = (p && p.saldoRealARS) || 0;
+  const brecha = i.saldoEsperadoARS - real;
+  const tolerancia = Math.max(20000, i.saldoEsperadoARS * 0.005);
+  const avisoSaldo = !real
+    ? ''
+    : Math.abs(brecha) <= tolerancia
+      ? `<div style="font-size:12px;color:var(--green);line-height:1.6;margin-top:8px">
+           ✓ El saldo real de la cuenta coincide con lo que debería haber. No hace falta abrirla para saberlo.
+         </div>`
+      : `<div style="font-size:12px;color:${brecha > 0 ? 'var(--red)' : 'var(--orange)'};line-height:1.6;margin-top:8px">
+           ⚠ Entre lo que debería haber y el <b>Saldo Real</b> cargado en la hoja Cajas hay
+           <b>${fmt(Math.abs(brecha))}</b> de diferencia
+           ${brecha > 0
+             ? '<b>de menos</b> en la cuenta. O salió plata que no se cargó en Movimientos, o el Saldo Real quedó viejo.'
+             : '<b>de más</b> en la cuenta. O entró plata que no se cargó, o el Saldo Real quedó viejo.'}
+         </div>`;
+
+  return `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="font-size:13px;font-weight:700;margin-bottom:4px">Control del rendimiento</div>
+      <div style="font-size:11px;color:var(--text-muted);line-height:1.6;margin-bottom:6px">
+        Al ${(i.tna * 100).toFixed(1)}% TNA, parte diaria, acreditando los días hábiles.
+        Desde el ${escapeHtml(i.desde)} hasta el ${escapeHtml(i.hasta)}.
+        Sirve para saber cuánto hay sin entrar a la cuenta.
+      </div>` +
+    linea('Debería haber rendido', fmt(i.esperadosARS), 'var(--text)', 'calculado, no asentado') +
+    linea('Acreditado y cargado', '− ' + fmt(i.acreditadosARS), 'var(--text-muted)', 'filas de rendimientos en Movimientos') +
+    `<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px">` +
+      linea('Diferencia', fmt(i.diferenciaARS), faltaCargar > 1000 ? 'var(--orange)' : 'var(--green)',
+            i.sinAcreditarARS ? `incluye ${fmt(i.sinAcreditarARS)} devengados que todavía no les toca acreditarse` : '') +
+    `</div>` +
+    avisoInteres +
+    `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">` +
+      linea('Debería haber en la cuenta', fmt(i.saldoEsperadoARS), 'var(--accent)', 'capital colocado + interés devengado') +
+      (real ? linea('Saldo Real cargado a mano', fmt(real), 'var(--text)', 'columna G de la hoja Cajas') : '') +
+    `</div>` +
+    avisoSaldo +
+    (i.porMes && i.porMes.length > 1
+      ? `<div style="font-size:12px;color:var(--text-muted);margin-top:10px">
+           <span style="cursor:pointer;text-decoration:underline" onclick="toggleInteresMeses()">ver el devengado mes a mes</span>
+           <div id="interes-meses" style="display:none;margin-top:8px">
+             ${i.porMes.map(m => `<div style="display:flex;justify-content:space-between;padding:3px 0">
+               <span>${escapeHtml(m.mes)}</span><b style="color:var(--text)">${fmt(m.montoARS)}</b></div>`).join('')}
+           </div>
+         </div>`
+      : '') +
+    `</div>`;
+}
+
+function toggleInteresMeses() {
+  const el = document.getElementById('interes-meses');
   if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
 }
 

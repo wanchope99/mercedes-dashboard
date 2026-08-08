@@ -417,13 +417,27 @@ async function _pozoReal() {
   }
 
   const movs = await getMovimientos().catch(() => []);
-  const salidas = movs
-    .filter(m => norm(m.medioPago) === norm(CAJA_POZO) && (m.salidaARS || 0) > 0)
+  const deLaCaja = movs.filter(m => norm(m.medioPago) === norm(CAJA_POZO));
+
+  const salidas = deLaCaja
+    .filter(m => (m.salidaARS || 0) > 0)
     .map(m => ({
       rowIndex: m.rowIndex, fecha: m.fechaStr, tipo: m.tipo, categoria: m.categoria,
       proveedor: m.proveedor, descripcion: m.descripcion, montoARS: m.salidaARS,
     }))
     .sort((a, b) => b.rowIndex - a.rowIndex);
+
+  // Flujos día a día para devengar el interés. Se separa lo que es RENDIMIENTO
+  // ya acreditado por Mercado Pago de lo que es capital: el devengado que
+  // calculamos reemplaza al acreditado, no se suma (ver calcularIntereses).
+  const flujos = deLaCaja
+    .filter(m => m.fecha)
+    .map(m => ({
+      fecha: m.fecha,
+      monto: (m.entradaARS || 0) - (m.salidaARS || 0),
+      esInteres: (m.entradaARS || 0) > 0 && RE_INTERES.test(`${m.descripcion} ${m.proveedor}`),
+      rowIndex: m.rowIndex, descripcion: m.descripcion,
+    }));
 
   return {
     encontrada: true,
@@ -433,6 +447,96 @@ async function _pozoReal() {
     entradasARS: Math.round(caja.entradas || 0),
     salidasARS: Math.round(caja.salidas || 0),
     salidas,
+    flujos,
+  };
+}
+
+// ─── Interés devengado: lo que la cuenta TENDRÍA que haber pagado ────────────
+//
+// Para qué existe: poder decir cuánto hay en Mercado Pago Pablo sin tener que
+// abrir la cuenta ni compartir el acceso con nadie. La cuenta remunerada rinde
+// sobre el saldo todos los días y acredita los días hábiles — lo que devenga
+// sábado y domingo entra el lunes junto con el del lunes.
+//
+// SE CALCULA, NO SE ASIENTA. Los rendimientos que Mercado Pago paga de verdad
+// entran al ledger como una fila más de Movimientos ("Rendimientos MP") y el
+// saldo de la caja ya los tiene adentro. Si además escribiéramos el devengado
+// como movimiento, la misma plata quedaría contada dos veces. Lo que se hace es
+// COMPARAR devengado esperado contra acreditado real: esa diferencia es la única
+// forma de ver, desde acá, si la cuenta pagó lo que tenía que pagar.
+//
+// Convención: tasa diaria = TNA/365 sobre el saldo del día, y lo devengado se
+// capitaliza el siguiente día hábil (por eso un lunes acredita tres días). Así
+// el rendimiento del año da la TNA completa. La plata rinde desde el día que
+// entra. Los feriados no se contemplan a propósito: corren una acreditación un
+// día, no cambian el total del período.
+const DIAS_ANIO = 365;
+const RE_INTERES = /rendimiento|inter[eé]s/i;
+const _DIA_MS = 86400000;
+
+// Clave YYYY-MM-DD tomando el día LOCAL. Construir la clave en UTC correría las
+// fechas un día para cualquier huso al oeste de Greenwich, que es el nuestro.
+function _diaISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function calcularIntereses(flujos, { tna, hasta } = {}) {
+  const tasa = Number(tna) || 0;
+  const capitalPorDia = new Map();
+  let acreditadoReal = 0, primera = null;
+
+  for (const f of flujos || []) {
+    if (!f.fecha) continue;
+    if (f.esInteres) { acreditadoReal += f.monto; continue; }
+    const k = _diaISO(f.fecha);
+    capitalPorDia.set(k, (capitalPorDia.get(k) || 0) + f.monto);
+    if (!primera || k < primera) primera = k;
+  }
+  if (!primera || !(tasa > 0)) {
+    return {
+      tna: tasa, desde: primera || null, hasta: hasta || null,
+      esperadosARS: 0, acreditadosARS: Math.round(acreditadoReal),
+      diferenciaARS: -Math.round(acreditadoReal), sinAcreditarARS: 0,
+      saldoEsperadoARS: 0, porMes: [],
+    };
+  }
+
+  const finISO = hasta || _diaISO(new Date());
+  const [y, m, d] = primera.split('-').map(Number);
+  let cursor = new Date(y, m - 1, d);
+  let balance = 0, pendiente = 0, capitalizado = 0;
+  const porMes = new Map();
+
+  while (_diaISO(cursor) <= finISO) {
+    const k = _diaISO(cursor);
+    balance += capitalPorDia.get(k) || 0;      // rinde desde el día que entra
+    const dev = balance * (tasa / DIAS_ANIO);
+    pendiente += dev;
+    const mes = k.slice(0, 7);
+    porMes.set(mes, (porMes.get(mes) || 0) + dev);
+    const dow = cursor.getDay();
+    if (dow >= 1 && dow <= 5) {               // hábil: se capitaliza lo devengado
+      balance += pendiente;
+      capitalizado += pendiente;
+      pendiente = 0;
+    }
+    cursor = new Date(cursor.getTime() + _DIA_MS);
+  }
+
+  const esperados = capitalizado + pendiente;
+  return {
+    tna: tasa,
+    desde: primera,
+    hasta: finISO,
+    esperadosARS: Math.round(esperados),
+    acreditadosARS: Math.round(acreditadoReal),
+    // Positivo = la cuenta pagó MENOS de lo que debería según la TNA cargada.
+    diferenciaARS: Math.round(esperados - acreditadoReal),
+    sinAcreditarARS: Math.round(pendiente),
+    saldoEsperadoARS: Math.round(balance + pendiente),
+    porMes: [...porMes.entries()]
+      .map(([mes, monto]) => ({ mes, montoARS: Math.round(monto) }))
+      .sort((a, b) => a.mes.localeCompare(b.mes)),
   };
 }
 
@@ -461,13 +565,17 @@ async function resumenFinanzas(recuperoPorMes = []) {
   }
 
   const proyeccion = calcularProyeccion(config, serie);
+  // Los flujos sólo sirven para devengar; no se mandan al browser.
+  const { flujos, ...pozoPublico } = pozo;
+  const intereses = calcularIntereses(flujos || [], { tna: config.tnaMercadoPago });
   return {
     config,
     mesInicio: inicio,
     aportes: serie,
     movimientos: movimientos.map(({ rowIndex, ...m }) => m),
     proyeccion,
-    pozo,
+    pozo: pozoPublico,
+    intereses,
     conciliacion: conciliar(movimientos, recuperoPorMes),
     // Claves de la estrategia vieja que siguen en la planilla y ya no se usan.
     clavesObsoletas: config.clavesObsoletas || null,
@@ -615,7 +723,7 @@ async function _borrarFila(api, hoja, rowIndex) {
 function clearCache() { cache.del(CACHE_KEY); }
 
 module.exports = {
-  resumenFinanzas, calcularProyeccion, conciliar,
+  resumenFinanzas, calcularProyeccion, conciliar, calcularIntereses,
   guardarConfig, guardarAporte, guardarMovimiento, borrarMovimiento,
   clearCache, DEFAULT_CONFIG, BALDES, BALDE_MP, BALDES_LEGACY, TIPOS,
   HOJA_CONFIG, HOJA_APORTES, HOJA_MOVS,
