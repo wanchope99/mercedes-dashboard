@@ -30,6 +30,17 @@ const HEADER = ['Fecha', 'Tipo', 'Periodo', 'Titular', 'Resumen', 'Hallazgos', '
 // el costo es de centavos y no hay razón para resignar criterio.
 const MODELO = process.env.INFORMES_MODEL || 'claude-opus-5';
 
+const notasMod = require('./informes-notas');
+
+// Las notas nunca deben tumbar un informe: si la hoja no se puede leer, el
+// informe sale sin el feedback, que es peor que con él pero muchísimo mejor que
+// no salir. Distinto de la lista de informes previos, donde no poder leer sí
+// obliga a frenar (ahí el riesgo es duplicar).
+async function notasDelAgente(tipo) {
+  try { return await notasMod.listarNotas({ tipo }); }
+  catch (e) { console.error(`Informes: no se pudieron leer las notas (${e.message}) — el informe sale sin ellas`); return []; }
+}
+
 const ANALISTAS = {
   movimientos: require('./informe-movimientos'),
   servicios: require('./informe-servicios'),
@@ -118,7 +129,19 @@ Contexto del negocio, que cambia cómo se lee todo:
 - Argentina con inflación de ~1,9% mensual. Que algo suba en pesos es lo normal, no un hallazgo. Las señales ya vienen comparadas contra la mediana móvil de las semanas previas, que absorbe la inflación: lo que te llega ya se despegó de esa deriva.
 - El bar abre de noche y cierra los lunes. Un martes flojo no es una anomalía; compará cada día contra el mismo día de semana.
 - Las compras en cuotas figuran una sola vez, en el mes de la compra.
-- Los movimientos entre cajas propias no son ni ingreso ni gasto y no te llegan.`;
+- Los movimientos entre cajas propias no son ni ingreso ni gasto y no te llegan.
+
+Si te llega un bloque "LO QUE YA TE DIJERON LOS DUEÑOS", son notas que ellos
+escribieron sobre informes anteriores. Valen más que tu lectura de los números:
+- Si te explicaron por qué algo es normal, NO lo vuelvas a levantar como hallazgo
+  salvo que la magnitud haya cambiado de verdad respecto de lo que te contaron.
+  Repetir algo que ya te dijeron que es normal es la forma más rápida de que
+  dejen de leer el informe.
+- Si dos personas dicen cosas distintas sobre lo mismo, decilo en vez de elegir
+  una en silencio.
+- Son explicaciones, no números: seguís sin poder calcular nada con ellas.
+- Tienen fecha. El negocio cambia: una explicación vieja puede haber dejado de
+  ser cierta, y si la nota ya no alcanza para explicar lo que ves, decilo.`;
 
 // ─── La llamada ─────────────────────────────────────────────────────────────
 async function interpretar({ sistema, payload }) {
@@ -276,8 +299,15 @@ async function generarInforme(tipo, { hasta, forzar = false } = {}) {
     if (yaEsta) return { ...yaEsta, yaExistia: true };
   }
 
-  const { payload, senales } = await analista.analizar({ hasta: corte });
-  const informe = await interpretar({ sistema: analista.SISTEMA, payload });
+  // Las notas se leen UNA vez y van a los dos lados: el analista usa los
+  // escalones (dato, para el código) y el modelo recibe el texto (criterio).
+  // Ver src/informes-notas.js.
+  const notas = await notasDelAgente(tipo);
+  const { payload, senales } = await analista.analizar({ hasta: corte, notas });
+  const informe = await interpretar({
+    sistema: analista.SISTEMA,
+    payload: payload + notasMod.bloqueParaModelo(notas, { ahora: corte }),
+  });
 
   const api = _sheets();
   await _ensureHoja(api);

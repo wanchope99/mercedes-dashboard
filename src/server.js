@@ -25,6 +25,7 @@ const tc = require('./tc');
 const roi = require('./roi');
 const finanzas = require('./finanzas');
 const informes = require('./informes');
+const informesNotas = require('./informes-notas');
 const propinas = require('./propinas');
 const mantenimiento = require('./mantenimiento');
 const stockBebidas = require('./stock-bebidas');
@@ -1927,6 +1928,31 @@ app.post('/api/informes/leido', authMiddleware, soloDestinatarioInformes, async 
     const { tipo, periodo } = req.body || {};
     res.json({ ok: true, data: await informes.marcarLeido({ tipo, periodo, usuario: req.user.usuario }) });
   } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+// ─── Notas al agente ────────────────────────────────────────────────────────
+// El feedback de los dueños sobre lo que el informe dice. Ver src/informes-notas.js.
+app.get('/api/informes/notas', authMiddleware, soloDestinatarioInformes, async (req, res) => {
+  try { res.json({ ok: true, data: await informesNotas.listarNotas({}) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post('/api/informes/notas', authMiddleware, soloDestinatarioInformes, async (req, res) => {
+  try {
+    const { tipo, periodo, hallazgo, veredicto, texto, escalonConcepto, escalonDesde } = req.body || {};
+    // El usuario lo pone el servidor, nunca el body: la nota queda firmada con
+    // quién entró, y más adelante pablo y tincho pueden opinar distinto sobre lo
+    // mismo. Que el navegador pudiera elegir el autor haría inservible el dato.
+    const data = await informesNotas.guardarNota({
+      usuario: req.user.usuario, tipo, periodo, hallazgo, veredicto, texto, escalonConcepto, escalonDesde,
+    });
+    res.json({ ok: true, data });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.post('/api/informes/notas/:fila/archivar', authMiddleware, soloDestinatarioInformes, async (req, res) => {
+  try { res.json({ ok: true, data: await informesNotas.archivarNota(req.params.fila) }); }
+  catch (err) { res.status(400).json({ ok: false, error: err.message }); }
 });
 
 // Generar a mano: sirve para probar sin esperar al domingo, y para el balance

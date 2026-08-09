@@ -82,6 +82,7 @@ Variables opcionales:
 | `ANTHROPIC_API_KEY` | **Requerida.** Sin ella los informes no se generan (el extractor de facturas ya la usa) | — |
 | `INFORMES_DESTINATARIO` | Qué usuario los ve. **Ojo: `admin` no los ve** salvo que se ponga acá | `tincho` |
 | `INFORMES_MODEL` | Modelo | `claude-opus-5` |
+| `INFORMES_NOTAS_DIAS` | Cuánto tiempo una nota escrita sigue llegándole al agente | `240` |
 | `INFORME_MOVIMIENTOS_CRON` | Cuándo sale el de la plata | `0 10 * * 0` (domingos 10:00) |
 | `INFORME_SERVICIOS_CRON` | Cuándo sale el del salón | `15 10 * * 0` (domingos 10:15) |
 | `INFORME_MENSUAL_CRON` | Cuándo sale el balance | `30 10 1 * *` (día 1, 10:30) |
@@ -98,6 +99,24 @@ deducir cuándo tendría que haber salido.
 
 Los tres informes sólo **LEEN**: ninguno escribe en `Movimientos`. Y ninguno
 calcula: los números los hace el código y el modelo sólo los interpreta.
+
+### Notas al agente (el feedback)
+
+Debajo de cada hallazgo hay dos botones: **"Me sirvió"** y **"Ya lo sé"**. El
+segundo abre un campo para explicar por qué. También hay un cuadro suelto,
+**"Contale algo al agente"**, para contexto que no responde a ningún hallazgo.
+Se guardan en la hoja `Informes Notas`, firmadas con quién las escribió, y en la
+próxima corrida le llegan al modelo.
+
+**La casilla "esto cambió para siempre" es la que más pesa, y no la lee el
+modelo sino el código.** Marcándola con un concepto y una fecha (ej: `ARCA`,
+`2026-08-01`), el análisis deja de comparar ese concepto contra lo anterior a esa
+fecha. Es lo que hay que usar cuando algo subió de nivel de forma permanente —
+más empleados, un aumento, otras condiciones. Sin eso el mismo hallazgo puede
+volver durante meses, hasta que la mediana histórica se mueva sola.
+
+Una nota escrita se puede archivar desde la misma pantalla ("ya no aplica")
+cuando dejó de ser cierta.
 
 ## Estructura del proyecto
 

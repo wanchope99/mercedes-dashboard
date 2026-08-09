@@ -610,6 +610,25 @@
     #informe-aviso-modal .ia-btn:disabled { opacity: 0.6; cursor: default; }
     #informe-aviso-modal .ia-btn-sec { flex: 0 0 auto; padding: 12px 16px; border: 1px solid var(--border); border-radius: 10px; background: transparent; color: var(--text); font-size: 14px; font-family: inherit; cursor: pointer; }
 
+    /* Notas al agente: el feedback debajo de cada hallazgo. Discreto hasta que
+       se toca — no tiene que competir con el hallazgo, que es lo que se lee. */
+    .nota-fb { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .nota-btn { padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-muted); font-size: 12px; font-family: inherit; cursor: pointer; min-height: 32px; }
+    .nota-btn:hover { border-color: var(--accent); color: var(--text); }
+    .nota-btn:disabled { opacity: .55; cursor: default; }
+    .nota-ok { font-size: 12px; color: var(--green); padding: 6px 0; }
+    .nota-form { margin-top: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-alt, rgba(127,127,127,.06)); }
+    .nota-form textarea, .nota-form input[type="text"], .nota-form input[type="date"] { width: 100%; box-sizing: border-box; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 13px; font-family: inherit; }
+    .nota-form textarea { resize: vertical; }
+    .nota-form .nota-escalon { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; font-size: 12px; color: var(--text-muted); line-height: 1.5; cursor: pointer; }
+    .nota-form .nota-escalon input { margin-top: 2px; flex: 0 0 auto; }
+    .nota-form .nota-escalon-campos { display: grid; grid-template-columns: 1fr 150px; gap: 8px; margin-top: 8px; }
+    @media (max-width: 560px) { .nota-form .nota-escalon-campos { grid-template-columns: 1fr; } }
+    .nota-form .nota-acciones { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    .nota-error { font-size: 12px; color: var(--red); margin-top: 8px; }
+    .nota-lista-item { padding: 9px 0; border-top: 1px solid var(--border); font-size: 13px; line-height: 1.6; }
+    .nota-lista-meta { font-size: 11px; color: var(--text-muted); }
+
     /* ── Proveedores ── */
     .prov-badge { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 5px; border-radius:99px; background:var(--red); color:#fff; font-size:10px; font-weight:700; margin-left:4px; }
     .prov-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
@@ -2516,6 +2535,10 @@
     </div>
   </div>
 </div>
+
+<!-- Proveedores conocidos, para el campo "cambió para siempre" de las notas.
+     Es sugerencia, no restricción: se puede escribir cualquier concepto. -->
+<datalist id="nota-proveedores"></datalist>
 
 <script>
 const state = {
@@ -6009,6 +6032,10 @@ async function loadInformes() {
   try {
     const { data } = await api('/api/informes');
     state.informes = data || [];
+    // Las notas nunca deben impedir ver el informe: si fallan, la pantalla sale
+    // igual y sólo se pierde la lista de lo ya dicho.
+    try { state.informeNotas = (await api('/api/informes/notas')).data || []; }
+    catch (e) { state.informeNotas = []; }
     if (!state.informeTipo) state.informeTipo = 'movimientos';
     renderInformes();
   } catch (err) {
@@ -6046,7 +6073,7 @@ function renderInformes() {
       <div style="font-size:12px;color:var(--text-muted);margin:8px 0 14px">
         Se genera solo (${escapeHtml(meta.cadencia)}). La primera vez se crea sola una pestaña
         <b>Informes</b> en la planilla — es esperado, no un error.
-      </div>${generar}</div>`;
+      </div>${generar}</div>` + notaLibreHTML() + notaListaHTML();
     return;
   }
 
@@ -6069,12 +6096,17 @@ function renderInformes() {
                <span>${escapeHtml(x.titular)}</span>
              </div>`).join('')}
          </div>`
-      : '');
+      : '') +
+    notaLibreHTML() + notaListaHTML();
 }
 
 // El informe en sí: titular, hallazgos y qué haría. Lo comparten la sección y el
 // aviso emergente del domingo, para que no puedan mostrar cosas distintas.
-function informeCuerpoHTML(inf) {
+//
+// `prefijo` distingue las dos: la ventana se abre ENCIMA de la sección, así que
+// los dos cuerpos pueden estar en el DOM al mismo tiempo y los id de los
+// formularios de feedback se pisarían.
+function informeCuerpoHTML(inf, { prefijo = 'sec' } = {}) {
   const sev = INFORME_SEVERIDAD[inf.severidad] || INFORME_SEVERIDAD.baja;
   const hallazgos = inf.hallazgos || [];
   // En el balance mensual la severidad es importancia para el negocio, no
@@ -6090,7 +6122,13 @@ function informeCuerpoHTML(inf) {
       ${inf.resumen ? `<div style="font-size:14px;line-height:1.75;color:var(--text-muted);margin-top:8px">${escapeHtml(inf.resumen)}</div>` : ''}
     </div>` +
     (hallazgos.length
-      ? hallazgos.map(h => `
+      ? hallazgos.map((h, i) => {
+        // El feedback se guarda contra el título del hallazgo. Va por un
+        // registro y no incrustado en el onclick: los títulos los escribe el
+        // modelo y pueden traer comillas de cualquier tipo.
+        const k = `${prefijo}-${i}`;
+        _notaRef[k] = { tipo: inf.tipo, periodo: inf.periodo, hallazgo: h.titulo };
+        return `
         <div style="padding:14px 0 14px 14px;border-top:1px solid var(--border);margin-top:10px">
           <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap">
             ${esBalance ? '' : `<span style="font-size:11px;font-weight:700;color:${(INFORME_SEVERIDAD[h.severidad] || sev).color};text-transform:uppercase">${escapeHtml(h.severidad)}</span>`}
@@ -6101,7 +6139,9 @@ function informeCuerpoHTML(inf) {
           ${(h.referencias || []).length || !esBalance ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px">
             confianza ${escapeHtml(h.confianza)}${(h.referencias || []).length ? ` · ${escapeHtml((h.referencias || []).join(', '))}` : ''}
           </div>` : ''}
-        </div>`).join('')
+          ${notaFeedbackHTML(k)}
+        </div>`;
+      }).join('')
       : `<div style="padding:14px 0 4px 14px;font-size:13px;color:var(--green);line-height:1.7">
            ✓ No encontró nada que valga tu atención esta semana. La mayoría de las semanas es así —
            el informe sale vacío a propósito en vez de inventar un hallazgo para tener algo que mostrar.
@@ -6130,6 +6170,201 @@ async function generarInformeAhora(tipo, btn) {
     await loadInformes();
   } catch (err) { alert('No se pudo generar: ' + err.message); }
   finally { if (btn) { btn.disabled = false; btn.textContent = 'Generar el de ahora'; } }
+}
+
+// ─── Notas al agente ────────────────────────────────────────────────────────
+//
+// Para qué está: el analista compara cada gasto contra la mediana histórica de
+// ese proveedor, y cuando el negocio cambia de verdad esa comparación empieza a
+// mentir. El caso testigo es el VEP de ARCA de agosto de 2026: se pasó de 2
+// empleados a 4, la carga se duplicó, y el informe la marcaba como monto
+// atípico todas las semanas. Tenía razón en los números; lo que no podía saber
+// es que el nivel nuevo es el nuevo normal. Eso sólo lo sabe el dueño.
+//
+// Dos partes, y van a lugares distintos a propósito:
+//   · el TEXTO lo lee el modelo (criterio);
+//   · el ESCALÓN lo lee el código (dato) y hace que el analista deje de
+//     comparar contra lo anterior.
+// Ver src/informes-notas.js.
+
+const _notaRef = {};   // clave de render -> a qué hallazgo pertenece
+
+function notaFeedbackHTML(k) {
+  return `<div class="nota-fb" id="nota-fb-${k}">
+      <button class="nota-btn" onclick="notaSirve('${k}', this)">👍 Me sirvió</button>
+      <button class="nota-btn" onclick="notaAbrir('${k}')">✓ Ya lo sé</button>
+    </div>
+    <div class="nota-form" id="nota-form-${k}" style="display:none">
+      <textarea id="nota-texto-${k}" rows="2" placeholder="¿Por qué es normal? (ej: pasamos de 2 a 4 empleados, se duplica la carga)"></textarea>
+      <label class="nota-escalon" for="nota-esc-${k}">
+        <input type="checkbox" id="nota-esc-${k}" onchange="notaToggleEscalon('${k}')">
+        <span>Esto cambió <b>para siempre</b> — que deje de compararlo contra lo de antes</span>
+      </label>
+      <div class="nota-escalon-campos" id="nota-esc-campos-${k}" style="display:none">
+        <input type="text" id="nota-esc-concepto-${k}" list="nota-proveedores" placeholder="¿Qué cambió? (ej: ARCA)">
+        <input type="date" id="nota-esc-desde-${k}">
+      </div>
+      <div class="nota-error" id="nota-error-${k}" style="display:none"></div>
+      <div class="nota-acciones">
+        <button class="btn btn-secondary" onclick="notaGuardar('${k}', this)">Guardar</button>
+        <button class="nota-btn" onclick="notaCerrar('${k}')">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+// El pulgar arriba es una sola llamada, sin formulario: si costara más de un
+// toque nadie lo usaría, y su valor es justamente el volumen.
+async function notaSirve(k, btn) {
+  const ref = _notaRef[k];
+  if (!ref) return;
+  const fb = document.getElementById('nota-fb-' + k);
+  fb.querySelectorAll('button').forEach(b => b.disabled = true);
+  try {
+    await api('/api/informes/notas', { method: 'POST', body: JSON.stringify({ ...ref, veredicto: 'sirve' }) });
+    fb.innerHTML = '<span class="nota-ok">✓ Anotado</span>';
+  } catch (err) {
+    fb.querySelectorAll('button').forEach(b => b.disabled = false);
+    alert('No se pudo guardar: ' + err.message);
+  }
+}
+
+async function notaAbrir(k) {
+  document.getElementById('nota-form-' + k).style.display = '';
+  document.getElementById('nota-texto-' + k).focus();
+  // Los proveedores conocidos sólo para sugerir en el campo del escalón. Se
+  // cargan la primera vez que hacen falta.
+  if (!Object.keys(state.proveedores || {}).length) {
+    try { const { data } = await api('/api/proveedores'); state.proveedores = data || {}; } catch (e) { /* el campo sigue siendo libre */ }
+  }
+  const dl = document.getElementById('nota-proveedores');
+  if (dl && !dl.children.length) {
+    dl.innerHTML = Object.values(state.proveedores || {})
+      .map(p => `<option value="${escapeHtml(p.nombre || '')}"></option>`).join('');
+  }
+}
+
+function notaCerrar(k) { document.getElementById('nota-form-' + k).style.display = 'none'; }
+
+function notaToggleEscalon(k) {
+  const on = document.getElementById('nota-esc-' + k).checked;
+  document.getElementById('nota-esc-campos-' + k).style.display = on ? '' : 'none';
+  if (!on) return;
+  // Prellenar con hoy es engañoso: el cambio casi nunca fue hoy, y una fecha
+  // puesta sola que nadie mira haría que el analista descarte historia de más.
+  document.getElementById('nota-esc-concepto-' + k).focus();
+}
+
+async function notaGuardar(k, btn) {
+  const ref = _notaRef[k] || {};
+  const err = document.getElementById('nota-error-' + k);
+  const escOn = document.getElementById('nota-esc-' + k).checked;
+  const cuerpo = {
+    ...ref,
+    veredicto: 'normal',
+    texto: document.getElementById('nota-texto-' + k).value,
+    escalonConcepto: escOn ? document.getElementById('nota-esc-concepto-' + k).value : '',
+    escalonDesde: escOn ? document.getElementById('nota-esc-desde-' + k).value : '',
+  };
+  err.style.display = 'none';
+  btn.disabled = true; btn.textContent = 'Guardando...';
+  try {
+    await api('/api/informes/notas', { method: 'POST', body: JSON.stringify(cuerpo) });
+    const fb = document.getElementById('nota-fb-' + k);
+    if (fb) fb.innerHTML = '<span class="nota-ok">✓ Anotado — el agente lo va a tener en cuenta</span>';
+    notaCerrar(k);
+  } catch (e) {
+    err.textContent = e.message;
+    err.style.display = '';
+  } finally { btn.disabled = false; btn.textContent = 'Guardar'; }
+}
+
+// ─── Contarle algo al agente sin que haya preguntado ─────────────────────────
+// La otra mitad: contexto que no responde a ningún hallazgo ("desde agosto somos
+// cuatro"). Sirve para adelantarse en vez de esperar a que el agente se
+// equivoque para corregirlo. Va sin tipo, así le llega a los tres.
+function notaLibreHTML() {
+  return `<div style="margin-top:22px;padding-top:14px;border-top:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Contale algo al agente</div>
+      <div style="font-size:12px;color:var(--text-muted);line-height:1.6;margin-bottom:10px">
+        Algo que tenga que saber para leer bien los números, aunque no lo haya preguntado.
+      </div>
+      ${notaFeedbackLibreCampos()}
+    </div>`;
+}
+
+function notaFeedbackLibreCampos() {
+  const k = 'libre';
+  _notaRef[k] = { tipo: '', periodo: '', hallazgo: '' };
+  return `<div class="nota-form" style="display:block">
+      <textarea id="nota-texto-${k}" rows="2" placeholder="ej: desde agosto somos 4 empleados en vez de 2"></textarea>
+      <label class="nota-escalon" for="nota-esc-${k}">
+        <input type="checkbox" id="nota-esc-${k}" onchange="notaToggleEscalon('${k}')">
+        <span>Esto cambió <b>para siempre</b> — que deje de compararlo contra lo de antes</span>
+      </label>
+      <div class="nota-escalon-campos" id="nota-esc-campos-${k}" style="display:none">
+        <input type="text" id="nota-esc-concepto-${k}" list="nota-proveedores" placeholder="¿Qué cambió? (ej: ARCA)">
+        <input type="date" id="nota-esc-desde-${k}">
+      </div>
+      <div class="nota-error" id="nota-error-${k}" style="display:none"></div>
+      <div class="nota-acciones">
+        <button class="btn btn-secondary" onclick="notaGuardarLibre(this)">Guardar</button>
+      </div>
+    </div>`;
+}
+
+async function notaGuardarLibre(btn) {
+  const k = 'libre';
+  const err = document.getElementById('nota-error-' + k);
+  const escOn = document.getElementById('nota-esc-' + k).checked;
+  err.style.display = 'none';
+  btn.disabled = true; btn.textContent = 'Guardando...';
+  try {
+    await api('/api/informes/notas', {
+      method: 'POST',
+      body: JSON.stringify({
+        tipo: '', periodo: '', hallazgo: '', veredicto: 'contexto',
+        texto: document.getElementById('nota-texto-' + k).value,
+        escalonConcepto: escOn ? document.getElementById('nota-esc-concepto-' + k).value : '',
+        escalonDesde: escOn ? document.getElementById('nota-esc-desde-' + k).value : '',
+      }),
+    });
+    await loadInformes();
+  } catch (e) {
+    err.textContent = e.message;
+    err.style.display = '';
+  } finally { btn.disabled = false; btn.textContent = 'Guardar'; }
+}
+
+// Lo que ya se le dijo. Está para poder revisarlo: una nota vieja que dejó de
+// ser cierta sigue pesando en cada informe hasta que alguien la archive.
+function notaListaHTML() {
+  const notas = (state.informeNotas || []).filter(n => (n.texto || '').trim() || n.escalonConcepto);
+  if (!notas.length) return '';
+  return `<div style="margin-top:22px;padding-top:14px;border-top:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">
+        Lo que ya le dijeron (${notas.length})
+      </div>
+      ${notas.map(n => `
+        <div class="nota-lista-item">
+          <div>${escapeHtml(n.texto || '')}</div>
+          ${n.escalonConcepto ? `<div class="nota-lista-meta" style="color:var(--accent)">
+            ⚑ ${escapeHtml(n.escalonConcepto)} cambió para siempre desde ${escapeHtml(n.escalonDesde)} — el análisis ya no compara contra lo anterior
+          </div>` : ''}
+          <div class="nota-lista-meta">
+            ${escapeHtml((n.fecha || '').slice(0, 10))} · ${escapeHtml(n.usuario || '')}${n.hallazgo ? ` · sobre "${escapeHtml(n.hallazgo)}"` : ' · contexto general'}
+            · <a href="#" onclick="notaArchivar(${n.rowIndex}, event)" style="color:var(--text-muted)">ya no aplica</a>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+async function notaArchivar(fila, ev) {
+  if (ev) ev.preventDefault();
+  if (!confirm('¿Archivar esta nota? El agente deja de tenerla en cuenta.')) return;
+  try {
+    await api(`/api/informes/notas/${fila}/archivar`, { method: 'POST' });
+    await loadInformes();
+  } catch (e) { alert('No se pudo archivar: ' + e.message); }
 }
 
 // ─── El aviso del domingo ───────────────────────────────────────────────────
@@ -6182,7 +6417,7 @@ function abrirAvisoInforme(lista) {
     const meta = INFORME_TIPOS[inf.tipo] || { icono: '🔎', titulo: inf.tipo };
     return (i ? '<div class="ia-sep"></div>' : '') +
       `<div class="ia-agente">${meta.icono} ${escapeHtml(meta.titulo)}</div>` +
-      informeCuerpoHTML(inf);
+      informeCuerpoHTML(inf, { prefijo: `pop${i}` });
   }).join('');
 
   const ok = document.getElementById('informe-aviso-ok');

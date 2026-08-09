@@ -171,7 +171,25 @@ Model: `claude-opus-5` with structured outputs (one schema for all three, so one
 
 The section lives **inside Reportes** as a third submenu (`reportes` → `informes`), not as a top-level tab — it is one more report, just written by an agent instead of a query. That makes it the only `soloUsuario` at *submenu* level, applied by the sub filter in `switchGroup`; the group-level filter in `gruposVisibles` is kept in step but currently has no group using it. The panel id stays `tab-informes`, which is what the submenu resolves to.
 
-All three analysts are **read-only**: no informe ever writes to `Movimientos`.
+### The feedback loop: `informes-notas.js`
+
+The analyst compares each expense against the **trailing median of that same supplier**, and when the business genuinely changes, that comparison starts lying. The canonical case: ARCA's payroll tax doubled in August 2026 because headcount went 2 → 4. The signal was statistically right — it really was 2× the usual — but the new level *is* the new normal, and nothing in the data says so. Worse, the median only moves once more than half of ARCA's historical rows sit at the new level, so on a monthly charge **that same finding repeats for roughly six months**. Only the owner can break that loop.
+
+A note has two parts and they go to deliberately different places — the same split that governs everything else here (code computes, model interprets):
+
+- **The prose is read by the model.** It's judgment: why something is normal, what context is missing. It's *soft* — it lowers the odds of a repeat, it doesn't forbid one, and the signal still fires in code.
+- **The `escalón` is read by the code.** It's data: "this concept changed level on this date." `informe-movimientos` section A then drops every row before that date from the median, and the false positive disappears at the source rather than depending on the model remembering to ignore it. It generalizes: a price hike, a new employee, changed terms — every structural change is a step in the series, and comparing across a step is *the* cause of this class of false positive.
+
+If fewer than `MIN_APARICIONES` rows survive the step, the signal is simply not emitted. That silence is correct: comparing against the old level is exactly what the owner asked it to stop doing.
+
+Two rules that are load-bearing:
+
+- **The author comes from `req.user`, never the body.** Notes are signed. Today only `tincho` reads the reports, but `pablo` will later, and the two can disagree about the same finding — a browser that could pick the author would make the field worthless. The shared prompt tells the model to *surface* a disagreement rather than silently pick a side, matching how the rest of the system treats contradictory sources.
+- **Notes must never break a report.** `notasDelAgente` swallows read errors and returns `[]`: a report without feedback is worse than one with it, and enormously better than no report. This is the opposite of the `estricto` read for previous reports, where failing to read *must* stop the run (there the risk is a duplicate).
+
+Prose notes age out after `INFORMES_NOTAS_DIAS` (240) and carry their date into the prompt, because an explanation can stop being true. Escalones never expire — they are a fact about a date, not an opinion. Untyped notes are general business context and reach all three agents; typed ones only reach the agent they were written against.
+
+All three analysts are **read-only**: no informe ever writes to `Movimientos`. The notes sheet (`Informes Notas`) is the only thing the feature writes, and it is not part of the ledger.
 
 ### Other independent modules
 

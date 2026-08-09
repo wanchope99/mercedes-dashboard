@@ -22,7 +22,7 @@ const UMBRAL_DESVIO = 4;
 // que sea estadísticamente. Sin piso, el informe se llena de envíos de $4.000.
 const PISO_MATERIAL = 25000;
 
-function analizarMovimientos(movimientos, { hasta } = {}) {
+function analizarMovimientos(movimientos, { hasta, escalones } = {}) {
   const corte = hasta ? new Date(hasta) : new Date();
   corte.setHours(23, 59, 59, 999);
 
@@ -50,8 +50,19 @@ function analizarMovimientos(movimientos, { hasta } = {}) {
   // ── A. Monto muy fuera de lo que ese proveedor suele cobrar ──────────────
   // Agarra tanto el precio que se disparó como el error de tipeo por orden de
   // magnitud — la comisión de $1.285.499 de julio habría entrado por acá.
-  for (const [, filas] of porProveedor) {
-    const historia = filas.filter(f => !enVentana(f)).map(f => f.salidaTotal);
+  for (const [clave, filas] of porProveedor) {
+    // Escalón: si el dueño avisó que este proveedor cambió de nivel (más
+    // empleados, un aumento, otras condiciones), la historia previa al cambio
+    // deja de ser comparable y se descarta. Sin esto, el nivel nuevo se marca
+    // como atípico cada semana hasta que la mitad de las filas históricas estén
+    // en el nivel nuevo y la mediana se mueva sola — medio año en un cargo
+    // mensual. Ver src/informes-notas.js.
+    const escalon = escalones && escalones.get(clave);
+    const previas = filas.filter(f => !enVentana(f) && (!escalon || f.fecha >= escalon.desde));
+    const historia = previas.map(f => f.salidaTotal);
+    // Con menos de MIN_APARICIONES después del escalón todavía no hay con qué
+    // comparar. Se calla, que es lo correcto: comparar contra el nivel viejo es
+    // exactamente lo que el dueño pidió que dejara de hacer.
     if (historia.length < MIN_APARICIONES) continue;
     const med = mediana(historia);
     const escala = escalaDe(historia, med);
@@ -245,9 +256,10 @@ const periodoDe = (corte) => {
   return `semana ${diaISO(desde)} a ${diaISO(corte)}`;
 };
 
-async function analizar({ hasta } = {}) {
+async function analizar({ hasta, notas } = {}) {
   const { getMovimientos } = require('./sheets');
-  const a = analizarMovimientos(await getMovimientos(), { hasta });
+  const { escalonesDe } = require('./informes-notas');
+  const a = analizarMovimientos(await getMovimientos(), { hasta, escalones: escalonesDe(notas) });
   const payload = [
     `Semana analizada: ${a.contexto.semana.desde} a ${a.contexto.semana.hasta}`, '',
     'CONTEXTO:', JSON.stringify(a.contexto, null, 1), '',
