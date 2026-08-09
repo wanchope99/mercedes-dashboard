@@ -83,6 +83,7 @@ Variables opcionales:
 | `INFORMES_DESTINATARIO` | Qué usuario los ve. **Ojo: `admin` no los ve** salvo que se ponga acá | `tincho` |
 | `INFORMES_MODEL` | Modelo | `claude-opus-5` |
 | `INFORMES_NOTAS_DIAS` | Cuánto tiempo una nota escrita sigue llegándole al agente | `240` |
+| `INFORMES_CONTEXTO_PREVIOS` | Cuántos informes anteriores lee antes de escribir el nuevo | `2` |
 | `INFORME_MOVIMIENTOS_CRON` | Cuándo sale el de la plata | `0 10 * * 0` (domingos 10:00) |
 | `INFORME_SERVICIOS_CRON` | Cuándo sale el del salón | `15 10 * * 0` (domingos 10:15) |
 | `INFORME_MENSUAL_CRON` | Cuándo sale el balance | `30 10 1 * *` (día 1, 10:30) |
@@ -99,6 +100,20 @@ deducir cuándo tendría que haber salido.
 
 Los tres informes sólo **LEEN**: ninguno escribe en `Movimientos`. Y ninguno
 calcula: los números los hace el código y el modelo sólo los interpreta.
+
+### Lo que el agente se acuerda entre corridas
+
+**`src/contexto-operativo.md`** — lo que ya sabemos del negocio y hace que un
+número raro no sea raro (la dotación, que Mercado Pago Pablo es cuenta de uso
+diario, que las propinas no entran al libro). Se le pasa a los tres agentes en
+cada corrida. **Es un archivo de texto: se edita y listo, no hace falta tocar
+código.** Sin esto, el agente redescubre esas cosas todas las semanas y las
+presenta como hallazgos.
+
+**Los dos informes anteriores del mismo tipo.** Antes de escribir el nuevo, el
+agente lee lo que él mismo dijo las últimas dos veces. Así puede decir "sigue
+pasando por tercera semana" en vez de repetir el mismo hallazgo, y avisar cuando
+algo que había marcado como grave desapareció.
 
 ### Notas al agente (el feedback)
 

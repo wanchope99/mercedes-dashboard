@@ -144,6 +144,21 @@ Contexto del negocio, que cambia cómo se lee todo:
 - Las compras en cuotas figuran una sola vez, en el mes de la compra.
 - Los movimientos entre cajas propias no son ni ingreso ni gasto y no te llegan.
 
+Si te llega un bloque "LO QUE VOS MISMO DIJISTE", es tu informe anterior. Leelo
+ANTES de decidir qué contar, y usalo así:
+- Lo que ya contaste no vuelve a contarse como si fuera nuevo. Si algo sigue
+  igual, lo que importa es que SIGUE: "tercera semana seguida" es información,
+  repetir el mismo hallazgo no lo es.
+- Si algo que marcaste como alto ya no aparece, decilo en una línea. Que un
+  problema se haya arreglado vale tanto como que haya aparecido, y si lo callás
+  el dueño no sabe si se resolvió o si dejaste de mirarlo.
+- Si esta vez leés los mismos datos distinto que la vez pasada, decilo y explicá
+  por qué. No te contradigas en silencio.
+- NO son datos de este período: no cites sus cifras como si fueran de ahora, y
+  no las mezcles con las señales que te llegaron.
+- Si no te llega ese bloque, es el primer informe de su tipo: no inventes que
+  hubo uno anterior.
+
 Si te llega un bloque "LO QUE YA TE DIJERON LOS DUEÑOS", son notas que ellos
 escribieron sobre informes anteriores. Valen más que tu lectura de los números:
 - Si te explicaron por qué algo es normal, NO lo vuelvas a levantar como hallazgo
@@ -156,6 +171,33 @@ escribieron sobre informes anteriores. Valen más que tu lectura de los números
 - Tienen fecha. El negocio cambia: una explicación vieja puede haber dejado de
   ser cierta, y si la nota ya no alcanza para explicar lo que ves, decilo.`;
 
+// ─── El contexto operativo ──────────────────────────────────────────────────
+//
+// Lo que ya sabemos del negocio y hace que un número raro no sea raro. Vive en
+// un .md al lado de este archivo, y no dentro de SISTEMA_COMUN, para que se
+// pueda corregir sin tocar código ni volver a razonar sobre template literals.
+//
+// Va en el prompt de SISTEMA y no en el payload: es contexto estable, no datos
+// de este período. Se lee en cada corrida (son diez por mes: cachearlo sólo
+// serviría para que un cambio no tenga efecto hasta el próximo deploy).
+const RUTA_CONTEXTO = require('path').join(__dirname, 'contexto-operativo.md');
+
+function contextoOperativo() {
+  try {
+    const texto = require('fs').readFileSync(RUTA_CONTEXTO, 'utf8')
+      // Se le saca el encabezado explicativo: las instrucciones de mantenimiento
+      // son para quien edita el archivo, no para el modelo.
+      .split(/^---$/m).slice(1).join('---').trim();
+    if (!texto) return '';
+    return `\n\nLO QUE YA SABEMOS DEL NEGOCIO (no lo descubras de nuevo ni lo presentes como hallazgo):\n\n${texto}`;
+  } catch (e) {
+    // Sin contexto el informe sale igual, sólo que más ingenuo. Nunca vale
+    // perder la corrida por esto.
+    console.error(`Informes: no se pudo leer contexto-operativo.md (${e.message}) — el informe sale sin él`);
+    return '';
+  }
+}
+
 // ─── La llamada ─────────────────────────────────────────────────────────────
 async function interpretar({ sistema, payload }) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -165,7 +207,7 @@ async function interpretar({ sistema, payload }) {
   const base = {
     model: MODELO,
     max_tokens: 16000,
-    system: `${SISTEMA_COMUN}\n\n${sistema}`,
+    system: `${SISTEMA_COMUN}${contextoOperativo()}\n\n${sistema}`,
     messages: [{ role: 'user', content: payload }],
     output_config: { effort: 'high', format: { type: 'json_schema', schema: ESQUEMA } },
   };
@@ -292,6 +334,40 @@ async function marcarLeido({ tipo, periodo, usuario }) {
   return { ...inf, leidos };
 }
 
+// ─── Lo que dijo la vez pasada ──────────────────────────────────────────────
+//
+// Hasta el 9 de agosto de 2026 cada corrida arrancaba de cero: el agente no
+// tenía forma de saber qué había dicho la semana anterior. Podía repetir el
+// mismo hallazgo palabra por palabra sin enterarse, y sobre todo no podía decir
+// lo único que un lector semanal quiere saber: si esto sigue pasando o si se
+// arregló. Un hallazgo que va tres semanas seguidas es una historia distinta de
+// tres hallazgos sueltos iguales.
+//
+// Van los últimos INFORMES_DE_CONTEXTO, no sólo el anterior, porque "tercera
+// semana consecutiva" necesita más de una vuelta de memoria.
+const INFORMES_DE_CONTEXTO = Number(process.env.INFORMES_CONTEXTO_PREVIOS || 2);
+
+function bloqueInformeAnterior(previos, periodoActual) {
+  const anteriores = (previos || [])
+    .filter(i => i.periodo !== periodoActual)
+    .slice(0, INFORMES_DE_CONTEXTO);
+  if (!anteriores.length) return '';
+
+  const partes = anteriores.map((i, idx) => {
+    const cual = idx === 0 ? 'EL ANTERIOR' : `${idx + 1} INFORMES ATRÁS`;
+    const hallazgos = (i.hallazgos || []).length
+      ? i.hallazgos.map(h => `  · [${h.severidad}] ${h.titulo} — ${h.quePasa}`).join('\n')
+      : '  · (sin hallazgos: esa vez no hubo nada que marcar)';
+    return [`--- ${cual} (${i.periodo}) ---`, `Titular: ${i.titular}`,
+            i.resumen ? `Resumen: ${i.resumen}` : null, 'Hallazgos:', hallazgos]
+      .filter(Boolean).join('\n');
+  });
+
+  return ['', '', 'LO QUE VOS MISMO DIJISTE LA(S) VEZ(CES) PASADA(S):',
+    '(Es tu informe anterior, NO son datos de este período. No cites sus números como si fueran de ahora.)',
+    '', ...partes].join('\n');
+}
+
 // ─── Generar ────────────────────────────────────────────────────────────────
 // Idempotente por (tipo, período): si ya existe el informe de esa semana o de
 // ese mes no se regenera, así un reinicio del server no dispara una segunda
@@ -304,10 +380,13 @@ async function generarInforme(tipo, { hasta, forzar = false } = {}) {
   const corte = hasta ? new Date(hasta) : new Date();
   const periodo = analista.periodoDe(corte);
 
+  // Una sola lectura sirve para las dos cosas: chequear si el período ya está
+  // hecho y saber qué dijo el informe anterior.
+  //
+  // estricto: si la planilla no se puede leer, frenamos acá. Generar "por las
+  // dudas" duplicaría el informe de la semana.
+  const previos = await listarInformes({ limite: 200, tipo, estricto: true });
   if (!forzar) {
-    // estricto: si la planilla no se puede leer, frenamos acá. Generar "por las
-    // dudas" duplicaría el informe de la semana.
-    const previos = await listarInformes({ limite: 200, tipo, estricto: true });
     const yaEsta = previos.find(i => i.periodo === periodo);
     if (yaEsta) return { ...yaEsta, yaExistia: true };
   }
@@ -319,7 +398,9 @@ async function generarInforme(tipo, { hasta, forzar = false } = {}) {
   const { payload, senales } = await analista.analizar({ hasta: corte, notas });
   const informe = await interpretar({
     sistema: analista.SISTEMA,
-    payload: payload + notasMod.bloqueParaModelo(notas, { ahora: corte }),
+    payload: payload
+      + bloqueInformeAnterior(previos, periodo)
+      + notasMod.bloqueParaModelo(notas, { ahora: corte }),
   });
 
   const api = _sheets();
@@ -344,6 +425,8 @@ async function generarInforme(tipo, { hasta, forzar = false } = {}) {
 
 module.exports = {
   generarInforme, listarInformes, marcarLeido, pendientesPara, interpretar,
+  // Exportadas para poder ejercitarlas sin llamar al modelo.
+  bloqueInformeAnterior, contextoOperativo,
   ANALISTAS, TIPOS, HOJA, MODELO, ESQUEMA, SISTEMA_COMUN,
   // utilidades que usan los analistas
   mediana, mad, escalaDe, norm, diaISO, diasEntre, DIAS_SEMANA,

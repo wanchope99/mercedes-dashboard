@@ -171,6 +171,22 @@ Model: `claude-opus-5` with structured outputs (one schema for all three, so one
 
 The section lives **inside Reportes** as a third submenu (`reportes` → `informes`), not as a top-level tab — it is one more report, just written by an agent instead of a query. That makes it the only `soloUsuario` at *submenu* level, applied by the sub filter in `switchGroup`; the group-level filter in `gruposVisibles` is kept in step but currently has no group using it. The panel id stays `tab-informes`, which is what the submenu resolves to.
 
+### What the agent knows across runs
+
+Until 2026-08-09 every run started from scratch: the analysts read `Movimientos` and Fudo and nothing else. Two things now carry across, and they are deliberately different in kind.
+
+**`src/contexto-operativo.md` — what we already know about the business.** A curated markdown file loaded into the **system** prompt on every run (`contextoOperativo()`). It holds the durable facts that make an odd number not odd: headcount went 2 → 5 in July 2026, `Mercado Pago Pablo` is a daily working account rather than a clean pot, tips never enter the ledger, the ~$190k June discrepancy was already investigated, the drinks-stock series only starts in July 2026. Without it the agent rediscovers each of these every week and files them as findings.
+
+It is a file and not a string inside `SISTEMA_COMUN` so it can be corrected without touching code, and it is re-read every run — ten runs a month makes caching pure downside, since a fix would otherwise wait for the next deploy. Everything above the first `---` is stripped: those are maintenance instructions for whoever edits it, not context for the model. A read failure logs and returns `''` — a naive report beats no report.
+
+Two rules keep it from rotting into a dumping ground: app behaviour (a sheet that auto-creates, a button that does X) does **not** belong there, because it changes no number's reading; and per-finding feedback does not either, because that belongs to the owners in `Informes Notas`. The wider human-facing list lives at `PROYECTOS/Proyectos/Mercedes/03_conocimiento/notas-operativas.md`, which points here — anything added there that changes how a number reads must be mirrored into this file or the agent never learns it.
+
+**The previous reports.** `bloqueInformeAnterior()` feeds the last `INFORMES_CONTEXTO_PREVIOS` (2) reports *of the same type* into the payload. Two, not one, because "third week running" needs more than a single step of memory — and persistence is the thing a weekly reader actually wants to know. The prompt turns this into behaviour: don't re-file what you already said, report that it *continues*; say so in one line when something you flagged high has disappeared, since silence leaves the owner unable to tell "resolved" from "stopped looking"; and if you now read the same data differently, say why rather than contradicting yourself quietly.
+
+The block is loudly labelled as *not* data for this period, because the one thing that must never happen is the model citing last week's figures as this week's — it would look exactly like the fabricated numbers the whole architecture exists to prevent.
+
+It costs no extra sheet read: `generarInforme` already listed previous reports for its idempotency check, so that single list now serves both. That listing moved **outside** the `if (!forzar)` guard, which means a forced regeneration also does a strict read — correct, since it needs the history either way. The current period is filtered out by period, so forcing a regeneration never feeds the agent its own earlier take on the same week.
+
 ### The feedback loop: `informes-notas.js`
 
 The analyst compares each expense against the **trailing median of that same supplier**, and when the business genuinely changes, that comparison starts lying. The canonical case: ARCA's payroll tax doubled in August 2026 because headcount went 2 → 4. The signal was statistically right — it really was 2× the usual — but the new level *is* the new normal, and nothing in the data says so. Worse, the median only moves once more than half of ARCA's historical rows sit at the new level, so on a monthly charge **that same finding repeats for roughly six months**. Only the owner can break that loop.
