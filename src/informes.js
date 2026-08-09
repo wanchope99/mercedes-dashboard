@@ -96,8 +96,20 @@ const ESQUEMA = {
           porQueImporta: { type: 'string' },
           confianza: { type: 'string', enum: ['alta', 'media', 'baja'] },
           referencias: { type: 'array', items: { type: 'string' }, description: 'Filas, fechas o categorías que lo respaldan' },
+          // Estos dos no son para leer: son para que el dueño pueda marcar
+          // "esto cambió para siempre" con un solo clic, sin tener que volver a
+          // escribir a mano de qué proveedor habla el hallazgo ni desde cuándo.
+          // Ver informes-notas.js y el bloque de feedback en index.html.
+          concepto: {
+            type: 'string',
+            description: 'El proveedor o entidad concreta de la que habla el hallazgo, copiado TAL CUAL de la señal (ej: "ARCA"). String vacío si el hallazgo no es sobre uno solo.',
+          },
+          desdeISO: {
+            type: 'string',
+            description: 'AAAA-MM-DD del movimiento que dispara el hallazgo, copiado tal cual de la señal. String vacío si no hay una fecha única.',
+          },
         },
-        required: ['titulo', 'severidad', 'quePasa', 'porQueImporta', 'confianza', 'referencias'],
+        required: ['titulo', 'severidad', 'quePasa', 'porQueImporta', 'confianza', 'referencias', 'concepto', 'desdeISO'],
         additionalProperties: false,
       },
     },
@@ -122,6 +134,7 @@ Cómo trabajar:
 Reglas:
 - NO calcules ni estimes ningún número. Usá solamente los que te llegan, tal cual. Si para decir algo necesitás un número que no tenés, decí que no lo podés afirmar.
 - Nunca describas lo que contienen los datos. Interpretá lo que significan.
+- Los campos "concepto" y "desdeISO" de cada hallazgo NO se muestran: los usa la app para que el dueño pueda marcar un cambio permanente con un solo clic. Copiá el nombre del proveedor y la fecha TAL CUAL vienen en la señal, sin reformatear ni deducir. Si el hallazgo no es sobre un proveedor único o no tiene una fecha única, dejalos en string vacío — es preferible vacío que inventado.
 - Si los datos no alcanzan para responder algo, decilo derecho en vez de estirar la interpretación.
 - Escribí corto y en español rioplatense. Sin relleno, sin repetir el dato en la explicación.
 

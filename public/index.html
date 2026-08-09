@@ -622,8 +622,6 @@
     .nota-form textarea { resize: vertical; }
     .nota-form .nota-escalon { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; font-size: 12px; color: var(--text-muted); line-height: 1.5; cursor: pointer; }
     .nota-form .nota-escalon input { margin-top: 2px; flex: 0 0 auto; }
-    .nota-form .nota-escalon-campos { display: grid; grid-template-columns: 1fr 150px; gap: 8px; margin-top: 8px; }
-    @media (max-width: 560px) { .nota-form .nota-escalon-campos { grid-template-columns: 1fr; } }
     .nota-form .nota-acciones { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
     .nota-error { font-size: 12px; color: var(--red); margin-top: 8px; }
     .nota-lista-item { padding: 9px 0; border-top: 1px solid var(--border); font-size: 13px; line-height: 1.6; }
@@ -2535,10 +2533,6 @@
     </div>
   </div>
 </div>
-
-<!-- Proveedores conocidos, para el campo "cambió para siempre" de las notas.
-     Es sugerencia, no restricción: se puede escribir cualquier concepto. -->
-<datalist id="nota-proveedores"></datalist>
 
 <script>
 const state = {
@@ -6030,6 +6024,7 @@ async function loadInformes() {
   const cont = document.getElementById('informes-contenido');
   cont.innerHTML = '<div class="loading"><div class="spinner"></div> Cargando informes...</div>';
   try {
+    await asegurarProveedores();   // la usa notaEscalonDe en los informes viejos
     const { data } = await api('/api/informes');
     state.informes = data || [];
     // Las notas nunca deben impedir ver el informe: si fallan, la pantalla sale
@@ -6126,8 +6121,13 @@ function informeCuerpoHTML(inf, { prefijo = 'sec' } = {}) {
         // El feedback se guarda contra el título del hallazgo. Va por un
         // registro y no incrustado en el onclick: los títulos los escribe el
         // modelo y pueden traer comillas de cualquier tipo.
+        //
+        // `concepto` y `desde` vienen del propio hallazgo (el modelo los copia
+        // de la señal que lo originó) y son los que evitan tener que pedirle al
+        // dueño que escriba de nuevo algo que el sistema ya sabe.
         const k = `${prefijo}-${i}`;
-        _notaRef[k] = { tipo: inf.tipo, periodo: inf.periodo, hallazgo: h.titulo };
+        const esc = notaEscalonDe(h) || { concepto: '', desde: '' };
+        _notaRef[k] = { tipo: inf.tipo, periodo: inf.periodo, hallazgo: h.titulo, ...esc };
         return `
         <div style="padding:14px 0 14px 14px;border-top:1px solid var(--border);margin-top:10px">
           <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap">
@@ -6189,21 +6189,71 @@ async function generarInformeAhora(tipo, btn) {
 
 const _notaRef = {};   // clave de render -> a qué hallazgo pertenece
 
+// De dónde sale el escalón sin que el dueño escriba nada.
+//
+// Lo normal es que el hallazgo lo traiga: el modelo copia el proveedor y la
+// fecha de la señal que lo originó. Pero los informes generados ANTES de que
+// existieran esos campos no los tienen, y son justo los que están en pantalla
+// hoy. Para esos se infiere de las referencias, que ya listan la fila, la fecha
+// y el proveedor.
+//
+// La inferencia sólo acepta un proveedor que exista en la hoja Proveedores: no
+// adivina nombres. Y como la casilla dice en voz alta qué va a hacer ("que deje
+// de comparar ARCA contra lo anterior al 05/08/26"), una inferencia equivocada
+// se ve antes de tildarla, no después.
+function notaEscalonDe(h) {
+  const concepto = (h.concepto || '').trim();
+  const desde = (h.desdeISO || '').trim();
+  if (concepto && /^\d{4}-\d{2}-\d{2}$/.test(desde)) return { concepto, desde };
+
+  const texto = [h.titulo || '', ...(h.referencias || [])].join(' ');
+  const fecha = desde || (texto.match(/\d{4}-\d{2}-\d{2}/) || [''])[0];
+  if (!fecha) return null;
+
+  let nombre = concepto;
+  if (!nombre) {
+    const enTexto = texto.toLowerCase();
+    // El más largo de los que aparecen: entre "Coca" y "Coca Cola SA" gana el
+    // específico, que es el que el analista usa como clave.
+    for (const p of Object.values(state.proveedores || {})) {
+      const n = (p.nombre || '').trim();
+      if (n.length > 2 && enTexto.includes(n.toLowerCase()) && n.length > nombre.length) nombre = n;
+    }
+  }
+  return nombre ? { concepto: nombre, desde: fecha } : null;
+}
+
+// La inferencia necesita la lista de proveedores. Se carga una vez y no bloquea:
+// sin ella simplemente no se ofrece la casilla en los informes viejos.
+async function asegurarProveedores() {
+  if (Object.keys(state.proveedores || {}).length) return;
+  try { const { data } = await api('/api/proveedores'); state.proveedores = data || {}; } catch (e) { /* sin casilla */ }
+}
+
 function notaFeedbackHTML(k) {
+  // El escalón NO se pide escrito. El hallazgo ya trae de qué proveedor habla y
+  // desde qué fecha, porque salieron de la señal que lo originó: pedirle al
+  // dueño que los vuelva a tipear era hacerle hacer el trabajo del sistema, y
+  // encima repetía lo que acababa de escribir en el comentario.
+  //
+  // Si el hallazgo no trae concepto (no es sobre un proveedor único, o es un
+  // informe viejo de antes de este cambio), la casilla directamente no aparece:
+  // mejor que no esté a que esté y pida datos a mano.
+  const ref = _notaRef[k] || {};
+  const casilla = ref.concepto && ref.desde ? `
+      <label class="nota-escalon" for="nota-esc-${k}">
+        <input type="checkbox" id="nota-esc-${k}">
+        <span>Esto cambió <b>para siempre</b>: que deje de comparar
+          <b>${escapeHtml(ref.concepto)}</b> contra lo anterior al ${escapeHtml(fechaCorta(ref.desde))}</span>
+      </label>` : '';
+
   return `<div class="nota-fb" id="nota-fb-${k}">
       <button class="nota-btn" onclick="notaSirve('${k}', this)">👍 Me sirvió</button>
       <button class="nota-btn" onclick="notaAbrir('${k}')">✓ Ya lo sé</button>
     </div>
     <div class="nota-form" id="nota-form-${k}" style="display:none">
       <textarea id="nota-texto-${k}" rows="2" placeholder="¿Por qué es normal? (ej: pasamos de 2 a 4 empleados, se duplica la carga)"></textarea>
-      <label class="nota-escalon" for="nota-esc-${k}">
-        <input type="checkbox" id="nota-esc-${k}" onchange="notaToggleEscalon('${k}')">
-        <span>Esto cambió <b>para siempre</b> — que deje de compararlo contra lo de antes</span>
-      </label>
-      <div class="nota-escalon-campos" id="nota-esc-campos-${k}" style="display:none">
-        <input type="text" id="nota-esc-concepto-${k}" list="nota-proveedores" placeholder="¿Qué cambió? (ej: ARCA)">
-        <input type="date" id="nota-esc-desde-${k}">
-      </div>
+      ${casilla}
       <div class="nota-error" id="nota-error-${k}" style="display:none"></div>
       <div class="nota-acciones">
         <button class="btn btn-secondary" onclick="notaGuardar('${k}', this)">Guardar</button>
@@ -6228,49 +6278,34 @@ async function notaSirve(k, btn) {
   }
 }
 
-async function notaAbrir(k) {
+function notaAbrir(k) {
   document.getElementById('nota-form-' + k).style.display = '';
   document.getElementById('nota-texto-' + k).focus();
-  // Los proveedores conocidos sólo para sugerir en el campo del escalón. Se
-  // cargan la primera vez que hacen falta.
-  if (!Object.keys(state.proveedores || {}).length) {
-    try { const { data } = await api('/api/proveedores'); state.proveedores = data || {}; } catch (e) { /* el campo sigue siendo libre */ }
-  }
-  const dl = document.getElementById('nota-proveedores');
-  if (dl && !dl.children.length) {
-    dl.innerHTML = Object.values(state.proveedores || {})
-      .map(p => `<option value="${escapeHtml(p.nombre || '')}"></option>`).join('');
-  }
 }
 
 function notaCerrar(k) { document.getElementById('nota-form-' + k).style.display = 'none'; }
 
-function notaToggleEscalon(k) {
-  const on = document.getElementById('nota-esc-' + k).checked;
-  document.getElementById('nota-esc-campos-' + k).style.display = on ? '' : 'none';
-  if (!on) return;
-  // Prellenar con hoy es engañoso: el cambio casi nunca fue hoy, y una fecha
-  // puesta sola que nadie mira haría que el analista descarte historia de más.
-  document.getElementById('nota-esc-concepto-' + k).focus();
-}
-
 async function notaGuardar(k, btn) {
   const ref = _notaRef[k] || {};
   const err = document.getElementById('nota-error-' + k);
-  const escOn = document.getElementById('nota-esc-' + k).checked;
-  const cuerpo = {
-    ...ref,
-    veredicto: 'normal',
-    texto: document.getElementById('nota-texto-' + k).value,
-    escalonConcepto: escOn ? document.getElementById('nota-esc-concepto-' + k).value : '',
-    escalonDesde: escOn ? document.getElementById('nota-esc-desde-' + k).value : '',
-  };
+  const casilla = document.getElementById('nota-esc-' + k);
+  const escOn = !!(casilla && casilla.checked);
   err.style.display = 'none';
   btn.disabled = true; btn.textContent = 'Guardando...';
   try {
-    await api('/api/informes/notas', { method: 'POST', body: JSON.stringify(cuerpo) });
+    await api('/api/informes/notas', {
+      method: 'POST',
+      body: JSON.stringify({
+        tipo: ref.tipo, periodo: ref.periodo, hallazgo: ref.hallazgo,
+        veredicto: 'normal',
+        texto: document.getElementById('nota-texto-' + k).value,
+        // Salen del hallazgo, no de algo que el dueño haya tenido que escribir.
+        escalonConcepto: escOn ? ref.concepto : '',
+        escalonDesde: escOn ? ref.desde : '',
+      }),
+    });
     const fb = document.getElementById('nota-fb-' + k);
-    if (fb) fb.innerHTML = '<span class="nota-ok">✓ Anotado — el agente lo va a tener en cuenta</span>';
+    if (fb) fb.innerHTML = `<span class="nota-ok">✓ Anotado${escOn ? ` — no vuelve a comparar ${escapeHtml(ref.concepto)} contra lo anterior` : ' — el agente lo va a tener en cuenta'}</span>`;
     notaCerrar(k);
   } catch (e) {
     err.textContent = e.message;
@@ -6292,20 +6327,14 @@ function notaLibreHTML() {
     </div>`;
 }
 
+// Sólo un cuadro de texto y un botón, a propósito. Acá no hay hallazgo del que
+// sacar el proveedor ni la fecha, así que ofrecer "esto cambió para siempre"
+// obligaría a tipearlos — que es justamente lo que no queremos. El comentario se
+// lo lleva el modelo y lo interpreta.
 function notaFeedbackLibreCampos() {
-  const k = 'libre';
-  _notaRef[k] = { tipo: '', periodo: '', hallazgo: '' };
   return `<div class="nota-form" style="display:block">
-      <textarea id="nota-texto-${k}" rows="2" placeholder="ej: desde agosto somos 4 empleados en vez de 2"></textarea>
-      <label class="nota-escalon" for="nota-esc-${k}">
-        <input type="checkbox" id="nota-esc-${k}" onchange="notaToggleEscalon('${k}')">
-        <span>Esto cambió <b>para siempre</b> — que deje de compararlo contra lo de antes</span>
-      </label>
-      <div class="nota-escalon-campos" id="nota-esc-campos-${k}" style="display:none">
-        <input type="text" id="nota-esc-concepto-${k}" list="nota-proveedores" placeholder="¿Qué cambió? (ej: ARCA)">
-        <input type="date" id="nota-esc-desde-${k}">
-      </div>
-      <div class="nota-error" id="nota-error-${k}" style="display:none"></div>
+      <textarea id="nota-texto-libre" rows="2" placeholder="ej: desde julio somos 4 empleados más Pablo, 5 sueldos en total"></textarea>
+      <div class="nota-error" id="nota-error-libre" style="display:none"></div>
       <div class="nota-acciones">
         <button class="btn btn-secondary" onclick="notaGuardarLibre(this)">Guardar</button>
       </div>
@@ -6313,26 +6342,22 @@ function notaFeedbackLibreCampos() {
 }
 
 async function notaGuardarLibre(btn) {
-  const k = 'libre';
-  const err = document.getElementById('nota-error-' + k);
-  const escOn = document.getElementById('nota-esc-' + k).checked;
+  const campo = document.getElementById('nota-texto-libre');
+  const err = document.getElementById('nota-error-libre');
   err.style.display = 'none';
+  if (!campo.value.trim()) { campo.focus(); return; }   // vacío: no es un error, no hay nada que guardar
   btn.disabled = true; btn.textContent = 'Guardando...';
   try {
     await api('/api/informes/notas', {
       method: 'POST',
-      body: JSON.stringify({
-        tipo: '', periodo: '', hallazgo: '', veredicto: 'contexto',
-        texto: document.getElementById('nota-texto-' + k).value,
-        escalonConcepto: escOn ? document.getElementById('nota-esc-concepto-' + k).value : '',
-        escalonDesde: escOn ? document.getElementById('nota-esc-desde-' + k).value : '',
-      }),
+      body: JSON.stringify({ tipo: '', periodo: '', hallazgo: '', veredicto: 'contexto', texto: campo.value }),
     });
     await loadInformes();
   } catch (e) {
     err.textContent = e.message;
     err.style.display = '';
-  } finally { btn.disabled = false; btn.textContent = 'Guardar'; }
+    btn.disabled = false; btn.textContent = 'Guardar';
+  }
 }
 
 // Lo que ya se le dijo. Está para poder revisarlo: una nota vieja que dejó de
@@ -6398,6 +6423,7 @@ async function checkAvisoInforme() {
   try {
     const { data } = await api('/api/informes/pendientes');
     if (!data || !data.length) return;
+    await asegurarProveedores();   // idem: la ventana también ofrece la casilla
     abrirAvisoInforme(data);
   } catch (e) { /* nunca romper la app por el aviso */ }
 }

@@ -109,31 +109,33 @@ async function guardarNota({ usuario, tipo, periodo, hallazgo, veredicto, texto,
   const concepto = (escalonConcepto || '').toString().trim();
   const desde = (escalonDesde || '').toString().trim();
 
-  // Un escalón sin las dos cosas no sirve: el código necesita saber a qué se
-  // aplica y desde cuándo. Se rechaza en vez de guardarse a medias, porque una
-  // nota que el analista ignora en silencio es peor que un error visible.
-  if ((concepto && !desde) || (desde && !concepto)) {
-    throw new Error('Para marcar un cambio permanente hacen falta el concepto y la fecha');
-  }
-  if (desde && !RE_FECHA.test(desde)) throw new Error('La fecha del cambio va como AAAA-MM-DD');
-
-  // "Sirve" solo es un pulgar arriba y no necesita texto. Los otros dos existen
-  // para explicar: sin explicación no le dejan nada al agente.
-  if (veredicto !== 'sirve' && !t && !concepto) {
-    throw new Error('Contá brevemente por qué, o marcá el cambio permanente: sin eso la nota no le sirve al agente');
+  // El escalón NO se le pide al usuario: sale del hallazgo, que ya trae el
+  // proveedor y la fecha desde la señal que lo originó. Así que las dos partes
+  // llegan juntas o no llega ninguna, y esto es una guarda contra un cliente
+  // roto, no algo que alguien pueda tropezar escribiendo.
+  //
+  // Un escalón a medias se descarta en silencio en vez de rechazar la nota
+  // entera: lo que el dueño escribió vale igual, y perderlo por un dato que ni
+  // siquiera tipeó sería exactamente al revés.
+  const escalonValido = !!(concepto && RE_FECHA.test(desde));
+  if ((concepto || desde) && !escalonValido) {
+    console.warn(`Notas: escalón incompleto descartado (concepto="${concepto}" desde="${desde}") — la nota se guarda igual`);
   }
 
   const api = _sheets();
   await _ensureHoja(api);
   const fila = [
     new Date().toISOString(), usuario, tipo || '', periodo || '', hallazgo || '',
-    veredicto, t, concepto, desde, 'vigente',
+    veredicto, t, escalonValido ? concepto : '', escalonValido ? desde : '', 'vigente',
   ];
   await api.spreadsheets.values.append({
     spreadsheetId: SPREADSHEET_ID, range: `${HOJA}!A:J`,
     valueInputOption: 'RAW', requestBody: { values: [fila] },
   });
-  return { fecha: fila[0], usuario, tipo, periodo, hallazgo, veredicto, texto: t, escalonConcepto: concepto, escalonDesde: desde, estado: 'vigente' };
+  return {
+    fecha: fila[0], usuario, tipo, periodo, hallazgo, veredicto, texto: t,
+    escalonConcepto: fila[7], escalonDesde: fila[8], estado: 'vigente',
+  };
 }
 
 async function archivarNota(rowIndex) {

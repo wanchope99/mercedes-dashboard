@@ -109,11 +109,18 @@ Se guardan en la hoja `Informes Notas`, firmadas con quién las escribió, y en 
 próxima corrida le llegan al modelo.
 
 **La casilla "esto cambió para siempre" es la que más pesa, y no la lee el
-modelo sino el código.** Marcándola con un concepto y una fecha (ej: `ARCA`,
-`2026-08-01`), el análisis deja de comparar ese concepto contra lo anterior a esa
-fecha. Es lo que hay que usar cuando algo subió de nivel de forma permanente —
+modelo sino el código.** Es un solo clic: no hay nada que escribir, porque el
+proveedor y la fecha salen del propio hallazgo. La casilla dice en voz alta qué
+va a hacer — *"que deje de comparar ARCA contra lo anterior al 05/08/26"* — así
+que si el dato estuviera mal se ve antes de tildarla.
+
+Tildándola, el análisis deja de comparar ese concepto contra lo anterior a esa
+fecha. Es lo que hay que usar cuando algo subió de nivel de forma permanente:
 más empleados, un aumento, otras condiciones. Sin eso el mismo hallazgo puede
 volver durante meses, hasta que la mediana histórica se mueva sola.
+
+Si un hallazgo no habla de un proveedor concreto, la casilla no aparece. El
+comentario en texto sirve igual: lo lee el modelo.
 
 Una nota escrita se puede archivar desde la misma pantalla ("ya no aplica")
 cuando dejó de ser cierta.
