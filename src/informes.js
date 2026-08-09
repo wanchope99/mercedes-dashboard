@@ -180,13 +180,27 @@ const severidadMaxima = h => {
   return (h || []).reduce((peor, x) => (orden[x.severidad] > orden[peor] ? x.severidad : peor), 'baja');
 };
 
-async function listarInformes({ limite = 40, tipo } = {}) {
+// La hoja todavía no existe: es el estado normal antes del primer informe, no
+// una falla. Google contesta 400 "Unable to parse range" cuando el rango apunta
+// a una pestaña que no está.
+const esHojaInexistente = e => /unable to parse range/i.test(e.message || '');
+
+// `estricto` distingue "no hay informes" de "no pude leer". Para mostrar la
+// pantalla da igual (una lista vacía es una lista vacía), pero para decidir si
+// hay que generar uno NO da igual: tragarse un error de Google ahí significaría
+// creer que el informe de la semana no existe y generarlo de nuevo — una fila
+// duplicada y una llamada al modelo al pedo. Con el catch-up de arranque eso
+// pasaría en cada reinicio mientras Google esté caído, no una vez por semana.
+async function listarInformes({ limite = 40, tipo, estricto = false } = {}) {
   if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
   let filas = [];
   try {
     const r = await _sheets().spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${HOJA}!A:K` });
     filas = r.data.values || [];
-  } catch (e) { return []; }
+  } catch (e) {
+    if (estricto && !esHojaInexistente(e)) throw e;
+    return [];
+  }
 
   const out = [];
   for (let i = 1; i < filas.length; i++) {
@@ -206,6 +220,26 @@ async function listarInformes({ limite = 40, tipo } = {}) {
     out.push(inf);
   }
   return out.sort((a, b) => (b.generado || b.fecha || '').localeCompare(a.generado || a.fecha || '')).slice(0, limite);
+}
+
+// ─── Lo que todavía no vio ──────────────────────────────────────────────────
+// El aviso del domingo pregunta acá. Devuelve el ÚLTIMO informe de cada tipo, y
+// sólo si el usuario no lo marcó leído.
+//
+// La condición sale del servidor y no de localStorage a propósito: el informe se
+// lee tanto en el teléfono como en la computadora, y con localStorage cerrarlo
+// en uno no lo cerraría en el otro. La columna `Leidos` ya existía para esto.
+//
+// Sólo el último de cada tipo: un informe viejo sin leer deja de molestar solo
+// cuando llega el de la semana siguiente y lo reemplaza. Así el aviso nunca
+// acumula atrasos ni se convierte en una pila que se cierra sin mirar.
+async function pendientesPara(usuario) {
+  if (!usuario) throw new Error('Falta el usuario');
+  const todos = await listarInformes({ limite: 60 });
+  // listarInformes ya viene ordenado del más nuevo al más viejo.
+  return TIPOS
+    .map(tipo => todos.find(i => i.tipo === tipo))
+    .filter(inf => inf && !inf.leidos.includes(usuario));
 }
 
 async function marcarLeido({ tipo, periodo, usuario }) {
@@ -235,7 +269,9 @@ async function generarInforme(tipo, { hasta, forzar = false } = {}) {
   const periodo = analista.periodoDe(corte);
 
   if (!forzar) {
-    const previos = await listarInformes({ limite: 200, tipo });
+    // estricto: si la planilla no se puede leer, frenamos acá. Generar "por las
+    // dudas" duplicaría el informe de la semana.
+    const previos = await listarInformes({ limite: 200, tipo, estricto: true });
     const yaEsta = previos.find(i => i.periodo === periodo);
     if (yaEsta) return { ...yaEsta, yaExistia: true };
   }
@@ -264,7 +300,7 @@ async function generarInforme(tipo, { hasta, forzar = false } = {}) {
 }
 
 module.exports = {
-  generarInforme, listarInformes, marcarLeido, interpretar,
+  generarInforme, listarInformes, marcarLeido, pendientesPara, interpretar,
   ANALISTAS, TIPOS, HOJA, MODELO, ESQUEMA, SISTEMA_COMUN,
   // utilidades que usan los analistas
   mediana, mad, escalaDe, norm, diaISO, diasEntre, DIAS_SEMANA,

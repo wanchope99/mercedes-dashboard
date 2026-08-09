@@ -593,6 +593,23 @@
     #galicia-recordatorio-modal .gr-btn { width: 100%; padding: 12px; border: none; border-radius: 10px; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
     #galicia-recordatorio-modal .gr-btn:hover { opacity: 0.9; }
 
+    /* Aviso del informe automático. Más ancho y con scroll propio: acá adentro
+       va el informe entero, no un recordatorio de dos líneas. */
+    #informe-aviso-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 820; align-items: center; justify-content: center; padding: 16px; }
+    #informe-aviso-overlay.open { display: flex; }
+    #informe-aviso-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; width: 620px; max-width: 100%; max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,0.6); }
+    #informe-aviso-modal .ia-head { padding: 22px 26px 14px; border-bottom: 1px solid var(--border); }
+    #informe-aviso-modal .ia-kicker { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .6px; }
+    #informe-aviso-modal .ia-titulo { font-size: 19px; font-weight: 700; margin-top: 4px; }
+    #informe-aviso-modal .ia-body { padding: 4px 26px 8px; overflow-y: auto; }
+    #informe-aviso-modal .ia-agente { font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin: 20px 0 10px; }
+    #informe-aviso-modal .ia-sep { height: 1px; background: var(--border); margin: 22px 0 0; }
+    #informe-aviso-modal .ia-pie { padding: 16px 26px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    #informe-aviso-modal .ia-btn { flex: 1; min-width: 150px; padding: 12px; border: none; border-radius: 10px; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; }
+    #informe-aviso-modal .ia-btn:hover { opacity: 0.9; }
+    #informe-aviso-modal .ia-btn:disabled { opacity: 0.6; cursor: default; }
+    #informe-aviso-modal .ia-btn-sec { flex: 0 0 auto; padding: 12px 16px; border: 1px solid var(--border); border-radius: 10px; background: transparent; color: var(--text); font-size: 14px; font-family: inherit; cursor: pointer; }
+
     /* ── Proveedores ── */
     .prov-badge { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 5px; border-radius:99px; background:var(--red); color:#fff; font-size:10px; font-weight:700; margin-left:4px; }
     .prov-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
@@ -2484,6 +2501,22 @@
   </div>
 </div>
 
+<!-- El informe del domingo, apenas se entra a la app. Sólo para el destinatario
+     (INFORMES_DESTINATARIO) y sólo mientras no lo marcó leído. -->
+<div id="informe-aviso-overlay">
+  <div id="informe-aviso-modal">
+    <div class="ia-head">
+      <div class="ia-kicker" id="informe-aviso-kicker"></div>
+      <div class="ia-titulo" id="informe-aviso-titulo"></div>
+    </div>
+    <div class="ia-body" id="informe-aviso-body"></div>
+    <div class="ia-pie">
+      <button class="ia-btn" id="informe-aviso-ok" onclick="cerrarAvisoInforme(true)">Listo, lo leí</button>
+      <button class="ia-btn-sec" onclick="cerrarAvisoInforme(false)">Después</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const state = {
   modo: 'mes', mes: '', desde: '', hasta: '', mesesDisponibles: [],
@@ -2636,6 +2669,7 @@ function onLoginSuccess(rol, nombre) {
     init(); // carga dashboard
     refreshProvBadge(); // badge de pendientes de proveedores
     checkGaliciaVencReminder(); // recordatorio de vencimiento de la tarjeta (1 vez por ciclo)
+    iniciarAvisoInformes(); // el informe del domingo, si el destinatario no lo vio
   } else {
     // Encargado: Cajas (con submenús Cajas / Arqueo) + Pagos + Stocks. Qué ve y
     // qué no lo decide el soloAdmin de TAB_GROUPS, ya aplicado por renderNav().
@@ -2782,9 +2816,14 @@ const TAB_GROUPS = {
   dashboard: { label: '📊 Dashboard', icono: '📊', corto: 'Números', soloAdmin: true, phonePrio: 1, subs: null },
   // Agregar un reporte nuevo = una línea acá + su panel `tab-<id>` + su carga
   // en cargarPanel().
+  // El informe automático vive acá adentro y no como sección propia: es un
+  // reporte más, sólo que lo escribe un agente en vez de una consulta.
+  // `soloUsuario` en un submenú es el único de la app — ver el comentario en
+  // switchGroup, que es quien lo aplica.
   reportes: { label: '📈 Reportes', icono: '📈', corto: 'Reportes', soloAdmin: true, subs: [
     { id: 'reportes-balance',   label: '📊 Balance' },
     { id: 'reportes-servicios', label: '🍽️ Servicios' },
+    { id: 'informes',           label: '🔎 Informe', soloUsuario: 'tincho' },
   ] },
   pagos: { label: '💳 Pagos', icono: '💳', corto: 'Pagos', subs: null },
   // Historial de Arqueos lee /api/arqueo/historial, que es adminOnly: si el
@@ -2818,12 +2857,6 @@ const TAB_GROUPS = {
     { id: 'propinas',           label: '💸 Reparto' },
     { id: 'propinas-historial', label: '📋 Historial' },
   ] },
-  // El informe diario lo lee una sola persona. `soloUsuario` es el único
-  // permiso de la app que mira quién sos y no qué rol tenés — los tres logins
-  // de admin son equivalentes, así que soloAdmin no alcanzaría para separarlos.
-  // Esconderlo acá es cosmética: quien decide es soloDestinatarioInformes en el
-  // servidor, igual que con todo lo de Charly.
-  informes: { label: '🔎 Informe', icono: '🔎', corto: 'Informe', soloAdmin: true, soloUsuario: 'tincho', subs: null },
   plan: { label: '🗓️ Plan', icono: '🗓️', corto: 'Plan', soloAdmin: true, subs: [
     { id: 'plan',        label: '📋 Resumen' },
     { id: 'calculadora', label: '🧮 Calculadora' },
@@ -2840,7 +2873,9 @@ function gruposVisibles(incluirSoloPhone) {
   return Object.entries(TAB_GROUPS)
     .filter(([, cfg]) => !cfg.soloAdmin || getRol() === 'admin')
     // soloUsuario: secciones de una persona, no de un rol. Los tres logins de
-    // admin tienen los mismos permisos, así que el rol no los distingue.
+    // admin tienen los mismos permisos, así que el rol no los distingue. Hoy
+    // ninguna sección entera lo usa — el Informe lo aplica a nivel submenú, en
+    // switchGroup — pero los dos niveles se filtran igual a propósito.
     .filter(([, cfg]) => !cfg.soloUsuario || getUsuario() === cfg.soloUsuario)
     .filter(([, cfg]) => incluirSoloPhone || !cfg.soloPhone)
     .map(([id, cfg]) => ({ id, ...cfg }));
@@ -2961,9 +2996,15 @@ function switchGroup(group, _btn) {
 
   const cfg = TAB_GROUPS[group];
   const subnav = document.getElementById('subtab-nav');
-  // Los submenús marcados soloAdmin no se le arman al encargado.
+  // Los submenús marcados soloAdmin no se le arman al encargado, y los marcados
+  // soloUsuario sólo a esa persona. soloUsuario es el único permiso de la app
+  // que mira quién sos y no qué rol tenés: los tres logins de admin son
+  // equivalentes, así que soloAdmin no alcanzaría para separarlos. Hoy lo usa
+  // sólo el Informe. Esconderlo acá es cosmética — quien decide de verdad es
+  // soloDestinatarioInformes en el servidor, igual que con todo lo de Charly.
   const subs = cfg && cfg.subs
-    ? cfg.subs.filter(s => !s.soloAdmin || getRol() === 'admin')
+    ? cfg.subs.filter(s => (!s.soloAdmin || getRol() === 'admin') &&
+                           (!s.soloUsuario || getUsuario() === s.soloUsuario))
     : null;
 
   if (subs && subs.length) {
@@ -6010,16 +6051,38 @@ function renderInformes() {
   }
 
   const inf = lista[0];
+  const leido = inf.leidos.includes(getUsuario());
+
+  cont.innerHTML = cabecera + informeCuerpoHTML(inf) +
+    `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center">
+      ${leido ? '<span style="font-size:12px;color:var(--text-muted)">✓ Leído</span>'
+              : `<button class="btn btn-secondary" onclick="marcarInformeLeido('${escapeHtml(inf.tipo)}','${escapeHtml(inf.periodo)}', this)">Marcar como leído</button>`}
+      ${generar}
+      <span style="font-size:11px;color:var(--text-muted)">${escapeHtml(inf.modelo || '')}</span>
+    </div>` +
+    (lista.length > 1
+      ? `<div style="margin-top:18px;padding-top:12px;border-top:1px solid var(--border)">
+           <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Anteriores</div>
+           ${lista.slice(1).map(x => `
+             <div style="display:flex;gap:10px;align-items:baseline;padding:6px 0;font-size:13px">
+               <span style="color:var(--text-muted);white-space:nowrap;font-size:12px">${escapeHtml(x.periodo)}</span>
+               <span>${escapeHtml(x.titular)}</span>
+             </div>`).join('')}
+         </div>`
+      : '');
+}
+
+// El informe en sí: titular, hallazgos y qué haría. Lo comparten la sección y el
+// aviso emergente del domingo, para que no puedan mostrar cosas distintas.
+function informeCuerpoHTML(inf) {
   const sev = INFORME_SEVERIDAD[inf.severidad] || INFORME_SEVERIDAD.baja;
   const hallazgos = inf.hallazgos || [];
-  const leido = inf.leidos.includes(getUsuario());
   // En el balance mensual la severidad es importancia para el negocio, no
   // gravedad de un problema: pintarlo de rojo diría algo que no es.
-  const esBalance = tipo === 'mensual';
+  const esBalance = inf.tipo === 'mensual';
   const colorBarra = esBalance ? 'var(--accent)' : (hallazgos.length ? sev.color : 'var(--green)');
 
-  cont.innerHTML = cabecera +
-    `<div style="border-left:3px solid ${colorBarra};padding-left:14px;margin-bottom:6px">
+  return `<div style="border-left:3px solid ${colorBarra};padding-left:14px;margin-bottom:6px">
       <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">
         ${escapeHtml(inf.periodo)}${!esBalance && hallazgos.length ? ` · severidad ${sev.etiqueta.toLowerCase()}` : ''}
       </div>
@@ -6046,23 +6109,7 @@ function renderInformes() {
     `<div style="margin-top:16px;padding:12px 14px;background:var(--bg-alt,rgba(127,127,127,.08));border-radius:8px">
       <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Lo que haría</div>
       <div style="font-size:14px;line-height:1.6;margin-top:4px">${escapeHtml(inf.loQueHariaHoy)}</div>
-    </div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center">
-      ${leido ? '<span style="font-size:12px;color:var(--text-muted)">✓ Leído</span>'
-              : `<button class="btn btn-secondary" onclick="marcarInformeLeido('${escapeHtml(inf.tipo)}','${escapeHtml(inf.periodo)}', this)">Marcar como leído</button>`}
-      ${generar}
-      <span style="font-size:11px;color:var(--text-muted)">${escapeHtml(inf.modelo || '')}</span>
-    </div>` +
-    (lista.length > 1
-      ? `<div style="margin-top:18px;padding-top:12px;border-top:1px solid var(--border)">
-           <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Anteriores</div>
-           ${lista.slice(1).map(x => `
-             <div style="display:flex;gap:10px;align-items:baseline;padding:6px 0;font-size:13px">
-               <span style="color:var(--text-muted);white-space:nowrap;font-size:12px">${escapeHtml(x.periodo)}</span>
-               <span>${escapeHtml(x.titular)}</span>
-             </div>`).join('')}
-         </div>`
-      : '');
+    </div>`;
 }
 
 async function marcarInformeLeido(tipo, periodo, btn) {
@@ -6083,6 +6130,97 @@ async function generarInformeAhora(tipo, btn) {
     await loadInformes();
   } catch (err) { alert('No se pudo generar: ' + err.message); }
   finally { if (btn) { btn.disabled = false; btn.textContent = 'Generar el de ahora'; } }
+}
+
+// ─── El aviso del domingo ───────────────────────────────────────────────────
+//
+// Los agentes dejan el informe en la planilla los domingos a las 10. Sin esto,
+// enterarse dependía de acordarse de entrar a mirarlo — que es como no tenerlo.
+//
+// Qué está pendiente lo decide el SERVIDOR (columna `Leidos` de la hoja), no
+// localStorage: el informe se lee tanto en el teléfono como en la computadora,
+// y cerrarlo en uno tiene que valer en el otro.
+//
+// Se chequea en tres momentos, y los tres hacen falta:
+//   · al entrar o recargar     — el caso normal;
+//   · al volver a la pestaña   — si dejó la app abierta desde el sábado, ni
+//                                entra ni recarga, y sin esto no se enteraría;
+//   · cada media hora          — para el que la deja abierta y a la vista.
+let _avisoInformes = null;      // los que está mostrando ahora mismo
+let _avisoPospuesto = false;    // dijo "después": no volver a abrirlo solo
+let _avisoTimer = null;
+
+// El destinatario sale de la misma config que arma el menú, para que no puedan
+// discrepar. Quien decide de verdad es el servidor: si esto se equivocara, la
+// llamada vuelve 403 y no pasa nada.
+function veInformes() {
+  const sub = ((TAB_GROUPS.reportes || {}).subs || []).find(s => s.id === 'informes');
+  return !!sub && (!sub.soloUsuario || getUsuario() === sub.soloUsuario);
+}
+
+async function checkAvisoInforme() {
+  if (!veInformes() || _avisoPospuesto || _avisoInformes) return;
+  try {
+    const { data } = await api('/api/informes/pendientes');
+    if (!data || !data.length) return;
+    abrirAvisoInforme(data);
+  } catch (e) { /* nunca romper la app por el aviso */ }
+}
+
+function abrirAvisoInforme(lista) {
+  _avisoInformes = lista;
+  const varios = lista.length > 1;
+  document.getElementById('informe-aviso-kicker').textContent =
+    varios ? `${lista.length} informes nuevos` : 'Informe nuevo';
+  document.getElementById('informe-aviso-titulo').textContent =
+    varios ? 'Los agentes dejaron su análisis' : (INFORME_TIPOS[lista[0].tipo] || {}).titulo || 'Informe';
+
+  // Los dos del domingo van en una sola ventana, uno abajo del otro: que salten
+  // dos ventanas seguidas al abrir la app es la forma más rápida de que se
+  // cierren las dos sin leerlas.
+  document.getElementById('informe-aviso-body').innerHTML = lista.map((inf, i) => {
+    const meta = INFORME_TIPOS[inf.tipo] || { icono: '🔎', titulo: inf.tipo };
+    return (i ? '<div class="ia-sep"></div>' : '') +
+      `<div class="ia-agente">${meta.icono} ${escapeHtml(meta.titulo)}</div>` +
+      informeCuerpoHTML(inf);
+  }).join('');
+
+  const ok = document.getElementById('informe-aviso-ok');
+  ok.disabled = false;
+  ok.textContent = varios ? 'Listo, los leí' : 'Listo, lo leí';
+  document.getElementById('informe-aviso-overlay').classList.add('open');
+}
+
+// "Listo" marca leído en la planilla; "Después" sólo cierra y no vuelve a saltar
+// solo hasta la próxima vez que se abra la app. Si el marcado falla, se cierra
+// igual: el informe queda sin leer y el aviso vuelve, que es lo correcto.
+async function cerrarAvisoInforme(marcarLeido) {
+  const lista = _avisoInformes || [];
+  const ok = document.getElementById('informe-aviso-ok');
+  if (marcarLeido && lista.length) {
+    ok.disabled = true;
+    ok.textContent = 'Guardando...';
+    for (const inf of lista) {
+      try {
+        await api('/api/informes/leido', { method: 'POST', body: JSON.stringify({ tipo: inf.tipo, periodo: inf.periodo }) });
+      } catch (e) { /* vuelve a aparecer la próxima */ }
+    }
+  } else {
+    _avisoPospuesto = true;
+  }
+  document.getElementById('informe-aviso-overlay').classList.remove('open');
+  _avisoInformes = null;
+  // Si la sección está abierta detrás, que refleje el nuevo estado de leído.
+  if (document.getElementById('tab-informes').classList.contains('active')) loadInformes();
+}
+
+function iniciarAvisoInformes() {
+  checkAvisoInforme();
+  if (_avisoTimer) return;   // no acumular listeners ni timers entre logins
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) checkAvisoInforme();
+  });
+  _avisoTimer = setInterval(checkAvisoInforme, 30 * 60 * 1000);
 }
 
 // ─── Control del rendimiento ────────────────────────────────────────────────

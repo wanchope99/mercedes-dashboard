@@ -71,7 +71,11 @@ correcto borra lo acumulado.
 
 ### Informes automáticos
 
-Tres agentes escriben en la sección Informes de la app. Variables opcionales:
+Tres agentes escriben en **Reportes → Informe**. Al destinatario le salta una
+ventana con el informe apenas entra a la app (o apenas vuelve a la pestaña, si
+la había dejado abierta), y no vuelve a saltar una vez que lo marca leído.
+
+Variables opcionales:
 
 | Variable | Para qué | Default |
 |---|---|---|
@@ -84,6 +88,13 @@ Tres agentes escriben en la sección Informes de la app. Variables opcionales:
 
 Horario: America/Argentina/Buenos_Aires. La primera vez se crea sola una hoja
 `Informes` en la planilla — es esperado, no un error.
+
+**Si el server estaba reiniciando a la hora de la corrida, el informe se
+recupera solo al arrancar** (Railway reinicia el contenedor en cada deploy). No
+gasta llamadas de más: si el informe del período ya existe, no hace nada.
+Ojo: poner cualquiera de las tres variables `INFORME_*_CRON` **desactiva esa
+recuperación** para ese informe, porque de un horario arbitrario no se puede
+deducir cuándo tendría que haber salido.
 
 Los tres informes sólo **LEEN**: ninguno escribe en `Movimientos`. Y ninguno
 calcula: los números los hace el código y el modelo sólo los interpreta.

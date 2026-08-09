@@ -1914,6 +1914,14 @@ app.get('/api/informes', authMiddleware, soloDestinatarioInformes, async (req, r
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// Lo que el destinatario todavía no vio. Lo consulta el aviso emergente al abrir
+// la app, al volver a la pestaña y cada media hora. La respuesta normal es una
+// lista vacía: sólo lee la hoja, nunca llama al modelo.
+app.get('/api/informes/pendientes', authMiddleware, soloDestinatarioInformes, async (req, res) => {
+  try { res.json({ ok: true, data: await informes.pendientesPara(req.user.usuario) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 app.post('/api/informes/leido', authMiddleware, soloDestinatarioInformes, async (req, res) => {
   try {
     const { tipo, periodo } = req.body || {};
