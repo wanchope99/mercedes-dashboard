@@ -1346,7 +1346,13 @@
   </div>
 </div>
 
-<!-- ═══ PROVEEDORES TAB ═══ -->
+<!-- ═══ PROVEEDORES TAB — ARCHIVADO 12/08/2026 ═══
+     Fuera del menú por decisión del dueño: de Stocks sobrevive sólo Gestión de
+     Bebidas. El panel y loadProveedores()/loadProvSerie() quedan intactos y
+     nunca se llaman. Para revivirlo: agregar { id: 'proveedores', label: '...' }
+     como sub de algún grupo en TAB_GROUPS. Nada más.
+     Lo que SÍ sigue vivo de acá es el drawer de facturas pendientes del bot,
+     que se mudó a Pagos.                                                     -->
 <div id="tab-proveedores" class="tab-panel">
   <div class="filters-bar">
     <div class="prov-toolbar">
@@ -1364,11 +1370,10 @@
       <span class="filter-label">Hasta</span>
       <input type="date" id="prov-hasta" onchange="loadProvSerie()" />
     </div>
-    <div style="margin-left:auto">
-      <button class="prov-notif-btn" onclick="openProvNotif()">🔔 Pendientes
-        <span id="prov-badge-2" class="prov-badge" style="display:none">0</span>
-      </button>
-    </div>
+    <!-- El botón "🔔 Pendientes" se mudó a Pagos el 12/08/2026, junto con el
+         circuito de confirmación del bot. No volver a ponerlo acá: el id
+         prov-badge-2 quedaría duplicado y refreshProvBadge() actualizaría el de
+         este panel archivado en vez del que se ve. -->
   </div>
 
   <main>
@@ -1406,7 +1411,11 @@
   </div>
 </div>
 
-<!-- ═══ COMPORTAMIENTO DE STOCKS TAB ═══ -->
+<!-- ═══ COMPORTAMIENTO DE STOCKS TAB — ARCHIVADO 12/08/2026 ═══
+     Fuera del menú por la misma decisión que Proveedores. El panel y
+     loadComportamiento()/loadStkProducto()/loadStkCategoria()/loadConsumo()
+     quedan intactos y nunca se llaman. Para revivirlo: agregar
+     { id: 'comportamiento', label: '...' } como sub de algún grupo.          -->
 <div id="tab-comportamiento" class="tab-panel">
   <div class="filters-bar">
     <span class="filter-label">Categoría</span>
@@ -2023,6 +2032,14 @@
       <input type="text" id="pagos-search" placeholder="Buscar proveedor..." oninput="loadPagos()" style="width:200px" />
     </span>
     <div style="flex:1"></div>
+    <!-- Las facturas que entran por el bot de Telegram se confirman acá desde el
+         12/08/2026. Antes este botón vivía en Stocks › Proveedores, que se
+         archivó: quedarse ahí habría dejado las facturas de Charly entrando sin
+         que nadie pudiera confirmarlas. Pagos es además donde ya viven las
+         compras, así que es el lugar que corresponde. -->
+    <button class="prov-notif-btn" onclick="openProvNotif()">🔔 Pendientes
+      <span id="prov-badge-2" class="prov-badge" style="display:none">0</span>
+    </button>
     <button class="btn btn-accent" onclick="openModal()">+ Nueva compra</button>
     <button class="btn" id="btn-pagar-pendiente" onclick="openPagarModal()">✓ Pagar</button>
   </div>
@@ -2728,7 +2745,7 @@ function onLoginSuccess(rol, nombre) {
     // Abrir Cajas → y dentro, el submenú Arqueo directamente. En el teléfono no:
     // ahí se entra por Inicio, y Arqueo es uno de sus cuatro botones.
     if (!esPhone()) {
-      switchGroup('cajas');
+      switchGroup('caja');
       switchSub('arqueo');
     }
   }
@@ -2743,7 +2760,7 @@ function onLoginSuccess(rol, nombre) {
 // teléfono y quedaría un panel activo invisible, o sea la pantalla en blanco.
 MQ_PHONE.addEventListener('change', e => {
   if (!e.matches && state.grupoActivo === 'inicio') {
-    switchGroup(getRol() === 'admin' ? 'dashboard' : 'cajas');
+    switchGroup(getRol() === 'admin' ? 'negocio' : 'caja');
   }
 });
 
@@ -2852,57 +2869,98 @@ async function checkSavedToken() {
 //   soloAdmin  el encargado no ve la sección
 //   phonePrio  posición fija en la barra de abajo; sin esto va adentro de "Más"
 //   subs       submenús (cada uno también puede ser soloAdmin)
+// ─── CUATRO SECCIONES, agrupadas por la PREGUNTA que contestan ───────────────
+//
+// Hasta el 12/08/2026 esto eran 10 secciones de primer nivel, agrupadas por
+// fuente de datos. Dos consecuencias medibles, no teóricas:
+//   · la barra de arriba tiene overflow-x con el scrollbar OCULTO, así que en una
+//     ventana angosta las últimas secciones se iban de pantalla sin ninguna señal;
+//   · la barra del teléfono fija 3 lugares, así que 7 de 10 vivían adentro de "Más".
+// Y había dos cosas llamadas "Servicios": la sección y un reporte adentro de
+// Reportes.
+//
+// El criterio ahora es la pregunta del que mira:
+//   Negocio   ¿cómo venimos?          (los números y el análisis)
+//   Caja      la plata de hoy          (lo operativo del día)
+//   Operación el bar funcionando       (lo que se consume, se gasta y se rompe)
+//   Plan      lo que viene             (inversión y recupero)
+//
+// Con 4 grupos + Inicio, la barra del teléfono los muestra a TODOS sin "Más"
+// (ver itemsBottomNav) y la de arriba no scrollea nunca.
+//
+// El ORDEN de este objeto es el orden de la barra de arriba en la computadora.
+//
+// Campos:
+//   label      texto de la barra de arriba (con emoji)
+//   icono      ícono suelto para la barra de abajo del teléfono
+//   corto      texto corto para la barra de abajo (entra en ~60px)
+//   soloAdmin  el encargado no ve la sección
+//   phonePrio  posición en la barra de abajo
+//   badge      pinta el contador rojo de pendientes en esa sección
+//   subs       submenús (cada uno también puede ser soloAdmin / soloUsuario)
+//
+// REGLA AL AGREGAR ALGO: un submenú nuevo es una línea acá + su panel `tab-<id>`
+// + su carga en cargarPanel(). Si un grupo pasa de 5 subs, es señal de que hay
+// que repensar el agrupamiento, no de agregar un sexto.
 const TAB_GROUPS = {
-  // Inicio no va en la barra de arriba: en la computadora esa barra ya muestra
-  // las 10 secciones de una, así que una pantalla que sólo lleva a cuatro sería
-  // un paso de más. soloPhone la deja fuera de la barra de arriba pero adentro
-  // de la de abajo. phonePrio 0 la fija como primer botón.
+  // Inicio no va en la barra de arriba: ahí ya están las cuatro secciones de una,
+  // así que una pantalla que lleva a cuatro sería un paso de más. soloPhone la
+  // deja fuera de la barra de arriba pero adentro de la de abajo.
   inicio: { label: '🏠 Inicio', icono: '🏠', corto: 'Inicio', soloPhone: true, phonePrio: 0, subs: null },
-  dashboard: { label: '📊 Dashboard', icono: '📊', corto: 'Números', soloAdmin: true, phonePrio: 1, subs: null },
-  // Agregar un reporte nuevo = una línea acá + su panel `tab-<id>` + su carga
-  // en cargarPanel().
-  // El informe automático vive acá adentro y no como sección propia: es un
-  // reporte más, sólo que lo escribe un agente en vez de una consulta.
-  // `soloUsuario` en un submenú es el único de la app — ver el comentario en
-  // switchGroup, que es quien lo aplica.
-  reportes: { label: '📈 Reportes', icono: '📈', corto: 'Reportes', soloAdmin: true, subs: [
-    { id: 'reportes-balance',   label: '📊 Balance' },
-    { id: 'reportes-servicios', label: '🍽️ Servicios' },
+
+  // ── ¿Cómo venimos? ────────────────────────────────────────────────────────
+  // Dashboard y Balance miran los mismos dos endpoints desde ángulos distintos
+  // (Dashboard compara contra el mes anterior y cierra el mes; Balance valúa en
+  // dólares y acumula). Servicios y Restaurant salen los dos de /api/servicios:
+  // Servicios es la lista noche por noche, Restaurant el análisis histórico.
+  // Antes se llamaban igual y por eso se confundían.
+  //
+  // El informe automático vive acá y no como sección propia: es un reporte más,
+  // sólo que lo escribe un agente. `soloUsuario` es el ÚNICO de toda la app y
+  // está mientras los agentes sigan en beta — es lo único que Pablo no ve. Si se
+  // saca, Pablo y Tincho pasan a ver exactamente lo mismo.
+  negocio: { label: '📊 Negocio', icono: '📊', corto: 'Negocio', soloAdmin: true, phonePrio: 1, subs: [
+    { id: 'dashboard',          label: '📊 Dashboard' },
+    { id: 'reportes-balance',   label: '📈 Balance' },
+    { id: 'servicios',          label: '🍽️ Servicios' },
+    { id: 'reportes-servicios', label: '🏆 Restaurant' },
     { id: 'informes',           label: '🔎 Informe', soloUsuario: 'tincho' },
   ] },
-  pagos: { label: '💳 Pagos', icono: '💳', corto: 'Pagos', subs: null },
-  // Historial de Arqueos lee /api/arqueo/historial, que es adminOnly: si el
-  // encargado veía el submenú, sólo conseguía un error de permisos. No se le arma.
-  // phonePrio 4: no le alcanza para entrar en la barra del admin (que ya llena
-  // sus 3 lugares con 0-1-2), pero sí en la del encargado, donde el arqueo de
-  // cada noche es lo primero que abre. Sin esto, Inicio lo empujaba a "Más".
-  cajas: { label: '🏦 Cajas', icono: '🏦', corto: 'Cajas', phonePrio: 4, subs: [
-    { id: 'cajas',  label: '🏦 Cajas' },
+
+  // ── La plata de hoy ───────────────────────────────────────────────────────
+  // Arqueo va PRIMERO: es lo que se abre cada noche, y para el encargado es la
+  // pantalla con la que empieza el turno. Cajas es el estado de las cuentas,
+  // Pagos lo que hay que pagar. Historial lee /api/arqueo/historial, que es
+  // adminOnly: mostrárselo al encargado sólo le daba un error de permisos.
+  //
+  // El badge de facturas pendientes vive acá porque las pendientes se confirman
+  // desde Pagos (antes estaba en Stocks, que es de donde se mudaron).
+  caja: { label: '🏦 Caja', icono: '🏦', corto: 'Caja', phonePrio: 2, badge: true, subs: [
     { id: 'arqueo', label: '🗃️ Arqueo de Caja' },
+    { id: 'cajas',  label: '🏦 Cajas' },
+    { id: 'pagos',  label: '💳 Pagos' },
     { id: 'historial-arqueos', label: '📋 Historial de Arqueos', soloAdmin: true },
   ] },
-  servicios: { label: '🍽️ Servicios', icono: '🍽️', corto: 'Servicios', soloAdmin: true, phonePrio: 2, subs: null },
-  // soloAdmin (en los subs): Charly entra a Stocks pero sólo ve Gestión de
-  // Bebidas, y ahí sólo el circulante — ver loadVinos.
-  stocks: { label: '📦 Stocks', icono: '📦', corto: 'Stocks', phonePrio: 3, badge: true, subs: [
-    { id: 'proveedores',    label: '🛒 Proveedores', soloAdmin: true },
-    { id: 'comportamiento', label: '📈 Comportamiento de Stocks', soloAdmin: true },
-    { id: 'vinos',          label: '🥂 Gestión de Bebidas' },
+
+  // ── El bar funcionando ────────────────────────────────────────────────────
+  // Lo que se consume (Bebidas), lo que cuesta (Costos), lo que se rompe
+  // (Mantenimiento) y lo que se reparte (Propinas).
+  //
+  // Mantenimiento SIN soloAdmin a propósito: el encargado es el que está en el
+  // salón cuando se rompe algo. Puede anotar y mover estados; borrar y editar es
+  // sólo del admin, y eso lo hace cumplir el server, no el botón escondido.
+  // Todo /api/propinas/* es adminOnly, así que ese sub sí se le esconde.
+  operacion: { label: '🍽️ Operación', icono: '🍽️', corto: 'Operación', phonePrio: 3, subs: [
+    { id: 'vinos',          label: '🥂 Bebidas' },
+    { id: 'mantenimiento',  label: '🔧 Mantenimiento' },
+    { id: 'costos-resumen', label: '🧮 Costos', soloAdmin: true },
+    { id: 'costos-config',  label: '⚙️ Config. de costos', soloAdmin: true },
+    { id: 'propinas',       label: '💸 Propinas', soloAdmin: true },
+    { id: 'propinas-historial', label: '📋 Historial de propinas', soloAdmin: true },
   ] },
-  // Sin soloAdmin a propósito: el encargado es el que está en el salón cuando se
-  // rompe algo. Puede anotar y mover estados; borrar y editar es sólo del admin,
-  // y eso lo hace cumplir el server, no el botón que se le esconde.
-  mantenimiento: { label: '🔧 Mantenimiento', icono: '🔧', corto: 'Arreglos', subs: null },
-  costos: { label: '🧮 Costos', icono: '🧮', corto: 'Costos', soloAdmin: true, subs: [
-    { id: 'costos-resumen', label: '📊 Costos' },
-    { id: 'costos-config',  label: '⚙️ Configuración' },
-  ] },
-  // Todo /api/propinas/* es adminOnly: la tab entera está oculta para el encargado.
-  propinas: { label: '💸 Propinas', icono: '💸', corto: 'Propinas', soloAdmin: true, subs: [
-    { id: 'propinas',           label: '💸 Reparto' },
-    { id: 'propinas-historial', label: '📋 Historial' },
-  ] },
-  plan: { label: '🗓️ Plan', icono: '🗓️', corto: 'Plan', soloAdmin: true, subs: [
+
+  // ── Lo que viene ──────────────────────────────────────────────────────────
+  plan: { label: '🗓️ Plan', icono: '🗓️', corto: 'Plan', soloAdmin: true, phonePrio: 4, subs: [
     { id: 'plan',        label: '📋 Resumen' },
     { id: 'calculadora', label: '🧮 Calculadora' },
     { id: 'inversiones', label: '🛠️ Inversiones' },
@@ -2910,6 +2968,18 @@ const TAB_GROUPS = {
     { id: 'proymes',     label: '📅 Proyección Mes' },
   ] },
 };
+
+// ─── Archivado el 12/08/2026 ─────────────────────────────────────────────────
+// `proveedores` (análisis de compras por producto) y `comportamiento` (rotación
+// de stock) salieron del menú por decisión del dueño: de Stocks sobrevive sólo
+// Gestión de Bebidas. Los paneles `tab-proveedores` y `tab-comportamiento` y sus
+// loaders SIGUEN EN EL ARCHIVO, inertes: para revivir cualquiera de los dos
+// alcanza con volver a agregar su { id, label } como sub de algún grupo.
+//
+// Lo que NO se archivó: el drawer de facturas pendientes del bot de Telegram
+// vivía adentro de `tab-proveedores`. Se mudó a Pagos — si se hubiera ido con el
+// resto, las facturas que manda Charly se seguirían cargando y nadie podría
+// confirmarlas.
 
 // Secciones que el rol actual puede ver, en el orden de TAB_GROUPS.
 // `incluirSoloPhone` distingue las dos barras: la de abajo lleva Inicio, la de
@@ -2929,10 +2999,19 @@ function gruposVisibles(incluirSoloPhone) {
 // Reparto de la barra inferior del teléfono: hasta 4 botones. Si sobran
 // secciones, el cuarto lugar lo ocupa "Más". La regla es genérica a propósito —
 // el encargado ve 3 secciones y le entran todas sin "Más", sin listas aparte.
+// Hasta 5 botones fijos: es el máximo que entra cómodo en una barra inferior y
+// el tope que usan iOS y Android. Con las cuatro secciones + Inicio, el admin ve
+// TODO sin "Más" y el encargado ve sus tres directo. El sheet "Más" queda como
+// red de contención por si algún día vuelven a ser más de cinco.
+const MAX_BOTTOM_NAV = 5;
+
 function itemsBottomNav() {
   const visibles = gruposVisibles(true);
-  if (visibles.length <= 4) return { fijos: visibles, resto: [] };
-  const fijos = visibles.slice().sort((a, b) => (a.phonePrio ?? 99) - (b.phonePrio ?? 99)).slice(0, 3);
+  if (visibles.length <= MAX_BOTTOM_NAV) return { fijos: visibles, resto: [] };
+  // Se deja un lugar para el botón "Más".
+  const fijos = visibles.slice()
+    .sort((a, b) => (a.phonePrio ?? 99) - (b.phonePrio ?? 99))
+    .slice(0, MAX_BOTTOM_NAV - 1);
   return { fijos, resto: visibles.filter(g => !fijos.includes(g)) };
 }
 
@@ -6512,8 +6591,21 @@ let _avisoTimer = null;
 // El destinatario sale de la misma config que arma el menú, para que no puedan
 // discrepar. Quien decide de verdad es el servidor: si esto se equivocara, la
 // llamada vuelve 403 y no pasa nada.
+//
+// Busca el submenú recorriendo TODOS los grupos en vez de mirar uno por nombre.
+// Antes decía `TAB_GROUPS.reportes`, y al reagrupar el menú el 12/08/2026 ese
+// grupo dejó de existir: el aviso del informe se habría apagado en silencio para
+// todo el mundo, sin ningún error. Así no depende de dónde esté colgado.
+function subDeMenu(id) {
+  for (const g of Object.values(TAB_GROUPS)) {
+    const sub = (g.subs || []).find(s => s.id === id);
+    if (sub) return sub;
+  }
+  return null;
+}
+
 function veInformes() {
-  const sub = ((TAB_GROUPS.reportes || {}).subs || []).find(s => s.id === 'informes');
+  const sub = subDeMenu('informes');
   return !!sub && (!sub.soloUsuario || getUsuario() === sub.soloUsuario);
 }
 
@@ -10434,7 +10526,7 @@ const HOME_TELEFONO = {
     { tab: 'dashboard',  icono: '📊', titulo: 'Dashboard', sub: 'los números del mes' },
     { accion: 'anotar',  icono: '🔧', titulo: 'Anotar',    sub: 'algo para arreglar', acento: true },
     { tab: 'servicios',  icono: '🍽️', titulo: 'Servicios', sub: 'cómo vienen las noches' },
-    { tab: 'stocks',     icono: '📦', titulo: 'Stocks',    sub: 'bebidas y proveedores' },
+    { tab: 'vinos',      icono: '🥂', titulo: 'Bebidas',   sub: 'stock y cobertura' },
   ],
   // El encargado abre la app para dos cosas: arquear la caja y cargar algo.
   // Por eso Arqueo va primero y en su lugar no hay Dashboard, que no ve.
@@ -10442,7 +10534,7 @@ const HOME_TELEFONO = {
     { tab: 'arqueo',     icono: '🗃️', titulo: 'Arqueo',    sub: 'abrir y cerrar la caja' },
     { accion: 'anotar',  icono: '🔧', titulo: 'Anotar',    sub: 'algo para arreglar', acento: true },
     { tab: 'pagos',      icono: '💳', titulo: 'Pagos',     sub: 'cargar una compra' },
-    { tab: 'stocks',     icono: '📦', titulo: 'Stocks',    sub: 'gestión de bebidas' },
+    { tab: 'vinos',      icono: '🥂', titulo: 'Bebidas',   sub: 'gestión de bebidas' },
   ],
 };
 
