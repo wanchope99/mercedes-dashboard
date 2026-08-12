@@ -18,7 +18,7 @@
 
 const express = require('express');
 const prov = require('./proveedores');
-const { extraerDeImagen } = require('./extractor');
+const { extraerCabecera, extraerItems } = require('./extractor');
 const cats = require('./proveedores-categorias');
 const provCfg = require('./proveedores-config');
 
@@ -345,83 +345,79 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro } 
     try {
       const { imageBase64, mime, origen = {}, imagenInfo = {} } = req.body || {};
       if (!imageBase64) return res.status(400).json({ ok: false, error: 'Falta imageBase64' });
+      const mimeOk = mime || 'image/jpeg';
 
-      const [{ items: crudos, factura }, indice] = await Promise.all([
-        extraerDeImagen({ base64: imageBase64, mime: mime || 'image/jpeg' }),
+      // ─── Las dos lecturas arrancan JUNTAS ────────────────────────────────
+      //
+      // La persona espera solamente la cabecera: con el proveedor y el total ya
+      // se le puede hacer la primera pregunta. Los renglones tardan mucho más
+      // —cada uno cuesta ~114 tokens de salida, y se generan de a uno— pero no
+      // hacen falta hasta que termina de contestar.
+      //
+      // Antes se esperaban las dos cosas juntas y por eso una factura de siete
+      // renglones tardaba 15 a 22 segundos en hacer la primera pregunta.
+      const pItems = extraerItems({ base64: imageBase64, mime: mimeOk });
+      // Que un rechazo sin nadie escuchándolo no tumbe el proceso: el error se
+      // vuelve a mirar cuando alguien hace await sobre la promesa.
+      pItems.catch(() => {});
+
+      const [{ factura }, indice] = await Promise.all([
+        extraerCabecera({ base64: imageBase64, mime: mimeOk }),
         prov.getIndiceInferencia(),
       ]);
 
-      if (!crudos.length) {
-        return res.json({ ok: true, status: 'sin_datos', message: 'No se pudieron extraer productos de la imagen.' });
+      if (!factura || (!factura.proveedor && !(Number(factura.total_factura) > 0))) {
+        return res.json({ ok: true, status: 'sin_datos', message: 'No se pudo leer la factura de la imagen.' });
       }
 
       // Normalizar el nombre del proveedor (alias). Ej: "Adicional 2015" o el
-      // vendedor "Diego Wesenack" → "Thames". Se aplica a la factura y a cada item.
-      const vendedor = (factura && factura.vendedor) || '';
-      const provNombre = cats.normalizarProveedor(
-        (factura && factura.proveedor) || (crudos[0] && crudos[0].proveedor) || '', vendedor);
-      if (factura) factura.proveedor = provNombre;
-      crudos.forEach(c => { c.proveedor = provNombre; });
+      // vendedor "Diego Wesenack" → "Thames".
+      const vendedor = factura.vendedor || '';
+      const provNombre = cats.normalizarProveedor(factura.proveedor || '', vendedor);
+      factura.proveedor = provNombre;
 
-      const items = procesarItems(crudos, indice);
-      // Datos a nivel factura: medio de pago e IVA (con/sin) del proveedor.
-      const fact = await procesarFactura(factura || {}, items);
+      // Las preguntas de cabecera se arman SIN los renglones. La única que los
+      // miraba era el cruce del total contra la suma de las líneas; con la
+      // lectura partida se compara cuando llegan, y si no cierran queda anotado
+      // en el pendiente para que se vea en el panel.
+      const items = [];
+      const fact = await procesarFactura(factura, items);
 
-      // Propagar el medio de pago (de la factura) a todos los items.
-      if (fact.medioPago) items.forEach(it => { it.formaPago = fact.medioPago; });
-      // Propagar atributos fiscales (booleans) a cada item para appendCompras.
-      const _aplicarFiscales = (lista, fk) => lista.forEach(it => {
-        if (fk.descuentoIncluido != null) it.descIncluido = fk.descuentoIncluido;
-        if (fk.ivaIncluido != null) it.ivaIncluido = fk.ivaIncluido;
-      });
-      _aplicarFiscales(items, fact);
-      // Prorratear "Otro Impuesto" (monto de factura) por el subtotal de cada línea.
-      aplicarOtroImpuesto(items, fact.otrosImpuestos);
-      // Si la factura traía IVA en monto y no hay duda pendiente de ivaPct, aplicar el %.
-      const _hayDudaIva = (fact.dudas || []).some(d => d.campo === 'ivaPct');
-      if (fact.ivaPctSugerido != null && !_hayDudaIva) {
-        items.forEach(it => { if (!(Number(it.ivaPct) > 0)) it.ivaPct = fact.ivaPctSugerido; });
-      }
-      // Control E*G vs total leído: si difiere, anotarlo en notas (no bloquea).
-      for (const it of items) {
-        const chk = prov.chequearTotalLinea(it);
-        if (!chk.ok && chk.diff != null) {
-          const aviso = `⚠ Control: E×G=${Math.round((it.cantidad||0)*(it.precioUnit||0))} vs total factura ${it.total_linea} (dif ${chk.diff})`;
-          it.notas = it.notas ? `${it.notas} · ${aviso}` : aviso;
-        }
-      }
-
-      const itemDudas = items.filter(it => it.dudas.length > 0);
-      const hayDudas = itemDudas.length > 0 || fact.dudas.length > 0;
-
-      // Todo claro (items + factura) → escribir directo.
-      //
-      // OJO: desde el 12/08/2026 este camino en la práctica no se toma nunca,
-      // y es a propósito. `procesarFactura` siempre agrega dos dudas de cabecera
-      // —el total del gasto y si está pagada o a pagar— porque desde que la
-      // factura también deja una fila en el libro, ningún gasto entra sin que una
-      // persona lo haya mirado. Decisión del dueño, tomada sabiendo que cuesta un
-      // toque más por factura.
-      //
-      // Se deja el camino en pie igual: si algún día se decide que un proveedor
-      // ya aprendido pueda escribir solo, alcanza con no empujar esas dudas.
-      if (!hayDudas) {
-        const n = await prov.appendCompras(items);
-        return res.json({
-          ok: true, status: 'escrito',
-          escritas: n, items,
-          message: `${n} producto(s) cargado(s) sin dudas.`,
+      // El pendiente nace SIN renglones y se contesta ya. Los renglones se le
+      // enganchan cuando terminan de leerse.
+      const reg = prov.crearPendiente({ origen, imagenInfo, items: [], factura: fact });
+      prov.adjuntarItems(reg.id, pItems.then(({ items: crudos }) => {
+        // Todo esto corría antes dentro del request, haciendo esperar a la
+        // persona. Ahora corre mientras contesta.
+        crudos.forEach(c => { c.proveedor = provNombre; });
+        const procesados = procesarItems(crudos, indice);
+        if (fact.medioPago) procesados.forEach(it => { it.formaPago = fact.medioPago; });
+        procesados.forEach(it => {
+          if (fact.descuentoIncluido != null) it.descIncluido = fact.descuentoIncluido;
+          if (fact.ivaIncluido != null) it.ivaIncluido = fact.ivaIncluido;
         });
-      }
+        aplicarOtroImpuesto(procesados, fact.otrosImpuestos);
+        const hayDudaIva = (fact.dudas || []).some(d => d.campo === 'ivaPct');
+        if (fact.ivaPctSugerido != null && !hayDudaIva) {
+          procesados.forEach(it => { if (!(Number(it.ivaPct) > 0)) it.ivaPct = fact.ivaPctSugerido; });
+        }
+        // Control E*G vs total leído: si difiere, se anota en notas (no bloquea).
+        for (const it of procesados) {
+          const chk = prov.chequearTotalLinea(it);
+          if (!chk.ok && chk.diff != null) {
+            const aviso = `⚠ Control: E×G=${Math.round((it.cantidad || 0) * (it.precioUnit || 0))} vs total factura ${it.total_linea} (dif ${chk.diff})`;
+            it.notas = it.notas ? `${it.notas} · ${aviso}` : aviso;
+          }
+        }
+        return procesados;
+      }));
 
-      // Hay dudas → crear pendiente (factura + items). No se escribe hasta resolver.
-      const reg = prov.crearPendiente({ origen, imagenInfo, items, factura: fact });
       return res.json({
         ok: true, status: 'pendiente',
         pendienteId: reg.id,
-        total: items.length, conDudas: itemDudas.length, limpios: items.length - itemDudas.length,
-        factura: reg.factura, items,
-        message: `Esta factura necesita confirmación${fact.dudas.length ? ' (medio de pago / IVA)' : ''}.`,
+        itemsEnCurso: true,
+        factura: reg.factura, items: [],
+        message: 'Leí la factura. Confirmá estos datos y la cargo.',
       });
     } catch (err) {
       console.error('Error /api/proveedores/ingest:', err.message);
@@ -452,28 +448,40 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro } 
   router.post('/api/proveedores/pendientes/:id/resolver', ingestAuth, async (req, res) => {
     try {
       try { await prov.cargarPendientesPersistidos(); } catch (e) {}
+
+      // Los renglones se leen en paralelo con la cabecera y recién hacen falta
+      // acá. Para este momento la persona ya contestó dos a cuatro preguntas, así
+      // que casi siempre están listos y este await no espera nada.
+      const listos = await prov.esperarItems(req.params.id);
+      if (!listos.ok && listos.error && !/no encontrado/i.test(listos.error)) {
+        return res.json({ ok: true, status: 'error_items', message: listos.error });
+      }
+
       const out = prov.aplicarResoluciones(req.params.id, (req.body && req.body.resoluciones) || {});
       if (!out) return res.status(404).json({ ok: false, error: 'Pendiente no encontrado' });
 
-      // Una duda de CABECERA sin resolver también deja el pendiente incompleto.
+      // SÓLO una duda de CABECERA frena. Las de renglón no.
       //
-      // Antes sólo se miraba `faltan`, que son dudas de items: si lo único que
-      // quedaba era una duda de factura, `faltan` venía vacío, `listoParaEscribir`
-      // también (porque lo bloquea `facturaOk`), y esto seguía de largo hasta
-      // escribir CERO productos y marcar el pendiente como resuelto. La factura
-      // desaparecía sin haberse cargado nunca.
+      // Dos cosas distintas que antes estaban mezcladas:
       //
-      // Con las preguntas del gasto —total, estado, categoría, medio— que son
-      // todas de cabecera, ese agujero pasaría a ser el camino normal.
-      if (out.faltan.length > 0 || !out.facturaOk) {
-        const pendientesCabecera = (out.facturaDudas || []).map(d => d.campo);
+      //  · Una duda de cabecera —el total, el medio de pago, si está pagada—
+      //    frena todo, porque de eso depende la fila del libro. Ojo: antes acá
+      //    se miraba sólo `faltan`, que son dudas de items; si lo único que
+      //    faltaba era de cabecera, esto seguía de largo, escribía CERO
+      //    productos y marcaba el pendiente como resuelto. La factura
+      //    desaparecía sin cargarse.
+      //
+      //  · Una duda de RENGLÓN (un producto ilegible, un precio raro) ya no
+      //    frena nada: el gasto se anota igual y ese renglón queda esperando en
+      //    el panel de la app. Decisión del dueño — confirmar el nombre de un
+      //    producto desde el teléfono es incómodo, y no tiene por qué demorar
+      //    el registro de la plata, que es lo urgente.
+      if (!out.facturaOk) {
         return res.json({
           ok: true, status: 'incompleto',
           faltan: out.faltan, facturaDudas: out.facturaDudas || [],
           listos: out.listoParaEscribir.length,
-          message: out.faltan.length > 0
-            ? `Todavía faltan ${out.faltan.length} producto(s) por confirmar.`
-            : `Falta confirmar de la factura: ${pendientesCabecera.join(', ')}.`,
+          message: `Falta confirmar de la factura: ${(out.facturaDudas || []).map(d => d.campo).join(', ')}.`,
         });
       }
 
@@ -488,7 +496,10 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro } 
         if (fk.ivaIncluido != null) it.ivaIncluido = fk.ivaIncluido;
       }
       const n = await prov.appendCompras(out.listoParaEscribir);
-      prov.marcarResuelto(req.params.id);
+      // Los renglones que quedaron con dudas NO se pierden: el pendiente sigue
+      // vivo con ellos y aparecen en el panel de la app. Los ya escritos quedan
+      // marcados para que no se carguen dos veces si alguien resuelve el resto.
+      const quedan = prov.marcarEscritosYCerrar(req.params.id, out.listoParaEscribir);
 
       // ─── Lo que aprende del proveedor, TODO junto ────────────────────────
       //
@@ -533,11 +544,12 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro } 
       res.json({
         ok: true, status: 'escrito', escritas: n,
         items: out.listoParaEscribir,
-        gasto,
+        gasto, renglonesPendientes: quedan,
         message: `${n} producto(s) cargado(s) en Compras.`
           + (gasto && gasto.ok && !gasto.yaExistia ? ` Gasto de ${gasto.montoTexto} anotado en el libro.` : '')
           + (gasto && gasto.ok && gasto.yaExistia ? ' El gasto ya estaba anotado en el libro.' : '')
-          + (gasto && !gasto.ok ? ` ⚠️ El gasto NO se anotó en el libro: ${gasto.error}` : ''),
+          + (gasto && !gasto.ok ? ` ⚠️ El gasto NO se anotó en el libro: ${gasto.error}` : '')
+          + (quedan ? ` Quedaron ${quedan} producto(s) para confirmar en la app.` : ''),
       });
     } catch (err) {
       console.error('Error resolver pendiente:', err.message);

@@ -316,6 +316,11 @@ async def finalizar(update_or_query, context):
             lineas.append(f"• Estado: {_md(str(gasto.get('estado', '')))}")
             if gasto.get("registradoEnSesion"):
                 lineas.append("• Descontado del arqueo de esta noche")
+        # Los renglones dudosos ya no frenan el gasto: se avisan y se resuelven
+        # desde la app, que es donde se ve mejor un nombre de producto.
+        if resp.get("renglonesPendientes"):
+            n = resp["renglonesPendientes"]
+            lineas.append(f"\n📋 Quedaron *{n}* producto{'s' if n > 1 else ''} para confirmar en Pagos › Pendientes.")
         elif gasto.get("yaExistia"):
             lineas.append("\n📒 _Ese gasto ya estaba anotado en el libro; no se duplicó._")
         elif gasto and not gasto.get("ok"):

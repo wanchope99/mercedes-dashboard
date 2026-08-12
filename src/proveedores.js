@@ -542,6 +542,65 @@ function crearPendiente({ origen = {}, imagenInfo = {}, items, factura = {} }) {
   return reg;
 }
 
+// ─── Los renglones llegan después que la cabecera ─────────────────────────────
+//
+// La lectura de la factura se parte en dos llamadas al modelo que arrancan
+// juntas: la cabecera vuelve en ~2 segundos y desbloquea la conversación con la
+// persona; los renglones tardan bastante más y se enganchan acá cuando terminan.
+//
+// La promesa vive en memoria, no en la planilla: es de esta corrida del proceso.
+// Si el server se reinicia justo en el medio, se pierde — y eso está contemplado
+// en esperarItems(), que devuelve un error claro en vez de escribir una factura
+// sin renglones.
+const itemsEnVuelo = new Map();   // id -> Promise<items[]>
+
+function adjuntarItems(id, promesa) {
+  const reg = pendientes.get(id);
+  if (!reg) return;
+  reg.itemsEnCurso = true;
+  const p = promesa.then(items => {
+    const r = pendientes.get(id);
+    if (r) {
+      r.items = (items || []).map((it, i) => ({ idx: i, ...it }));
+      r.itemsEnCurso = false;
+      _persistPendiente(r);
+    }
+    return items || [];
+  });
+  p.catch(e => {
+    const r = pendientes.get(id);
+    if (r) { r.itemsEnCurso = false; r.itemsError = e.message; _persistPendiente(r); }
+    console.error('No se pudieron leer los renglones de la factura', id, e.message);
+  });
+  itemsEnVuelo.set(id, p);
+  return p;
+}
+
+// Espera a que los renglones estén listos. Se llama al resolver, que es cuando
+// recién hacen falta — para entonces casi siempre ya llegaron, porque la persona
+// tardó más en contestar que el modelo en leer.
+async function esperarItems(id, ms = 90000) {
+  const reg = pendientes.get(id);
+  if (!reg) return { ok: false, error: 'Pendiente no encontrado' };
+  if (!reg.itemsEnCurso) return { ok: true };
+
+  const p = itemsEnVuelo.get(id);
+  if (!p) {
+    // El proceso se reinició mientras se leía la factura: la promesa no existe
+    // más y la imagen no se guarda en ningún lado. No se puede recuperar.
+    return { ok: false, error: 'La lectura de los productos se perdió (se reinició el servidor). Mandá la foto de nuevo.' };
+  }
+  try {
+    await Promise.race([
+      p,
+      new Promise((_, rej) => setTimeout(() => rej(new Error('tardó demasiado')), ms)),
+    ]);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: `No se pudieron leer los productos de la factura: ${e.message}` };
+  }
+}
+
 function getPendiente(id) { return pendientes.get(id) || null; }
 function listPendientes() {
   return [...pendientes.values()]
@@ -628,7 +687,10 @@ function aplicarResoluciones(id, resoluciones = {}) {
     });
   }
   const facturaOk = !reg.factura.dudas || reg.factura.dudas.length === 0;
-  const activos = reg.items.filter(it => !it.descartado);
+  // `escrito` marca los renglones que ya fueron a Compras en una resolución
+  // anterior (una factura puede resolverse en dos tandas: la plata por el bot,
+  // los renglones dudosos por el panel). No se vuelven a escribir.
+  const activos = reg.items.filter(it => !it.descartado && !it.escrito);
   const itemsLimpios = activos.filter(it => !it.dudas || it.dudas.length === 0);
   const listoParaEscribir = facturaOk ? itemsLimpios : [];
   const faltan = activos.filter(it => (it.dudas && it.dudas.length > 0));
@@ -639,6 +701,29 @@ function aplicarResoluciones(id, resoluciones = {}) {
 function marcarResuelto(id) {
   const reg = pendientes.get(id);
   if (reg) { reg.estado = 'resuelto'; _persistPendiente(reg); }
+}
+
+// Marca como escritos los renglones que ya se cargaron en Compras y decide si el
+// pendiente se cierra o sigue vivo.
+//
+// Desde que las dudas de renglón no frenan el gasto, una factura puede quedar
+// "a medias": la plata anotada y los productos limpios cargados, pero un par de
+// renglones esperando que alguien confirme un nombre o un precio desde el panel.
+// Esos renglones tienen que seguir visibles, y los ya escritos NO pueden volver
+// a escribirse cuando se resuelva el resto.
+//
+// Devuelve cuántos renglones quedaron pendientes.
+function marcarEscritosYCerrar(id, escritos = []) {
+  const reg = pendientes.get(id);
+  if (!reg) return 0;
+  const yaEscritos = new Set(escritos.map(it => it.idx));
+  for (const it of reg.items || []) {
+    if (yaEscritos.has(it.idx)) it.escrito = true;
+  }
+  const quedan = (reg.items || []).filter(it => !it.escrito && !it.descartado);
+  reg.estado = quedan.length ? 'pendiente' : 'resuelto';
+  _persistPendiente(reg);
+  return quedan.length;
 }
 function descartarPendiente(id) {
   const reg = pendientes.get(id);
@@ -652,7 +737,9 @@ module.exports = {
   normalizarHistoricoCategorias,
   getProductosYCategorias, getSerieProducto, nombreVisible,
   crearPendiente, getPendiente, listPendientes, countPendientes,
-  aplicarResoluciones, marcarResuelto, descartarPendiente,
+  aplicarResoluciones, marcarResuelto, descartarPendiente, marcarEscritosYCerrar,
+  // Los renglones llegan después que la cabecera (lectura partida en dos).
+  adjuntarItems, esperarItems,
   cargarPendientesPersistidos,
   chequearTotalLinea,
   clearProvCache,
