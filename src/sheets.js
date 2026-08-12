@@ -139,6 +139,29 @@ function parseDate(val) {
   return date;
 }
 
+// ─── NO "arreglar" la lectura de fechas leyendo el serial de Sheets ───────────
+//
+// Medido el 12/08/2026, contra la columna Mes (texto escrito a mano, que es el
+// único árbitro de la intención humana):
+//
+//   · parseDate() sobre el TEXTO MOSTRADO acierta 1097 de 1157 (95%), y los 60
+//     desvíos son todos del tipo esperado — un pago que vence el 1 de junio y
+//     pertenece a mayo. Es la diferencia Fecha/Mes que existe a propósito.
+//   · Leer el SERIAL sin formatear acierta 49 de 469 (10%). Movería 432 filas
+//     de mes.
+//
+// La razón: 469 celdas son fechas de verdad pero fueron cargadas escribiendo
+// D/M en una planilla con formato M/D, así que Sheets guardó el día y el mes
+// invertidos. El serial es el resultado de esa confusión, NO la intención. Al
+// mostrarse, el mismo formato invierte de vuelta, y el texto vuelve a decir lo
+// que la persona quiso escribir. Dos errores que se cancelan.
+//
+// Conclusión práctica: el texto mostrado es la fuente correcta y parseDate()
+// está bien como está. Suena mal y es frágil, pero cambiarlo rompe 432 filas.
+// Si algún día se normaliza la planilla, hay que arreglar los DATOS primero.
+const isoLocal = d => (!d || isNaN(d.getTime())) ? null
+  : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
 function getGrupo(categoria) {
   return CATEGORIA_GRUPO[categoria] || 'Otros';
 }
@@ -178,9 +201,10 @@ function parseCuotas(cuotasRaw, estado) {
 
 // ─── Movimientos ──────────────────────────────────────────────────────────────
 async function getMovimientos() {
-  // Hasta Q: la columna del TC por fila. Si la planilla todavía no la tiene, las
-  // filas llegan cortas y row[16] queda undefined → fallback, sin romper nada.
-  const rows = await getSheetRows('Movimientos', 'A:Q');
+  // Hasta T: Q es el TC real de la operación y T el blue del día. Si la planilla
+  // todavía no las tiene, las filas llegan cortas y quedan undefined → fallback,
+  // sin romper nada. R y S NO se usan: son un bloque de saldos propio de la hoja.
+  const rows = await getSheetRows('Movimientos', 'A:T');
 
   let headerIdx = -1;
   for (let i = 0; i < rows.length; i++) {
@@ -202,7 +226,9 @@ async function getMovimientos() {
     // Columnas: A Fecha, B Mes, C Tipo, D Estado, E Vencimiento, F Cuotas,
     // G Extraodinario, H ID Compra, I Proveedor, J Categoría, K Descripción,
     // L Medio de pago, M Entrada ARS, N Entrada USD, O Salida ARS, P Salida USD,
-    // Q TC USD (oculta en la planilla, se carga desde la app)
+    // Q TC USD de la operación (oculta, se carga desde la app),
+    // R/S Saldo ARS y Saldo USD (bloque propio de la planilla, NO tocar),
+    // T Blue del día (oculta, la completa el sistema — ver tc-movimientos.js)
     const fecha = parseDate(row[0]);
     const tipo = (row[2] || '').trim();       // Gasto, Ingreso, Otros
     const estado = (row[3] || '').trim();
@@ -237,6 +263,25 @@ async function getMovimientos() {
     const esFondeoFila = tipo === 'Otros';
     const tcRelevante = tieneUSD && !esCambioFila && !esFondeoFila;
 
+    // ─── Valuación en dólares ─────────────────────────────────────────────────
+    // Cada fila se valúa al tipo de cambio de SU día, no a uno solo para toda la
+    // historia. Sumar esas conversiones da plata a valor constante, que es el
+    // único total comparable entre meses con esta inflación.
+    //
+    // Precedencia: Q manda sobre T. Q es a cuánto se hizo REALMENTE la operación
+    // (un hecho de la transacción, cargado a mano); T es el blue de ese día (una
+    // referencia de mercado, automática). Cuando existen las dos, la verdad es Q.
+    //
+    // Consecuencia que hay que tener presente al leer un KPI: el total en dólares
+    // NO es el total en pesos dividido por un tipo de cambio. Son N conversiones
+    // distintas sumadas.
+    const tcBlueFila = parseAmount(row[19]);
+    const tcValuacion = tcFila > 0 ? tcFila : (tcBlueFila > 0 ? tcBlueFila : 0);
+    const origenTC = tcFila > 0 ? 'operacion' : (tcBlueFila > 0 ? 'blue' : 'ninguno');
+    // Los importes ya cargados en dólares no se convierten: ya están en dólares.
+    const entradaEnUSD = tcValuacion > 0 ? entradaUSD + (entradaARS / tcValuacion) : entradaUSD;
+    const salidaEnUSD  = tcValuacion > 0 ? salidaUSD  + (salidaARS  / tcValuacion) : salidaUSD;
+
     // Cuotas (columnas F y H)
     const cuotasInfo = parseCuotas(row[5], estado);
     const cuotaId = (row[7] || '').toString().trim();
@@ -269,6 +314,12 @@ async function getMovimientos() {
       salidaUSD,
       entradaTotal,   // ARS + USD*TC de la fila
       salidaTotal,    // ARS + USD*TC de la fila
+      // Valuación en dólares al TC del día de la fila (Q manda, si no T).
+      entradaEnUSD,
+      salidaEnUSD,
+      tcValuacion: tcValuacion || null,
+      origenTC,       // 'operacion' | 'blue' | 'ninguno'
+      fechaISO: isoLocal(fecha),
       // TC: sólo tiene sentido en filas con importe en dólares. En el resto se
       // manda tcConfirmado=true para que la app no marque lo que no hay que cargar.
       tieneUSD,
@@ -378,6 +429,16 @@ async function getResumenMensual({ mes, fechaDesde, fechaHasta } = {}) {
         ingresosPorMedioPago: {},
         totalGastosPagados: 0,
         totalGastosComprometidos: 0,
+        // ─── El mismo mes, en dólares ───────────────────────────────────────
+        // Cada fila se convierte al tipo de cambio de SU día (columna Q si la
+        // operación tiene el suyo, si no el blue de la columna T) y recién ahí
+        // se suma. Es plata a valor constante: lo único comparable entre meses
+        // cuando el peso se mueve 13% en un trimestre.
+        //
+        // OJO al leerlo: usd.ingresos NO es ingresos.total dividido por un tipo
+        // de cambio. Son N conversiones distintas sumadas, y por eso no da lo
+        // mismo. La pantalla lo dice explícitamente.
+        usd: { ingresos: 0, gastos: 0, filasSinTC: 0 },
       };
     }
 
@@ -396,6 +457,8 @@ async function getResumenMensual({ mes, fechaDesde, fechaHasta } = {}) {
       entry.ingresos[mp] = (entry.ingresos[mp] || 0) + m.entradaTotal;
       entry.ingresos.total += m.entradaTotal;
       entry.ingresosPorMedioPago[mp] = (entry.ingresosPorMedioPago[mp] || 0) + m.entradaTotal;
+      entry.usd.ingresos += m.entradaEnUSD;
+      if (!m.tcValuacion && m.entradaTotal > 0) entry.usd.filasSinTC++;
     }
 
     if (m.tipo === 'Gasto') {
@@ -421,11 +484,21 @@ async function getResumenMensual({ mes, fechaDesde, fechaHasta } = {}) {
       // del mes de la compra (la financiación es tema de caja, no de P&L)
       if (m.pagado || m.esCompraEnCuotas) entry.totalGastosPagados += monto;
       entry.totalGastosComprometidos += monto;
+      entry.usd.gastos += m.salidaEnUSD;
+      if (!m.tcValuacion && monto > 0) entry.usd.filasSinTC++;
     }
   }
 
   return Object.values(meses).map(m => ({
     ...m,
+    usd: {
+      ...m.usd,
+      resultadoNeto: m.usd.ingresos - m.usd.gastos,
+      // El TC implícito del mes: los pesos que hubo que mover por cada dólar de
+      // resultado. Sirve para explicar por qué el total en dólares no es el
+      // total en pesos sobre una cotización sola.
+      tcImplicito: m.usd.ingresos > 0 ? m.ingresos.total / m.usd.ingresos : null,
+    },
     resultadoNeto: m.ingresos.total - m.gastos.total,
     pctMercInsumos: m.ingresos.total > 0
       ? ((m.gastos.Mercaderia + m.gastos.Insumos) / m.ingresos.total) * 100 : 0,

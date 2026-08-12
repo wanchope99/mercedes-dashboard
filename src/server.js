@@ -22,6 +22,7 @@ const consumo = require('./consumo');
 const cierres = require('./cierres');
 const plan = require('./plan');
 const tc = require('./tc');
+const tcMovimientos = require('./tc-movimientos');
 const roi = require('./roi');
 const finanzas = require('./finanzas');
 const informes = require('./informes');
@@ -1314,10 +1315,18 @@ function mesDeFecha(fechaStr) {
 // "Mercado Pago Tincho" (la operativa del bar, la que se arquea) y "Mercado Pago
 // Pablo" (donde se coloca la plata del recupero): un "Mercado Pago" a secas es
 // ambiguo y ninguna de las dos lo suma, así que se resuelve a la operativa.
+// Los nombres van EXACTAMENTE como figuran en la columna A de la hoja Cajas: el
+// Saldo Calculado es un SUMIFS por texto exacto contra la columna L de
+// Movimientos, así que una diferencia de una letra vuelve esa plata invisible
+// para el saldo, para siempre y sin ningún error a la vista.
+//
+// `MP Pablo USD` (12/08/2026) se llama así y no "MP USD Pablo": es la caja donde
+// se vaultea en dólares una parte del capital de recupero. Su moneda sale de la
+// columna C de la hoja (USD), no de acá — getCajas() ya la lee.
 const MEDIOS_CANONICOS = [
   'Efectivo Local', 'Efectivo Pablo', 'Efectivo Tincho',
   'Mercado Pago Tincho', 'Mercado Pago Pablo',
-  'Galicia', 'USD Pablo', 'USD Tincho',
+  'Galicia', 'USD Pablo', 'USD Tincho', 'MP Pablo USD',
 ];
 
 function normalizarMedio(medio) {
@@ -1512,6 +1521,25 @@ app.get('/api/movimientos/tc-pendientes', authMiddleware, adminOnly, async (req,
       },
     });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// POST /api/movimientos/completar-tc — completa el blue del día (columna T) de
+// las filas que no lo tengan. Es lo mismo que corre el cron a las 09:05; existe
+// como endpoint para poder forzarlo y, sobre todo, para poder MIRARLO antes.
+//
+// dryRun viene en true por defecto a propósito: esto toca mil filas de la
+// planilla de la que sale toda la plata del negocio, así que ver qué haría tiene
+// que ser el camino por defecto y escribir tiene que ser una decisión explícita.
+app.post('/api/movimientos/completar-tc', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const dryRun = req.body?.dryRun !== false;
+    const r = await tcMovimientos.completarTC({ dryRun, limite: Number(req.body?.limite) || 0 });
+    if (!dryRun && r.escritas > 0) clearCache();   // la próxima lectura ve los TC nuevos
+    res.json({ ok: true, data: r });
+  } catch (err) {
+    console.error('Error /api/movimientos/completar-tc:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // PUT /api/movimientos/:fila/tc — carga el tipo de cambio de UNA fila (columna Q).

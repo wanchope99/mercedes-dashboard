@@ -7,9 +7,18 @@
 const cron = require('node-cron');
 const stockBebidas = require('./stock-bebidas');
 const informes = require('./informes');
+const tcMovimientos = require('./tc-movimientos');
 
 // 09:00 hora Argentina, todos los días, antes del servicio.
 const STOCK_BEBIDAS_CRON = process.env.STOCK_BEBIDAS_CRON || '0 9 * * *';
+
+// 09:05: completar el blue del día (columna T) de las filas que no lo tengan.
+// Cinco minutos después del snapshot de stock para no solaparlos.
+//
+// No necesita catch-up propio, a diferencia de los informes: completarTC() mira
+// TODAS las filas vacías, así que una corrida perdida la recupera la siguiente
+// sola. Es idempotente por naturaleza — nunca pisa una celda que ya tiene valor.
+const TC_MOVIMIENTOS_CRON = process.env.TC_MOVIMIENTOS_CRON || '5 9 * * *';
 
 const TZ_AR = 'America/Argentina/Buenos_Aires';
 
@@ -85,6 +94,22 @@ function iniciarCron() {
   }, { timezone: TZ_AR, name: 'stock-bebidas-diario', noOverlap: true });
 
   console.log(`Cron: snapshot diario de Stock Bebidas programado (${STOCK_BEBIDAS_CRON} ${TZ_AR})`);
+
+  // Tipo de cambio de las filas nuevas de Movimientos.
+  cron.schedule(TC_MOVIMIENTOS_CRON, async () => {
+    try {
+      const r = await tcMovimientos.completarTC({ dryRun: false });
+      if (r.escritas > 0) console.log(`Cron TC Movimientos: ${r.escritas} filas completadas`);
+      if (r.problemas.length) {
+        console.warn(`Cron TC Movimientos: ${r.problemas.length} filas sin resolver`,
+          r.problemas.slice(0, 5));
+      }
+    } catch (e) {
+      console.error('Cron TC Movimientos: error completando el tipo de cambio:', e.message);
+    }
+  }, { timezone: TZ_AR, name: 'tc-movimientos-diario', noOverlap: true });
+
+  console.log(`Cron: completado diario del TC de Movimientos programado (${TC_MOVIMIENTOS_CRON} ${TZ_AR})`);
 
   // Informes automáticos.
   const programarInforme = (tipo, expresion) => {

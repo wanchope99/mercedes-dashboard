@@ -74,7 +74,20 @@ const HEADER_MOVS = ['ID', 'Fecha', 'Tipo', 'Bucket', 'MontoARS', 'Instrumento',
 // Único destino vigente. Los históricos 'uva'/'cer' se siguen LEYENDO (no se
 // pierde historial) pero ya no se pueden cargar nuevos.
 const BALDE_MP = 'mp';
-const BALDES = [BALDE_MP];
+// Vault en dólares (12/08/2026). Un porcentaje del capital de recupero se guarda
+// en dólares en la caja `MP Pablo USD`.
+//
+// INCLUSIÓN MÍNIMA, A PROPÓSITO: hoy este balde sirve para que la plata deje de
+// ser invisible —se puede registrar y el pozo la cuenta— pero el modelo sigue
+// siendo el de un solo destino en pesos. Lo que TODAVÍA NO hace y hay que
+// resolver en el revamp:
+//   · el interés se devenga sólo sobre la cuenta en pesos (la TNA del 17,5% es
+//     de esa cuenta; el vault en dólares no rinde eso, rinde lo que haga el dólar);
+//   · no hay política de qué porcentaje va a cada destino, ni nada que la controle;
+//   · la proyección (calcularProyeccion) razona en pesos y no sabe de esto.
+// No agregar features encima de este balde sin encarar eso primero.
+const BALDE_MP_USD = 'mp-usd';
+const BALDES = [BALDE_MP, BALDE_MP_USD];
 const BALDES_LEGACY = ['uva', 'cer'];
 // "interes" es lo que la cuenta remunerada pagó: NO es plata colocada, es lo que
 // rindió la que ya estaba. Se registra a medida que se acredita, y como cada
@@ -403,6 +416,13 @@ function conciliar(movimientos, recuperoPorMes) {
 // fija (Cajas!F3) tarde o temprano lee la cuenta de otro.
 const CAJA_POZO = 'Mercado Pago Pablo';
 
+// El vault en dólares. Se lleva EN DÓLARES (columna Moneda = USD en la hoja
+// Cajas), así que su saldo no se puede sumar al de la cuenta en pesos sin
+// convertirlo. Se valúa al blue de HOY porque es una foto del presente —"cuánto
+// vale hoy el pozo"—, no un movimiento histórico. Los movimientos históricos sí
+// se valúan al TC de su día (ver sheets.js).
+const CAJA_POZO_USD = 'MP Pablo USD';
+
 // Las salidas de esa cuenta son gastos del bar que Pablo paga desde ahí. No es
 // plata que "se perdió" del pozo: es plata del bar que salió por esa ventanilla.
 // Se muestran aparte justamente porque el saldo solo no deja verlo.
@@ -439,6 +459,20 @@ async function _pozoReal() {
       rowIndex: m.rowIndex, descripcion: m.descripcion,
     }));
 
+  // El vault en dólares, como componente APARTE. No se mezcla con saldoARS: ese
+  // campo es la cuenta en pesos y hay pantallas y cálculos que dependen de que
+  // siga significando exactamente eso. El total combinado se arma en
+  // resumenFinanzas(), donde está el tipo de cambio.
+  const cajaUSD = cajas.find(c => norm(c.caja) === norm(CAJA_POZO_USD));
+  const vaultUSD = cajaUSD
+    ? {
+        encontrada: true,
+        caja: cajaUSD.caja,
+        saldoUSD: Math.round(cajaUSD.saldoCalculado || 0),
+        saldoRealUSD: Math.round(cajaUSD.saldoReal || 0),
+      }
+    : { encontrada: false, caja: CAJA_POZO_USD, saldoUSD: 0, saldoRealUSD: 0 };
+
   return {
     encontrada: true,
     caja: caja.caja,
@@ -447,6 +481,7 @@ async function _pozoReal() {
     entradasARS: Math.round(caja.entradas || 0),
     salidasARS: Math.round(caja.salidas || 0),
     salidas,
+    vaultUSD,
     flujos,
   };
 }
@@ -576,11 +611,25 @@ async function resumenFinanzas(recuperoPorMes = []) {
   // darían dos respuestas para la misma pregunta.
   const blue = await require('./tc').getDolarBlue().catch(() => null);
   const enUSD = ars => (blue && blue.tc > 0 ? Math.round((ars || 0) / blue.tc) : null);
+  // El vault en dólares valuado en pesos, y el pozo total sumando los dos.
+  // `pozoUSD` sigue significando lo mismo que antes —la cuenta en PESOS medida en
+  // dólares— para no cambiarle el sentido a un campo que ya se está mostrando.
+  // Lo nuevo va en campos nuevos.
+  const vault = pozoPublico.vaultUSD || { saldoUSD: 0 };
+  const vaultEnARS = (blue && blue.tc > 0) ? Math.round(vault.saldoUSD * blue.tc) : null;
   const dolar = blue
     ? {
         tc: blue.tc, compra: blue.compra, venta: blue.venta,
         fecha: blue.fecha, fuente: blue.fuente, stale: !!blue.stale,
         pozoUSD: enUSD(pozoPublico.saldoARS),
+        vaultUSD: vault.saldoUSD,
+        vaultEnARS,
+        // El pozo completo: la cuenta en pesos más el vault en dólares valuado
+        // a hoy. Es el número que contesta "cuánto hay puesto", ahora que la
+        // plata vive en dos monedas.
+        pozoTotalARS: vaultEnARS != null ? pozoPublico.saldoARS + vaultEnARS : null,
+        pozoTotalUSD: enUSD(pozoPublico.saldoARS) != null
+          ? enUSD(pozoPublico.saldoARS) + vault.saldoUSD : null,
       }
     : null;
   return {
@@ -679,12 +728,15 @@ async function guardarAporte(mesISO, monto, notas) {
 async function guardarMovimiento(mov) {
   if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
   const tipo = (mov.tipo || 'colocacion').toString().trim();
-  // El destino ya no se elige: todo va a Mercado Pago Pablo. Se acepta el campo
-  // por compatibilidad con clientes viejos, pero sólo si coincide.
+  // Dos destinos desde el 12/08/2026: la cuenta en pesos y el vault en dólares.
+  // Si no se especifica, sigue siendo la de pesos — así ningún cliente viejo
+  // cambia de comportamiento por el solo hecho de que exista el segundo.
   const balde = (mov.balde || BALDE_MP).toString().trim().toLowerCase();
   const monto = Math.round(_num(mov.monto));
   if (!TIPOS.includes(tipo)) throw new Error(`Tipo inválido (${TIPOS.join(' | ')})`);
-  if (balde !== BALDE_MP) throw new Error('El único destino vigente es Mercado Pago Pablo');
+  if (!BALDES.includes(balde)) {
+    throw new Error(`Destino inválido. Los vigentes son: ${BALDES.join(' | ')}`);
+  }
   if (!(monto > 0)) throw new Error('El monto debe ser mayor a cero');
   const fecha = (mov.fecha || '').toString().trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new Error('Fecha inválida (se espera YYYY-MM-DD)');
@@ -695,7 +747,9 @@ async function guardarMovimiento(mov) {
   await _ensureHoja(api, HOJA_MOVS, HEADER_MOVS, 'A1:J1');
   const fila = [
     `f${Date.now()}`, fecha, tipo, balde, monto,
-    (mov.instrumento || 'Mercado Pago Pablo').toString().trim(),
+    // El instrumento por defecto sigue al destino: si no, un movimiento al vault
+    // quedaría registrado como si hubiera ido a la cuenta en pesos.
+    (mov.instrumento || (balde === BALDE_MP_USD ? CAJA_POZO_USD : CAJA_POZO)).toString().trim(),
     (mov.comprobante || '').toString().trim(),
     mesRec,
     (mov.notas || '').toString().trim(),

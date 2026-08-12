@@ -9155,6 +9155,24 @@ async function loadReporteBalance() {
   setRepView(state.repBal.view);
 }
 
+// Dólares con el mismo criterio de formato que fmt() usa para pesos.
+function fmtUSD(n) {
+  const v = Math.round(n || 0);
+  return (v < 0 ? '-' : '') + 'US$' + Math.abs(v).toLocaleString('es-AR');
+}
+
+// ─── Los KPI del Balance van en dólares, con el peso abajo ──────────────────
+//
+// Por qué el dólar arriba: con inflación de dos dígitos por trimestre, un total
+// en pesos más grande que el del mes pasado no dice si el negocio anduvo mejor.
+// El total en dólares sí. El peso sigue estando porque es la moneda en la que se
+// opera y en la que se controla la caja.
+//
+// Cada fila se convierte al tipo de cambio de SU día (columna Q si la operación
+// tiene el suyo, si no el blue de la columna T) y recién ahí se suman. El total
+// en dólares NO es el total en pesos dividido por una cotización, y la nota al
+// pie lo dice: si no, el primero que haga la división a mano va a pensar que la
+// pantalla está rota.
 function renderRepBalKPIs(resumen, serie) {
   const ingresos = resumen.reduce((s, m) => s + m.ingresos.total, 0);
   const gastos = resumen.reduce((s, m) => s + m.gastos.total, 0);
@@ -9163,11 +9181,37 @@ function renderRepBalKPIs(resumen, serie) {
   const diasConIngreso = serie.filter(p => p.ingresos > 0).length;
   const promedio = diasConIngreso > 0 ? ingresos / diasConIngreso : 0;
 
+  // usd puede no venir si el server todavía es viejo: se cae con gracia a pesos.
+  const hayUSD = resumen.length > 0 && resumen.every(m => m && m.usd);
+  const ingUSD = hayUSD ? resumen.reduce((s, m) => s + (m.usd.ingresos || 0), 0) : 0;
+  const gasUSD = hayUSD ? resumen.reduce((s, m) => s + (m.usd.gastos || 0), 0) : 0;
+  const resUSD = ingUSD - gasUSD;
+  const promUSD = diasConIngreso > 0 ? ingUSD / diasConIngreso : 0;
+  const sinTC = hayUSD ? resumen.reduce((s, m) => s + (m.usd.filasSinTC || 0), 0) : 0;
+
+  // Tarjeta: valor grande en dólares, valor en pesos como subtexto, y el dato
+  // de contexto que ya estaba, más chico todavía.
+  const card = (color, label, usd, ars, nota) => `
+    <div class="kpi-card ${color}">
+      <div class="kpi-label">${label}</div>
+      <div class="kpi-value">${hayUSD ? fmtUSD(usd) : fmt(ars)}</div>
+      ${hayUSD ? `<div class="kpi-sub" style="font-size:13px;color:var(--text)">${fmt(ars)}</div>` : ''}
+      <div class="kpi-sub" style="font-size:11px;margin-top:2px">${nota}</div>
+    </div>`;
+
   document.getElementById('rep-bal-kpis').innerHTML =
-    `<div class="kpi-card green"><div class="kpi-label">Ingresos</div><div class="kpi-value">${fmt(ingresos)}</div><div class="kpi-sub">${diasConIngreso} días con ingreso</div></div>`
-    + `<div class="kpi-card red"><div class="kpi-label">Gastos</div><div class="kpi-value">${fmt(gastos)}</div><div class="kpi-sub">${ingresos > 0 ? pct((gastos / ingresos) * 100) + ' de los ingresos' : 'sin ingresos en el período'}</div></div>`
-    + `<div class="kpi-card ${resultado >= 0 ? 'green' : 'red'}"><div class="kpi-label">Resultado</div><div class="kpi-value">${fmt(resultado)}</div><div class="kpi-sub">${pct(margen)} de margen</div></div>`
-    + `<div class="kpi-card blue"><div class="kpi-label">Promedio por día con ingreso</div><div class="kpi-value">${fmt(promedio)}</div><div class="kpi-sub">${serie.length} días en el período</div></div>`;
+      card('green', 'Ingresos', ingUSD, ingresos, `${diasConIngreso} días con ingreso`)
+    + card('red', 'Gastos', gasUSD, gastos,
+        ingresos > 0 ? pct((gastos / ingresos) * 100) + ' de los ingresos' : 'sin ingresos en el período')
+    + card(resultado >= 0 ? 'green' : 'red', 'Resultado', resUSD, resultado, `${pct(margen)} de margen`)
+    + card('blue', 'Promedio por día con ingreso', promUSD, promedio, `${serie.length} días en el período`)
+    + (!hayUSD ? '' : `
+      <div style="grid-column:1/-1;font-size:11px;color:var(--text-muted);line-height:1.6;margin-top:-4px">
+        Los dólares se calculan fila por fila, cada movimiento al tipo de cambio del día en que ocurrió
+        (el real de la operación si está cargado; si no, el blue de esa fecha).
+        <b>No es el total en pesos dividido por una sola cotización</b>, así que la cuenta a mano no va a dar igual — y está bien.
+        ${sinTC > 0 ? `<span style="color:var(--orange)"> · ${sinTC} ${sinTC === 1 ? 'fila queda' : 'filas quedan'} sin tipo de cambio y no suman al total en dólares.</span>` : ''}
+      </div>`);
 }
 
 function renderRepBalChart(serie) {
