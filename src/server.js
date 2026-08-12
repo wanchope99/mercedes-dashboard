@@ -1044,20 +1044,26 @@ async function registrarGastoEnLibro(datos = {}) {
   const { facturaId, proveedor, descripcion, usuario } = datos;
 
   // Idempotencia: si ya hay una fila con este id de factura, no se escribe otra.
+  //
+  // Se lee SÓLO la columna H, no el movimiento entero. Contra Sheets lo caro es
+  // la cantidad de llamadas, no el tamaño: getMovimientos() son dos llamadas
+  // (A:T y T:T) más parsear 1.166 filas × 20 columnas, para mirar una sola
+  // columna. Una lectura de H:H hace lo mismo en una llamada y sin parseo.
+  const sheetsApi = google.sheets({ version: 'v4', auth: getAuth() });
   try {
-    const yaEstan = await getMovimientos();
-    const previa = yaEstan.find(m => (m.cuotaId || '') === facturaId);
-    if (previa) {
-      return { ok: true, yaExistia: true, fila: previa.rowIndex, monto: previa.salidaARS, medio: previa.medioPago };
-    }
+    const r = await sheetsApi.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID, range: 'Movimientos!H:H',
+    });
+    const col = r.data.values || [];
+    const fila = col.findIndex(x => (x && x[0] ? x[0].toString().trim() : '') === facturaId);
+    if (fila >= 0) return { ok: true, yaExistia: true, fila: fila + 1 };
   } catch (e) {
     // Si no se puede leer, NO se escribe: el riesgo de duplicar un gasto es peor
     // que el de pedir que se reintente.
     return { ok: false, motivo: 'lectura', error: `No se pudo verificar si la factura ya estaba cargada (${e.message}). No se escribió nada.` };
   }
 
-  const sheets = google.sheets({ version: 'v4', auth: getAuth() });
-  await sheets.spreadsheets.values.append({
+  await sheetsApi.spreadsheets.values.append({
     spreadsheetId: SPREADSHEET_ID, range: 'Movimientos!A:P',
     valueInputOption: 'USER_ENTERED', requestBody: { values: [row] },
   });

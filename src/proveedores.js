@@ -425,7 +425,16 @@ let _pendHidratado = false;
 // Columnas: A ID · B Estado · C Creado · D JSON. Sobreviven a los redeploys.
 const PEND_SHEET = process.env.PROVEEDORES_PEND_SHEET || 'Pendientes';
 
+// La hoja se crea una sola vez en la vida del proceso.
+//
+// Antes esto mandaba un addSheet en CADA persistencia, que a partir de la
+// segunda siempre falla con "already exists": una ida y vuelta a Google entera,
+// tirada, por cada guardado. Con dos guardados por factura eran dos llamadas
+// perdidas. La bandera se levanta tanto si la creamos como si ya existía.
+let _pendSheetLista = false;
+
 async function _ensurePendSheet(sheets) {
+  if (_pendSheetLista) return;
   try {
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId: PROV_SHEET_ID,
@@ -435,8 +444,10 @@ async function _ensurePendSheet(sheets) {
       spreadsheetId: PROV_SHEET_ID, range: `${PEND_SHEET}!A1:D1`, valueInputOption: 'RAW',
       requestBody: { values: [['ID', 'Estado', 'Creado', 'JSON']] },
     });
+    _pendSheetLista = true;
   } catch (e) {
     if (!String(e.message || '').toLowerCase().includes('already exists')) throw e;
+    _pendSheetLista = true;   // ya estaba: no volver a preguntar
   }
 }
 
@@ -446,22 +457,33 @@ async function _persistPendiente(reg) {
   try {
     const sheets = sheetsClient();
     await _ensurePendSheet(sheets);
-    // Buscar si ya existe la fila de este ID
-    const res = await sheets.spreadsheets.values.get({ spreadsheetId: PROV_SHEET_ID, range: `${PEND_SHEET}!A:A` });
-    const rows = res.data.values || [];
-    let rowIndex = -1;
-    for (let i = 1; i < rows.length; i++) { if ((rows[i][0] || '') === reg.id) { rowIndex = i + 1; break; } }
-    const fila = [reg.id, reg.estado, reg.creado, JSON.stringify(reg)];
+    // Dónde está la fila de este pendiente. Se recuerda en el propio registro:
+    // una factura se persiste dos veces (al resolver y al marcar resuelto) y sin
+    // esto la segunda vuelve a leer la columna entera para encontrar lo mismo.
+    let rowIndex = reg._fila || -1;
+    if (rowIndex < 0) {
+      const res = await sheets.spreadsheets.values.get({ spreadsheetId: PROV_SHEET_ID, range: `${PEND_SHEET}!A:A` });
+      const rows = res.data.values || [];
+      for (let i = 1; i < rows.length; i++) { if ((rows[i][0] || '') === reg.id) { rowIndex = i + 1; break; } }
+      if (rowIndex > 0) reg._fila = rowIndex;
+    }
+    // `_fila` es interno: no tiene que viajar dentro del JSON que se guarda.
+    const { _fila, ...paraGuardar } = reg;
+    const fila = [reg.id, reg.estado, reg.creado, JSON.stringify(paraGuardar)];
     if (rowIndex > 0) {
       await sheets.spreadsheets.values.update({
         spreadsheetId: PROV_SHEET_ID, range: `${PEND_SHEET}!A${rowIndex}:D${rowIndex}`,
         valueInputOption: 'RAW', requestBody: { values: [fila] },
       });
     } else {
-      await sheets.spreadsheets.values.append({
+      const r = await sheets.spreadsheets.values.append({
         spreadsheetId: PROV_SHEET_ID, range: `${PEND_SHEET}!A:D`,
         valueInputOption: 'RAW', requestBody: { values: [fila] },
       });
+      // La respuesta del append dice en qué fila quedó: se guarda para que el
+      // siguiente guardado sea un update directo, sin volver a buscarla.
+      const m = String((r.data && r.data.updates && r.data.updates.updatedRange) || '').match(/!A(\d+)/);
+      if (m) reg._fila = Number(m[1]);
     }
   } catch (e) { console.warn('Pendientes: no se pudo persistir', reg.id, e.message); }
 }

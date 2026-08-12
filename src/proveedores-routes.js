@@ -490,34 +490,33 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro } 
       const n = await prov.appendCompras(out.listoParaEscribir);
       prov.marcarResuelto(req.params.id);
 
-      // Recordar el criterio de IVA del proveedor para la próxima vez.
-      if (ivaProv && reg.factura.proveedor) {
-        try { await provCfg.setIvaProveedor(reg.factura.proveedor, ivaProv); }
-        catch (e) { console.warn('No se pudo guardar IVA del proveedor:', e.message); }
-      }
-      // Recordar el MEDIO DE PAGO del proveedor para no volver a preguntarlo.
+      // ─── Lo que aprende del proveedor, TODO junto ────────────────────────
       //
-      // Se guarda el nombre EXACTO de la caja que eligió la persona, no lo que
-      // dijera antes la hoja. Así un "Mercado Pago Tincho / Galicia" —que hay que
-      // preguntar todas las veces porque son dos— se convierte en un valor
-      // concreto la primera vez que alguien contesta, y deja de preguntarse.
-      const medioProv = cats.normalizarParaLibro(reg.factura.medioPago);
-      if (reg.factura.proveedor && medioProv) {
-        try { await provCfg.setMedioProveedor(reg.factura.proveedor, medioProv); }
-        catch (e) { console.warn('No se pudo guardar medio de pago del proveedor:', e.message); }
-      }
-      // Recordar la CATEGORÍA DE GASTO del proveedor (columna J de Movimientos).
-      if (reg.factura.proveedor && reg.factura.categoriaGasto) {
-        try { await provCfg.setAtributoProveedor(reg.factura.proveedor, 'Categoria Gasto', reg.factura.categoriaGasto); }
-        catch (e) { console.warn('No se pudo guardar la categoría de gasto:', e.message); }
-      }
-      // Recordar atributos fiscales del proveedor (deducible / incluidos).
+      // Antes eran seis llamadas —IVA, medio, categoría de gasto y los tres
+      // atributos fiscales—, cada una con su propia lectura de la hoja y su
+      // escritura: unas 14 idas y vueltas a Google, más de 4 segundos de espera.
+      // Y a partir de la segunda factura de un proveedor reescribían exactamente
+      // los mismos valores.
+      //
+      // Ahora es una sola lectura y una sola escritura con lo que de verdad
+      // cambió. En una factura repetida no escribe nada.
+      //
+      // El medio se guarda con el nombre EXACTO de la caja que eligió la
+      // persona: así un "Mercado Pago Tincho / Galicia" —que hay que preguntar
+      // siempre porque son dos— se vuelve un valor concreto la primera vez que
+      // alguien contesta, y deja de preguntarse.
       if (reg.factura.proveedor) {
-        try {
-          if (fk.ivaDeducible != null) await provCfg.setIvaDeducible(reg.factura.proveedor, fk.ivaDeducible);
-          if (fk.descuentoIncluido != null) await provCfg.setDescuentoIncluido(reg.factura.proveedor, fk.descuentoIncluido);
-          if (fk.ivaIncluido != null) await provCfg.setIvaIncluido(reg.factura.proveedor, fk.ivaIncluido);
-        } catch (e) { console.warn('No se pudo guardar atributos fiscales:', e.message); }
+        const sn = b => (b ? 'S' : 'N');
+        const aprender = {};
+        if (ivaProv) aprender['IVA'] = ivaProv === 'con' ? 'Con IVA' : 'Sin IVA';
+        const medioProv = cats.normalizarParaLibro(reg.factura.medioPago);
+        if (medioProv) aprender['Medio de Pago'] = medioProv;
+        if (reg.factura.categoriaGasto) aprender['Categoria Gasto'] = reg.factura.categoriaGasto;
+        if (fk.ivaDeducible != null) aprender['IVA Deducible'] = sn(fk.ivaDeducible);
+        if (fk.descuentoIncluido != null) aprender['Descuento Incluido'] = sn(fk.descuentoIncluido);
+        if (fk.ivaIncluido != null) aprender['IVA Incluido'] = sn(fk.ivaIncluido);
+        try { await provCfg.setAtributosProveedor(reg.factura.proveedor, aprender); }
+        catch (e) { console.warn('No se pudo guardar lo aprendido del proveedor:', e.message); }
       }
 
       // ─── Y el gasto en el libro ─────────────────────────────────────────

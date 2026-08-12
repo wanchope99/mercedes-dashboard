@@ -197,6 +197,119 @@ async function setAtributoProveedor(nombre, headerNombre, valor) {
   cache.del('prov_config');
 }
 
+// ─── Guardar VARIOS atributos de un proveedor en una sola vuelta ──────────────
+//
+// Por qué existe: contra Google Sheets lo caro es la CANTIDAD de llamadas, no
+// el tamaño. Medido el 12/08/2026: leer una sola celda tarda 611 ms y leer las
+// 1.166 filas de Movimientos tarda 461 ms. Es todo latencia de ida y vuelta.
+//
+// Al confirmar una factura se guardaban seis atributos con seis llamadas a
+// setAtributoProveedor, y cada una hacía su propia lectura A:Z más su escritura
+// —y setMedioProveedor hacía una lectura extra encima—: unas 14 idas y vueltas,
+// cerca de 4,5 segundos de la espera del usuario.
+//
+// Y lo peor: reescribía los mismos valores TODAS las veces. A partir de la
+// segunda factura de un proveedor, esos seis valores ya son los que están en la
+// hoja, así que eran 14 llamadas para no cambiar nada.
+//
+// Acá: UNA lectura, se descarta lo que no cambió, y UNA escritura con todo
+// junto. Si no cambió nada, cero escrituras.
+//
+// `mapa` es { 'Nombre de la columna': valor }. Una columna que no existe se crea.
+async function setAtributosProveedor(nombre, mapa = {}) {
+  if (!GESTION_SHEET_ID || !nombre) return { escritas: 0, llamadas: 0 };
+  const entradas = Object.entries(mapa).filter(([, v]) => v !== undefined && v !== null && v !== '');
+  if (!entradas.length) return { escritas: 0, llamadas: 0 };
+
+  const api = sheets();
+  let llamadas = 1;
+  const res0 = await api.spreadsheets.values.get({ spreadsheetId: GESTION_SHEET_ID, range: `${PROVEEDORES_HOJA}!A:Z` });
+  const rows0 = res0.data.values || [];
+  let hIdx = rows0.findIndex(r => norm(r && r[0]) === 'proveedor'); if (hIdx === -1) hIdx = 0;
+  const headerRaw = rows0[hIdx] || [];
+  const header = headerRaw.map(norm);
+
+  // Fila del proveedor (1-based). Si no está, se agrega entera al final.
+  let filaIdx = -1;
+  for (let i = hIdx + 1; i < rows0.length; i++) {
+    if (rows0[i] && norm(rows0[i][0]) === norm(nombre)) { filaIdx = i; break; }
+  }
+
+  // Resolver la columna de cada atributo, creando las que falten.
+  let proxLibre = headerRaw.length;
+  const nuevasCols = [];
+  const destino = [];
+  for (const [col, valor] of entradas) {
+    let idx = header.findIndex(h => h === norm(col));
+    // "Medio de Pago" y "Forma de Pago" son la misma columna: en esta hoja se
+    // llama de una u otra forma según quién la creó. Sin este alias se crearía
+    // una columna duplicada y leerConfig seguiría leyendo la vieja.
+    if (idx === -1 && (norm(col).includes('medio') || norm(col).includes('forma'))) {
+      idx = header.findIndex(h => h.includes('medio') || h.includes('forma'));
+    }
+    if (idx === -1) {
+      idx = proxLibre++;
+      nuevasCols.push({ idx, nombre: col });
+      header[idx] = norm(col);
+    }
+    destino.push({ idx, valor: String(valor) });
+  }
+
+  // Proveedor nuevo: una sola escritura con la fila completa.
+  if (filaIdx === -1) {
+    const row = [];
+    row[0] = nombre;
+    for (const d of destino) row[d.idx] = d.valor;
+    for (let k = 0; k < row.length; k++) if (row[k] === undefined) row[k] = '';
+    const data = nuevasCols.map(c => ({
+      range: `${PROVEEDORES_HOJA}!${colLetter(c.idx)}${hIdx + 1}`, values: [[c.nombre]],
+    }));
+    if (data.length) {
+      await api.spreadsheets.values.batchUpdate({
+        spreadsheetId: GESTION_SHEET_ID, requestBody: { valueInputOption: 'RAW', data },
+      });
+      llamadas++;
+    }
+    await api.spreadsheets.values.append({
+      spreadsheetId: GESTION_SHEET_ID, range: `${PROVEEDORES_HOJA}!A:Z`,
+      valueInputOption: 'RAW', requestBody: { values: [row] },
+    });
+    llamadas++;
+    cache.del('prov_config');
+    return { escritas: destino.length, llamadas, filaNueva: true };
+  }
+
+  // Proveedor existente: sólo lo que realmente cambia.
+  const actual = rows0[filaIdx] || [];
+  const data = nuevasCols.map(c => ({
+    range: `${PROVEEDORES_HOJA}!${colLetter(c.idx)}${hIdx + 1}`, values: [[c.nombre]],
+  }));
+  let escritas = 0;
+  for (const d of destino) {
+    const previo = (actual[d.idx] ?? '').toString().trim();
+    if (previo === d.valor) continue;          // ya está así: no se toca
+    data.push({
+      range: `${PROVEEDORES_HOJA}!${colLetter(d.idx)}${filaIdx + 1}`, values: [[d.valor]],
+    });
+    escritas++;
+  }
+  if (data.length) {
+    await api.spreadsheets.values.batchUpdate({
+      spreadsheetId: GESTION_SHEET_ID, requestBody: { valueInputOption: 'RAW', data },
+    });
+    llamadas++;
+    cache.del('prov_config');
+  }
+  return { escritas, llamadas };
+}
+
+// El header real de la columna de medio de pago, que en esta hoja puede llamarse
+// "Medio de Pago" o "Forma de Pago" según quién la creó.
+function headerMedioDe(headerRaw) {
+  const idx = (headerRaw || []).findIndex(h => { const n = norm(h); return n.includes('medio') || n.includes('forma'); });
+  return idx >= 0 ? headerRaw[idx] : 'Medio de Pago';
+}
+
 // Helpers fiscales: guardan S/N por proveedor.
 const _sn = b => b ? 'S' : 'N';
 async function setIvaDeducible(nombre, b)       { return setAtributoProveedor(nombre, 'IVA Deducible', _sn(b)); }
@@ -224,4 +337,7 @@ async function setMedioProveedor(nombre, medio) {
 
 function clearConfigCache() { cache.flushAll(); }
 
-module.exports = { leerConfig, getProveedor, setIvaProveedor, setMedioProveedor, setAtributoProveedor, setIvaDeducible, setDescuentoIncluido, setIvaIncluido, clearConfigCache, norm };
+module.exports = { leerConfig, getProveedor, setIvaProveedor, setMedioProveedor, setAtributoProveedor, setIvaDeducible, setDescuentoIncluido, setIvaIncluido, clearConfigCache, norm,
+  // Guarda varios atributos en UNA lectura + UNA escritura, salteando lo que no
+  // cambió. Es lo que hay que usar cuando se guarda más de un atributo junto.
+  setAtributosProveedor, headerMedioDe };
