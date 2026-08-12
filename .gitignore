@@ -7,3 +7,12 @@ credentials.json
 # la meta de recupero en USD, proveedores y notas sobre el personal por nombre).
 # Nada de eso tiene por qué ser legible por cualquiera. Se queda local.
 progress.json
+
+# Exports de Fudo, por la misma razón: el repositorio es PÚBLICO y ventas.xls
+# trae el detalle de cada venta del año más la hoja de comprobantes emitidos,
+# con razón social, CUIT y domicilio de clientes reales. Es además la única
+# fuente del estado fiscal de una venta (la API de Fudo no lo expone), así que
+# el archivo se usa a mano y se queda local.
+ventas.xls
+*.xls
+*.xlsx

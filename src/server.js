@@ -356,7 +356,7 @@ async function filaCaja(sheets, nombre) {
 
 // ─── Arqueo de Cajas ──────────────────────────────────────────────────────────
 
-// Encabezados canónicos de la hoja "Arqueo de Cajas" (A1:V1). Deben coincidir EXACTO
+// Encabezados canónicos de la hoja "Arqueo de Cajas" (A1:X1). Deben coincidir EXACTO
 // con el orden en que se escribe rowArqueo y en que lee /api/arqueo/historial. Se
 // reescriben en cada cierre para que la planilla se autocorrija (ver POST cerrar).
 //
@@ -382,6 +382,12 @@ const ARQUEO_HEADERS = [
   'Efectivo Esperado Cierre',     // T — R real inicial + Fudo − gastos
   'Saldo Calculado al Cerrar',    // U — Saldo Calculado de la caja de efectivo al cerrar
   'Ajuste Apertura Posteado',     // V — fila de ajuste escrita en Movimientos al abrir
+  // ─── Control de facturación (12 ago 2026) ───
+  // W y X existen para que la confirmación de facturación del cierre quede
+  // REGISTRADA. Sin esto el checkbox sería sólo un click que no deja rastro: no
+  // habría forma de saber después qué noches se confirmó ni sobre qué monto.
+  'Facturación Confirmada',       // W — quién y cuándo confirmó haber facturado
+  'Bancarizado del Turno',        // X — monto Galicia según Fudo sobre el que se confirmó
 ];
 
 // Diferencias de efectivo por debajo de esto se ignoran (redondeo, no plata real).
@@ -474,7 +480,7 @@ app.get('/api/arqueo/historial', authMiddleware, adminOnly, async (req, res) => 
     const sheets = google.sheets({ version: 'v4', auth });
     const r = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Arqueo de Cajas!A:V',
+      range: 'Arqueo de Cajas!A:X',
     });
     const rows = r.data.values || [];
     const num = v => {
@@ -635,10 +641,22 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   // galicia = Total Bruto; galiciaNeto = Total Neto Acreditado
   // impuestos se calcula como Bruto - Neto
   // fudo = ingresos del día según Fudo { encontrado, efectivo, mercadoPago, galicia }
-  const { efectivo, mercadoPago, galicia, galiciaNeto, fudo, nota } = req.body;
+  const { efectivo, mercadoPago, galicia, galiciaNeto, fudo, nota, facturacionConfirmada } = req.body;
   if (efectivo === undefined || mercadoPago === undefined || galicia === undefined) {
     estadoCaja.cerrando = false;
     return res.status(400).json({ ok: false, error: 'Faltan valores de saldo final' });
+  }
+
+  // Control de facturación: el cierre no se escribe sin la confirmación explícita.
+  // La regla vive ACÁ y no sólo en el botón deshabilitado del navegador porque un
+  // control que se puede saltear con una request a mano no es un control. Ver
+  // 04_decisiones/2026-08-12-control-de-facturacion-en-el-cierre.md.
+  if (facturacionConfirmada !== true) {
+    estadoCaja.cerrando = false;
+    return res.status(400).json({
+      ok: false,
+      error: 'Falta confirmar que se emitieron las facturas de este servicio. No se cerró la caja.',
+    });
   }
 
   const cierre = new Date();
@@ -721,6 +739,10 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
     // Diferencia REAL del turno (efectivo): lo contado al cerrar vs lo esperado según
     // ventas de Fudo. Esperado = inicial + Fudo efectivo − gastos en efectivo del turno.
     const fudoEfectivo = (fudo && fudo.encontrado) ? (Number(fudo.efectivo) || 0) : 0;
+    // Bancarizado del turno según Fudo (QR + Débito + Crédito, los tres que
+    // liquidan por Galicia). Es el monto que EXIGE comprobante y sobre el que se
+    // confirmó la facturación; queda en la columna X del arqueo.
+    const fudoGalicia = (fudo && fudo.encontrado) ? (Number(fudo.galicia) || 0) : 0;
     const _gastosEfvoTurno = (estadoCaja.gastosSesion || []).filter(g => g.bucket === 'efectivo').reduce((a, g) => a + g.monto, 0);
     const _esperadoEfvo = (estadoCaja.efectivoInicial || 0) + fudoEfectivo - _gastosEfvoTurno;
     const difEfectivoTurno = Math.round((Number(efectivo) - _esperadoEfvo) * 100) / 100;
@@ -756,6 +778,12 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
       _esperadoEfvo,                         // T: esperado al cierre = E + N − S
       saldoCalculadoAlCerrar,                // U: Saldo Calculado al cerrar
       estadoCaja.ajusteApertura || 0,        // V: ajuste posteado al abrir
+      // W: quién confirmó la facturación y cuándo. Se guarda el nombre, no un "SI":
+      // dentro de un mes la pregunta no va a ser si alguien tildó, va a ser quién.
+      `${req.user.nombre || 'usuario'} · ${cierre.toISOString()}`,
+      // X: el monto bancarizado del turno según Fudo, que es sobre lo que se
+      // confirmó. Sin esto la confirmación no dice sobre qué plata se confirmó.
+      fudoGalicia,
     ];
     // Escribimos en una fila absoluta calculada a partir de la columna A, NO con
     // values.append. append detecta automáticamente una "tabla" y agrega la fila
@@ -777,8 +805,8 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
       requestBody: {
         valueInputOption: 'USER_ENTERED',
         data: [
-          { range: 'Arqueo de Cajas!A1:V1', values: [ARQUEO_HEADERS] },
-          { range: `Arqueo de Cajas!A${proxFila}:V${proxFila}`, values: [rowArqueo] },
+          { range: 'Arqueo de Cajas!A1:X1', values: [ARQUEO_HEADERS] },
+          { range: `Arqueo de Cajas!A${proxFila}:X${proxFila}`, values: [rowArqueo] },
         ],
       },
     });

@@ -3615,6 +3615,68 @@ async function cerrarCaja() {
   renderConfirmCierre(diffs, motivo, { bruto: galicia, neto: galiciaNeto });
 }
 
+// ─── Control de facturación del cierre (12 ago 2026) ────────────────────────
+// El bloque que hay que tildar para poder cerrar la caja. Nace de un relevamiento
+// que encontró $27,2M cobrados por tarjeta y QR sin comprobante entre mayo y
+// agosto, con 12 noches enteras sin una sola factura.
+//
+// Dos decisiones de redacción, las dos deliberadas:
+//   · Dice el MONTO bancarizado de esta noche, sacado de Fudo. "Acordate de
+//     facturar" es un cartel que se aprende a ignorar en una semana; "entraron
+//     $412.000 por tarjeta y QR" es una pregunta concreta que hay que contestar.
+//   · Dice explícitamente qué significa tildar y qué NO hay que hacer si no se
+//     facturó. Un checkbox obligatorio sin esa frase se tilda por reflejo para
+//     sacarse el modal de encima, y ahí el control pasa a ser peor que nada:
+//     deja constancia firmada de algo que no pasó.
+function bloqueFacturacion() {
+  const f = state.fudoCierre;
+  const monto = (f && f.encontrado) ? (f.galicia || 0) : null;
+  let detalle, pedido;
+  if (monto > 0) {
+    detalle = `Esta noche entraron <b>${fmt(monto)}</b> por tarjeta de crédito, débito y QR.`;
+    pedido = 'Todo eso deja rastro bancario y necesita comprobante.';
+  } else if (monto === 0) {
+    detalle = 'Esta noche Fudo no registra cobros por tarjeta ni QR.';
+    pedido = 'Si igual hubo cobros bancarizados, facturalos antes de cerrar.';
+  } else {
+    detalle = 'No se pudieron leer los cobros de Fudo para esta noche.';
+    pedido = 'Fijate en Fudo qué se cobró con tarjeta y QR, y facturalo antes de confirmar.';
+  }
+
+  return `
+    <div id="cierre-facturacion" style="margin-top:14px;padding:14px;border-radius:10px;
+         background:rgba(224,138,91,0.10);border:1px solid var(--orange)">
+      <div style="font-weight:700;font-size:14px;margin-bottom:6px">🧾 Facturación del servicio</div>
+      <div style="font-size:13px;line-height:1.55;color:var(--text)">
+        ${detalle} ${pedido}
+      </div>
+      <label style="display:flex;gap:10px;align-items:flex-start;margin-top:12px;cursor:pointer;
+                    padding:10px;border-radius:8px;background:var(--surface2)">
+        <input type="checkbox" id="ci-facturado" style="margin-top:3px;width:18px;height:18px;flex-shrink:0;cursor:pointer"
+               onchange="actualizarBotonCierre()" />
+        <span style="font-size:13px;line-height:1.5">
+          <b>Ya emití las facturas de este servicio.</b>
+          <span style="display:block;color:var(--text-muted);margin-top:3px">
+            Tildá esto <u>solamente</u> si ya facturaste. Si todavía no lo hiciste, cerrá esta ventana,
+            facturá en Fudo y volvé. Queda registrado quién confirmó y sobre qué monto.
+          </span>
+        </span>
+      </label>
+    </div>`;
+}
+
+// El botón de confirmar arranca deshabilitado y sólo lo habilita el tilde.
+function actualizarBotonCierre() {
+  const chk = document.getElementById('ci-facturado');
+  const btn = document.getElementById('btn-confirmar-cierre');
+  if (!btn) return;
+  const ok = !!(chk && chk.checked);
+  btn.disabled = !ok;
+  btn.style.opacity = ok ? '1' : '0.45';
+  btn.style.cursor = ok ? 'pointer' : 'not-allowed';
+  btn.title = ok ? '' : 'Confirmá la facturación para poder cerrar';
+}
+
 function renderConfirmCierre(diffs, motivo, galicia) {
   const body = document.getElementById('confirm-cierre-body');
   const actions = document.getElementById('confirm-cierre-actions');
@@ -3654,10 +3716,10 @@ function renderConfirmCierre(diffs, motivo, galicia) {
         <h3 style="margin-bottom:8px">⚠️ No se pudo verificar el cierre</h3>
         <p style="font-size:13px;color:var(--text-muted)">No pude leer la planilla o las ventas del día de Fudo. Podés cerrar igual: se registrará lo contado tal cual.</p>`;
     }
-    body.innerHTML += bloqueGalicia;
+    body.innerHTML += bloqueGalicia + bloqueFacturacion();
     actions.innerHTML = `
       <button class="btn" onclick="closeConfirmCierre()">🔄 Arquear nuevamente</button>
-      <button class="btn btn-accent" onclick="confirmarCierreDefinitivo()">Cerrar igual</button>`;
+      <button class="btn btn-accent" id="btn-confirmar-cierre" onclick="confirmarCierreDefinitivo()">Cerrar igual</button>`;
   } else {
     const cerro = Math.abs(diffs.efectivo.diff) <= TOLERANCIA_CIERRE && Math.abs(diffs.mp.diff) <= TOLERANCIA_CIERRE;
     body.innerHTML = `
@@ -3668,10 +3730,16 @@ function renderConfirmCierre(diffs, motivo, galicia) {
       ${cerro ? '' : `<p style="font-size:12px;color:var(--text-muted);margin-top:10px">Si hubo error al contar, arqueá de nuevo. Si la diferencia es real (pagos en efectivo durante el servicio, propinas, etc.), podés cerrar igual y queda registrada.</p>`}
       ${bloqueGalicia}
       ${cerro ? '' : `<div style="margin-top:12px"><label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">📝 Nota: ¿por qué no cierra? (ayuda a rastrear el error después)</label><textarea id="cierre-nota" rows="2" style="width:100%;resize:vertical" placeholder="Ej: retiré $50.000 para pagar al verdulero, propinas en efectivo, etc."></textarea></div>`}`;
+    body.innerHTML += bloqueFacturacion();
     actions.innerHTML = `
       <button class="btn" onclick="closeConfirmCierre()">🔄 Arquear nuevamente</button>
-      <button class="btn btn-accent" onclick="confirmarCierreDefinitivo()">${cerro ? '✅ Entendido, cerrar caja' : '⚠️ Entiendo la diferencia, cerrar igual'}</button>`;
+      <button class="btn btn-accent" id="btn-confirmar-cierre" onclick="confirmarCierreDefinitivo()">${cerro ? '✅ Entendido, cerrar caja' : '⚠️ Entiendo la diferencia, cerrar igual'}</button>`;
   }
+  // Se llama DESPUÉS de escribir los dos innerHTML: el botón tiene que existir
+  // para poder arrancar deshabilitado. Si se hiciera antes, el modal abriría con
+  // el botón activo durante un instante, que es todo lo que hace falta para
+  // saltear el control sin querer.
+  actualizarBotonCierre();
   document.getElementById('confirm-cierre-overlay').style.display = 'flex';
 }
 
@@ -3689,11 +3757,14 @@ async function confirmarCierreDefinitivo() {
     const f = state.fudoCierre;
     const notaEl = document.getElementById('cierre-nota');
     const nota = notaEl ? notaEl.value.trim() : '';
+    const chk = document.getElementById('ci-facturado');
     const res = await api('/api/arqueo/cerrar', {
       method: 'POST',
       body: JSON.stringify({
         ...state.cierrePendiente,
         nota,
+        // El servidor vuelve a exigirlo y rechaza el cierre si no viene en true.
+        facturacionConfirmada: !!(chk && chk.checked),
         fudo: f ? { encontrado: !!f.encontrado, efectivo: f.efectivo || 0, mercadoPago: f.mercadoPago || 0, galicia: f.galicia || 0 } : null,
       }),
     });

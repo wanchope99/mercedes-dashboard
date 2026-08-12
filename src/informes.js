@@ -395,13 +395,32 @@ async function generarInforme(tipo, { hasta, forzar = false } = {}) {
   // escalones (dato, para el código) y el modelo recibe el texto (criterio).
   // Ver src/informes-notas.js.
   const notas = await notasDelAgente(tipo);
-  const { payload, senales } = await analista.analizar({ hasta: corte, notas });
-  const informe = await interpretar({
+  const { payload, senales, hallazgosFijos } = await analista.analizar({ hasta: corte, notas });
+  const interpretado = await interpretar({
     sistema: analista.SISTEMA,
     payload: payload
       + bloqueInformeAnterior(previos, periodo)
       + notasMod.bloqueParaModelo(notas, { ahora: corte }),
   });
+
+  // ─── Hallazgos fijos: controles que el modelo no decide ───────────────────
+  // Un analista puede devolver hallazgos ya redactados por código. Van PRIMEROS
+  // y el modelo nunca los ve como suyos. La razón de que existan: un control
+  // periódico —el recordatorio de facturación del domingo, hoy el único— tiene
+  // que salir todas las semanas, y el mismo prompt que le permite al agente no
+  // encontrar nada lo haría desaparecer justo en las semanas tranquilas.
+  //
+  // También fuerzan hayHallazgos: sin eso la pantalla dibuja el caso vacío
+  // ("no hay nada que marcar") con un hallazgo adentro, que es lo peor de los
+  // dos mundos.
+  const fijos = hallazgosFijos || [];
+  const informe = fijos.length
+    ? {
+        ...interpretado,
+        hayHallazgos: true,
+        hallazgos: [...fijos, ...(interpretado.hallazgos || [])],
+      }
+    : interpretado;
 
   const api = _sheets();
   await _ensureHoja(api);

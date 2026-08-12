@@ -19,6 +19,20 @@ const {
 const TIPO = 'servicios';
 const TITULO = 'El salón de la semana';
 
+// ─── Control de facturación (12 ago 2026) ───────────────────────────────────
+// Los medios que liquidan por Galicia: dejan rastro bancario y exigen comprobante.
+// Mercado Pago y Efectivo quedan afuera por decisión del dueño — no son medios
+// que se facturen habitualmente acá.
+const MEDIOS_BANCARIZADOS = ['tarj. crédito', 'tarj. débito', 'qr'];
+const esBancarizado = nombre => {
+  const n = norm(nombre);
+  if (n.includes('mercado')) return false;   // Mercado Pago va aparte, no entra
+  return MEDIOS_BANCARIZADOS.some(m => n === m)
+      || n.includes('crédito') || n.includes('credito')
+      || n.includes('débito') || n.includes('debito')
+      || n === 'qr' || n.startsWith('qr ');
+};
+
 const UMBRAL_DESVIO = 2.5;      // más bajo que en plata: acá la serie es más ruidosa
 const MIN_REFERENCIA = 3;       // mínimo de días comparables para opinar
 const PISO_PLATA = 150000;      // desvíos de ingreso menores no mueven la aguja
@@ -229,8 +243,43 @@ function analizarServicios(dias, { hasta } = {}) {
       .map(p => ({ ...p, unidades: Math.round(p.unidades), montoARS: redondear(p.montoARS) }));
   })();
 
+  // ── Control de facturación de la semana ──────────────────────────────────
+  // NO detecta qué falta facturar: la API de Fudo no expone el estado fiscal de
+  // una venta (probado el 12/08/2026 — no hay recurso de comprobantes, y dos
+  // ventas con estado fiscal distinto devuelven exactamente los mismos campos).
+  // Lo que sí puede hacer, y es lo útil, es decir CUÁNTO entró por medios que
+  // obligan a facturar, noche por noche. Eso convierte "revisá la facturación"
+  // en una lista de montos concretos para cotejar contra Fudo.
+  const controlFacturacion = (() => {
+    const porDia = semana.map(d => {
+      const medios = d.mediosPago || {};
+      const bruto = Object.entries(medios)
+        .filter(([nombre]) => esBancarizado(nombre))
+        .reduce((s, [, monto]) => s + (monto || 0), 0);
+      // Los montos de mediosPago incluyen la propina, que se cobra por encima
+      // del total y no es base imponible. Se prorratea fuera para que la cifra
+      // sea la que tiene que tener comprobante y no una mayor.
+      const cobrado = (d.total || 0) + (d.propinas || 0);
+      const neto = cobrado > 0 ? bruto * ((d.total || 0) / cobrado) : bruto;
+      return {
+        fecha: d.fecha,
+        diaSemana: DIAS_SEMANA[d._f.getDay()],
+        bancarizadoARS: redondear(neto),
+        ventas: d.ventas || 0,
+      };
+    }).filter(d => d.bancarizadoARS > 0);
+
+    return {
+      desde: diaISO(desdeVentana),
+      hasta: diaISO(corte),
+      totalARS: redondear(porDia.reduce((s, d) => s + d.bancarizadoARS, 0)),
+      dias: porDia,
+    };
+  })();
+
   return {
     corte: diaISO(corte),
+    controlFacturacion,
     contexto: {
       semana: {
         desde: diaISO(desdeVentana), hasta: diaISO(corte), diasAbiertos: semana.length,
@@ -278,6 +327,8 @@ Cómo leerlas:
 
 PUEDE NO HABER NADA que valga la pena, y en ese caso devolvé la lista de hallazgos vacía. Es una respuesta correcta y esperada, no un fracaso. No infles el informe para tener algo que mostrar.
 
+SOBRE EL CONTROL DE FACTURACIÓN: al final del payload te llega un bloque con lo cobrado por tarjeta y QR de la semana. Ese recordatorio ya está escrito y se agrega solo al informe — NO lo repitas como hallazgo tuyo ni lo menciones en el titular. Está ahí para que sepas que existe y no escribas algo que lo contradiga. Tampoco saques conclusiones sobre si se facturó o no: no tenés ese dato, la API de Fudo no lo informa.
+
 Dejá el campo "resumen" como string vacío: es sólo para el balance mensual.
 
 Terminá con una sola frase: lo más importante que sugieren estos datos que habría que hacer.`;
@@ -287,6 +338,41 @@ const periodoDe = (corte) => {
   const desde = new Date(fin.getTime() - DIAS_VENTANA * 86400000);
   return `semana ${diaISO(desde)} a ${diaISO(fin)}`;
 };
+
+// ─── El recordatorio de facturación, escrito por código ─────────────────────
+//
+// Va como `hallazgoFijo` y no como una señal más porque NO es un hallazgo: es un
+// control que tiene que aparecer todas las semanas, haya pasado algo o no. Si
+// dependiera del modelo, el mismo prompt que le dice "puede no haber nada que
+// valga la pena" lo haría desaparecer la primera semana tranquila — y una semana
+// tranquila en el salón no dice nada sobre si se facturó.
+//
+// Devuelve null sólo si no hubo un peso bancarizado en toda la semana: ahí no hay
+// nada que revisar y el recordatorio sería ruido.
+function hallazgoFacturacion(control) {
+  if (!control || !(control.totalARS > 0)) return null;
+
+  const fmtARS = n => '$' + Math.round(n).toLocaleString('es-AR');
+  const lineas = control.dias
+    .map(d => `${d.diaSemana} ${d.fecha.slice(8, 10)}/${d.fecha.slice(5, 7)}: ${fmtARS(d.bancarizadoARS)}`)
+    .join(' · ');
+
+  return {
+    titulo: 'Control semanal de facturación',
+    severidad: 'alta',
+    quePasa: `Esta semana entraron ${fmtARS(control.totalARS)} por tarjeta de crédito, débito y QR, `
+      + `repartidos así: ${lineas}. Todo eso deja rastro bancario y necesita comprobante. `
+      + `Este recordatorio sale todas las semanas y no significa que falte facturar algo: `
+      + `significa que hay que ir a Fudo y confirmar que estos montos tienen su factura.`,
+    porQueImporta: 'Entre mayo y agosto de 2026 quedaron $27,2 millones cobrados por estos tres medios '
+      + 'sin comprobante, con 12 noches enteras sin una sola factura. La app no puede detectarlo sola: '
+      + 'la API de Fudo no informa si una venta se facturó. Este chequeo es manual por necesidad.',
+    confianza: 'alta',
+    referencias: control.dias.map(d => d.fecha),
+    concepto: '',
+    desdeISO: '',
+  };
+}
 
 async function analizar({ hasta } = {}) {
   const fudo = require('./fudo');
@@ -299,8 +385,20 @@ async function analizar({ hasta } = {}) {
     'CONTEXTO:', JSON.stringify(a.contexto, null, 1), '',
     `SEÑALES DETECTADAS (${a.senales.length}):`,
     a.senales.length ? JSON.stringify(a.senales, null, 1) : '(ninguna)',
+    '',
+    'CONTROL DE FACTURACIÓN (ya redactado, se agrega solo al informe — NO lo repitas):',
+    JSON.stringify(a.controlFacturacion, null, 1),
   ].join('\n');
-  return { payload, senales: a.senales.length, analisis: a };
+  const fijo = hallazgoFacturacion(a.controlFacturacion);
+  return {
+    payload,
+    senales: a.senales.length,
+    analisis: a,
+    hallazgosFijos: fijo ? [fijo] : [],
+  };
 }
 
-module.exports = { TIPO, TITULO, SISTEMA, analizar, periodoDe, analizarServicios, HORA_AR };
+module.exports = {
+  TIPO, TITULO, SISTEMA, analizar, periodoDe, analizarServicios, HORA_AR,
+  hallazgoFacturacion, esBancarizado,
+};
