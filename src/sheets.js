@@ -78,8 +78,8 @@ function getAuth() {
   });
 }
 
-async function getSheetRows(sheetName, columnas = 'A:P') {
-  const cacheKey = `rows_${sheetName}_${columnas}`;
+async function getSheetRows(sheetName, columnas = 'A:P', { crudo = false } = {}) {
+  const cacheKey = `rows_${sheetName}_${columnas}${crudo ? '_crudo' : ''}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
@@ -88,11 +88,36 @@ async function getSheetRows(sheetName, columnas = 'A:P') {
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
     range: `${sheetName}!${columnas}`,
+    // crudo: el valor guardado, sin pasar por el formato de la celda. Para un
+    // número es la única lectura segura — ver el bloque del TC más abajo.
+    ...(crudo ? { valueRenderOption: 'UNFORMATTED_VALUE' } : {}),
   });
   const rows = response.data.values || [];
   cache.set(cacheKey, rows);
   return rows;
 }
+
+// ─── Un tipo de cambio creíble ────────────────────────────────────────────────
+//
+// Piso de cordura para cualquier ARS/USD que venga de la planilla. No es
+// decoración: el 12/08/2026 una sola celda de la columna T tenía formato de
+// FECHA heredado, así que el 1420 que había guardado el sistema se leía como
+// "11/20/03" (el serial 1420 es el 20-nov-1903) y parseAmount lo convertía en
+// 11. Con TC=11 una compra de $198.000 pasaba a valer US$18.000, y esa sola
+// fila inflaba el gasto de mayo en unos US$17.900.
+//
+// Dos defensas, y hacen falta las dos:
+//   · la columna T se lee CRUDA, así ningún formato de celda puede alterar el
+//     número (ataca la causa);
+//   · un TC por debajo del piso se descarta y la fila queda SIN tipo de cambio,
+//     que la app ya muestra y cuenta (ataca la consecuencia, venga de donde
+//     venga el disparate).
+//
+// Descartar es lo correcto y no "usar el fallback": un valor absurdo significa
+// que no sabemos el TC de esa fila, y valuarla igual la volvería a meter en un
+// total sin que nadie se entere. Preferimos un total que dice "faltan N filas".
+const TC_MINIMO_CREIBLE = Number(process.env.TC_MINIMO_CREIBLE || 100);
+const tcCreible = v => (Number.isFinite(v) && v >= TC_MINIMO_CREIBLE ? v : 0);
 
 function parseAmount(val) {
   if (!val || val === '' || val === '-') return 0;
@@ -204,7 +229,14 @@ async function getMovimientos() {
   // Hasta T: Q es el TC real de la operación y T el blue del día. Si la planilla
   // todavía no las tiene, las filas llegan cortas y quedan undefined → fallback,
   // sin romper nada. R y S NO se usan: son un bloque de saldos propio de la hoja.
-  const rows = await getSheetRows('Movimientos', 'A:T');
+  // La columna T se pide además CRUDA, en una lectura chica aparte: es un número
+  // y el formato de la celda no puede tener voz sobre su valor. Va aparte y no en
+  // lugar de la lectura formateada porque el resto de la fila sí se muestra tal
+  // cual en la app (fechas y montos con su formato).
+  const [rows, crudoT] = await Promise.all([
+    getSheetRows('Movimientos', 'A:T'),
+    getSheetRows('Movimientos', 'T:T', { crudo: true }),
+  ]);
 
   let headerIdx = -1;
   for (let i = 0; i < rows.length; i++) {
@@ -275,9 +307,13 @@ async function getMovimientos() {
     // Consecuencia que hay que tener presente al leer un KPI: el total en dólares
     // NO es el total en pesos dividido por un tipo de cambio. Son N conversiones
     // distintas sumadas.
-    const tcBlueFila = parseAmount(row[19]);
-    const tcValuacion = tcFila > 0 ? tcFila : (tcBlueFila > 0 ? tcBlueFila : 0);
-    const origenTC = tcFila > 0 ? 'operacion' : (tcBlueFila > 0 ? 'blue' : 'ninguno');
+    // Q sólo vale como TC de valuación si esta fila REALMENTE tiene un importe en
+    // dólares: es "a cuánto se hizo esta operación en dólares". En una fila sólo
+    // en pesos, Q no significa nada — y si trae algo, es basura arrastrada.
+    const tcOperacion = tieneUSD ? tcCreible(tcFila) : 0;
+    const tcBlueFila = tcCreible(parseAmount((crudoT[i] || [])[0]));
+    const tcValuacion = tcOperacion > 0 ? tcOperacion : tcBlueFila;
+    const origenTC = tcOperacion > 0 ? 'operacion' : (tcBlueFila > 0 ? 'blue' : 'ninguno');
     // Los importes ya cargados en dólares no se convierten: ya están en dólares.
     const entradaEnUSD = tcValuacion > 0 ? entradaUSD + (entradaARS / tcValuacion) : entradaUSD;
     const salidaEnUSD  = tcValuacion > 0 ? salidaUSD  + (salidaARS  / tcValuacion) : salidaUSD;

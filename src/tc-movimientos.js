@@ -134,6 +134,36 @@ async function completarTC({ dryRun = true, limite = 0 } = {}) {
 
   if (dryRun || !aEscribir.length) return { ...resumen, escritas: 0 };
 
+  // Forzar formato NÚMERO en toda la columna antes de escribir.
+  //
+  // No es cosmética. El 12/08/2026 una celda de T tenía formato de FECHA
+  // heredado de antes: el 1420 que se guardó se MOSTRABA como "11/20/03" (el
+  // serial 1420 es el 20-nov-1903), y quien leyera la planilla formateada leía
+  // 11 en vez de 1420. Con TC=11 una compra de $198.000 valía US$18.000.
+  // El valor guardado siempre estuvo bien; lo que engañaba era el formato.
+  try {
+    const meta = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
+    const hoja = (meta.data.sheets || []).find(s => s.properties.title === HOJA);
+    if (hoja) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SPREADSHEET_ID,
+        requestBody: {
+          requests: [{
+            repeatCell: {
+              range: { sheetId: hoja.properties.sheetId, startColumnIndex: COL_TC, endColumnIndex: COL_TC + 1 },
+              cell: { userEnteredFormat: { numberFormat: { type: 'NUMBER', pattern: '0' } } },
+              fields: 'userEnteredFormat.numberFormat',
+            },
+          }],
+        },
+      });
+    }
+  } catch (e) {
+    // Si no se pudo, se escribe igual: el VALOR va a quedar bien. Quien lee por
+    // API ahora lee esta columna cruda, así que el formato ya no puede mentirle.
+    console.warn('TC Movimientos: no se pudo forzar el formato numérico de la columna:', e.message);
+  }
+
   // Encabezado de T, si falta. Se escribe primero: una columna con datos y sin
   // título es exactamente lo que hace que alguien la borre por no saber qué es.
   const headerActual = String((rows[headerIdx] || [])[COL_TC] ?? '').trim();
