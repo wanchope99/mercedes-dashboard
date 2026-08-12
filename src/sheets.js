@@ -388,6 +388,12 @@ async function getComprasEnCuotas() {
   const grupos = {};
   for (const m of todos) {
     if (!m.cuotaId) continue;
+    // La columna H dejó de ser exclusiva de las cuotas: desde el 12/08/2026 el
+    // gasto que escribe el bot desde una factura lleva ahí su id, para poder
+    // detectar duplicados antes de escribir. Esas filas no son ni cuota ni fila
+    // madre, y sin este filtro aparecerían en la vista de Cuotas como una compra
+    // fantasma de total 0.
+    if (!m.esCuota && !m.esCompraEnCuotas) continue;
     if (!grupos[m.cuotaId]) {
       grupos[m.cuotaId] = {
         cuotaId: m.cuotaId, totalCompra: 0, cuotasTotal: null,

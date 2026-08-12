@@ -945,6 +945,146 @@ app.post('/api/gastos-rapidos', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// ─── El gasto de una factura del bot, en el libro ───────────────────────────────
+//
+// El circuito de facturas escribía sólo en la hoja `Compras` (una fila por
+// producto, analítica). Desde el 12/08/2026 escribe ADEMÁS una única fila de
+// gasto en `Movimientos`, con el total de la factura: sacar una foto pasa a ser
+// una forma de anotar un gasto, no sólo de registrar precios.
+//
+// Vive acá y no en proveedores-routes porque necesita tres cosas que son de este
+// archivo: `normalizarMedio` (la única puerta a la columna L), `estadoCaja` (el
+// arqueo en curso) y `clearCache`. Se le pasa a las rutas como dependencia.
+//
+// TRES COSAS QUE NO SE PUEDEN SALTEAR, y cada una arruina algo distinto:
+//
+//  1. El medio tiene que ser el nombre EXACTO de una caja. El Saldo Calculado es
+//     un SUMIFS por texto; cualquier otra cosa es plata que ninguna caja resta
+//     nunca, sin ningún error a la vista. Acá se RECHAZA en vez de escribir mal:
+//     el bot puede volver a preguntar, la planilla no se puede arreglar sola.
+//
+//  2. Idempotencia. El bot puede reintentar (timeout de red, doble toque), y en
+//     todo el resto del libro no existe ninguna protección contra duplicados. El
+//     id de la factura va en la columna H y se relee antes de escribir. Es la
+//     misma columna que agrupa cuotas, por eso `getComprasEnCuotas` aprende a
+//     saltear las filas que no son ni cuota ni madre.
+//
+//  3. Si la caja está abierta y el gasto salió de una de las dos cajas que se
+//     arquean, hay que anotarlo en la sesión. Si no, el cierre de esa noche lo
+//     cuenta como plata faltante y Charly ve una diferencia que no existe.
+const ISO_FECHA = /^(\d{4})-(\d{2})-(\d{2})/;
+
+// La planilla escribe las fechas como DD/MM/AAAA; el extractor las lee en ISO.
+function aFechaPlanilla(fecha) {
+  const s = (fecha || '').toString().trim();
+  const m = s.match(ISO_FECHA);
+  if (m) return `${Number(m[3])}/${Number(m[2])}/${m[1]}`;
+  return s;   // ya viene como DD/MM/AAAA
+}
+
+function mesDeCualquierFecha(fecha) {
+  const s = (fecha || '').toString().trim();
+  const m = s.match(ISO_FECHA);
+  if (m) return MESES_NOMBRES[Number(m[2]) - 1] || '';
+  return mesDeFecha(s);
+}
+
+// Construye la fila, o explica por qué no se puede. PURA a propósito: es el
+// contrato con la planilla (16 posiciones exactas, ni 15 ni 17 — todo lo que
+// pase de P pisa Q/R/S/T, que están ocupadas) y se puede ejercitar sin escribir.
+function construirFilaGasto({
+  facturaId, fecha, proveedor, categoria, monto, descripcion,
+  medioPago, estado, vencimiento,
+} = {}) {
+  const montoNum = Number(monto);
+  if (!Number.isFinite(montoNum) || montoNum <= 0) {
+    return { ok: false, motivo: 'monto', error: 'El total del gasto tiene que ser un número mayor que cero.' };
+  }
+  if (!proveedor) return { ok: false, motivo: 'proveedor', error: 'Falta el proveedor.' };
+  if (!facturaId) return { ok: false, motivo: 'id', error: 'Falta el identificador de la factura.' };
+
+  const medio = normalizarMedio(medioPago);
+  if (!medio || !MEDIOS_CANONICOS.includes(medio)) {
+    return {
+      ok: false, motivo: 'medio',
+      error: `"${medioPago || '(vacío)'}" no es una caja del sistema. El gasto NO se escribió: `
+        + `si se registrara así, ninguna caja lo restaría del saldo. Cajas válidas: ${MEDIOS_CANONICOS.join(', ')}.`,
+    };
+  }
+
+  const fechaRow = aFechaPlanilla(fecha) || aFechaPlanilla(new Date().toISOString());
+  const mes = mesDeCualquierFecha(fecha) || mesDeCualquierFecha(new Date().toISOString());
+  const estadoRow = estado === 'A pagar' ? 'A pagar' : 'Pagado';
+  const categoriaRow = cats.normalizarCategoriaGasto(categoria) || 'Otros';
+
+  const row = [
+    fechaRow,                              // A Fecha
+    mes,                                   // B Mes
+    'Gasto',                               // C Tipo Movimiento
+    estadoRow,                             // D Estado
+    estadoRow === 'A pagar' ? (aFechaPlanilla(vencimiento) || '') : '',  // E Vencimiento
+    '',                                    // F Cuotas
+    '',                                    // G Extraodinario
+    facturaId,                             // H ID Compra — la clave de idempotencia
+    proveedor,                             // I Proveedor
+    categoriaRow,                          // J Categoría
+    descripcion || `Factura ${proveedor}`, // K Descripción
+    medio,                                 // L Medio de pago
+    '', '',                                // M/N Entradas
+    montoNum,                              // O Salida ARS
+    '',                                    // P Salida USD
+  ];
+  return { ok: true, row, medio, montoNum, estadoRow, categoria: categoriaRow, fechaRow, mes };
+}
+
+async function registrarGastoEnLibro(datos = {}) {
+  const armado = construirFilaGasto(datos);
+  if (!armado.ok) return armado;
+  const { row, medio, montoNum, estadoRow, categoria, fechaRow, mes } = armado;
+  const { facturaId, proveedor, descripcion, usuario } = datos;
+
+  // Idempotencia: si ya hay una fila con este id de factura, no se escribe otra.
+  try {
+    const yaEstan = await getMovimientos();
+    const previa = yaEstan.find(m => (m.cuotaId || '') === facturaId);
+    if (previa) {
+      return { ok: true, yaExistia: true, fila: previa.rowIndex, monto: previa.salidaARS, medio: previa.medioPago };
+    }
+  } catch (e) {
+    // Si no se puede leer, NO se escribe: el riesgo de duplicar un gasto es peor
+    // que el de pedir que se reintente.
+    return { ok: false, motivo: 'lectura', error: `No se pudo verificar si la factura ya estaba cargada (${e.message}). No se escribió nada.` };
+  }
+
+  const sheets = google.sheets({ version: 'v4', auth: getAuth() });
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID, range: 'Movimientos!A:P',
+    valueInputOption: 'USER_ENTERED', requestBody: { values: [row] },
+  });
+  clearCache();
+
+  // Gasto pagado desde una caja arqueada con la caja abierta → a la sesión.
+  let registradoEnSesion = false;
+  if (estadoCaja.abierta && estadoRow === 'Pagado') {
+    const low = medio.toLowerCase();
+    const bucket = low === CAJA_EFECTIVO.toLowerCase() ? 'efectivo'
+      : low === CAJA_MP.toLowerCase() ? 'mp' : null;
+    if (bucket) {
+      estadoCaja.gastosSesion = estadoCaja.gastosSesion || [];
+      estadoCaja.gastosSesion.push({
+        bucket, monto: montoNum,
+        descripcion: descripcion || proveedor,
+        ts: new Date().toISOString(),
+        usuario: usuario || 'bot',
+      });
+      registradoEnSesion = true;
+      guardarEstadoCaja(estadoCaja);
+    }
+  }
+
+  return { ok: true, monto: montoNum, medio, categoria: categoria || 'Otros', estado: estadoRow, fecha: fechaRow, mes, registradoEnSesion };
+}
+
 // GET /api/arqueo/fudo-hoy — ventas del día de servicio en curso según Fudo,
 // agrupadas en Efectivo / Mercado Pago / Otros. Para el control de cierre de caja.
 app.get('/api/arqueo/fudo-hoy', authMiddleware, async (req, res) => {
@@ -2687,7 +2827,9 @@ app.get('/api/fudo/probe-stock-single', authMiddleware, adminOnly, async (req, r
 });
 
 // ─── Módulo Proveedores (ingesta de facturas + dashboard de costos) ───────────
-app.use(proveedoresRoutes({ authMiddleware, adminOnly }));
+// registrarGastoEnLibro se inyecta: la escritura en Movimientos necesita
+// normalizarMedio, estadoCaja y clearCache, que viven acá. Ver su comentario.
+app.use(proveedoresRoutes({ authMiddleware, adminOnly, registrarGastoEnLibro }));
 
 // ─── Static y fallback ────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, '../public')));
@@ -2711,4 +2853,4 @@ app.get('*', (req, res) => {
   });
 })();
 
-module.exports = { buildFilasCierreServicio, leerProveedoresSheet };
+module.exports = { buildFilasCierreServicio, leerProveedoresSheet, registrarGastoEnLibro, construirFilaGasto };

@@ -110,6 +110,102 @@ const KEYWORDS = {
 const CAJA_MP_OPERATIVA = process.env.CAJA_MP || 'Mercado Pago Tincho';
 const MEDIOS_PAGO = ['Efectivo Local', CAJA_MP_OPERATIVA, 'Galicia', 'Echeq', 'Otro'];
 
+// ─── Lo que se puede escribir en el LIBRO (Movimientos) ─────────────────────────
+//
+// Ojo con la diferencia: MEDIOS_PAGO de arriba es para la hoja Compras, que es
+// analítica y tolera 'Echeq' y 'Otro'. Esta lista es para la columna L de
+// Movimientos, donde el Saldo Calculado de cada caja es un SUMIFS por texto
+// EXACTO: un valor que no sea el nombre literal de una caja es plata que ninguna
+// caja vuelve a restar, para siempre y sin ningún error a la vista.
+//
+// 'Echeq' no está porque no es una caja: los echeqs se fondean desde Galicia y
+// normalizarMedio() ya los traduce. 'Otro' tampoco: no hay ninguna caja que se
+// llame así.
+//
+// El orden es por uso real en los gastos históricos (215 / 201 / 176 / 58 / 22).
+const MEDIOS_LIBRO = [
+  CAJA_MP_OPERATIVA,
+  'Galicia',
+  'Efectivo Local',
+  'Efectivo Pablo',
+  'Efectivo Tincho',
+];
+
+// Categorías válidas para la columna J de Movimientos.
+//
+// NO es la misma taxonomía que CATEGORIAS (que son ingredientes, por producto).
+// Ésta es por FACTURA y describe qué clase de gasto es para el negocio.
+//
+// La hoja tiene una lista de validación en esa columna: escribir algo fuera de
+// ella deja la celda marcada como inválida en Sheets. Estas son las que
+// realmente se usan en gastos de proveedor — Mercadería e Insumos solos son el
+// 57% de las 851 filas de gasto.
+const CATEGORIAS_GASTO = [
+  'Mercaderia',
+  'Insumos',
+  'Operativos',
+  'Cocina',
+  'Sala',
+  'Frios',
+  'Mobiliario',
+  'Servicios',
+  'Otros',
+];
+const CATEGORIAS_GASTO_SET = new Set(CATEGORIAS_GASTO);
+
+function normalizarCategoriaGasto(cat) {
+  const c = (cat || '').toString().trim();
+  if (!c) return '';
+  const exacta = CATEGORIAS_GASTO.find(x => x.toLowerCase() === c.toLowerCase());
+  if (exacta) return exacta;
+  const n = norm(c);
+  if (n.includes('mercader')) return 'Mercaderia';
+  if (n.includes('insumo')) return 'Insumos';
+  if (n.includes('operativ')) return 'Operativos';
+  if (n.includes('frio')) return 'Frios';
+  if (n.includes('mobiliar')) return 'Mobiliario';
+  if (n.includes('servicio')) return 'Servicios';
+  return '';
+}
+
+// ¿Este medio sirve tal cual para la columna L de Movimientos?
+function esMedioDeLibro(medio) {
+  const m = (medio || '').toString().trim().toLowerCase();
+  if (!m) return false;
+  if (m === 'echeq' || m.includes('cheque')) return true;   // normalizarMedio → Galicia
+  return MEDIOS_LIBRO.some(x => x.toLowerCase() === m);
+}
+
+// El medio guardado por proveedor suele ser una PISTA para un humano, no un dato:
+// de 38 proveedores, 9 dicen "Mercado Pago Tincho / Galicia" y uno dice "Todos".
+// Esto lo parte en opciones concretas para preguntar, en vez de descartarlo.
+// Devuelve [] si no se puede sacar nada usable.
+function opcionesDeMedioGuardado(guardado) {
+  const g = (guardado || '').toString().trim();
+  if (!g) return [];
+  if (esMedioDeLibro(g)) return [normalizarParaLibro(g)];
+  const partes = g.split(/[\/,;+]| o | y /i).map(s => s.trim()).filter(Boolean);
+  const out = [];
+  for (const p of partes) {
+    if (!esMedioDeLibro(p)) continue;
+    const v = normalizarParaLibro(p);
+    if (v && !out.includes(v)) out.push(v);
+  }
+  return out;
+}
+
+// Traduce a nombre exacto de caja. Espejo chico de normalizarMedio() de
+// server.js, que es la autoridad; acá sólo se usa para armar las opciones que se
+// le muestran a la persona. El valor que finalmente se escribe pasa igual por
+// normalizarMedio.
+function normalizarParaLibro(medio) {
+  const m = (medio || '').toString().trim();
+  const low = m.toLowerCase();
+  if (low === 'echeq' || low.includes('cheque')) return 'Galicia';
+  const exacto = MEDIOS_LIBRO.find(x => x.toLowerCase() === low);
+  return exacto || '';
+}
+
 function normalizarMedioPago(medio) {
   const m = (medio || '').toString().trim().toLowerCase();
   if (!m) return '';
@@ -334,4 +430,7 @@ module.exports = {
   normalizarMedioPago, normalizarCategoria,
   inferirPorKeywords, construirIndiceInferencia, sugerirCategoria,
   resolverItem, norm, nombreCanonico, normalizarProveedor,
+  // Para el gasto que se escribe en el LIBRO (Movimientos), no en Compras.
+  MEDIOS_LIBRO, CATEGORIAS_GASTO, CATEGORIAS_GASTO_SET,
+  normalizarCategoriaGasto, esMedioDeLibro, opcionesDeMedioGuardado, normalizarParaLibro,
 };

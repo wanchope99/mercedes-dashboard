@@ -107,24 +107,40 @@ async function procesarFactura(factura, items) {
 
   // Si la factura no lo dice claro (o era "Contado") pero el proveedor tiene
   // medio habitual confirmado, usarlo y NO molestar.
+  //
+  // Desde que el medio también decide de qué CAJA sale la plata (columna L de
+  // Movimientos), sólo sirve si es el nombre exacto de una caja. Lo guardado por
+  // proveedor muchas veces no lo es: de 38 proveedores, 9 dicen "Mercado Pago
+  // Tincho / Galicia" y uno dice "Todos". Eso es una pista para un humano, no un
+  // dato — así que se usa para ARMAR LAS OPCIONES, no para responder solo.
+  const opcionesDelProveedor = cats.opcionesDeMedioGuardado(cfg && cfg.medioPago);
   let medioDeProveedor = false;
-  if ((!medioPago || esContadoAmbiguo || (fconf.forma_de_pago ?? 1) < UMBRAL) && cfg && cfg.medioPago) {
-    const m = cats.normalizarMedioPago(cfg.medioPago);
-    if (m && cats.MEDIOS_PAGO.includes(m)) { medioPago = m; medioDeProveedor = true; }
+  if ((!medioPago || esContadoAmbiguo || (fconf.forma_de_pago ?? 1) < UMBRAL)
+      && opcionesDelProveedor.length === 1) {
+    medioPago = opcionesDelProveedor[0];
+    medioDeProveedor = true;
   }
 
   const necesitaConfirmar =
     !medioPago ||
-    !cats.MEDIOS_PAGO.includes(medioPago) ||
+    !cats.esMedioDeLibro(medioPago) ||                 // no es una caja → hay que preguntar sí o sí
     (esContadoAmbiguo && !medioDeProveedor) ||         // "Contado" sin medio del proveedor → preguntar
     ((fconf.forma_de_pago ?? 1) < UMBRAL && !medioDeProveedor);
 
   if (necesitaConfirmar) {
+    // Las opciones del proveedor van PRIMERO: si la hoja dice "Mercado Pago
+    // Tincho / Galicia", esas dos aparecen arriba y el resto abajo.
+    const opciones = [...opcionesDelProveedor,
+      ...cats.MEDIOS_LIBRO.filter(m => !opcionesDelProveedor.includes(m))];
     dudas.push({
       campo: 'medioPago',
-      sugerido: medioPago || (cfg && cats.normalizarMedioPago(cfg.medioPago)) || 'Efectivo Local',
-      fuente: esContadoAmbiguo ? 'plazo-no-es-medio' : (cfg && cfg.medioPago ? 'proveedor-config' : 'ninguna'),
-      opciones: cats.MEDIOS_PAGO,
+      sugerido: cats.normalizarParaLibro(medioPago) || opcionesDelProveedor[0] || 'Efectivo Local',
+      fuente: esContadoAmbiguo ? 'plazo-no-es-medio'
+        : (opcionesDelProveedor.length > 1 ? 'proveedor-config' : (cfg && cfg.medioPago ? 'proveedor-config' : 'ninguna')),
+      opciones,
+      pregunta: opcionesDelProveedor.length > 1
+        ? `A *${proveedor}* se le paga por ${opcionesDelProveedor.join(' o ')}. ¿Con cuál fue esta vez?`
+        : undefined,
     });
   }
 
@@ -177,12 +193,137 @@ async function procesarFactura(factura, items) {
     });
   }
 
+  // ── El gasto que va al LIBRO (Movimientos) ────────────────────────────────
+  //
+  // Desde el 12/08/2026 una factura no sólo alimenta Compras: también deja una
+  // fila de gasto en Movimientos con el total. Eso convierte "sacarle una foto a
+  // la factura" en la forma rápida de anotar un gasto.
+  //
+  // Tres preguntas más, y ninguna es opcional por la misma razón: esta plata
+  // entra al libro del negocio. Las dos primeras salen SIEMPRE; la tercera y el
+  // medio de pago sólo la primera vez con cada proveedor.
+
+  // 1) EL TOTAL. Lo lee el modelo de una foto, así que siempre se confirma con
+  //    un toque. Se cruza contra la suma de las líneas —que es un dato
+  //    independiente, extraído aparte— y si difieren se muestran las dos para
+  //    que la persona elija, en vez de elegir nosotros.
+  const totalLeido = Number(factura.total_factura) || 0;
+  const sumaLineas = items.reduce((s, it) => {
+    const base = (Number(it.cantidad) || 0) * (Number(it.precioUnit) || 0);
+    const conDesc = it.descIncluido ? base : base * (1 - (Number(it.descuento) || 0) / 100);
+    const conIva = it.ivaIncluido ? conDesc : conDesc * (1 + (Number(it.ivaPct) || 0) / 100);
+    return s + conIva + (Number(it.otroImpuesto) || 0);
+  }, 0);
+  const redondear = n => Math.round(n);
+  const totalSugerido = totalLeido > 0 ? redondear(totalLeido) : redondear(sumaLineas);
+  const difere = totalLeido > 0 && sumaLineas > 0
+    && Math.abs(totalLeido - sumaLineas) > Math.max(1, totalLeido * 0.01);
+
+  const pesos = n => '$' + Math.round(n).toLocaleString('es-AR');
+  const opcionesTotal = [];
+  if (totalSugerido > 0) opcionesTotal.push(String(totalSugerido));
+  if (difere && redondear(sumaLineas) !== totalSugerido) opcionesTotal.push(String(redondear(sumaLineas)));
+
+  dudas.push({
+    campo: 'totalGasto',
+    sugerido: String(totalSugerido || ''),
+    fuente: difere ? 'total-no-cierra' : (totalLeido > 0 ? 'total-de-factura' : 'suma-de-lineas'),
+    opciones: opcionesTotal,
+    pregunta: difere
+      ? `⚠️ El total de la factura dice ${pesos(totalLeido)} pero las líneas suman ${pesos(sumaLineas)}. `
+        + '¿Cuál es el gasto real? Este es el monto que entra al libro.'
+      : `El gasto que voy a anotar en el libro es ${pesos(totalSugerido)}. ¿Está bien?`,
+  });
+
+  // 2) ¿YA ESTÁ PAGADA O QUEDA A PAGAR? Un toque más, pero deja el tema cerrado:
+  //    si queda a pagar, aparece sola en la lista de Pagos con su vencimiento.
+  const diasCredito = Number(factura.dias_credito) || (cfg && Number(cfg.plazoDias)) || 0;
+  dudas.push({
+    campo: 'estadoGasto',
+    sugerido: diasCredito > 0 ? 'A pagar' : 'Pagado',
+    fuente: diasCredito > 0 ? 'plazo-del-proveedor' : 'ninguna',
+    opciones: ['Pagado', 'A pagar'],
+    pregunta: diasCredito > 0
+      ? `Esta factura tiene ${diasCredito} días de plazo. ¿Ya la pagaste o queda a pagar?`
+      : '¿Ya está pagada o queda a pagar?',
+  });
+
+  // 3) CATEGORÍA DEL GASTO. No es la del producto (que es por ingrediente y va a
+  //    Compras): es qué clase de gasto es para el negocio, y va en la columna J
+  //    de Movimientos. Se pregunta una sola vez por proveedor y se recuerda.
+  const categoriaGasto = (cfg && cats.normalizarCategoriaGasto(cfg.categoriaGasto)) || '';
+  if (!categoriaGasto) {
+    dudas.push({
+      campo: 'categoriaGasto',
+      sugerido: cats.normalizarCategoriaGasto(items[0] && items[0].categoria) || 'Mercaderia',
+      fuente: 'ninguna',
+      opciones: cats.CATEGORIAS_GASTO,
+      pregunta: `¿En qué categoría entra el gasto de *${proveedor}*? Te lo pregunto una sola vez.`,
+    });
+  }
+
   const otrosImpuestos = Number(factura.otros_impuestos_monto) || 0;
   return { proveedor, medioPago, iva, ivaDeducible, descuentoIncluido, ivaIncluido,
-    ivaPctSugerido, otrosImpuestos, subtotalFact, dudas };
+    ivaPctSugerido, otrosImpuestos, subtotalFact, dudas,
+    // Para el gasto del libro
+    totalGasto: totalSugerido, sumaLineas: redondear(sumaLineas), totalLeido: redondear(totalLeido),
+    categoriaGasto, estadoGasto: '', diasCredito, fecha: factura.fecha || '' };
 }
 
-module.exports = function ({ authMiddleware, adminOnly } = {}) {
+module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro } = {}) {
+
+  // Escribe en Movimientos el gasto de una factura ya confirmada.
+  //
+  // `registrarGastoEnLibro` lo inyecta server.js porque necesita cosas que viven
+  // allá (la caja abierta, normalizarMedio, el cache). Si no viene —tests, o un
+  // server viejo— esto no rompe: devuelve un aviso y el circuito de Compras
+  // sigue funcionando exactamente como antes.
+  //
+  // NUNCA tira: un error escribiendo el gasto no puede perder los productos que
+  // ya se cargaron en Compras.
+  async function escribirGastoDeFactura(reg) {
+    const f = (reg && reg.factura) || {};
+    if (typeof registrarGastoEnLibro !== 'function') {
+      return { ok: false, error: 'el servidor no tiene habilitada la escritura en el libro' };
+    }
+    const monto = Number(f.totalGasto) || 0;
+    if (!(monto > 0)) return { ok: false, error: 'no hay un total confirmado' };
+
+    const nProd = (reg.items || []).filter(it => !it.descartado).length;
+    try {
+      const r = await registrarGastoEnLibro({
+        // El id del pendiente es la clave de idempotencia: reintentar la misma
+        // confirmación no puede duplicar el gasto.
+        facturaId: reg.id,
+        fecha: f.fecha || (reg.items && reg.items[0] && reg.items[0].fecha) || '',
+        proveedor: f.proveedor,
+        categoria: f.categoriaGasto || 'Otros',
+        monto,
+        descripcion: `Factura ${f.proveedor}${nProd ? ` · ${nProd} producto${nProd > 1 ? 's' : ''}` : ''}`,
+        medioPago: f.medioPago,
+        estado: f.estadoGasto || 'Pagado',
+        vencimiento: vencimientoDe(f),
+        usuario: (reg.origen && reg.origen.usuario) || 'bot',
+      });
+      return { ...r, montoTexto: '$' + Math.round(monto).toLocaleString('es-AR') };
+    } catch (e) {
+      console.error('No se pudo anotar el gasto en el libro:', e.message);
+      return { ok: false, error: e.message };
+    }
+  }
+
+  // Si queda a pagar, el vencimiento sale de los días de plazo contra la fecha
+  // de la factura. Sin plazo conocido no se inventa uno: la fila queda "A pagar"
+  // sin vencimiento y aparece igual en la lista de Pagos.
+  function vencimientoDe(f) {
+    const dias = Number(f.diasCredito) || 0;
+    if ((f.estadoGasto || '') !== 'A pagar' || dias <= 0) return '';
+    const base = (f.fecha || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const d = base ? new Date(Number(base[1]), Number(base[2]) - 1, Number(base[3])) : new Date();
+    d.setDate(d.getDate() + dias);
+    return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
+  }
+
   const router = express.Router();
 
   // Solo admin puede ver el tab Proveedores (dashboard + panel de pendientes).
@@ -254,6 +395,16 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
       const hayDudas = itemDudas.length > 0 || fact.dudas.length > 0;
 
       // Todo claro (items + factura) → escribir directo.
+      //
+      // OJO: desde el 12/08/2026 este camino en la práctica no se toma nunca,
+      // y es a propósito. `procesarFactura` siempre agrega dos dudas de cabecera
+      // —el total del gasto y si está pagada o a pagar— porque desde que la
+      // factura también deja una fila en el libro, ningún gasto entra sin que una
+      // persona lo haya mirado. Decisión del dueño, tomada sabiendo que cuesta un
+      // toque más por factura.
+      //
+      // Se deja el camino en pie igual: si algún día se decide que un proveedor
+      // ya aprendido pueda escribir solo, alcanza con no empujar esas dudas.
       if (!hayDudas) {
         const n = await prov.appendCompras(items);
         return res.json({
@@ -304,11 +455,25 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
       const out = prov.aplicarResoluciones(req.params.id, (req.body && req.body.resoluciones) || {});
       if (!out) return res.status(404).json({ ok: false, error: 'Pendiente no encontrado' });
 
-      if (out.faltan.length > 0) {
+      // Una duda de CABECERA sin resolver también deja el pendiente incompleto.
+      //
+      // Antes sólo se miraba `faltan`, que son dudas de items: si lo único que
+      // quedaba era una duda de factura, `faltan` venía vacío, `listoParaEscribir`
+      // también (porque lo bloquea `facturaOk`), y esto seguía de largo hasta
+      // escribir CERO productos y marcar el pendiente como resuelto. La factura
+      // desaparecía sin haberse cargado nunca.
+      //
+      // Con las preguntas del gasto —total, estado, categoría, medio— que son
+      // todas de cabecera, ese agujero pasaría a ser el camino normal.
+      if (out.faltan.length > 0 || !out.facturaOk) {
+        const pendientesCabecera = (out.facturaDudas || []).map(d => d.campo);
         return res.json({
           ok: true, status: 'incompleto',
-          faltan: out.faltan, listos: out.listoParaEscribir.length,
-          message: `Todavía faltan ${out.faltan.length} producto(s) por confirmar.`,
+          faltan: out.faltan, facturaDudas: out.facturaDudas || [],
+          listos: out.listoParaEscribir.length,
+          message: out.faltan.length > 0
+            ? `Todavía faltan ${out.faltan.length} producto(s) por confirmar.`
+            : `Falta confirmar de la factura: ${pendientesCabecera.join(', ')}.`,
         });
       }
 
@@ -331,12 +496,20 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
         catch (e) { console.warn('No se pudo guardar IVA del proveedor:', e.message); }
       }
       // Recordar el MEDIO DE PAGO del proveedor para no volver a preguntarlo.
-      // (Antes solo se guardaba el IVA; por eso una factura "Contado" preguntaba
-      //  el medio en cada carga aunque ya se hubiera respondido.)
-      const medioProv = cats.normalizarMedioPago(reg.factura.medioPago);
-      if (reg.factura.proveedor && medioProv && cats.MEDIOS_PAGO.includes(medioProv)) {
+      //
+      // Se guarda el nombre EXACTO de la caja que eligió la persona, no lo que
+      // dijera antes la hoja. Así un "Mercado Pago Tincho / Galicia" —que hay que
+      // preguntar todas las veces porque son dos— se convierte en un valor
+      // concreto la primera vez que alguien contesta, y deja de preguntarse.
+      const medioProv = cats.normalizarParaLibro(reg.factura.medioPago);
+      if (reg.factura.proveedor && medioProv) {
         try { await provCfg.setMedioProveedor(reg.factura.proveedor, medioProv); }
         catch (e) { console.warn('No se pudo guardar medio de pago del proveedor:', e.message); }
+      }
+      // Recordar la CATEGORÍA DE GASTO del proveedor (columna J de Movimientos).
+      if (reg.factura.proveedor && reg.factura.categoriaGasto) {
+        try { await provCfg.setAtributoProveedor(reg.factura.proveedor, 'Categoria Gasto', reg.factura.categoriaGasto); }
+        catch (e) { console.warn('No se pudo guardar la categoría de gasto:', e.message); }
       }
       // Recordar atributos fiscales del proveedor (deducible / incluidos).
       if (reg.factura.proveedor) {
@@ -347,10 +520,25 @@ module.exports = function ({ authMiddleware, adminOnly } = {}) {
         } catch (e) { console.warn('No se pudo guardar atributos fiscales:', e.message); }
       }
 
+      // ─── Y el gasto en el libro ─────────────────────────────────────────
+      // Compras responde "a qué precio compramos"; Movimientos responde "cuánta
+      // plata salió y de qué caja". Son dos preguntas distintas y por eso son
+      // dos escrituras, pero pasan a ocurrir juntas: sacar la foto ahora también
+      // anota el gasto.
+      //
+      // Va DESPUÉS de appendCompras y no puede tumbar la respuesta: si falla, los
+      // productos ya quedaron cargados y el aviso dice qué pasó, en vez de perder
+      // las dos cosas.
+      const gasto = await escribirGastoDeFactura(reg);
+
       res.json({
         ok: true, status: 'escrito', escritas: n,
         items: out.listoParaEscribir,
-        message: `${n} producto(s) cargado(s) en Compras.`,
+        gasto,
+        message: `${n} producto(s) cargado(s) en Compras.`
+          + (gasto && gasto.ok && !gasto.yaExistia ? ` Gasto de ${gasto.montoTexto} anotado en el libro.` : '')
+          + (gasto && gasto.ok && gasto.yaExistia ? ' El gasto ya estaba anotado en el libro.' : '')
+          + (gasto && !gasto.ok ? ` ⚠️ El gasto NO se anotó en el libro: ${gasto.error}` : ''),
       });
     } catch (err) {
       console.error('Error resolver pendiente:', err.message);

@@ -498,6 +498,19 @@ function crearPendiente({ origen = {}, imagenInfo = {}, items, factura = {} }) {
       descuentoIncluido: factura.descuentoIncluido != null ? factura.descuentoIncluido : null,
       ivaIncluido: factura.ivaIncluido != null ? factura.ivaIncluido : null,
       dudas: factura.dudas || [],
+      // ─── El gasto que va al libro (Movimientos) ───────────────────────────
+      // Estos campos TIENEN que viajar en el pendiente. Antes acá se copiaba
+      // sólo un subconjunto de `factura`, y lo que no estaba se perdía al
+      // confirmar desde el bot o desde el panel — que es exactamente cuando se
+      // necesita. `totalLeido` y `sumaLineas` se guardan los dos porque la
+      // pregunta muestra ambos cuando no coinciden.
+      totalGasto: factura.totalGasto || 0,
+      totalLeido: factura.totalLeido || 0,
+      sumaLineas: factura.sumaLineas || 0,
+      categoriaGasto: factura.categoriaGasto || '',
+      estadoGasto: factura.estadoGasto || '',
+      diasCredito: factura.diasCredito || 0,
+      fecha: factura.fecha || '',
     },
     items: items.map((it, i) => ({ idx: i, ...it })),
     estado: 'pendiente',
@@ -536,13 +549,33 @@ function aplicarResoluciones(id, resoluciones = {}) {
         for (const it of reg.items) { if (!(Number(it.ivaPct) > 0)) it.ivaPct = p; }
       }
     }
+    // ─── Los tres campos del gasto del libro ──────────────────────────────
+    if (rf.totalGasto != null && rf.totalGasto !== '') {
+      // Acepta "124.500", "124500" y "124.500,50": la persona escribe como habla.
+      const n = Number(String(rf.totalGasto).replace(/[^0-9,.-]/g, '').replace(/\.(?=\d{3}\b)/g, '').replace(',', '.'));
+      if (Number.isFinite(n) && n > 0) reg.factura.totalGasto = Math.round(n);
+    }
+    if (rf.estadoGasto) {
+      reg.factura.estadoGasto = String(rf.estadoGasto).toLowerCase().startsWith('a pagar') ? 'A pagar' : 'Pagado';
+    }
+    if (rf.categoriaGasto) {
+      const c = cats.normalizarCategoriaGasto(rf.categoriaGasto);
+      if (c) reg.factura.categoriaGasto = c;
+    }
+
     reg.factura.dudas = (reg.factura.dudas || []).filter(d => {
-      if (d.campo === 'medioPago') return !reg.factura.medioPago || !cats.MEDIOS_PAGO.includes(cats.normalizarMedioPago(reg.factura.medioPago));
+      // El medio ahora tiene que ser el nombre exacto de una caja: si no, esa
+      // plata no la resta ninguna caja del saldo. Se sigue preguntando hasta que
+      // lo sea.
+      if (d.campo === 'medioPago') return !cats.esMedioDeLibro(reg.factura.medioPago);
       if (d.campo === 'iva') return !reg.factura.iva;
       if (d.campo === 'ivaDeducible') return reg.factura.ivaDeducible == null;
       if (d.campo === 'descuentoIncluido') return reg.factura.descuentoIncluido == null;
       if (d.campo === 'ivaIncluido') return reg.factura.ivaIncluido == null;
       if (d.campo === 'ivaPct') return reg.factura.ivaPct == null;
+      if (d.campo === 'totalGasto') return !(Number(reg.factura.totalGasto) > 0);
+      if (d.campo === 'estadoGasto') return !reg.factura.estadoGasto;
+      if (d.campo === 'categoriaGasto') return !reg.factura.categoriaGasto;
       return false;
     });
   }

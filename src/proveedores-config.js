@@ -62,6 +62,9 @@ async function leerConfig() {
   const idxDeducible = header.findIndex(h => h.includes('deducible'));
   const idxDescIncl = header.findIndex(h => h.includes('descuento') && h.includes('incluido'));
   const idxIvaIncl  = header.findIndex(h => h.includes('iva') && h.includes('incluido'));
+  // Categoría del GASTO (columna J de Movimientos), no la del producto. La crea
+  // setAtributoProveedor la primera vez que alguien contesta la pregunta.
+  const idxCatGasto = header.findIndex(h => h.includes('categoria') && h.includes('gasto'));
 
   const ivaColLetter = idxIva >= 0 ? colLetter(idxIva) : null;
   const boolSN = v => { const x = norm(v); if (!x) return null; return (x.startsWith('s')||x==='si'||x==='sí'||x==='true') ? true : (x.startsWith('n')||x==='false' ? false : null); };
@@ -85,11 +88,12 @@ async function leerConfig() {
       ivaDeducible: idxDeducible >= 0 ? boolSN(r[idxDeducible]) : null,
       descuentoIncluido: idxDescIncl >= 0 ? boolSN(r[idxDescIncl]) : null,
       ivaIncluido: idxIvaIncl >= 0 ? boolSN(r[idxIvaIncl]) : null,
+      categoriaGasto: idxCatGasto >= 0 ? (r[idxCatGasto] || '').toString().trim() : '',
       rowIndex: i + 1,
     };
   }
 
-  const out = { byNombre, ivaColLetter, idxIva, idxDeducible, idxDescIncl, idxIvaIncl, headerRow: hIdx + 1, headerLen: header.length };
+  const out = { byNombre, ivaColLetter, idxIva, idxDeducible, idxDescIncl, idxIvaIncl, idxCatGasto, headerRow: hIdx + 1, headerLen: header.length };
   cache.set('prov_config', out);
   return out;
 }

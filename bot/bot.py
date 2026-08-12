@@ -151,11 +151,21 @@ CAMPO_LABEL = {
     "iva": "¿se paga con o sin IVA?",
     "producto": "nombre del producto",
     "precio_unitario": "precio unitario",
+    "factor": "unidades por paquete",
     "ivaDeducible": "¿Esta factura sirve para descontar IVA?",
     "descuentoIncluido": "¿El descuento ya viene incluido en el precio?",
     "ivaIncluido": "¿El IVA ya viene incluido en el precio?",
     "ivaPct": "% de IVA a imputar",
+    # Del gasto que va al libro (Movimientos), no a Compras.
+    "totalGasto": "total del gasto",
+    "estadoGasto": "¿ya está pagada o queda a pagar?",
+    "categoriaGasto": "categoría del gasto",
 }
+
+# Campos que son un NÚMERO: se parsean antes de mandarlos, y si no se entienden
+# se vuelve a preguntar en vez de guardar basura. El total va acá porque es la
+# plata que entra al libro.
+CAMPOS_NUMERICOS = {"precio_unitario": "precioUnit", "totalGasto": "totalGasto"}
 
 # Índice especial para las dudas de FACTURA (medio de pago, IVA): -1.
 FACTURA_IDX = -1
@@ -293,10 +303,26 @@ async def finalizar(update_or_query, context):
 
     status = resp.get("status")
     if status == "escrito":
-        await context.bot.send_message(
-            chat, f"✅ {resp.get('message', 'Cargado.')}\n_Verificá en la planilla si algo quedó mal._",
-            parse_mode="Markdown",
-        )
+        # Se muestra la fila que quedó en el libro, no sólo "listo". El que sacó
+        # la foto tiene que poder ver el gasto que acaba de crear sin abrir la
+        # app: si el monto o la caja están mal, es ahora cuando se da cuenta.
+        gasto = resp.get("gasto") or {}
+        lineas = [f"✅ {resp.get('message', 'Cargado.')}"]
+        if gasto.get("ok") and not gasto.get("yaExistia"):
+            lineas.append("")
+            lineas.append("📒 *En el libro quedó:*")
+            lineas.append(f"• {_md(str(gasto.get('montoTexto', '')))} — {_md(str(gasto.get('categoria', '')))}")
+            lineas.append(f"• Sale de: {_md(str(gasto.get('medio', '')))}")
+            lineas.append(f"• Estado: {_md(str(gasto.get('estado', '')))}")
+            if gasto.get("registradoEnSesion"):
+                lineas.append("• Descontado del arqueo de esta noche")
+        elif gasto.get("yaExistia"):
+            lineas.append("\n📒 _Ese gasto ya estaba anotado en el libro; no se duplicó._")
+        elif gasto and not gasto.get("ok"):
+            lineas.append(f"\n⚠️ *El gasto NO se anotó en el libro:* {_md(str(gasto.get('error', '')))}")
+            lineas.append("_Los productos sí quedaron cargados. El gasto hay que cargarlo a mano._")
+        lineas.append("\n_Verificá en la planilla si algo quedó mal._")
+        await context.bot.send_message(chat, "\n".join(lineas), parse_mode="Markdown")
         context.chat_data.pop("pend", None)
     elif status == "incompleto":
         # Quedaron dudas que el usuario decidió dejar para la app.
@@ -569,12 +595,16 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pend["esperando_texto"] = None
 
     if valor and valor != "-":
-        # producto → texto; precio_unitario → número
-        if campo == "precio_unitario":
+        # producto → texto; precio y total → número
+        if campo in CAMPOS_NUMERICOS:
             try:
-                valor_num = float(valor.replace(".", "").replace(",", "."))
+                # "124.500", "124500" y "124.500,50" son todos válidos: la
+                # persona escribe como habla, no como una planilla.
+                valor_num = float(valor.replace("$", "").replace(" ", "").replace(".", "").replace(",", "."))
+                if valor_num <= 0:
+                    raise ValueError("no positivo")
                 key = "factura" if item_idx == FACTURA_IDX else item_idx
-                pend["resoluciones"].setdefault(key, {})["precioUnit"] = valor_num
+                pend["resoluciones"].setdefault(key, {})[CAMPOS_NUMERICOS[campo]] = valor_num
             except ValueError:
                 await update.message.reply_text("No entendí el número. Probá de nuevo (ej: 17990).")
                 pend["esperando_texto"] = (item_idx, campo)
