@@ -122,16 +122,34 @@ Persistence: three sheets in `SPREADSHEET_ID`, auto-created on first use — `Pr
 
 The roster is the same people every week, so `Propinas Personas` is seeded with `PERSONAS_DEFAULT` — but only at the moment the sheet is **created**, never when it merely reads back empty, so removing someone doesn't resurrect them next load. The UI reflects that: the normal weekly action is just unticking whoever didn't work, and add/edit/delete are hidden behind an "Editar equipo" toggle. Unticking is in-memory only and resets on reload; the `Activo` column is the persistent version of the same idea.
 
+### Four sections, grouped by the question they answer
+
+Since 2026-08-12 the menu is **four top-level groups** (`TAB_GROUPS` in `public/index.html`), down from ten:
+
+| Group | Answers | Subs |
+|---|---|---|
+| `negocio` | how are we doing | Dashboard · Balance · Servicios · Restaurant · Informe |
+| `caja` | today's money | Arqueo · Cajas · Pagos · Historial |
+| `operacion` | the bar running | Bebidas · Mantenimiento · Costos · Config · Propinas |
+| `plan` | what's coming | Resumen · Calculadora · Inversiones · Finanzas · Proyección Mes |
+
+Grouping by **the reader's question** rather than by data source is the whole point. Two concrete failures forced it: the top bar uses `overflow-x` with a *hidden* scrollbar, so with ten items the last sections silently scrolled off a narrow window; and the phone bar pinned three slots, so seven of ten lived inside a "Más" sheet. There were also two different things called "Servicios" — a top-level section and a report inside Reportes, with different default ranges. The per-night list is now **Servicios** and the historical analysis is **Restaurant**.
+
+**The reorganization renamed no panel.** All 23 `id="tab-*"` and every branch of `cargarPanel()` were left alone; only `TAB_GROUPS`, the labels, and four hardcoded group ids changed. Keep it that way when adding things: a new submenu is one line in `TAB_GROUPS` + its `tab-<id>` panel + its branch in `cargarPanel()`. **If a group reaches six subs, that is the signal to rethink the grouping, not to add a seventh.**
+
+`MAX_BOTTOM_NAV` is 5 — the iOS/Android tab-bar maximum. With four groups plus `inicio` that means the "Más" sheet never appears for anyone; it survives only as a fallback. Measured at 420px: five 84px buttons, no truncation.
+
+**Never look a group up by name.** `veInformes()` used to read `TAB_GROUPS.reportes`, and when that group stopped existing the report popup would have silently switched off for everyone with no error. It now finds the submenu with `subDeMenu(id)`, which walks every group. Any future code that needs a submenu must do the same.
+
+**Archived, not deleted (2026-08-12):** `tab-proveedores` and `tab-comportamiento` are out of the menu — of the old Stocks group only Gestión de Bebidas survives. Both panels and their loaders remain in the file, inert; reviving either is re-adding its `{ id, label }` to a group. The one thing that did **not** go with them is the Telegram bot's pending-invoice drawer, which moved to Pagos — leaving it inside an archived panel would have meant invoices arriving with nobody able to confirm them. The `badge` flag moved from `stocks` to `caja` for the same reason.
+
 ### The phone opens on a curated home screen, the desktop does not
 
-On a phone (≤640px) both roles land on `tab-inicio`: four big buttons for what actually gets done daily, plus the bottom bar. On desktop that screen does not exist — the top bar already shows all ten sections, so a screen that leads to four of them would be a step backwards. The `soloPhone` flag on a `TAB_GROUPS` entry is what keeps `inicio` out of the top bar while `gruposVisibles(true)` puts it in the bottom one; that flag is the only place the two bars differ.
+On a phone (≤640px) both roles land on `tab-inicio`: four big buttons for what actually gets done daily, plus the bottom bar. On desktop that screen does not exist — the top bar already shows all four sections at once, so a screen that leads to four of them would be a step backwards. The `soloPhone` flag on a `TAB_GROUPS` entry is what keeps `inicio` out of the top bar while `gruposVisibles(true)` puts it in the bottom one; that flag is the only place the two bars differ.
 
-The four buttons come from `HOME_TELEFONO`, a hand-written per-role list, **deliberately not derived from `TAB_GROUPS`**. The whole point is that they are few and the right ones, which is a judgment call, not something computable from the menu. A button's `tab` may name a group (`dashboard`) or a submenu (`arqueo`) — `switchTab` resolves both — or carry an `accion` that opens something without navigating.
+The four buttons come from `HOME_TELEFONO`, a hand-written per-role list, **deliberately not derived from `TAB_GROUPS`**. The whole point is that they are few and the right ones, which is a judgment call, not something computable from the menu. A button's `tab` may name a group or a submenu (`arqueo`, `vinos`) — `switchTab` resolves both — or carry an `accion` that opens something without navigating.
 
-Two consequences worth knowing before touching this:
-
-- `phonePrio` is now `?? 99`, not `|| 99`. `inicio` has priority `0`, and under `||` that fell through to 99 and put the home button last.
-- Adding `inicio` costs a slot in the bottom bar's three fixed positions. `cajas` carries `phonePrio: 4` purely so the nightly arqueo stays in the `encargado`'s bar instead of being pushed into "Más"; it never reaches the admin's bar, whose 0-1-2 slots are already taken.
+One consequence worth knowing before touching this: `phonePrio` is `?? 99`, not `|| 99`. `inicio` has priority `0`, and under `||` that fell through to 99 and put the home button last.
 
 The "Anotar" button opens a bottom sheet that POSTs to the same `/api/mantenimiento` as the section, asking only for text and urgency — the sector is filled in later from the section, because having to pick one now is exactly what stops anything being logged mid-service. The sheet stays open if the save fails; closing it would leave the impression the item was recorded.
 
@@ -175,7 +193,9 @@ Model: `claude-opus-5` with structured outputs (one schema for all three, so one
 
 **Visibility is per-user, not per-role** — the only such permission in the app. `INFORMES_DESTINATARIO` (default `tincho`) gates `soloDestinatarioInformes` on the server and `soloUsuario` in the browser; the three admin logins are otherwise identical, so `soloAdmin` could not distinguish them. Note this means the `admin` account does **not** see the reports, nor get the popup.
 
-The section lives **inside Reportes** as a third submenu (`reportes` → `informes`), not as a top-level tab — it is one more report, just written by an agent instead of a query. That makes it the only `soloUsuario` at *submenu* level, applied by the sub filter in `switchGroup`; the group-level filter in `gruposVisibles` is kept in step but currently has no group using it. The panel id stays `tab-informes`, which is what the submenu resolves to.
+The section lives **inside Negocio** as a submenu (`negocio` → `informes`), not as a top-level tab — it is one more report, just written by an agent instead of a query. That makes it the only `soloUsuario` in the whole app, applied by the sub filter in `switchGroup`; the group-level filter in `gruposVisibles` is kept in step but no group uses it. The panel id stays `tab-informes`, which is what the submenu resolves to.
+
+**That single flag is the only thing separating the three admin logins.** Confirmed by the owner on 2026-08-12: `pablo` must see everything `tincho` sees, and the Sunday agent reports are the sole exception, held back only while they are in beta. Verified in the browser: Pablo resolves 19 submenus, Tincho 20, and the difference is exactly `negocio/informes`. Any change to the menu must preserve that — if a second `soloUsuario` ever appears, it is almost certainly a mistake.
 
 ### What the agent knows across runs
 

@@ -6685,6 +6685,52 @@ async function cerrarAvisoInforme(marcarLeido) {
 // misma computadora no se pisen.
 const RELEASE_LOG = [
   {
+    version: '2026-08-12-menu',
+    fecha: '12 de agosto de 2026',
+    titulo: 'El menú cambió: ahora son cuatro secciones',
+    porque: 'La app venía creciendo y ya eran <b>diez secciones</b> arriba: algunas se salían de la pantalla '
+      + 'sin avisar, y en el teléfono siete estaban escondidas atrás de un botón "Más". '
+      + 'Ahora están agrupadas por <b>la pregunta que contestan</b>, no por de dónde salen los datos.',
+    items: [
+      {
+        icono: '📊',
+        titulo: 'Negocio — cómo venimos',
+        desc: 'Acá está todo lo que antes era Dashboard y Reportes: <b>Dashboard</b>, <b>Balance</b>, '
+            + '<b>Servicios</b> (la lista noche por noche) y <b>Restaurant</b> (récords y promedios por día de semana). '
+            + 'Antes las dos últimas se llamaban igual y se confundían.',
+        donde: 'Negocio',
+      },
+      {
+        icono: '🏦',
+        titulo: 'Caja — la plata de hoy',
+        desc: 'El <b>Arqueo</b> quedó primero porque es lo que se abre cada noche. Al lado, los saldos de las '
+            + 'cuentas, los <b>Pagos</b> a proveedores y el historial de arqueos.',
+        donde: 'Caja',
+      },
+      {
+        icono: '🍽️',
+        titulo: 'Operación — el bar andando',
+        desc: '<b>Bebidas</b>, <b>Mantenimiento</b>, <b>Costos</b> y <b>Propinas</b> juntos: lo que se consume, '
+            + 'lo que cuesta, lo que se rompe y lo que se reparte.',
+        donde: 'Operación',
+      },
+      {
+        icono: '🔔',
+        titulo: 'Las facturas del bot ahora se confirman en Pagos',
+        desc: 'El botón <b>🔔 Pendientes</b> —el de las facturas que Charly manda por Telegram— se mudó de Stocks '
+            + 'a <b>Pagos</b>, que es donde ya viven las compras. El contador rojo ahora aparece en Caja.',
+        donde: 'Caja › Pagos',
+      },
+      {
+        icono: '📦',
+        titulo: 'De Stocks quedó sólo Bebidas',
+        desc: 'El análisis de compras por proveedor y el de rotación de stock salieron del menú por ahora. '
+            + 'No se borró nada: si los querés de vuelta, se reactivan.',
+        donde: 'Operación › Bebidas',
+      },
+    ],
+  },
+  {
     version: '2026-08-12',
     fecha: '12 de agosto de 2026',
     titulo: 'Facturación bajo control y los números en dólares',
@@ -6698,14 +6744,14 @@ const RELEASE_LOG = [
         desc: 'La pantalla de cierre ahora muestra <b>cuánto entró esa noche por tarjeta de crédito, débito y QR</b>, '
             + 'y hay que tildar una casilla para poder cerrar. Tildala <b>solamente si ya facturaste</b>: '
             + 'queda registrado quién confirmó y sobre qué monto.',
-        donde: 'Cajas › Cerrar Caja',
+        donde: 'Caja › Arqueo de Caja',
       },
       {
         icono: '📅',
         titulo: 'El informe del domingo trae un recordatorio de facturación',
         desc: 'Todas las semanas, con <b>los montos noche por noche</b> cobrados por tarjeta y QR, para ir a '
             + 'cotejarlos contra Fudo. Sale siempre, aunque la semana haya estado tranquila.',
-        donde: 'Reportes › Informe',
+        donde: 'Negocio › Informe',
       },
       {
         icono: '💵',
@@ -6714,7 +6760,7 @@ const RELEASE_LOG = [
             + 'al dólar <b>del día en que ocurrió</b>, así que los meses se pueden comparar de verdad. '
             + 'Ojo con una cosa: el total en dólares <b>no</b> es el total en pesos dividido por una cotización — '
             + 'la cuenta a mano no va a dar igual, y está bien.',
-        donde: 'Reportes › Balance',
+        donde: 'Negocio › Balance',
       },
       {
         icono: '🏦',
