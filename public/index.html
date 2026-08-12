@@ -595,20 +595,33 @@
 
     /* Aviso del informe automático. Más ancho y con scroll propio: acá adentro
        va el informe entero, no un recordatorio de dos líneas. */
-    #informe-aviso-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 820; align-items: center; justify-content: center; padding: 16px; }
-    #informe-aviso-overlay.open { display: flex; }
-    #informe-aviso-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; width: 620px; max-width: 100%; max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,0.6); }
-    #informe-aviso-modal .ia-head { padding: 22px 26px 14px; border-bottom: 1px solid var(--border); }
-    #informe-aviso-modal .ia-kicker { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .6px; }
-    #informe-aviso-modal .ia-titulo { font-size: 19px; font-weight: 700; margin-top: 4px; }
-    #informe-aviso-modal .ia-body { padding: 4px 26px 8px; overflow-y: auto; }
+    #informe-aviso-overlay, #release-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 820; align-items: center; justify-content: center; padding: 16px; }
+    #informe-aviso-overlay.open, #release-overlay.open { display: flex; }
+    #informe-aviso-modal, #release-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; width: 620px; max-width: 100%; max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,0.6); }
+    #informe-aviso-modal .ia-head, #release-modal .ia-head { padding: 22px 26px 14px; border-bottom: 1px solid var(--border); }
+    #informe-aviso-modal .ia-kicker, #release-modal .ia-kicker { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .6px; }
+    #informe-aviso-modal .ia-titulo, #release-modal .ia-titulo { font-size: 19px; font-weight: 700; margin-top: 4px; }
+    #informe-aviso-modal .ia-body, #release-modal .ia-body { padding: 4px 26px 8px; overflow-y: auto; }
     #informe-aviso-modal .ia-agente { font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin: 20px 0 10px; }
-    #informe-aviso-modal .ia-sep { height: 1px; background: var(--border); margin: 22px 0 0; }
-    #informe-aviso-modal .ia-pie { padding: 16px 26px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    #informe-aviso-modal .ia-btn { flex: 1; min-width: 150px; padding: 12px; border: none; border-radius: 10px; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; }
-    #informe-aviso-modal .ia-btn:hover { opacity: 0.9; }
-    #informe-aviso-modal .ia-btn:disabled { opacity: 0.6; cursor: default; }
-    #informe-aviso-modal .ia-btn-sec { flex: 0 0 auto; padding: 12px 16px; border: 1px solid var(--border); border-radius: 10px; background: transparent; color: var(--text); font-size: 14px; font-family: inherit; cursor: pointer; }
+    #informe-aviso-modal .ia-sep, #release-modal .ia-sep { height: 1px; background: var(--border); margin: 22px 0 0; }
+    #informe-aviso-modal .ia-pie, #release-modal .ia-pie { padding: 16px 26px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    #informe-aviso-modal .ia-btn, #release-modal .ia-btn { flex: 1; min-width: 150px; padding: 12px; border: none; border-radius: 10px; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; }
+    #informe-aviso-modal .ia-btn:hover, #release-modal .ia-btn:hover { opacity: 0.9; }
+    #informe-aviso-modal .ia-btn:disabled, #release-modal .ia-btn:disabled { opacity: 0.6; cursor: default; }
+    #informe-aviso-modal .ia-btn-sec, #release-modal .ia-btn-sec { flex: 0 0 auto; padding: 12px 16px; border: 1px solid var(--border); border-radius: 10px; background: transparent; color: var(--text); font-size: 14px; font-family: inherit; cursor: pointer; }
+
+    /* Novedades: una fila por cambio. Icono a la izquierda, título y explicación
+       en lenguaje de todos los días — quien lo lee usa el bar, no escribe la app. */
+    .rl-item { display: flex; gap: 13px; padding: 15px 0; border-bottom: 1px solid var(--border); }
+    .rl-item:last-child { border-bottom: none; }
+    .rl-ico { flex: 0 0 auto; font-size: 20px; line-height: 1.3; }
+    .rl-txt { min-width: 0; }
+    .rl-tit { font-size: 14px; font-weight: 700; margin-bottom: 3px; }
+    .rl-desc { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+    .rl-desc b { color: var(--text); font-weight: 600; }
+    .rl-donde { display: inline-block; margin-top: 6px; font-size: 11px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
+    .rl-porque { margin: 4px 0 2px; padding: 12px 14px; border-radius: 10px; background: var(--surface2); font-size: 12.5px; color: var(--text-muted); line-height: 1.6; }
+    .rl-porque b { color: var(--text); }
 
     /* Notas al agente: el feedback debajo de cada hallazgo. Discreto hasta que
        se toca — no tiene que competir con el hallazgo, que es lo que se lee. */
@@ -2530,6 +2543,21 @@
     <div class="ia-pie">
       <button class="ia-btn" id="informe-aviso-ok" onclick="cerrarAvisoInforme(true)">Listo, lo leí</button>
       <button class="ia-btn-sec" onclick="cerrarAvisoInforme(false)">Después</button>
+    </div>
+  </div>
+</div>
+
+<!-- Novedades de la app -->
+<div id="release-overlay">
+  <div id="release-modal">
+    <div class="ia-head">
+      <div class="ia-kicker" id="release-kicker"></div>
+      <div class="ia-titulo" id="release-titulo"></div>
+    </div>
+    <div class="ia-body" id="release-body"></div>
+    <div class="ia-pie">
+      <button class="ia-btn" onclick="cerrarRelease(true)">Entendido</button>
+      <button class="ia-btn-sec" onclick="cerrarRelease(false)">Después</button>
     </div>
   </div>
 </div>
@@ -6546,11 +6574,136 @@ async function cerrarAvisoInforme(marcarLeido) {
   if (document.getElementById('tab-informes').classList.contains('active')) loadInformes();
 }
 
+// ─── Novedades de la app ────────────────────────────────────────────────────
+//
+// Qué cambió en la última versión, en una ventana que salta una sola vez por
+// persona. Va sólo a los tres admin (Pablo, Tincho y el usuario admin); Charly
+// no la ve, porque de esta tanda lo único que le toca es el cierre de caja y eso
+// se lo explica la propia pantalla en el momento.
+//
+// El texto está escrito para quien USA el bar, no para quien escribe la app:
+// qué cambió, dónde se ve y por qué. Nada de nombres de archivos ni de columnas.
+//
+// POR QUÉ localStorage Y NO LA PLANILLA, a diferencia del aviso del informe:
+// aquel se guarda en la hoja porque un informe hay que leerlo y cerrarlo en el
+// teléfono tiene que valer en la computadora. Esto es una nota de novedades: si
+// alguien la vuelve a ver una vez por haber entrado desde otro navegador, no
+// pasa nada. No justifica una hoja nueva, dos endpoints y una lectura más en
+// cada arranque. La clave lleva el usuario adentro para que dos personas en la
+// misma computadora no se pisen.
+const RELEASE_LOG = [
+  {
+    version: '2026-08-12',
+    fecha: '12 de agosto de 2026',
+    titulo: 'Facturación bajo control y los números en dólares',
+    porque: 'Se revisaron las <b>1.087 ventas</b> desde que abrió el bar. De lo cobrado con tarjeta y QR, '
+      + '<b>$27,2 millones no tenían factura</b> — y 12 noches enteras no tenían ni una. '
+      + 'Los dos primeros cambios son para que eso no se repita.',
+    items: [
+      {
+        icono: '🧾',
+        titulo: 'Al cerrar la caja hay que confirmar la facturación',
+        desc: 'La pantalla de cierre ahora muestra <b>cuánto entró esa noche por tarjeta de crédito, débito y QR</b>, '
+            + 'y hay que tildar una casilla para poder cerrar. Tildala <b>solamente si ya facturaste</b>: '
+            + 'queda registrado quién confirmó y sobre qué monto.',
+        donde: 'Cajas › Cerrar Caja',
+      },
+      {
+        icono: '📅',
+        titulo: 'El informe del domingo trae un recordatorio de facturación',
+        desc: 'Todas las semanas, con <b>los montos noche por noche</b> cobrados por tarjeta y QR, para ir a '
+            + 'cotejarlos contra Fudo. Sale siempre, aunque la semana haya estado tranquila.',
+        donde: 'Reportes › Informe',
+      },
+      {
+        icono: '💵',
+        titulo: 'El Balance ahora se lee en dólares',
+        desc: 'Los números grandes pasan a estar en dólares y el peso queda abajo. Cada movimiento se convierte '
+            + 'al dólar <b>del día en que ocurrió</b>, así que los meses se pueden comparar de verdad. '
+            + 'Ojo con una cosa: el total en dólares <b>no</b> es el total en pesos dividido por una cotización — '
+            + 'la cuenta a mano no va a dar igual, y está bien.',
+        donde: 'Reportes › Balance',
+      },
+      {
+        icono: '🏦',
+        titulo: 'La caja MP Pablo USD ya está en el sistema',
+        desc: 'La caja nueva en dólares se reconoce y su saldo se suma al pozo. '
+            + 'Todavía falta definir qué porcentaje del recupero va ahí.',
+        donde: 'Plan › Finanzas',
+      },
+    ],
+  },
+];
+
+const _releaseKey = () => `mb_release_visto_${getUsuario() || 'anon'}`;
+
+// Sólo los admin, y sólo si no vieron ya esta versión.
+function releasePendiente() {
+  if (getRol() !== 'admin') return null;
+  const ultima = RELEASE_LOG[0];
+  if (!ultima) return null;
+  let visto = null;
+  try { visto = localStorage.getItem(_releaseKey()); } catch (e) { /* modo privado */ }
+  return visto === ultima.version ? null : ultima;
+}
+
+function checkRelease() {
+  // Nunca encima de otra ventana: al entrar como admin pueden dispararse el
+  // recordatorio de la tarjeta Galicia y el aviso del informe. Dos o tres
+  // ventanas seguidas es la forma más rápida de que se cierren todas sin leer
+  // ninguna. Si hay alguna abierta, esto espera a la próxima vuelta.
+  const abierta = id => {
+    const el = document.getElementById(id);
+    if (!el) return false;
+    return el.classList.contains('open') || getComputedStyle(el).display !== 'none';
+  };
+  if (abierta('informe-aviso-overlay')) return;
+  if (abierta('galicia-recordatorio-overlay')) return;
+  if (abierta('release-overlay')) return;
+  const r = releasePendiente();
+  if (r) abrirRelease(r);
+}
+
+function abrirRelease(r) {
+  document.getElementById('release-kicker').textContent = `Novedades · ${r.fecha}`;
+  document.getElementById('release-titulo').textContent = r.titulo;
+  document.getElementById('release-body').innerHTML =
+    (r.porque ? `<div class="rl-porque">${r.porque}</div>` : '')
+    + r.items.map(i => `
+      <div class="rl-item">
+        <div class="rl-ico">${i.icono}</div>
+        <div class="rl-txt">
+          <div class="rl-tit">${escapeHtml(i.titulo)}</div>
+          <div class="rl-desc">${i.desc}${i.donde ? `<br><span class="rl-donde">${escapeHtml(i.donde)}</span>` : ''}</div>
+        </div>
+      </div>`).join('');
+  document.getElementById('release-overlay').classList.add('open');
+}
+
+// "Entendido" no vuelve a mostrarla. "Después" sólo cierra: vuelve a saltar la
+// próxima vez que se abra la app, igual que el aviso del informe.
+function cerrarRelease(marcarVisto) {
+  if (marcarVisto) {
+    const ultima = RELEASE_LOG[0];
+    try { if (ultima) localStorage.setItem(_releaseKey(), ultima.version); } catch (e) { /* modo privado */ }
+  }
+  document.getElementById('release-overlay').classList.remove('open');
+}
+
 function iniciarAvisoInformes() {
   checkAvisoInforme();
+  // Las novedades van después: si hay informe sin leer o el recordatorio de la
+  // tarjeta, esos mandan. checkRelease se reintenta solo mientras haya algo
+  // abierto, así no se pierde por quedar tapada la primera vez.
+  let intentos = 0;
+  const reintentar = () => {
+    if (releasePendiente() && ++intentos <= 20) { checkRelease(); setTimeout(reintentar, 3000); }
+  };
+  setTimeout(reintentar, 1200);
+
   if (_avisoTimer) return;   // no acumular listeners ni timers entre logins
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) checkAvisoInforme();
+    if (!document.hidden) { checkAvisoInforme(); checkRelease(); }
   });
   _avisoTimer = setInterval(checkAvisoInforme, 30 * 60 * 1000);
 }
