@@ -2152,6 +2152,19 @@ app.post('/api/informes/notas', authMiddleware, soloDestinatarioInformes, async 
   } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
 });
 
+// Sumarle el "por qué" a un pulgar arriba ya guardado. Existe para que el 👍
+// siga siendo UN toque: se guarda primero y recién ahí se ofrece contar por qué
+// sirvió. El usuario sale de req.user por la misma razón que al crear la nota, y
+// el módulo además verifica que la fila sea suya.
+app.post('/api/informes/notas/:fila/texto', authMiddleware, soloDestinatarioInformes, async (req, res) => {
+  try {
+    const data = await informesNotas.agregarTexto({
+      rowIndex: req.params.fila, usuario: req.user.usuario, texto: (req.body || {}).texto,
+    });
+    res.json({ ok: true, data });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
 app.post('/api/informes/notas/:fila/archivar', authMiddleware, soloDestinatarioInformes, async (req, res) => {
   try { res.json({ ok: true, data: await informesNotas.archivarNota(req.params.fila) }); }
   catch (err) { res.status(400).json({ ok: false, error: err.message }); }

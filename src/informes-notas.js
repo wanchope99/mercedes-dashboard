@@ -40,6 +40,13 @@ const VEREDICTOS = ['sirve', 'normal', 'contexto'];
 // caducan — son un hecho sobre una fecha, no una opinión.
 const DIAS_VIGENCIA = Number(process.env.INFORMES_NOTAS_DIAS || 240);
 
+// Los "me sirvió" se acumulan todas las semanas y, sin tope, en unos meses son
+// el bloque más largo del prompt: ahogarían justamente las explicaciones, que
+// son las que evitan que el agente repita un falso positivo. Se priorizan los
+// que tienen comentario (dicen POR QUÉ sirvió, que es lo que calibra) y del
+// resto entran los más nuevos; los que quedan afuera se cuentan en una línea.
+const MAX_UTILES = Number(process.env.INFORMES_NOTAS_UTILES_MAX || 15);
+
 const norm = s => (s || '').toString().trim().toLowerCase();
 const RE_FECHA = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -128,14 +135,53 @@ async function guardarNota({ usuario, tipo, periodo, hallazgo, veredicto, texto,
     new Date().toISOString(), usuario, tipo || '', periodo || '', hallazgo || '',
     veredicto, t, escalonValido ? concepto : '', escalonValido ? desde : '', 'vigente',
   ];
-  await api.spreadsheets.values.append({
+  const r = await api.spreadsheets.values.append({
     spreadsheetId: SPREADSHEET_ID, range: `${HOJA}!A:J`,
     valueInputOption: 'RAW', requestBody: { values: [fila] },
   });
   return {
+    // La fila donde quedó, para poder sumarle un comentario después sin volver a
+    // leer la hoja entera. El pulgar arriba se guarda de un toque y recién
+    // entonces se ofrece contar por qué sirvió: sin esto, esa segunda mitad
+    // tendría que ser una nota nueva y el mismo hecho quedaría en dos filas.
+    rowIndex: _filaDe(r),
     fecha: fila[0], usuario, tipo, periodo, hallazgo, veredicto, texto: t,
     escalonConcepto: fila[7], escalonDesde: fila[8], estado: 'vigente',
   };
+}
+
+// append devuelve el rango que escribió ("'Informes Notas'!A42:J42"). Si algún
+// día cambiara el formato, se devuelve null y lo único que se pierde es poder
+// agregar el comentario — la nota ya quedó guardada, que es lo que importa.
+function _filaDe(res) {
+  const rango = res && res.data && res.data.updates && res.data.updates.updatedRange;
+  const m = /![A-Z]+(\d+)/.exec(rango || '');
+  return m ? Number(m[1]) : null;
+}
+
+// Sumarle el "por qué" a una nota que ya existe. Es AGREGAR, no editar: si la
+// fila ya tiene texto se rechaza, así este camino no puede pisar lo que alguien
+// escribió. El autor se compara contra el de la fila — una nota firmada que
+// cualquiera pudiera completar no estaría firmada.
+async function agregarTexto({ rowIndex, usuario, texto }) {
+  if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
+  const n = Number(rowIndex);
+  if (!Number.isInteger(n) || n < 2) throw new Error('Fila inválida');
+  const t = (texto || '').toString().trim();
+  if (!t) throw new Error('No hay nada que agregar');
+
+  const api = _sheets();
+  const r = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${HOJA}!A${n}:J${n}` });
+  const fila = (r.data.values || [])[0];
+  if (!fila || !fila[0]) throw new Error('Esa nota no existe');
+  if (norm(fila[1]) !== norm(usuario)) throw new Error('Esa nota la escribió otra persona');
+  if ((fila[6] || '').trim()) throw new Error('Esa nota ya tiene un comentario');
+
+  await api.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID, range: `${HOJA}!G${n}`,
+    valueInputOption: 'RAW', requestBody: { values: [[t]] },
+  });
+  return { rowIndex: n, texto: t };
 }
 
 async function archivarNota(rowIndex) {
@@ -166,31 +212,145 @@ function escalonesDe(notas) {
 }
 
 // ─── Lo que lee el MODELO ───────────────────────────────────────────────────
-// Sólo las notas con algo escrito: un pulgar arriba pelado no aporta nada al
-// prompt, sirve para calibrar mirando la hoja. Se recortan por antigüedad y se
-// muestra la fecha, para que el modelo pueda pesar una explicación vieja.
+//
+// Esto NO es una lista de respuestas sueltas a comentarios sueltos, y la
+// diferencia es la razón de ser del bloque. La primera versión era una tira
+// cronológica de notas, y leída así cada una respondía a un hallazgo de una
+// semana que ya pasó: el agente no aprendía un criterio, se enteraba de tres
+// correcciones viejas. Acá el mismo material se ordena por LO QUE ENSEÑA, que
+// es lo único que sirve para leer los datos de esta semana:
+//
+//   1. cómo se lee el negocio — lo que contaron sin que se los preguntaran;
+//   2. lo que ya explicaron que es normal — AGRUPADO POR TEMA, no por fecha,
+//      así "ARCA" es una sola cosa con su historia y no tres viñetas sueltas;
+//   3. qué les sirvió — para calibrar qué vale la pena contar.
+//
+// El 3 es el más delicado y por eso va etiquetado tan fuerte: que a alguien le
+// haya servido un hallazgo NO es motivo para volver a emitirlo. Sin esa aclaración
+// el bloque empuja exactamente al error que toda la arquitectura evita — afirmar
+// algo sin una señal que lo respalde.
+//
+// Entra toda nota que enseñe algo: la que tiene texto, la que tiene escalón, y
+// también el "ya lo sé" pelado y el pulgar arriba pelado. Un "ya lo sabía" sin
+// explicación sigue siendo la información más accionable que existe acá.
+// Se recorta por antigüedad y se muestra la fecha, para que el modelo pueda
+// pesar una explicación vieja.
 function bloqueParaModelo(notas, { ahora = new Date() } = {}) {
   const corte = new Date(ahora.getTime() - DIAS_VIGENCIA * 86400000);
-  const utiles = (notas || [])
-    .filter(n => (n.texto || '').trim() || n.escalonConcepto)
-    .filter(n => !n.fecha || new Date(n.fecha) > corte);
-  if (!utiles.length) return '';
+  const vigentes = (notas || [])
+    .filter(n => (n.texto || '').trim() || n.escalonConcepto || n.hallazgo)
+    .filter(n => !n.fecha || new Date(n.fecha) > corte)
+    .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+  if (!vigentes.length) return '';
 
-  const lineas = utiles.map(n => {
-    const partes = [`[${(n.fecha || '').slice(0, 10)}] ${n.usuario || 'alguien'}`];
-    if (n.hallazgo) partes.push(`sobre "${n.hallazgo}"`);
-    partes.push(n.veredicto === 'normal' ? '— ES NORMAL:' : n.veredicto === 'sirve' ? '— le sirvió:' : '—');
-    if (n.texto) partes.push(n.texto);
-    if (n.escalonConcepto) {
-      partes.push(`(cambio permanente en "${n.escalonConcepto}" desde ${n.escalonDesde}: el análisis ya deja de comparar contra lo anterior)`);
+  const cuando = n => (n.fecha || '').slice(0, 10);
+  const quien = n => n.usuario || 'alguien';
+  const dice = n => (n.texto || '').trim();
+
+  const secciones = [];
+
+  // ── 1. Contexto que dieron por propia iniciativa ──────────────────────────
+  const contexto = vigentes.filter(n => n.veredicto === 'contexto' && dice(n));
+  if (contexto.length) {
+    secciones.push(
+      'CÓMO SE LEE EL NEGOCIO — te lo contaron ellos, sin que lo preguntaras:',
+      ...contexto.map(n => `- [${cuando(n)}] ${quien(n)}: ${dice(n)}`),
+      ''
+    );
+  }
+
+  // ── 2. Lo que ya explicaron, agrupado por tema ────────────────────────────
+  // La clave del grupo es el concepto del escalón cuando lo hay, porque es el
+  // único identificador fuerte que existe (sale de la señal, no de un título
+  // que el modelo redacta distinto cada semana). Sin escalón se agrupa por el
+  // informe del que hablaban, que es lo más específico que se puede afirmar
+  // sin adivinar de qué tema es la nota.
+  const normales = vigentes.filter(n => n.veredicto === 'normal');
+  if (normales.length) {
+    // Los conceptos que ELLOS marcaron como escalón son los únicos nombres de
+    // tema que existen con respaldo: salieron de la señal, no de un título que
+    // el modelo redacta distinto cada semana. Una nota sin escalón que hable de
+    // uno de esos conceptos se suma a ese tema en vez de abrir el suyo — si no,
+    // "ARCA" queda partido en dos viñetas que se leen como dos temas y vuelve a
+    // ser una lista de comentarios sueltos, que es lo que este bloque evita.
+    //
+    // Sólo se matchea contra conceptos que ya existen; acá tampoco se inventan
+    // nombres. Gana el más largo, igual que en la inferencia del navegador.
+    const conceptos = [...new Set(normales.filter(n => n.escalonConcepto).map(n => n.escalonConcepto))]
+      .sort((a, b) => b.length - a.length);
+    const temaDe = n => {
+      if (n.escalonConcepto) return norm(n.escalonConcepto);
+      const texto = norm(n.hallazgo);
+      const hit = conceptos.find(c => norm(c).length > 2 && texto.includes(norm(c)));
+      return hit ? norm(hit) : null;
+    };
+
+    const grupos = new Map();
+    for (const n of normales) {
+      const tema = temaDe(n);
+      const clave = tema ? `c:${tema}` : n.tipo ? `t:${n.tipo}` : 'general';
+      if (!grupos.has(clave)) grupos.set(clave, []);
+      grupos.get(clave).push(n);
     }
-    return `- ${partes.join(' ')}`;
-  });
 
-  return ['', `LO QUE YA TE DIJERON LOS DUEÑOS (${utiles.length}):`, ...lineas].join('\n');
+    // Primero los temas con nombre propio: son hechos sobre un concepto
+    // concreto. Después los cajones por informe, que son el resto.
+    const ordenados = [...grupos.entries()]
+      .sort((a, b) => (a[0].startsWith('c:') ? 0 : 1) - (b[0].startsWith('c:') ? 0 : 1))
+      .map(([, g]) => g);
+
+    const lineas = [];
+    for (const grupo of ordenados) {
+      // Las notas ya vienen de la más nueva a la más vieja: el escalón vigente
+      // es el de la más reciente que lo tenga, igual que en escalonesDe().
+      const conEscalon = grupo.find(n => n.escalonConcepto);
+      lineas.push(conEscalon
+        ? `· ${conEscalon.escalonConcepto} — marcado como cambio permanente desde ${conEscalon.escalonDesde}: el análisis ya no compara contra lo anterior a esa fecha.`
+        : `· sobre el informe de ${grupo[0].tipo || 'siempre'}:`);
+      for (const n of grupo) {
+        const sobre = n.hallazgo ? ` sobre "${n.hallazgo}"` : '';
+        lineas.push(dice(n)
+          ? `    - [${cuando(n)}] ${quien(n)}${sobre}: ${dice(n)}`
+          : `    - [${cuando(n)}] ${quien(n)}${sobre}: ya lo sabían. No hace falta que se los cuentes de nuevo.`);
+      }
+    }
+    secciones.push('YA TE EXPLICARON QUE ESTO ES NORMAL:', ...lineas, '');
+  }
+
+  // ── 3. Qué les sirvió ─────────────────────────────────────────────────────
+  const sirvieron = vigentes.filter(n => n.veredicto === 'sirve');
+  if (sirvieron.length) {
+    const conPorQue = sirvieron.filter(n => dice(n));
+    const pelados = sirvieron.filter(n => !dice(n));
+    const elegidos = [...conPorQue, ...pelados].slice(0, MAX_UTILES);
+    const afuera = sirvieron.length - elegidos.length;
+
+    secciones.push(
+      'QUÉ LES SIRVIÓ — es para calibrar QUÉ TIPO de hallazgo vale la pena contarles.',
+      'NO es un pedido de volver a emitir estos hallazgos, y nunca alcanza para afirmar',
+      'algo que las señales de este período no digan:',
+      ...elegidos.map(n => {
+        const sobre = n.hallazgo ? ` "${n.hallazgo}"` : '';
+        return dice(n)
+          ? `- [${cuando(n)}] a ${quien(n)} le sirvió${sobre}, porque: ${dice(n)}`
+          : `- [${cuando(n)}] a ${quien(n)} le sirvió${sobre}`;
+      }),
+      ...(afuera > 0 ? [`(y ${afuera} más que marcaron como útiles, sin comentario)`] : []),
+      ''
+    );
+  }
+
+  if (!secciones.length) return '';
+
+  return ['',
+    `LO QUE YA TE DIJERON LOS DUEÑOS (${vigentes.length} notas acumuladas):`,
+    'No son datos de este período: son el criterio con el que tenés que leerlos.',
+    '',
+    ...secciones,
+  ].join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
 module.exports = {
-  listarNotas, guardarNota, archivarNota, escalonesDe, bloqueParaModelo,
-  HOJA, HEADER, VEREDICTOS, DIAS_VIGENCIA,
+  listarNotas, guardarNota, agregarTexto, archivarNota, escalonesDe, bloqueParaModelo,
+  HOJA, HEADER, VEREDICTOS, DIAS_VIGENCIA, MAX_UTILES,
 };

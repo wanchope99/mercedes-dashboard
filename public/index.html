@@ -595,18 +595,18 @@
 
     /* Aviso del informe automático. Más ancho y con scroll propio: acá adentro
        va el informe entero, no un recordatorio de dos líneas. */
-    #informe-aviso-overlay, #release-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 820; align-items: center; justify-content: center; padding: 16px; }
-    #informe-aviso-overlay.open, #release-overlay.open { display: flex; }
-    #informe-aviso-modal, #release-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; width: 620px; max-width: 100%; max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,0.6); }
-    #informe-aviso-modal .ia-head, #release-modal .ia-head { padding: 22px 26px 14px; border-bottom: 1px solid var(--border); }
-    #informe-aviso-modal .ia-kicker, #release-modal .ia-kicker { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .6px; }
-    #informe-aviso-modal .ia-titulo, #release-modal .ia-titulo { font-size: 19px; font-weight: 700; margin-top: 4px; }
-    #informe-aviso-modal .ia-body, #release-modal .ia-body { padding: 4px 26px 8px; overflow-y: auto; }
+    #informe-aviso-overlay, #release-overlay, #memoria-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 820; align-items: center; justify-content: center; padding: 16px; }
+    #informe-aviso-overlay.open, #release-overlay.open, #memoria-overlay.open { display: flex; }
+    #informe-aviso-modal, #release-modal, #memoria-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; width: 620px; max-width: 100%; max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,0.6); }
+    #informe-aviso-modal .ia-head, #release-modal .ia-head, #memoria-modal .ia-head { padding: 22px 26px 14px; border-bottom: 1px solid var(--border); }
+    #informe-aviso-modal .ia-kicker, #release-modal .ia-kicker, #memoria-modal .ia-kicker { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .6px; }
+    #informe-aviso-modal .ia-titulo, #release-modal .ia-titulo, #memoria-modal .ia-titulo { font-size: 19px; font-weight: 700; margin-top: 4px; }
+    #informe-aviso-modal .ia-body, #release-modal .ia-body, #memoria-modal .ia-body { padding: 4px 26px 8px; overflow-y: auto; }
     #informe-aviso-modal .ia-agente { font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin: 20px 0 10px; }
     #informe-aviso-modal .ia-sep, #release-modal .ia-sep { height: 1px; background: var(--border); margin: 22px 0 0; }
-    #informe-aviso-modal .ia-pie, #release-modal .ia-pie { padding: 16px 26px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    #informe-aviso-modal .ia-btn, #release-modal .ia-btn { flex: 1; min-width: 150px; padding: 12px; border: none; border-radius: 10px; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; }
-    #informe-aviso-modal .ia-btn:hover, #release-modal .ia-btn:hover { opacity: 0.9; }
+    #informe-aviso-modal .ia-pie, #release-modal .ia-pie, #memoria-modal .ia-pie { padding: 16px 26px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    #informe-aviso-modal .ia-btn, #release-modal .ia-btn, #memoria-modal .ia-btn { flex: 1; min-width: 150px; padding: 12px; border: none; border-radius: 10px; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; }
+    #informe-aviso-modal .ia-btn:hover, #release-modal .ia-btn:hover, #memoria-modal .ia-btn:hover { opacity: 0.9; }
     #informe-aviso-modal .ia-btn:disabled, #release-modal .ia-btn:disabled { opacity: 0.6; cursor: default; }
     #informe-aviso-modal .ia-btn-sec, #release-modal .ia-btn-sec { flex: 0 0 auto; padding: 12px 16px; border: 1px solid var(--border); border-radius: 10px; background: transparent; color: var(--text); font-size: 14px; font-family: inherit; cursor: pointer; }
 
@@ -2560,6 +2560,21 @@
     <div class="ia-pie">
       <button class="ia-btn" id="informe-aviso-ok" onclick="cerrarAvisoInforme(true)">Listo, lo leí</button>
       <button class="ia-btn-sec" onclick="cerrarAvisoInforme(false)">Después</button>
+    </div>
+  </div>
+</div>
+
+<!-- La memoria del agente: todo lo que se le fue diciendo. Deliberadamente fuera
+     del informe — se abre cada tanto, no todos los domingos. -->
+<div id="memoria-overlay">
+  <div id="memoria-modal">
+    <div class="ia-head">
+      <div class="ia-kicker">Informes</div>
+      <div class="ia-titulo">Memoria del agente</div>
+    </div>
+    <div class="ia-body" id="memoria-body"></div>
+    <div class="ia-pie">
+      <button class="ia-btn" onclick="cerrarMemoriaAgente()">Cerrar</button>
     </div>
   </div>
 </div>
@@ -6246,7 +6261,7 @@ function renderInformes() {
       <div style="font-size:12px;color:var(--text-muted);margin:8px 0 14px">
         Se genera solo (${escapeHtml(meta.cadencia)}). La primera vez se crea sola una pestaña
         <b>Informes</b> en la planilla — es esperado, no un error.
-      </div>${generar}</div>` + notaLibreHTML() + notaListaHTML();
+      </div>${generar}</div>` + notaMemoriaLinkHTML();
     return;
   }
 
@@ -6270,7 +6285,7 @@ function renderInformes() {
              </div>`).join('')}
          </div>`
       : '') +
-    notaLibreHTML() + notaListaHTML();
+    notaMemoriaLinkHTML();
 }
 
 // El informe en sí: titular, hallazgos y qué haría. Lo comparten la sección y el
@@ -6408,6 +6423,33 @@ async function asegurarProveedores() {
   try { const { data } = await api('/api/proveedores'); state.proveedores = data || {}; } catch (e) { /* sin casilla */ }
 }
 
+// Para comparar títulos de hallazgo: los escribe el modelo, así que un informe
+// regenerado puede devolver el mismo hallazgo con otro espaciado o mayúsculas.
+const notaClave = s => (s || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
+
+// ¿Este hallazgo ya lo contesté YO?
+//
+// El estado sale del servidor (la hoja `Informes Notas`), no de la pantalla.
+// Antes el "✓ Anotado" era sólo un innerHTML pisado al guardar: contestabas en
+// la compu, abrías el teléfono y el informe aparecía virgen pidiéndote feedback
+// de nuevo, sin forma de saber si lo anterior había servido de algo. Es el mismo
+// problema que la columna `Leidos` ya había resuelto para el "leído", y se
+// resuelve igual — el informe se lee en los dos lados y lo que hiciste en uno
+// tiene que valer en el otro.
+//
+// Devuelve la nota, pero el informe sólo usa que exista: QUÉ contestaste no se
+// muestra acá a propósito. Eso vive en la memoria del agente.
+function notaMiaDe(ref) {
+  if (!ref || !ref.hallazgo) return null;
+  const yo = notaClave(getUsuario());
+  return (state.informeNotas || []).find(n =>
+    notaClave(n.usuario) === yo &&
+    (n.tipo || '') === (ref.tipo || '') &&
+    (n.periodo || '') === (ref.periodo || '') &&
+    notaClave(n.hallazgo) === notaClave(ref.hallazgo)
+  ) || null;
+}
+
 function notaFeedbackHTML(k) {
   // El escalón NO se pide escrito. El hallazgo ya trae de qué proveedor habla y
   // desde qué fecha, porque salieron de la señal que lo originó: pedirle al
@@ -6418,6 +6460,17 @@ function notaFeedbackHTML(k) {
   // informe viejo de antes de este cambio), la casilla directamente no aparece:
   // mejor que no esté a que esté y pida datos a mano.
   const ref = _notaRef[k] || {};
+
+  // Ya contestado: el informe deja de pedirlo y no muestra qué se dijo.
+  //
+  // El match es contra el título, que lo escribe el modelo, así que si el
+  // informe se regenera puede cambiar y no matchear. Pasa poco a propósito: el
+  // cron no regenera nada (generarInforme es idempotente por período) y el botón
+  // "Generar el de ahora" no manda `forzar`, así que sólo tincho forzando a mano
+  // puede provocarlo. Y cuando pasa vuelven los botones: un pedido de más, nunca
+  // un dato perdido.
+  if (notaMiaDe(ref)) return `<div class="nota-fb" id="nota-fb-${k}">${notaYaEstaHTML()}</div>`;
+
   const casilla = ref.concepto && ref.desde ? `
       <label class="nota-escalon" for="nota-esc-${k}">
         <input type="checkbox" id="nota-esc-${k}">
@@ -6440,19 +6493,83 @@ function notaFeedbackHTML(k) {
     </div>`;
 }
 
-// El pulgar arriba es una sola llamada, sin formulario: si costara más de un
+const notaYaEstaHTML = () => '<span class="nota-ok">✓ Ya lo respondiste</span>';
+
+// Lo que se guardó recién queda en memoria además de en la hoja, así el mismo
+// hallazgo abierto en la ventana del domingo y en la sección no se contradicen,
+// y un re-render no vuelve a pedir lo que acabás de contestar.
+function notaRecordar(nota) {
+  if (!nota) return;
+  state.informeNotas = [nota, ...(state.informeNotas || [])];
+}
+
+// El pulgar arriba es UNA sola llamada, sin formulario: si costara más de un
 // toque nadie lo usaría, y su valor es justamente el volumen.
+//
+// El "por qué te sirvió" se ofrece DESPUÉS, ya guardado, y es opcional. Ese
+// orden es el punto: un campo antes de guardar convierte un toque en un trámite,
+// y sin el campo el agente sabe que algo sirvió pero no qué lo hacía servir —
+// que es lo único que le permite buscar más de eso.
 async function notaSirve(k, btn) {
   const ref = _notaRef[k];
   if (!ref) return;
   const fb = document.getElementById('nota-fb-' + k);
   fb.querySelectorAll('button').forEach(b => b.disabled = true);
   try {
-    await api('/api/informes/notas', { method: 'POST', body: JSON.stringify({ ...ref, veredicto: 'sirve' }) });
-    fb.innerHTML = '<span class="nota-ok">✓ Anotado</span>';
+    const { data } = await api('/api/informes/notas', { method: 'POST', body: JSON.stringify({ ...ref, veredicto: 'sirve' }) });
+    notaRecordar(data);
+    ref.rowIndex = data && data.rowIndex;
+    // Sin fila devuelta no hay dónde escribir el comentario: la nota igual quedó
+    // guardada, así que se muestra el mismo "ya está" y no se ofrece contar más.
+    fb.innerHTML = ref.rowIndex
+      ? `<span class="nota-ok">✓ Anotado</span>
+         <button class="nota-btn" onclick="notaPorQueAbrir('${k}')">contar por qué (opcional)</button>`
+      : notaYaEstaHTML();
   } catch (err) {
     fb.querySelectorAll('button').forEach(b => b.disabled = false);
     alert('No se pudo guardar: ' + err.message);
+  }
+}
+
+// El campo del "por qué" se dibuja recién cuando lo piden: si estuviera desde el
+// principio, el pulgar arriba dejaría de leerse como un toque.
+function notaPorQueAbrir(k) {
+  const fb = document.getElementById('nota-fb-' + k);
+  fb.innerHTML = `<span class="nota-ok">✓ Anotado</span>
+    <div class="nota-form" style="display:block;width:100%">
+      <textarea id="nota-pq-${k}" rows="2" placeholder="¿Qué te sirvió de esto? (ej: no lo tenía visto, cambié el pedido por esto)"></textarea>
+      <div class="nota-error" id="nota-pq-error-${k}" style="display:none"></div>
+      <div class="nota-acciones">
+        <button class="btn btn-secondary" onclick="notaPorQueGuardar('${k}', this)">Guardar</button>
+        <button class="nota-btn" onclick="notaPorQueCancelar('${k}')">Así está bien</button>
+      </div>
+    </div>`;
+  document.getElementById('nota-pq-' + k).focus();
+}
+
+function notaPorQueCancelar(k) {
+  document.getElementById('nota-fb-' + k).innerHTML = notaYaEstaHTML();
+}
+
+async function notaPorQueGuardar(k, btn) {
+  const ref = _notaRef[k] || {};
+  const campo = document.getElementById('nota-pq-' + k);
+  const err = document.getElementById('nota-pq-error-' + k);
+  err.style.display = 'none';
+  if (!campo.value.trim()) return notaPorQueCancelar(k);   // vacío no es un error: el 👍 ya está
+  btn.disabled = true; btn.textContent = 'Guardando...';
+  try {
+    await api(`/api/informes/notas/${ref.rowIndex}/texto`, {
+      method: 'POST', body: JSON.stringify({ texto: campo.value }),
+    });
+    // La nota en memoria es la misma fila, ahora con su porqué.
+    const mia = notaMiaDe(ref);
+    if (mia) mia.texto = campo.value.trim();
+    document.getElementById('nota-fb-' + k).innerHTML = notaYaEstaHTML();
+  } catch (e) {
+    err.textContent = e.message;
+    err.style.display = '';
+    btn.disabled = false; btn.textContent = 'Guardar';
   }
 }
 
@@ -6471,7 +6588,7 @@ async function notaGuardar(k, btn) {
   err.style.display = 'none';
   btn.disabled = true; btn.textContent = 'Guardando...';
   try {
-    await api('/api/informes/notas', {
+    const { data } = await api('/api/informes/notas', {
       method: 'POST',
       body: JSON.stringify({
         tipo: ref.tipo, periodo: ref.periodo, hallazgo: ref.hallazgo,
@@ -6482,8 +6599,13 @@ async function notaGuardar(k, btn) {
         escalonDesde: escOn ? ref.desde : '',
       }),
     });
+    notaRecordar(data);
     const fb = document.getElementById('nota-fb-' + k);
-    if (fb) fb.innerHTML = `<span class="nota-ok">✓ Anotado${escOn ? ` — no vuelve a comparar ${escapeHtml(ref.concepto)} contra lo anterior` : ' — el agente lo va a tener en cuenta'}</span>`;
+    // El escalón sí se confirma en voz alta: cambia lo que el análisis va a
+    // hacer con los números, y quien lo tildó tiene que ver que quedó hecho.
+    if (fb) fb.innerHTML = escOn
+      ? `<span class="nota-ok">✓ Anotado — no vuelve a comparar ${escapeHtml(ref.concepto)} contra lo anterior</span>`
+      : notaYaEstaHTML();
     notaCerrar(k);
   } catch (e) {
     err.textContent = e.message;
@@ -6491,12 +6613,53 @@ async function notaGuardar(k, btn) {
   } finally { btn.disabled = false; btn.textContent = 'Guardar'; }
 }
 
+// ─── La memoria del agente ──────────────────────────────────────────────────
+//
+// Todo lo que se le fue diciendo, junto y en un lugar aparte. Vive FUERA del
+// informe a propósito: es la fuente de conocimiento del agente, no algo que haya
+// que leer el domingo. Debajo del informe competía con lo único que se vino a
+// leer, y encima crece todas las semanas — cuanto mejor funciona el feedback,
+// más larga es la lista y más tapa al informe.
+//
+// El informe conserva un solo enlace discreto. Quien no lo abre nunca no se
+// pierde de nada: el agente usa estas notas igual, se abran o no.
+function notaMemoriaLinkHTML() {
+  return `<div style="margin-top:22px;padding-top:12px;border-top:1px solid var(--border)">
+      <a href="#" onclick="abrirMemoriaAgente(event)" style="font-size:12px;color:var(--text-muted);text-decoration:none">
+        ⚙ Memoria del agente — lo que ya le dijeron y qué más contarle
+      </a>
+    </div>`;
+}
+
+async function abrirMemoriaAgente(ev) {
+  if (ev) ev.preventDefault();
+  document.getElementById('memoria-overlay').classList.add('open');
+  const cuerpo = document.getElementById('memoria-body');
+  cuerpo.innerHTML = '<div class="loading"><div class="spinner"></div> Cargando...</div>';
+  // Se relee siempre: acá sí importa ver lo que cargó el otro socio, y es una
+  // pantalla que se abre cada tanto, no en cada informe.
+  try { state.informeNotas = (await api('/api/informes/notas')).data || []; }
+  catch (e) { /* se muestra lo último que había en memoria */ }
+  renderMemoriaAgente();
+}
+
+function cerrarMemoriaAgente() {
+  document.getElementById('memoria-overlay').classList.remove('open');
+  // El informe de abajo puede haber quedado viejo: si acá se archivó una nota,
+  // el hallazgo correspondiente vuelve a estar sin responder.
+  if (document.getElementById('informes-contenido')) renderInformes();
+}
+
+function renderMemoriaAgente() {
+  document.getElementById('memoria-body').innerHTML = notaLibreHTML() + notaListaHTML();
+}
+
 // ─── Contarle algo al agente sin que haya preguntado ─────────────────────────
 // La otra mitad: contexto que no responde a ningún hallazgo ("desde agosto somos
 // cuatro"). Sirve para adelantarse en vez de esperar a que el agente se
 // equivoque para corregirlo. Va sin tipo, así le llega a los tres.
 function notaLibreHTML() {
-  return `<div style="margin-top:22px;padding-top:14px;border-top:1px solid var(--border)">
+  return `<div style="padding-top:6px">
       <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Contale algo al agente</div>
       <div style="font-size:12px;color:var(--text-muted);line-height:1.6;margin-bottom:10px">
         Algo que tenga que saber para leer bien los números, aunque no lo haya preguntado.
@@ -6526,11 +6689,12 @@ async function notaGuardarLibre(btn) {
   if (!campo.value.trim()) { campo.focus(); return; }   // vacío: no es un error, no hay nada que guardar
   btn.disabled = true; btn.textContent = 'Guardando...';
   try {
-    await api('/api/informes/notas', {
+    const { data } = await api('/api/informes/notas', {
       method: 'POST',
       body: JSON.stringify({ tipo: '', periodo: '', hallazgo: '', veredicto: 'contexto', texto: campo.value }),
     });
-    await loadInformes();
+    notaRecordar(data);
+    renderMemoriaAgente();
   } catch (e) {
     err.textContent = e.message;
     err.style.display = '';
@@ -6540,25 +6704,54 @@ async function notaGuardarLibre(btn) {
 
 // Lo que ya se le dijo. Está para poder revisarlo: una nota vieja que dejó de
 // ser cierta sigue pesando en cada informe hasta que alguien la archive.
+//
+// Se agrupa por las MISMAS tres partes en que el agente lo recibe (ver
+// bloqueParaModelo en src/informes-notas.js), así esta pantalla contesta la
+// pregunta que la motiva —"¿de qué le sirvió lo que le dije?"— mostrando el
+// material tal como él lo lee, y no como un registro de cuándo se apretó qué.
+const NOTA_GRUPOS = [
+  ['contexto', 'Cómo se lee el negocio', 'Lo que le contaron sin que preguntara. Es la base de todo lo que interpreta.'],
+  ['normal',   'Lo que ya sabe que es normal', 'Por esto dejó de marcarlo. Si algo de acá dejó de ser cierto, archivalo.'],
+  ['sirve',    'Lo que les sirvió', 'Con esto calibra qué vale la pena contarles. No lo repite por estar acá.'],
+];
+
 function notaListaHTML() {
-  const notas = (state.informeNotas || []).filter(n => (n.texto || '').trim() || n.escalonConcepto);
-  if (!notas.length) return '';
-  return `<div style="margin-top:22px;padding-top:14px;border-top:1px solid var(--border)">
-      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">
-        Lo que ya le dijeron (${notas.length})
-      </div>
-      ${notas.map(n => `
-        <div class="nota-lista-item">
-          <div>${escapeHtml(n.texto || '')}</div>
-          ${n.escalonConcepto ? `<div class="nota-lista-meta" style="color:var(--accent)">
-            ⚑ ${escapeHtml(n.escalonConcepto)} cambió para siempre desde ${escapeHtml(n.escalonDesde)} — el análisis ya no compara contra lo anterior
-          </div>` : ''}
-          <div class="nota-lista-meta">
-            ${escapeHtml((n.fecha || '').slice(0, 10))} · ${escapeHtml(n.usuario || '')}${n.hallazgo ? ` · sobre "${escapeHtml(n.hallazgo)}"` : ' · contexto general'}
-            · <a href="#" onclick="notaArchivar(${n.rowIndex}, event)" style="color:var(--text-muted)">ya no aplica</a>
-          </div>
-        </div>`).join('')}
-    </div>`;
+  // Entran también los pulgares arriba pelados: no tienen texto, pero son parte
+  // de lo que el agente sabe, y esta pantalla existe justamente para poder ver
+  // todo lo que sabe.
+  const notas = state.informeNotas || [];
+  if (!notas.length) {
+    return `<div style="margin-top:22px;padding-top:14px;border-top:1px solid var(--border);font-size:13px;color:var(--text-muted);line-height:1.7">
+        Todavía no le dijeron nada. Cada 👍 y cada "ya lo sé" de un informe queda acá,
+        y el agente los lee antes de escribir el siguiente.
+      </div>`;
+  }
+
+  const bloques = NOTA_GRUPOS.map(([veredicto, titulo, ayuda]) => {
+    const suyas = notas.filter(n => (n.veredicto || 'contexto') === veredicto);
+    if (!suyas.length) return '';
+    return `<div style="margin-top:22px;padding-top:14px;border-top:1px solid var(--border)">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">
+          ${escapeHtml(titulo)} (${suyas.length})
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);line-height:1.6;margin:4px 0 2px">${escapeHtml(ayuda)}</div>
+        ${suyas.map(n => `
+          <div class="nota-lista-item">
+            ${(n.texto || '').trim()
+              ? `<div>${escapeHtml(n.texto)}</div>`
+              : '<div style="color:var(--text-muted)">— sin comentario</div>'}
+            ${n.escalonConcepto ? `<div class="nota-lista-meta" style="color:var(--accent)">
+              ⚑ ${escapeHtml(n.escalonConcepto)} cambió para siempre desde ${escapeHtml(n.escalonDesde)} — el análisis ya no compara contra lo anterior
+            </div>` : ''}
+            <div class="nota-lista-meta">
+              ${escapeHtml((n.fecha || '').slice(0, 10))} · ${escapeHtml(n.usuario || '')}${n.hallazgo ? ` · sobre "${escapeHtml(n.hallazgo)}"` : ' · contexto general'}
+              ${n.rowIndex ? `· <a href="#" onclick="notaArchivar(${n.rowIndex}, event)" style="color:var(--text-muted)">ya no aplica</a>` : ''}
+            </div>
+          </div>`).join('')}
+      </div>`;
+  }).join('');
+
+  return bloques;
 }
 
 async function notaArchivar(fila, ev) {
@@ -6566,7 +6759,8 @@ async function notaArchivar(fila, ev) {
   if (!confirm('¿Archivar esta nota? El agente deja de tenerla en cuenta.')) return;
   try {
     await api(`/api/informes/notas/${fila}/archivar`, { method: 'POST' });
-    await loadInformes();
+    state.informeNotas = (state.informeNotas || []).filter(n => n.rowIndex !== fila);
+    renderMemoriaAgente();
   } catch (e) { alert('No se pudo archivar: ' + e.message); }
 }
 
@@ -6615,6 +6809,13 @@ async function checkAvisoInforme() {
     const { data } = await api('/api/informes/pendientes');
     if (!data || !data.length) return;
     await asegurarProveedores();   // idem: la ventana también ofrece la casilla
+    // Y las notas, o la ventana no puede saber qué ya se contestó. Este era el
+    // caso que fallaba: se responde el informe en la compu y se abre en el
+    // teléfono, donde el aviso salta por el mismo informe sin leer y pedía todo
+    // el feedback de nuevo. Acá se leen sí o sí, porque `loadInformes` sólo
+    // corre si entrás a la sección y por el aviso no entrás a ningún lado.
+    try { state.informeNotas = (await api('/api/informes/notas')).data || []; }
+    catch (e) { /* sin esto se piden de nuevo: molesto, no roto */ }
     abrirAvisoInforme(data);
   } catch (e) { /* nunca romper la app por el aviso */ }
 }
