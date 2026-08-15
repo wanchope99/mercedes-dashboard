@@ -60,9 +60,20 @@ const HEADER = ['ID', 'Fecha', 'Proveedor', 'Detalle', 'CostoEstimado', 'MedioPr
 const HEADER_SEMANAL = ['ID', 'Dia', 'Orden', 'Tipo', 'Proveedor', 'Nota', 'MedioPrevisto',
                         'Activo', 'Actualizado'];
 
-// Lunes primero: es como se lee el cuadro y como lo escribe el doc de hoy. El
-// índice dentro del array es el día de la semana ISO menos uno.
+// La semana entera. Lunes primero: el índice dentro del array es el día de la
+// semana ISO menos uno, así que este array NO se toca — es lo que traduce una
+// fecha a su día de la semana.
 const DIAS = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
+
+// Los días que el CUADRO ofrece. Domingo y lunes quedan afuera (15/08/2026):
+// ningún proveedor entrega esos días, así que dos columnas de siete estaban
+// siempre vacías y le sacaban ancho a las que sí se usan.
+//
+// Son dos listas distintas a propósito. Un pedido concreto sí puede caer un
+// lunes — alguien manda algo fuera de la rutina, o llega un Mercado Libre — y
+// esos días siguen apareciendo en la lista de arriba con normalidad. Lo que se
+// achica es la rutina fija, no el calendario.
+const DIAS_CUADRO = ['martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 
 const ESTADOS = ['esperado', 'recibido', 'cancelado'];
 const ESTADO_DEFAULT = 'esperado';
@@ -410,6 +421,9 @@ async function listPedidos({ dias = DIAS_ADELANTE } = {}) {
     dias: armarDias(pedidos, semanal, { hoy, dias }),
     semanal: semanal.map(_publico),
     diasSemana: DIAS,
+    // Las columnas del cuadro. El navegador dibuja éstas y no las siete: ver
+    // DIAS_CUADRO arriba.
+    diasCuadro: DIAS_CUADRO,
     tipos: TIPOS,
   };
 }
@@ -564,10 +578,22 @@ async function listSemanal() {
   return (await _loadSemanal()).map(_publico);
 }
 
+// El cuadro no ofrece domingo ni lunes, así que tampoco los acepta: si el
+// navegador mandara uno, la fila quedaría escrita en una columna que la pantalla
+// no dibuja — invisible e ineditable, pero generando previstos igual.
+function _diaDelCuadro(valor) {
+  const dia = normalizarDia(valor);
+  if (!dia) throw new Error('Elegí un día de la semana');
+  if (!DIAS_CUADRO.includes(dia)) {
+    throw new Error(`El cuadro semanal va de martes a sábado: los ${dia} no hay entregas. `
+      + 'Si igual esperás algo ese día, cargalo como un pedido suelto arriba.');
+  }
+  return dia;
+}
+
 async function crearSemanal(datos = {}) {
   if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
-  const dia = normalizarDia(datos.dia);
-  if (!dia) throw new Error('Elegí un día de la semana');
+  const dia = _diaDelCuadro(datos.dia);
   const proveedor = _txt(datos.proveedor);
   if (!proveedor) throw new Error('Falta el proveedor');
 
@@ -616,9 +642,13 @@ async function actualizarSemanal(id, cambios = {}) {
   const tiene = c => Object.prototype.hasOwnProperty.call(cambios, c);
   const nuevo = { ...actual };
   if (tiene('dia')) {
+    // Sólo se valida contra el cuadro si el día CAMBIA. Una fila que quedó en un
+    // domingo (escrita a mano en la planilla) se sigue pudiendo editar: si no,
+    // corregirle la nota fallaría por un día que quien edita no eligió, y la
+    // única salida sería moverla — que es justo lo que hay que poder hacer.
     const d = normalizarDia(cambios.dia);
-    if (!d) throw new Error('Día inválido');
-    nuevo.dia = d;
+    if (!d) throw new Error('Elegí un día de la semana');
+    nuevo.dia = d === actual.dia ? d : _diaDelCuadro(d);
   }
   if (tiene('tipo')) nuevo.tipo = normalizarTipo(cambios.tipo);
   if (tiene('proveedor')) {
@@ -695,5 +725,5 @@ module.exports = {
   armarDias, estaAbierto, diaSemanaDe, etiquetaDia, normalizarFecha, normalizarDia,
   normalizarEstado, normalizarPago, normalizarTipo, hoyAR,
   clearCache,
-  DIAS, ESTADOS, PAGOS, TIPOS, HOJA, HOJA_SEMANAL, DIAS_ADELANTE,
+  DIAS, DIAS_CUADRO, ESTADOS, PAGOS, TIPOS, HOJA, HOJA_SEMANAL, DIAS_ADELANTE,
 };

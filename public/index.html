@@ -452,11 +452,18 @@
     .ped-chip.atrasado { background: var(--red-dim); color: var(--red); border-color: var(--red); }
 
     /* ── El cuadro semanal ──────────────────────────────────────────────── */
-    .ped-semana { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; align-items: start; }
+    /* Cuántas columnas lo dice renderPedidosSemana() por --ped-cols: son cinco
+       (martes a sábado), más alguna suelta si quedó una fila en un día que el
+       cuadro ya no ofrece. */
+    .ped-semana { display: grid; grid-template-columns: repeat(var(--ped-cols, 5), 1fr); gap: 10px; align-items: start; }
     .ped-dia-col { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 10px; min-height: 92px; }
     /* El día sobre el que se está soltando un bloque. Sin esta marca el drag es
        adivinar dónde va a caer. */
     .ped-dia-col.drop { border-color: var(--accent); background: var(--border); }
+    /* Un día que el cuadro ya no ofrece pero donde quedó algo cargado. Se dibuja
+       para que no sea una fila invisible, marcado para que se saque de ahí. */
+    .ped-dia-col.huerfana { border-color: var(--orange); border-style: dashed; }
+    .ped-dia-col.huerfana .ped-col-titulo { color: var(--orange); }
     .ped-col-titulo { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
     .ped-col-add { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 2px; }
     .ped-col-add:hover { color: var(--text); }
@@ -11495,7 +11502,9 @@ function poblarPedidosSelects() {
   setSi('ped-medio', medios);
   setSi('ped-sem-medio', medios);
   setSi('ped-r-medio', PED_MEDIOS.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join(''));
-  setSi('ped-sem-dia', (pedState.data.diasSemana || []).map(d =>
+  // Sólo los días que el cuadro ofrece: ofrecer un lunes que después el server
+  // rechaza es hacer elegir algo que no se puede elegir.
+  setSi('ped-sem-dia', (pedState.data.diasCuadro || pedState.data.diasSemana || []).map(d =>
     `<option value="${escapeHtml(d)}">${escapeHtml(d.charAt(0).toUpperCase() + d.slice(1))}</option>`).join(''));
 
   // La fecha del alta arranca en hoy, y el proveedor usa las mismas sugerencias
@@ -11898,19 +11907,36 @@ function pedBuscar(id) {
 
 function renderPedidosSemana() {
   const cont = document.getElementById('ped-semana');
-  const dias = pedState.data.diasSemana || [];
   const items = pedState.data.semanal || [];
+  const delCuadro = pedState.data.diasCuadro || pedState.data.diasSemana || [];
+
+  // Domingo y lunes no son columnas: nunca hay entregas. PERO si alguna fila
+  // quedó en un día de esos —escrita a mano en la planilla, o de antes de este
+  // cambio— su columna se dibuja igual. Una fila que no se ve pero sigue
+  // generando previstos es peor que una columna de más.
+  const orden = pedState.data.diasSemana || [];
+  const huerfanos = [...new Set(items.filter(s => s.activo && !delCuadro.includes(s.dia)).map(s => s.dia))]
+    .sort((a, b) => orden.indexOf(a) - orden.indexOf(b));
+  const dias = [...delCuadro, ...huerfanos];
+  // Vía variable CSS y no gridTemplateColumns directo: un estilo inline le
+  // ganaría al media query del teléfono, que apila el cuadro en una columna.
+  cont.style.setProperty('--ped-cols', dias.length);
 
   cont.innerHTML = dias.map(dia => {
     const delDia = items.filter(s => s.dia === dia && s.activo);
     const bloques = delDia.length
       ? delDia.map(bloqueSemanal).join('')
       : '<div class="ped-col-vacia">—</div>';
-    return `<div class="ped-dia-col" data-dia="${escapeHtml(dia)}"
-                 ondragover="pedDragOver(event,this)" ondragleave="this.classList.remove('drop')"
-                 ondrop="pedDrop(event,this)">
+    // La columna huérfana no ofrece "＋" ni recibe lo que se arrastre: agregar
+    // ahí es cargar algo en un día que el cuadro no acepta. Existe sólo para
+    // poder ver lo que quedó y sacarlo de ahí con el "⋮" de su bloque.
+    const esHuerfana = huerfanos.includes(dia);
+    return `<div class="ped-dia-col${esHuerfana ? ' huerfana' : ''}" data-dia="${escapeHtml(dia)}"
+                 ${esHuerfana ? '' : `ondragover="pedDragOver(event,this)" ondragleave="this.classList.remove('drop')" ondrop="pedDrop(event,this)"`}>
       <div class="ped-col-titulo"><span>${escapeHtml(dia)}</span>
-        <button class="ped-col-add" title="Agregar" onclick="openPedSem(null,'${escapeHtml(dia)}')">＋</button>
+        ${esHuerfana
+          ? '<span title="El cuadro va de martes a sábado. Movelo con el ⋮ de su bloque.">⚠</span>'
+          : `<button class="ped-col-add" title="Agregar" onclick="openPedSem(null,'${escapeHtml(dia)}')">＋</button>`}
       </div>
       ${bloques}
     </div>`;
@@ -11980,7 +12006,7 @@ function openPedSem(id, diaSugerido) {
   pedState.editandoSem = s ? s.id : null;
   document.getElementById('ped-sem-titulo').textContent = s ? 'Editar el bloque' : 'Agregar al cuadro semanal';
   document.getElementById('ped-sem-error').textContent = '';
-  setSelectValue(document.getElementById('ped-sem-dia'), s ? s.dia : (diaSugerido || 'lunes'));
+  setSelectValue(document.getElementById('ped-sem-dia'), s ? s.dia : (diaSugerido || 'martes'));
   document.getElementById('ped-sem-tipo').value = s ? s.tipo : 'entrega';
   document.getElementById('ped-sem-proveedor').value = s ? s.proveedor : '';
   document.getElementById('ped-sem-nota').value = s ? s.nota : '';
