@@ -409,6 +409,98 @@
       .mant-acciones { grid-column: 2; justify-content: flex-start; }
     }
 
+    /* ── Pedidos por día ────────────────────────────────────────────────── */
+    .ped-alta { display: grid; grid-template-columns: 150px 1fr 1fr 130px 165px auto; gap: 10px; align-items: center; }
+    .ped-alta > * { min-width: 0; }
+    /* El renglón del día. Cerrado es una línea; abierto despliega los pedidos. */
+    .ped-dia { border: 1px solid var(--border); background: var(--surface2); border-radius: 10px; margin-bottom: 8px; overflow: hidden; }
+    .ped-dia.hoy { border-color: var(--accent); }
+    .ped-dia.atrasado { border-color: var(--red); }
+    .ped-dia-head { display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: center;
+                    padding: 12px 14px; cursor: pointer; user-select: none; }
+    .ped-dia-head:hover { background: var(--border); }
+    .ped-flecha { color: var(--text-muted); font-size: 12px; transition: transform 0.15s; }
+    .ped-dia.abierto .ped-flecha { transform: rotate(90deg); }
+    /* Sin text-transform: el título viene ya capitalizado del server ("Jueves 20
+       de agosto"), y capitalize acá lo dejaba "Jueves 20 De Agosto". */
+    .ped-dia-titulo { font-size: 14px; font-weight: 500; }
+    .ped-dia-sub { font-size: 11px; color: var(--text-muted); margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .ped-dia-monto { font-size: 13px; font-weight: 600; white-space: nowrap; }
+    .ped-dia-body { padding: 0 14px 14px; }
+    .ped-dia:not(.abierto) .ped-dia-body { display: none; }
+    .ped-item { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center;
+                background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px; margin-bottom: 7px; }
+    .ped-item.recibido { opacity: 0.6; }
+    /* Los previstos son la rutina del cuadro semanal, no filas guardadas.
+       Borde punteado para que se vea de un vistazo que todavía no existen. */
+    .ped-item.previsto { border-style: dashed; background: transparent; }
+    .ped-item-titulo { font-size: 13.5px; font-weight: 500; }
+    .ped-item-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .ped-acciones { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+    .ped-acciones button { background: none; border: 1px solid var(--border); color: var(--text-muted); cursor: pointer;
+                           font-size: 12px; padding: 5px 10px; border-radius: 7px; font-family: inherit; white-space: nowrap; }
+    .ped-acciones button:hover { background: var(--border); color: var(--text); }
+    .ped-acciones button.ok:hover { border-color: var(--green); color: var(--green); }
+    .ped-acciones button.plata { border-color: rgba(76,175,130,0.4); color: var(--green); }
+    .ped-acciones button.plata:hover { background: var(--green-dim); }
+    .ped-pedir { font-size: 11.5px; color: var(--text-muted); border-top: 1px dashed var(--border); padding-top: 9px; margin-top: 4px; line-height: 1.7; }
+    .ped-vacio { color: var(--text-muted); font-size: 12.5px; padding: 6px 0 10px; }
+    .ped-chip { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap;
+                background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); }
+    .ped-chip.pagado { background: var(--green-dim); color: var(--green); border-color: rgba(76,175,130,0.4); }
+    .ped-chip.apagar { background: var(--orange-dim); color: var(--orange); border-color: rgba(224,138,92,0.4); }
+    .ped-chip.atrasado { background: var(--red-dim); color: var(--red); border-color: var(--red); }
+
+    /* ── El cuadro semanal ──────────────────────────────────────────────── */
+    .ped-semana { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; align-items: start; }
+    .ped-dia-col { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 10px; min-height: 92px; }
+    /* El día sobre el que se está soltando un bloque. Sin esta marca el drag es
+       adivinar dónde va a caer. */
+    .ped-dia-col.drop { border-color: var(--accent); background: var(--border); }
+    .ped-col-titulo { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+    .ped-col-add { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 2px; }
+    .ped-col-add:hover { color: var(--text); }
+    .ped-bloque { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 9px; margin-bottom: 6px;
+                  font-size: 12px; cursor: grab; display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: start; }
+    .ped-bloque:active { cursor: grabbing; }
+    .ped-bloque.arrastrando { opacity: 0.4; }
+    .ped-bloque.pedir { border-style: dashed; }
+    .ped-bloque-nombre { font-weight: 600; line-height: 1.3; }
+    .ped-bloque-nota { color: var(--text-muted); font-size: 11px; margin-top: 3px; line-height: 1.4; }
+    .ped-bloque-menu { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
+    .ped-bloque-menu:hover { color: var(--text); }
+    .ped-col-vacia { color: var(--text-muted); font-size: 11px; font-style: italic; padding: 4px 2px; }
+
+    /* Los dos modales de esta pantalla. En el resto de la app cada overlay trae
+       sus propias reglas por id — no existe un .modal-overlay genérico. */
+    #ped-recibir-overlay, #ped-sem-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 320; align-items: center; justify-content: center; padding: 20px; }
+    #ped-recibir-overlay.open, #ped-sem-overlay.open { display: flex; }
+    #ped-recibir-overlay .modal, #ped-sem-overlay .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; width: 520px; max-width: 95vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 24px 64px rgba(0,0,0,0.5); }
+    #ped-recibir-overlay .modal-title, #ped-sem-overlay .modal-title { font-size: 17px; font-weight: 600; margin-bottom: 22px; }
+    #ped-recibir-overlay label, #ped-sem-overlay label { font-size: 12px; font-weight: 500; color: var(--text-muted); display: block; margin-bottom: 6px; }
+    #ped-recibir-overlay select, #ped-recibir-overlay input, #ped-sem-overlay select, #ped-sem-overlay input {
+      background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 9px 12px;
+      border-radius: 8px; font-size: 13px; font-family: inherit; outline: none; width: 100%; }
+    #ped-recibir-overlay input[type="date"] { color-scheme: dark; }
+    /* Las cuentas pendientes del proveedor: se elige una y esa es la que se
+       cierra. Mismo componente que el modal de Pagos (.pg-item). */
+    .ped-cuenta { display: flex; justify-content: space-between; align-items: center; gap: 10px; background: var(--surface2);
+                  border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; cursor: pointer; font-size: 12.5px; }
+    .ped-cuenta:hover { border-color: #5a5a7a; }
+    .ped-cuenta.selected { border-color: var(--accent); background: var(--border); }
+    .ped-cuenta-sub { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+
+    @media (max-width: 900px) {
+      .ped-alta { grid-template-columns: 1fr 1fr; }
+      .ped-alta input[id="ped-detalle"], .ped-alta button { grid-column: 1 / -1; }
+      .ped-item { grid-template-columns: 1fr; }
+      .ped-acciones { justify-content: flex-start; }
+      /* El drag nativo de HTML5 no existe en el teléfono: el cuadro pasa a ser
+         una lista y cada bloque se mueve con el botón "⋮". */
+      .ped-semana { grid-template-columns: 1fr; }
+      .ped-dia-col { min-height: 0; }
+    }
+
     .loading { display: flex; align-items: center; justify-content: center; height: 120px; color: var(--text-muted); font-size: 14px; gap: 12px; }
     .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -1283,6 +1375,141 @@
      servicio (acá o por Telegram) y después se ordena por semana o prioridad.
      El encargado entra: puede agregar y mover estados, no borrar. No toca la
      contabilidad del bar. Ver src/mantenimiento.js. -->
+<!-- ═══ PEDIDOS POR DÍA ═══════════════════════════════════════════════════════
+     Qué llega cada día, si hay que pagarlo y cuánto. Reemplaza el Google Doc
+     "PEDIDOS X DIA". Ver src/pedidos.js y la sección de JS más abajo.        -->
+<div id="tab-pedidos" class="tab-panel">
+  <main>
+    <div class="card">
+      <div class="card-title"><span>Esperar un pedido</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· lo que va a llegar, para saber qué recibir y qué pagar</span>
+      </div>
+      <div class="ped-alta">
+        <input type="date" id="ped-fecha" />
+        <input type="text" id="ped-proveedor" list="proveedores-datalist" autocomplete="off" placeholder="Proveedor"
+               onkeydown="if(event.key==='Enter')crearPedido(this)" />
+        <input type="text" id="ped-detalle" maxlength="500" placeholder="Qué trae (ej: 4 cajones de birra)"
+               onkeydown="if(event.key==='Enter')crearPedido(this)" />
+        <input type="text" id="ped-costo" inputmode="numeric" placeholder="Costo aprox." />
+        <select id="ped-medio"></select>
+        <button class="btn btn-acento" onclick="crearPedido(this)">+ Agregar</button>
+      </div>
+      <div id="ped-alta-msg" style="font-size:12px;margin-top:10px;min-height:16px"></div>
+    </div>
+
+    <div class="card" style="margin-top:24px">
+      <div class="card-title"><span>Los próximos días</span>
+        <button class="btn" style="padding:4px 12px" onclick="loadPedidos(this)">↻ Actualizar</button>
+      </div>
+      <div id="ped-dias"><div class="loading"><div class="spinner"></div> Cargando...</div></div>
+    </div>
+
+    <div class="card" style="margin-top:24px">
+      <div class="card-title"><span>Qué entra cada día de la semana</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
+              id="ped-semana-ayuda">· arrastrá un bloque para cambiarlo de día</span>
+      </div>
+      <div id="ped-semana" class="ped-semana"><div class="loading"><div class="spinner"></div> Cargando...</div></div>
+    </div>
+  </main>
+</div>
+
+<!-- Modal: recibir un pedido. Es donde se toca la plata, así que dice
+     explícitamente qué va a pasar en la planilla antes de confirmar. -->
+<div class="modal-overlay" id="ped-recibir-overlay">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-title">Recibir pedido</div>
+    <div id="ped-r-cabecera" style="font-size:13px;color:var(--text-muted);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;line-height:1.8;margin-bottom:14px"></div>
+
+    <div class="form-group full" style="margin-bottom:12px">
+      <label>¿Se pagó?</label>
+      <select id="ped-r-pago" onchange="onPedPagoChange()" style="width:100%">
+        <option value="pagado">Sí, se pagó ahora</option>
+        <option value="a pagar">Todavía no — queda a pagar</option>
+        <option value="no">Sólo recibido, la plata se ve después</option>
+      </select>
+    </div>
+
+    <div id="ped-r-plata">
+      <div class="form-group full" id="ped-r-lista-wrap" style="display:none;margin-bottom:12px">
+        <label id="ped-r-lista-label">Este proveedor ya tiene cuentas pendientes</label>
+        <div id="ped-r-lista"></div>
+      </div>
+      <div class="form-group full" style="margin-bottom:12px">
+        <label>Cuánto se pagó</label>
+        <input type="text" id="ped-r-monto" inputmode="numeric" placeholder="0" style="width:100%">
+      </div>
+      <div class="form-group full" style="margin-bottom:12px">
+        <label>Con qué medio</label>
+        <select id="ped-r-medio" style="width:100%"></select>
+      </div>
+      <div class="form-group full" id="ped-r-venc-wrap" style="display:none;margin-bottom:12px">
+        <label>Vencimiento</label>
+        <input type="date" id="ped-r-venc" style="width:100%">
+      </div>
+      <div id="ped-r-que-hace" style="font-size:11.5px;color:var(--text-muted);line-height:1.6;margin-bottom:12px"></div>
+    </div>
+
+    <div id="ped-r-error" style="color:var(--red);font-size:13px;margin-bottom:10px;text-align:center"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closePedRecibir()">Cancelar</button>
+      <button class="btn btn-accent" onclick="confirmarPedRecibir()">✓ Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: alta / edición de un bloque del cuadro semanal -->
+<div class="modal-overlay" id="ped-sem-overlay">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-title" id="ped-sem-titulo">Agregar al cuadro semanal</div>
+    <div class="form-grid" style="grid-template-columns:1fr">
+      <div class="form-group full" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label>Día</label><select id="ped-sem-dia"></select></div>
+        <div><label>Qué es</label><select id="ped-sem-tipo">
+          <option value="entrega">Entrega — llega y se paga</option>
+          <option value="pedir">Pedir — hay que encargarlo</option>
+        </select></div>
+      </div>
+      <div class="form-group full">
+        <label>Proveedor</label>
+        <input type="text" id="ped-sem-proveedor" list="proveedores-datalist" autocomplete="off" />
+      </div>
+      <div class="form-group full">
+        <label>Nota</label>
+        <input type="text" id="ped-sem-nota" maxlength="1000" placeholder="Ej: cambiar cajones vacíos por llenos" />
+      </div>
+      <div class="form-group full">
+        <label>Medio de pago habitual</label>
+        <select id="ped-sem-medio"></select>
+      </div>
+    </div>
+    <div id="ped-sem-error" style="color:var(--red);font-size:13px;margin:8px 0;text-align:center"></div>
+    <div class="modal-actions">
+      <button class="btn" id="ped-sem-borrar" style="margin-right:auto" onclick="borrarSemanal()">🗑️ Sacar del cuadro</button>
+      <button class="btn" onclick="closePedSem()">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarPedSem()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- "Más" de Operación: las dos pantallas que son la cola de otra sección
+     (Config. de costos vive de Costos, Historial de propinas de Propinas) y se
+     abren una vez cada tanto. Los paneles no se tocaron: sólo salieron de la
+     barra, igual que cuando se archivó tab-proveedores. -->
+<div id="tab-operacion-mas" class="tab-panel">
+  <main>
+    <div class="card">
+      <div class="card-title"><span>Más de Operación</span></div>
+      <div class="mas-grid" style="margin-top:6px">
+        <button class="btn mas-item" onclick="abrirDesdeMas('costos-config')">
+          <span style="font-size:22px">⚙️</span><span>Config. de costos</span></button>
+        <button class="btn mas-item" onclick="abrirDesdeMas('propinas-historial')">
+          <span style="font-size:22px">📋</span><span>Historial de propinas</span></button>
+      </div>
+    </div>
+  </main>
+</div>
+
 <div id="tab-mantenimiento" class="tab-panel">
   <main>
     <div class="card">
@@ -2763,6 +2990,10 @@ function onLoginSuccess(rol, nombre) {
       switchGroup('caja');
       switchSub('arqueo');
     }
+    // Las novedades marcadas `paraTodos` también le llegan al encargado. El
+    // resto de iniciarAvisoInformes() es del informe del domingo, que es de una
+    // sola persona, y por eso queda en la rama de arriba.
+    setTimeout(checkRelease, 1200);
   }
 
   // En el teléfono la app abre en Inicio, para los dos roles. En la computadora
@@ -2958,20 +3189,27 @@ const TAB_GROUPS = {
   ] },
 
   // ── El bar funcionando ────────────────────────────────────────────────────
-  // Lo que se consume (Bebidas), lo que cuesta (Costos), lo que se rompe
-  // (Mantenimiento) y lo que se reparte (Propinas).
+  // Lo que llega (Pedidos), lo que se consume (Bebidas), lo que se rompe
+  // (Mantenimiento), lo que cuesta (Costos) y lo que se reparte (Propinas).
   //
-  // Mantenimiento SIN soloAdmin a propósito: el encargado es el que está en el
-  // salón cuando se rompe algo. Puede anotar y mover estados; borrar y editar es
-  // sólo del admin, y eso lo hace cumplir el server, no el botón escondido.
-  // Todo /api/propinas/* es adminOnly, así que ese sub sí se le esconde.
+  // Pedidos y Mantenimiento SIN soloAdmin a propósito: el encargado es el que
+  // está en el salón cuando se rompe algo y el que recibe al proveedor en la
+  // puerta. Todo /api/propinas/* y /api/costos* es adminOnly, así que esos subs
+  // sí se le esconden.
+  //
+  // El sexto lugar es "Más" y no un sexto tema: al agregar Pedidos el 15/08/2026
+  // el grupo llegaba a siete, y la regla de este archivo dice que a los seis hay
+  // que repensar el agrupamiento. Config. de costos e Historial de propinas son
+  // las dos pantallas que se abren una vez cada tanto — son la cola de Costos y
+  // de Propinas, no temas propios — así que se movieron adentro de Más. El
+  // criterio para lo que venga: si un sub es el detalle de otro sub, va a Más.
   operacion: { label: '🍽️ Operación', icono: '🍽️', corto: 'Operación', phonePrio: 3, subs: [
+    { id: 'pedidos',        label: '📦 Pedidos' },
     { id: 'vinos',          label: '🥂 Bebidas' },
     { id: 'mantenimiento',  label: '🔧 Mantenimiento' },
     { id: 'costos-resumen', label: '🧮 Costos', soloAdmin: true },
-    { id: 'costos-config',  label: '⚙️ Config. de costos', soloAdmin: true },
     { id: 'propinas',       label: '💸 Propinas', soloAdmin: true },
-    { id: 'propinas-historial', label: '📋 Historial de propinas', soloAdmin: true },
+    { id: 'operacion-mas',  label: '⋯ Más', soloAdmin: true },
   ] },
 
   // ── Lo que viene ──────────────────────────────────────────────────────────
@@ -3078,6 +3316,8 @@ function abrirMasSheet() {
 // Carga de cada panel cuando se activa.
 function cargarPanel(tab) {
   if (tab === 'inicio') renderInicio();
+  else if (tab === 'pedidos') loadPedidos();
+  else if (tab === 'operacion-mas') { /* sólo botones, nada que cargar */ }
   else if (tab === 'pagos') { if (state.rol === 'admin') loadPagos(); }
   else if (tab === 'cajas') loadCajas();
   else if (tab === 'arqueo') initArqueo();
@@ -3191,6 +3431,17 @@ function switchTab(tab, btn) {
   }
   // Fallback: activar el panel directamente.
   activarPanel(tab);
+}
+
+// Abre un panel que ya NO está en la barra de submenús porque vive adentro de
+// "Más" (Config. de costos, Historial de propinas). El subtab "Más" queda
+// marcado: es dónde estás parado, y dejarlo sin marcar haría parecer que la
+// barra se desincronizó.
+function abrirDesdeMas(tab) {
+  activarPanel(tab);
+  document.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
+  const mas = document.getElementById('subtab-operacion-mas');
+  if (mas) mas.classList.add('active');
 }
 
 // ─── ARQUEO DE CAJAS ──────────────────────────────────────────────────────────
@@ -6886,6 +7137,51 @@ async function cerrarAvisoInforme(marcarLeido) {
 // misma computadora no se pisen.
 const RELEASE_LOG = [
   {
+    version: '2026-08-15-pedidos',
+    fecha: '15 de agosto de 2026',
+    titulo: 'Los pedidos del día ya no viven en un Word',
+    // Ésta SÍ le llega a Charly: la pantalla es suya. Ver `paraTodos` abajo.
+    paraTodos: true,
+    porque: 'El documento "PEDIDOS X DIA" pasó a ser una sección de la app. Además de no tener que '
+      + 'escribir los días a mano, ahora <b>recibir un pedido y pagarlo queda anotado en la planilla '
+      + 'en el momento</b>, que era lo que después había que acordarse de cargar.',
+    items: [
+      {
+        icono: '📦',
+        titulo: 'Los días se abren y se cierran',
+        desc: 'Cada día es un renglón que se despliega con lo que va a llegar: proveedor, qué trae, cuánto '
+            + 'sale y con qué se paga. Los días que ya pasaron desaparecen solos — salvo que hayan quedado '
+            + 'con algo <b>sin recibir o sin definir si se pagó</b>, y ésos suben arriba de todo en rojo.',
+        donde: 'Operación › Pedidos',
+      },
+      {
+        icono: '💵',
+        titulo: 'Marcar "recibido y pagado" escribe en Movimientos',
+        desc: 'Si el proveedor ya tenía una cuenta pendiente cargada, esa fila pasa a <b>Pagado</b> — la misma '
+            + 'operación que el botón Pagar de la sección Pagos, así que no se duplica nada. Si no había ninguna, '
+            + 'se agrega una fila nueva. También se puede dejar como <b>a pagar</b> y aparece en Pagos. '
+            + 'Antes de confirmar, la ventana dice en una línea qué va a hacer.',
+        donde: 'Operación › Pedidos',
+      },
+      {
+        icono: '🗓️',
+        titulo: 'El cuadro de la semana se arrastra',
+        desc: 'Abajo está la rutina fija (los jueves entrega Barracas, Coca y Bendito). Se cambia un proveedor '
+            + 'de día <b>arrastrando el bloque</b>, o con el botón ⋮ desde el teléfono. Lo que dice el cuadro '
+            + 'aparece solo en cada día como "previsto": no hay que volver a cargarlo todas las semanas.',
+        donde: 'Operación › Pedidos',
+      },
+      {
+        icono: '⋯',
+        titulo: 'Operación se reordenó',
+        desc: 'Con Pedidos ya eran siete submenús. <b>Config. de costos</b> e <b>Historial de propinas</b> pasaron '
+            + 'adentro de un botón <b>Más</b>: son el detalle de Costos y de Propinas, no temas aparte. '
+            + 'No se sacó nada.',
+        donde: 'Operación › Más',
+      },
+    ],
+  },
+  {
     version: '2026-08-12-menu',
     fecha: '12 de agosto de 2026',
     titulo: 'El menú cambió: ahora son cuatro secciones',
@@ -6977,10 +7273,16 @@ const RELEASE_LOG = [
 const _releaseKey = () => `mb_release_visto_${getUsuario() || 'anon'}`;
 
 // Sólo los admin, y sólo si no vieron ya esta versión.
+//
+// `paraTodos` es la excepción: una tanda cuya pantalla es del encargado también
+// le tiene que llegar a él. Pedidos es el primer caso — es la sección que abre
+// todos los días. El default sigue siendo admin: la mayoría de las novedades
+// son de pantallas que Charly no ve, y avisarle de algo que no puede abrir es
+// ruido.
 function releasePendiente() {
-  if (getRol() !== 'admin') return null;
   const ultima = RELEASE_LOG[0];
   if (!ultima) return null;
+  if (getRol() !== 'admin' && !ultima.paraTodos) return null;
   let visto = null;
   try { visto = localStorage.getItem(_releaseKey()); } catch (e) { /* modo privado */ }
   return visto === ultima.version ? null : ultima;
@@ -10777,11 +11079,14 @@ const HOME_TELEFONO = {
   ],
   // El encargado abre la app para dos cosas: arquear la caja y cargar algo.
   // Por eso Arqueo va primero y en su lugar no hay Dashboard, que no ve.
+  // Pedidos entró en lugar de Bebidas (15/08/2026): es lo que abre todos los
+  // días para saber qué esperar y qué pagar en la puerta; a Bebidas llega por
+  // Operación cuando la necesita, que es cada varios días.
   encargado: [
     { tab: 'arqueo',     icono: '🗃️', titulo: 'Arqueo',    sub: 'abrir y cerrar la caja' },
     { accion: 'anotar',  icono: '🔧', titulo: 'Anotar',    sub: 'algo para arreglar', acento: true },
+    { tab: 'pedidos',    icono: '📦', titulo: 'Pedidos',   sub: 'qué llega y qué se paga' },
     { tab: 'pagos',      icono: '💳', titulo: 'Pagos',     sub: 'cargar una compra' },
-    { tab: 'vinos',      icono: '🥂', titulo: 'Bebidas',   sub: 'gestión de bebidas' },
   ],
 };
 
@@ -11122,6 +11427,625 @@ async function guardarMantenimientoEdit() {
 document.addEventListener('DOMContentLoaded', () => {
   const ov = document.getElementById('mant-edit-overlay');
   if (ov) ov.addEventListener('click', function (e) { if (e.target === this) closeMantenimientoEdit(); });
+});
+
+// ═══ PEDIDOS POR DÍA ════════════════════════════════════════════════════════
+// Qué llega cada día, si hay que pagarlo y cuánto. Ver src/pedidos.js.
+//
+// Todo se trae de una sola llamada a /api/pedidos: los días ya vienen armados
+// del server, con sus previstos resueltos. El navegador NO calcula qué previsto
+// corresponde a qué día — esa es la única regla de negocio de la pantalla y
+// tenerla en dos lados es cómo empiezan a discrepar.
+
+const pedState = {
+  data: null,
+  // Qué días quedaron abiertos. Se recuerda entre recargas de la pantalla: si
+  // no, marcar algo recibido cerraría el día que estabas mirando.
+  abiertos: new Set(),
+  recibiendo: null,       // el pedido que está en el modal
+  cuentas: [],            // filas "A pagar" del proveedor de ese pedido
+  cuentaElegida: null,
+  editandoSem: null,
+  arrastrando: null,
+  msgTimer: null,
+};
+
+// Las mismas cajas que ofrece el modal de Pagos. Es la lista corta a propósito:
+// escribir cualquier otra cosa en la columna L de Movimientos es plata que
+// ninguna caja resta nunca. El server igual valida contra los nombres exactos.
+const PED_MEDIOS = ['Efectivo Local', 'Efectivo Tincho', 'Efectivo Pablo',
+                    'Mercado Pago Tincho', 'Galicia', 'Echeq'];
+
+function pedEsAdmin() { return getRol() === 'admin'; }
+
+// Un número tipeado con puntos, comas o un "$" adelante.
+function pedNumero(v) {
+  const n = Number(String(v ?? '').replace(/[^0-9,.-]/g, '').replace(/\./g, '').replace(',', '.'));
+  return Number.isFinite(n) ? n : 0;
+}
+
+async function loadPedidos(btn) {
+  if (btn) btn.classList.add('spinning');
+  try {
+    const { data } = await api('/api/pedidos');
+    pedState.data = data;
+    // La primera vez, hoy abierto y el resto cerrado: es el día que se mira.
+    // Los atrasados también, porque son justamente lo que hay que resolver.
+    if (!pedState.abiertos.size) {
+      data.dias.filter(d => d.esHoy || d.atrasado).forEach(d => pedState.abiertos.add(d.fecha));
+    }
+    poblarPedidosSelects();
+    renderPedidosDias();
+    renderPedidosSemana();
+  } catch (e) {
+    document.getElementById('ped-dias').innerHTML =
+      '<div class="prop-error">No se pudo cargar: ' + escapeHtml(e.message) + '</div>';
+  } finally {
+    if (btn) btn.classList.remove('spinning');
+  }
+}
+
+function poblarPedidosSelects() {
+  const medios = '<option value="">Medio (opcional)</option>'
+    + PED_MEDIOS.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
+  const setSi = (id, html) => {
+    const el = document.getElementById(id);
+    if (el && !el.dataset.listo) { el.innerHTML = html; el.dataset.listo = '1'; }
+  };
+  setSi('ped-medio', medios);
+  setSi('ped-sem-medio', medios);
+  setSi('ped-r-medio', PED_MEDIOS.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join(''));
+  setSi('ped-sem-dia', (pedState.data.diasSemana || []).map(d =>
+    `<option value="${escapeHtml(d)}">${escapeHtml(d.charAt(0).toUpperCase() + d.slice(1))}</option>`).join(''));
+
+  // La fecha del alta arranca en hoy, y el proveedor usa las mismas sugerencias
+  // que el resto de la app (Movimientos + hoja Proveedores).
+  const f = document.getElementById('ped-fecha');
+  if (f && !f.value) f.value = pedState.data.hoy;
+  ensureSugerencias();
+}
+
+// ─── Los días ───────────────────────────────────────────────────────────────
+
+function renderPedidosDias() {
+  const cont = document.getElementById('ped-dias');
+  const dias = pedState.data.dias || [];
+
+  // Un día futuro sin nada no aporta: sería una lista de días vacíos donde hay
+  // que buscar los que tienen algo. Hoy siempre se muestra — es donde se carga.
+  const visibles = dias.filter(d =>
+    d.esHoy || d.atrasado || d.pedidos.length || d.previstos.length || d.paraPedir.length);
+
+  if (!visibles.length) {
+    cont.innerHTML = '<div class="mant-vacio">No hay nada esperado para los próximos días.<br>'
+      + 'Cargá arriba lo que va a llegar, o armá el cuadro semanal para que aparezca solo.</div>';
+    return;
+  }
+  cont.innerHTML = visibles.map(diaPedidos).join('');
+}
+
+function diaPedidos(d) {
+  const abierto = pedState.abiertos.has(d.fecha);
+  const clases = ['ped-dia', abierto ? 'abierto' : '', d.esHoy ? 'hoy' : '', d.atrasado ? 'atrasado' : ''].filter(Boolean).join(' ');
+
+  const chips = [
+    d.atrasado ? '<span class="ped-chip atrasado">sin resolver</span>' : '',
+    d.esHoy ? '<span class="ped-chip">hoy</span>' : '',
+    d.pedidos.length ? `<span>${d.pedidos.length} pedido${d.pedidos.length !== 1 ? 's' : ''}</span>` : '',
+    d.previstos.length ? `<span>${d.previstos.length} previsto${d.previstos.length !== 1 ? 's' : ''}</span>` : '',
+    d.abiertos ? `<span>${d.abiertos} sin recibir</span>` : '',
+    // Un día que sólo tiene cosas para pedir tenía el renglón vacío y parecía
+    // un día sin nada, cuando es justamente un día con algo que hacer.
+    d.paraPedir.length ? `<span>${d.paraPedir.length} para pedir</span>` : '',
+  ].filter(Boolean).join('');
+
+  const cuerpo = [
+    ...d.pedidos.map(itemPedido),
+    ...d.previstos.map(p => itemPrevisto(p, d.fecha)),
+    !d.pedidos.length && !d.previstos.length ? '<div class="ped-vacio">Nada esperado este día.</div>' : '',
+    d.paraPedir.length
+      ? `<div class="ped-pedir"><b>Para pedir:</b> ${d.paraPedir.map(s =>
+          escapeHtml(s.proveedor) + (s.nota ? ' — ' + escapeHtml(s.nota) : '')).join(' · ')}</div>`
+      : '',
+  ].filter(Boolean).join('');
+
+  return `<div class="${clases}" id="ped-dia-${d.fecha}">
+    <div class="ped-dia-head" onclick="togglePedDia('${d.fecha}')">
+      <span class="ped-flecha">▶</span>
+      <div>
+        <div class="ped-dia-titulo">${escapeHtml(d.label)}</div>
+        <div class="ped-dia-sub">${chips}</div>
+      </div>
+      <div class="ped-dia-monto">${d.totalEstimado ? fmt(d.totalEstimado) : ''}</div>
+    </div>
+    <div class="ped-dia-body">${cuerpo}</div>
+  </div>`;
+}
+
+function togglePedDia(fecha) {
+  if (pedState.abiertos.has(fecha)) pedState.abiertos.delete(fecha);
+  else pedState.abiertos.add(fecha);
+  const el = document.getElementById('ped-dia-' + fecha);
+  if (el) el.classList.toggle('abierto');
+}
+
+function itemPedido(p) {
+  const id = escapeHtml(p.id);
+  const recibido = p.estado === 'recibido';
+
+  const meta = [
+    p.detalle ? `<span>${escapeHtml(p.detalle)}</span>` : '',
+    p.pago === 'pagado' ? `<span class="ped-chip pagado">pagado ${fmt(p.montoPagado)}${p.medioPagoReal ? ' · ' + escapeHtml(p.medioPagoReal) : ''}</span>`
+      : p.pago === 'a pagar' ? '<span class="ped-chip apagar">quedó a pagar</span>'
+      : p.costoEstimado ? `<span>~${fmt(p.costoEstimado)}</span>` : '',
+    p.medioPrevisto && p.pago === 'no' ? `<span class="ped-chip">${escapeHtml(p.medioPrevisto)}</span>` : '',
+    recibido && p.recibidoPor ? `<span>✓ recibió ${escapeHtml(p.recibidoPor)}</span>` : '',
+  ].filter(Boolean).join('');
+
+  // Un pedido con el pago ya registrado no ofrece volver atrás: la fila del
+  // libro ya está escrita y deshacerla desde acá la dejaría huérfana. Se
+  // corrige donde vive, en Movimientos.
+  const acciones = p.pago !== 'no'
+    ? (pedEsAdmin() ? `<button onclick="borrarPedido('${id}')">🗑️</button>` : '')
+    : [
+        `<button class="plata" onclick="openPedRecibir('${id}')">💵 Recibido y pagado</button>`,
+        !recibido ? `<button class="ok" onclick="recibirSinPlata('${id}')">✓ Recibido</button>` : '',
+        pedEsAdmin() ? `<button onclick="borrarPedido('${id}')">🗑️</button>` : '',
+      ].filter(Boolean).join('');
+
+  return `<div class="ped-item${recibido ? ' recibido' : ''}">
+    <div>
+      <div class="ped-item-titulo">${escapeHtml(p.proveedor)}</div>
+      <div class="ped-item-meta">${meta}</div>
+    </div>
+    <div class="ped-acciones">${acciones}</div>
+  </div>`;
+}
+
+// Un previsto NO es una fila: es lo que ese día de la semana suele traer, según
+// el cuadro de abajo. Recibirlo lo crea y lo marca en un solo paso — que es el
+// caso normal, porque lo previsto es justamente lo que llega.
+function itemPrevisto(s, fecha) {
+  const meta = [
+    s.nota ? `<span>${escapeHtml(s.nota)}</span>` : '',
+    `<span class="ped-chip">del cuadro semanal</span>`,
+    s.medioPrevisto ? `<span class="ped-chip">${escapeHtml(s.medioPrevisto)}</span>` : '',
+  ].filter(Boolean).join('');
+
+  return `<div class="ped-item previsto">
+    <div>
+      <div class="ped-item-titulo">${escapeHtml(s.proveedor)}</div>
+      <div class="ped-item-meta">${meta}</div>
+    </div>
+    <div class="ped-acciones">
+      <button class="plata" onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}',true)">💵 Recibido y pagado</button>
+      <button class="ok" onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}',false)">✓ Recibido</button>
+      <button onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}',null)">＋ Esperarlo</button>
+    </div>
+  </div>`;
+}
+
+// ─── Alta ───────────────────────────────────────────────────────────────────
+
+function pedMensaje(html) {
+  clearTimeout(pedState.msgTimer);
+  pedState.msgTimer = null;
+  document.getElementById('ped-alta-msg').innerHTML = html;
+}
+
+async function crearPedido(btn) {
+  const prov = document.getElementById('ped-proveedor');
+  const proveedor = prov.value.trim();
+  if (!proveedor) { pedMensaje('<span style="color:var(--orange)">¿De qué proveedor?</span>'); prov.focus(); return; }
+
+  const boton = btn && btn.tagName === 'BUTTON' ? btn : null;
+  if (boton) boton.disabled = true;
+  pedMensaje('<span style="color:var(--text-muted)">Guardando...</span>');
+  try {
+    await api('/api/pedidos', {
+      method: 'POST',
+      body: JSON.stringify({
+        fecha: document.getElementById('ped-fecha').value,
+        proveedor,
+        detalle: document.getElementById('ped-detalle').value,
+        costoEstimado: pedNumero(document.getElementById('ped-costo').value),
+        medioPrevisto: document.getElementById('ped-medio').value,
+      }),
+    });
+    // La fecha NO se limpia: lo normal es cargar dos o tres pedidos del mismo
+    // día seguidos. Sí se limpia lo que cambia entre uno y otro.
+    prov.value = ''; document.getElementById('ped-detalle').value = ''; document.getElementById('ped-costo').value = '';
+    pedMensaje('<span style="color:var(--green)">✓ Anotado.</span>');
+    pedState.msgTimer = setTimeout(() => { document.getElementById('ped-alta-msg').innerHTML = ''; }, 2500);
+    prov.focus();
+    pedState.abiertos.add(document.getElementById('ped-fecha').value);
+    await loadPedidos();
+  } catch (e) {
+    pedMensaje('<span style="color:var(--red)">' + escapeHtml(e.message) + '</span>');
+  } finally {
+    if (boton) boton.disabled = false;
+  }
+}
+
+/**
+ * Un previsto pasa a ser una fila real.
+ *
+ * `conPlata` decide qué sigue: true abre el modal de pago, false lo marca
+ * recibido sin tocar el libro, null lo deja simplemente esperado (para poder
+ * editarle el detalle o el costo antes de que llegue).
+ */
+async function materializarPrevisto(idSemanal, fecha, conPlata) {
+  const s = (pedState.data.semanal || []).find(x => x.id === idSemanal);
+  if (!s) return;
+  showToast('⏳ Guardando...');
+  try {
+    const { data } = await api('/api/pedidos', {
+      method: 'POST',
+      body: JSON.stringify({
+        fecha, proveedor: s.proveedor, detalle: s.nota,
+        medioPrevisto: s.medioPrevisto, origen: 'plantilla',
+      }),
+    });
+    await loadPedidos();
+    if (conPlata === true) openPedRecibir(data.id);
+    else if (conPlata === false) await recibirSinPlata(data.id);
+    else showToast('Agregado al día');
+  } catch (e) { showToast('Error: ' + e.message, 4000); }
+}
+
+async function recibirSinPlata(id) {
+  showToast('⏳ Guardando...');
+  try {
+    await api('/api/pedidos/' + encodeURIComponent(id) + '/recibir', {
+      method: 'POST', body: JSON.stringify({ pago: 'no' }),
+    });
+    await loadPedidos();
+    showToast('Marcado como recibido');
+  } catch (e) { showToast('Error: ' + e.message, 4000); }
+}
+
+async function borrarPedido(id) {
+  if (!confirm('¿Sacar este pedido de la lista?')) return;
+  try {
+    await api('/api/pedidos/' + encodeURIComponent(id), { method: 'DELETE' });
+    await loadPedidos();
+    showToast('Eliminado');
+  } catch (e) { showToast('Error: ' + e.message, 4000); }
+}
+
+// ─── Recibir con plata ──────────────────────────────────────────────────────
+// Es lo único de esta pantalla que escribe en Movimientos, así que dice en
+// palabras qué va a pasar en la planilla ANTES de confirmar.
+
+async function openPedRecibir(id) {
+  const p = pedBuscar(id);
+  if (!p) return;
+  pedState.recibiendo = p;
+  pedState.cuentas = [];
+  pedState.cuentaElegida = null;
+
+  document.getElementById('ped-r-error').textContent = '';
+  document.getElementById('ped-r-pago').value = 'pagado';
+  document.getElementById('ped-r-monto').value = p.costoEstimado || '';
+  document.getElementById('ped-r-venc').value = p.fecha;
+  document.getElementById('ped-r-lista-wrap').style.display = 'none';
+  document.getElementById('ped-r-lista').innerHTML = '';
+  document.getElementById('ped-r-cabecera').innerHTML =
+    `<b>${escapeHtml(p.proveedor)}</b>${p.detalle ? ' · ' + escapeHtml(p.detalle) : ''}<br>`
+    + `Esperado para el ${new Date(p.fecha + 'T12:00:00').toLocaleDateString('es-AR')}`
+    + (p.costoEstimado ? ` · estimado ${fmt(p.costoEstimado)}` : '');
+
+  const medioSel = document.getElementById('ped-r-medio');
+  setSelectValue(medioSel, p.medioPrevisto || 'Efectivo Local');
+  onPedPagoChange();
+  document.getElementById('ped-recibir-overlay').classList.add('open');
+
+  // Las cuentas pendientes de ese proveedor. Si hay una, lo más probable es que
+  // el pago que se está haciendo sea justamente ésa — cerrar la que existe en
+  // vez de escribir una nueva es lo que evita contar el gasto dos veces.
+  try {
+    const { data } = await api('/api/pedidos/a-pagar?proveedor=' + encodeURIComponent(p.proveedor));
+    pedState.cuentas = data || [];
+    renderPedCuentas();
+  } catch (e) { /* sin cuentas: se crea una fila nueva, que es el otro camino válido */ }
+}
+
+function renderPedCuentas() {
+  const wrap = document.getElementById('ped-r-lista-wrap');
+  const lista = document.getElementById('ped-r-lista');
+  const modo = document.getElementById('ped-r-pago').value;
+  if (!pedState.cuentas.length || modo !== 'pagado') { wrap.style.display = 'none'; return; }
+
+  document.getElementById('ped-r-lista-label').textContent = pedState.cuentas.length === 1
+    ? 'Este proveedor tiene una cuenta pendiente — ¿es ésta la que estás pagando?'
+    : `Este proveedor tiene ${pedState.cuentas.length} cuentas pendientes — elegí cuál estás pagando`;
+
+  lista.innerHTML = pedState.cuentas.map(c => {
+    const venc = c.vencimiento ? `vence ${escapeHtml(c.vencimiento)}` : 'sin vencimiento';
+    return `<div class="ped-cuenta" id="ped-cuenta-${c.rowIndex}" onclick="elegirPedCuenta(${c.rowIndex})">
+      <div>
+        <div>${venc}${c.cuota ? ` · cuota ${escapeHtml(c.cuota)}` : ''}</div>
+        ${c.descripcion ? `<div class="ped-cuenta-sub">${escapeHtml(c.descripcion.slice(0, 50))}</div>` : ''}
+        <div class="ped-cuenta-sub">registrada ${escapeHtml(c.fecha)}</div>
+      </div>
+      <div><b>${fmt(c.monto)}</b></div>
+    </div>`;
+  }).join('')
+  + `<div class="ped-cuenta" id="ped-cuenta-0" onclick="elegirPedCuenta(0)">
+      <div><div>Ninguna — es un gasto nuevo</div>
+      <div class="ped-cuenta-sub">se escribe una fila nueva en Movimientos</div></div></div>`;
+  wrap.style.display = '';
+
+  // Con UNA sola pendiente viene elegida: es lo más probable, y quien esté
+  // pagando otra cosa la puede cambiar con el ítem de abajo.
+  //
+  // Con VARIAS no se elige ninguna y el botón no deja avanzar hasta que se
+  // elija. El default cómodo sería "gasto nuevo", y ahí un Confirmar distraído
+  // escribe una fila que duplica una cuenta que ya estaba cargada — el error
+  // más caro que puede cometer esta pantalla, y el único que no se ve.
+  if (pedState.cuentas.length === 1) elegirPedCuenta(pedState.cuentas[0].rowIndex);
+  else { pedState.cuentaElegida = null; pedExplicar(); }
+}
+
+// `cuentaElegida`: null = todavía no eligió · 0 = eligió "es un gasto nuevo" ·
+// un número = la fila que se va a cerrar. Los tres estados son distintos: sin
+// el primero no se puede exigir que elija.
+function elegirPedCuenta(rowIndex) {
+  pedState.cuentaElegida = rowIndex;
+  document.querySelectorAll('.ped-cuenta').forEach(el =>
+    el.classList.toggle('selected', el.id === 'ped-cuenta-' + rowIndex));
+  const c = pedState.cuentas.find(x => x.rowIndex === rowIndex);
+  if (c) {
+    document.getElementById('ped-r-monto').value = c.monto || '';
+    if (c.medioPago) setSelectValue(document.getElementById('ped-r-medio'), c.medioPago);
+  }
+  pedExplicar();
+}
+
+function onPedPagoChange() {
+  const modo = document.getElementById('ped-r-pago').value;
+  document.getElementById('ped-r-plata').style.display = modo === 'no' ? 'none' : '';
+  document.getElementById('ped-r-venc-wrap').style.display = modo === 'a pagar' ? '' : 'none';
+  if (modo !== 'pagado') pedState.cuentaElegida = null;
+  renderPedCuentas();
+  pedExplicar();
+}
+
+// Decir en una línea qué va a pasar en la planilla. Es lo que hace que un error
+// se vea antes de escribirlo y no después.
+function pedExplicar() {
+  const modo = document.getElementById('ped-r-pago').value;
+  const el = document.getElementById('ped-r-que-hace');
+  const c = pedState.cuentas.find(x => x.rowIndex === pedState.cuentaElegida);
+  if (modo === 'no') { el.innerHTML = ''; return; }
+  if (modo === 'a pagar') {
+    el.innerHTML = '→ Se agrega una fila <b>A pagar</b> en Movimientos y aparece en la sección Pagos.';
+    return;
+  }
+  if (pedState.cuentaElegida === null && pedState.cuentas.length) {
+    el.innerHTML = '<span style="color:var(--orange)">Elegí arriba cuál de las cuentas estás pagando (o que es un gasto nuevo).</span>';
+    return;
+  }
+  el.innerHTML = c
+    ? `→ La cuenta pendiente de ${fmt(c.monto)} pasa a <b>Pagado</b>. No se agrega ninguna fila.`
+    : '→ Se agrega una fila nueva en Movimientos como <b>Pagado</b>.';
+}
+
+function closePedRecibir() {
+  document.getElementById('ped-recibir-overlay').classList.remove('open');
+  pedState.recibiendo = null;
+}
+
+async function confirmarPedRecibir() {
+  const p = pedState.recibiendo;
+  if (!p) return;
+  const modo = document.getElementById('ped-r-pago').value;
+  const monto = pedNumero(document.getElementById('ped-r-monto').value);
+  const medioPago = document.getElementById('ped-r-medio').value;
+  const err = document.getElementById('ped-r-error');
+
+  if (modo !== 'no' && monto <= 0) { err.textContent = 'Poné cuánto se pagó.'; return; }
+  if (modo === 'pagado' && pedState.cuentas.length && pedState.cuentaElegida === null) {
+    err.textContent = 'Elegí cuál cuenta pendiente estás pagando, o marcá que es un gasto nuevo.';
+    return;
+  }
+
+  closePedRecibir();
+  showToast('⏳ Actualizando planilla...');
+  try {
+    const { asiento } = await api('/api/pedidos/' + encodeURIComponent(p.id) + '/recibir', {
+      method: 'POST',
+      body: JSON.stringify({
+        pago: modo, monto, medioPago,
+        rowIndexExistente: modo === 'pagado' ? pedState.cuentaElegida : null,
+        vencimiento: document.getElementById('ped-r-venc').value,
+      }),
+    });
+    await loadPedidos();
+
+    const queHizo = !asiento ? 'No se tocó Movimientos: sólo quedó marcado como recibido.'
+      : asiento.tipo === 'fila-existente' ? `La cuenta pendiente pasó de A pagar a <b>Pagado</b>.`
+      : asiento.tipo === 'ya-estaba' ? 'Este pedido ya tenía su fila en Movimientos: no se duplicó.'
+      : modo === 'a pagar' ? 'Se agregó una fila <b>A pagar</b> — ya aparece en Pagos.'
+      : 'Se agregó una fila nueva como <b>Pagado</b>.';
+
+    showResultadoModal({
+      ok: true,
+      titulo: 'Pedido recibido',
+      detalle: `<b>${escapeHtml(p.proveedor)}</b>${modo !== 'no' ? ' · ' + fmt(monto) : ''}<br>${queHizo}`
+        + (asiento && asiento.registradoEnSesion
+            ? '<br><span style="font-size:11px">Se descontó del esperado del arqueo en curso ✓</span>' : ''),
+    });
+  } catch (e) {
+    showResultadoModal({
+      ok: false,
+      titulo: 'No se pudo registrar',
+      detalle: `${escapeHtml(e.message)}<br><span style="font-size:11px">El pedido quedó como estaba y no se escribió nada en la planilla.</span>`,
+    });
+  }
+}
+
+function pedBuscar(id) {
+  for (const d of (pedState.data?.dias || [])) {
+    const p = d.pedidos.find(x => x.id === id);
+    if (p) return p;
+  }
+  return null;
+}
+
+// ─── El cuadro semanal ──────────────────────────────────────────────────────
+// La rutina fija del bar. No crea filas: alimenta los "previstos" de cada día.
+
+function renderPedidosSemana() {
+  const cont = document.getElementById('ped-semana');
+  const dias = pedState.data.diasSemana || [];
+  const items = pedState.data.semanal || [];
+
+  cont.innerHTML = dias.map(dia => {
+    const delDia = items.filter(s => s.dia === dia && s.activo);
+    const bloques = delDia.length
+      ? delDia.map(bloqueSemanal).join('')
+      : '<div class="ped-col-vacia">—</div>';
+    return `<div class="ped-dia-col" data-dia="${escapeHtml(dia)}"
+                 ondragover="pedDragOver(event,this)" ondragleave="this.classList.remove('drop')"
+                 ondrop="pedDrop(event,this)">
+      <div class="ped-col-titulo"><span>${escapeHtml(dia)}</span>
+        <button class="ped-col-add" title="Agregar" onclick="openPedSem(null,'${escapeHtml(dia)}')">＋</button>
+      </div>
+      ${bloques}
+    </div>`;
+  }).join('');
+}
+
+function bloqueSemanal(s) {
+  return `<div class="ped-bloque${s.tipo === 'pedir' ? ' pedir' : ''}" draggable="true" data-id="${escapeHtml(s.id)}"
+               ondragstart="pedDragStart(event,'${escapeHtml(s.id)}')" ondragend="pedDragEnd(event)">
+    <div>
+      <div class="ped-bloque-nombre">${s.tipo === 'pedir' ? '📝 ' : ''}${escapeHtml(s.proveedor)}</div>
+      ${s.nota ? `<div class="ped-bloque-nota">${escapeHtml(s.nota)}</div>` : ''}
+      ${s.medioPrevisto ? `<div class="ped-bloque-nota">💵 ${escapeHtml(s.medioPrevisto)}</div>` : ''}
+    </div>
+    <button class="ped-bloque-menu" title="Editar o mover" onclick="openPedSem('${escapeHtml(s.id)}')">⋮</button>
+  </div>`;
+}
+
+// El drag nativo de HTML5. En el teléfono no existe — por eso cada bloque tiene
+// además el botón "⋮", que abre el mismo formulario con el selector de día.
+// Sin ese camino la pantalla sería inusable justo en el dispositivo donde más
+// se usa.
+function pedDragStart(ev, id) {
+  pedState.arrastrando = id;
+  ev.dataTransfer.effectAllowed = 'move';
+  // Firefox no dispara el drag si no se setea algo en dataTransfer.
+  try { ev.dataTransfer.setData('text/plain', id); } catch (e) {}
+  ev.currentTarget.classList.add('arrastrando');
+}
+
+function pedDragEnd(ev) {
+  ev.currentTarget.classList.remove('arrastrando');
+  document.querySelectorAll('.ped-dia-col.drop').forEach(c => c.classList.remove('drop'));
+}
+
+function pedDragOver(ev, col) {
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'move';
+  col.classList.add('drop');
+}
+
+async function pedDrop(ev, col) {
+  ev.preventDefault();
+  col.classList.remove('drop');
+  const id = pedState.arrastrando || ev.dataTransfer.getData('text/plain');
+  pedState.arrastrando = null;
+  if (!id) return;
+  const s = (pedState.data.semanal || []).find(x => x.id === id);
+  const dia = col.dataset.dia;
+  if (!s || s.dia === dia) return;
+
+  // Optimista: se pinta ya y se vuelve a cargar del server al terminar. Si
+  // falla, la recarga deja el cuadro como está de verdad en la planilla.
+  s.dia = dia;
+  renderPedidosSemana();
+  try {
+    await api('/api/pedidos/semanal/' + encodeURIComponent(id), {
+      method: 'PUT', body: JSON.stringify({ dia }),
+    });
+    showToast(`${s.proveedor} → ${dia}`);
+  } catch (e) { showToast('No se pudo mover: ' + e.message, 4000); }
+  await loadPedidos();
+}
+
+function openPedSem(id, diaSugerido) {
+  const s = id ? (pedState.data.semanal || []).find(x => x.id === id) : null;
+  pedState.editandoSem = s ? s.id : null;
+  document.getElementById('ped-sem-titulo').textContent = s ? 'Editar el bloque' : 'Agregar al cuadro semanal';
+  document.getElementById('ped-sem-error').textContent = '';
+  setSelectValue(document.getElementById('ped-sem-dia'), s ? s.dia : (diaSugerido || 'lunes'));
+  document.getElementById('ped-sem-tipo').value = s ? s.tipo : 'entrega';
+  document.getElementById('ped-sem-proveedor').value = s ? s.proveedor : '';
+  document.getElementById('ped-sem-nota').value = s ? s.nota : '';
+  // Se limpia primero: setSelectValue no hace nada con '' y, sin esto, abrir un
+  // bloque con medio y después uno sin medio dejaba el del anterior puesto.
+  document.getElementById('ped-sem-medio').value = '';
+  setSelectValue(document.getElementById('ped-sem-medio'), s ? s.medioPrevisto : '');
+  // Sacar del cuadro es del admin, igual que borrar en Mantenimiento. Quien
+  // decide de verdad es el server.
+  document.getElementById('ped-sem-borrar').style.display = s && pedEsAdmin() ? '' : 'none';
+  document.getElementById('ped-sem-overlay').classList.add('open');
+  ensureSugerencias();
+}
+
+function closePedSem() {
+  document.getElementById('ped-sem-overlay').classList.remove('open');
+  pedState.editandoSem = null;
+}
+
+async function guardarPedSem() {
+  const proveedor = document.getElementById('ped-sem-proveedor').value.trim();
+  const err = document.getElementById('ped-sem-error');
+  if (!proveedor) { err.textContent = '¿Qué proveedor?'; return; }
+
+  const body = {
+    dia: document.getElementById('ped-sem-dia').value,
+    tipo: document.getElementById('ped-sem-tipo').value,
+    proveedor,
+    nota: document.getElementById('ped-sem-nota').value,
+    medioPrevisto: document.getElementById('ped-sem-medio').value,
+  };
+  try {
+    if (pedState.editandoSem) {
+      await api('/api/pedidos/semanal/' + encodeURIComponent(pedState.editandoSem), {
+        method: 'PUT', body: JSON.stringify(body),
+      });
+    } else {
+      await api('/api/pedidos/semanal', { method: 'POST', body: JSON.stringify(body) });
+    }
+    closePedSem();
+    await loadPedidos();
+    showToast('Cuadro actualizado');
+  } catch (e) { err.textContent = e.message; }
+}
+
+async function borrarSemanal() {
+  if (!pedState.editandoSem) return;
+  if (!confirm('¿Sacar este proveedor del cuadro semanal?')) return;
+  try {
+    await api('/api/pedidos/semanal/' + encodeURIComponent(pedState.editandoSem), { method: 'DELETE' });
+    closePedSem();
+    await loadPedidos();
+    showToast('Sacado del cuadro');
+  } catch (e) { document.getElementById('ped-sem-error').textContent = e.message; }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  [['ped-recibir-overlay', closePedRecibir], ['ped-sem-overlay', closePedSem]].forEach(([id, cerrar]) => {
+    const ov = document.getElementById(id);
+    if (ov) ov.addEventListener('click', function (e) { if (e.target === this) cerrar(); });
+  });
+  // El texto de ayuda del cuadro cambia según el dispositivo: prometer un
+  // arrastre que no funciona es peor que no prometer nada.
+  const ayuda = document.getElementById('ped-semana-ayuda');
+  if (ayuda && esPhone()) ayuda.textContent = '· tocá ⋮ en un bloque para cambiarlo de día';
 });
 
 // Arrancar: verificar token guardado o mostrar login

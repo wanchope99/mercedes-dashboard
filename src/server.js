@@ -29,6 +29,7 @@ const informes = require('./informes');
 const informesNotas = require('./informes-notas');
 const propinas = require('./propinas');
 const mantenimiento = require('./mantenimiento');
+const pedidos = require('./pedidos');
 const stockBebidas = require('./stock-bebidas');
 const { iniciarCron } = require('./cron');
 const { cargarEstadoCaja, guardarEstadoCaja } = require('./estado-caja');
@@ -1571,59 +1572,82 @@ async function leerProveedoresSheet() {
   return proveedores;
 }
 
-// POST /api/pagos/pagar — marca un registro "A pagar" como Pagado MODIFICANDO la
-// fila existente (no agrega línea): Estado (col D) → Pagado, y Medio de pago (col L)
-// si vino uno. La fecha de registración original se conserva.
+/**
+ * Pasa una fila "A pagar" de Movimientos a "Pagado" MODIFICANDO la fila que ya
+ * existe (no agrega línea): Estado (col D) → Pagado, y Medio de pago (col L) si
+ * vino uno. La fecha de registración original se conserva.
+ *
+ * Vive como función y no adentro del handler porque tiene DOS entradas: el
+ * botón "Pagar" de la sección Pagos y el "recibido y pagado" de Pedidos. Las
+ * dos tienen que hacer exactamente lo mismo — incluido el efecto sobre el
+ * arqueo en curso, que es lo que se olvida al copiar y pegar.
+ *
+ * Devuelve `{ ok: false, status, error }` en vez de tirar cuando el problema es
+ * del pedido (la fila ya no está, ya figura pagada, la planilla cambió): son
+ * respuestas para el usuario, no fallas del servidor.
+ */
+async function marcarFilaPagada({ rowIndex, proveedor, medioPago, usuario, descripcionSesion } = {}) {
+  const idx = parseInt(rowIndex);
+  if (!idx || idx < 2) return { ok: false, status: 400, error: 'Falta el registro a pagar' };
+
+  // Releer la fila para validar que sigue siendo la que el usuario eligió
+  const movs = await getMovimientos();
+  const m = movs.find(x => x.rowIndex === idx);
+  if (!m) return { ok: false, status: 404, error: 'No se encontró el registro. Refrescá la página e intentá de nuevo.' };
+  if (m.pagado) return { ok: false, status: 400, error: `"${m.proveedor}" ya figura como Pagado.` };
+  if (proveedor && m.proveedor && proveedor.trim().toLowerCase() !== m.proveedor.toLowerCase()) {
+    return { ok: false, status: 409, error: 'La planilla cambió desde que abriste el modal. Refrescá e intentá de nuevo.' };
+  }
+
+  const medio = normalizarMedio(medioPago);
+  const auth = getAuth();
+  const sheets = google.sheets({ version: 'v4', auth });
+  const data = [{ range: `Movimientos!D${idx}`, values: [['Pagado']] }];
+  if (medio) data.push({ range: `Movimientos!L${idx}`, values: [[medio]] });
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: { valueInputOption: 'USER_ENTERED', data },
+  });
+  clearCache();
+
+  // Si la caja esta ABIERTA, este dinero YA salio de una caja arqueada al pagar
+  // la cuenta pendiente. Se anota en la sesion para descontarlo del esperado en el
+  // cierre (igual que /api/gastos-rapidos). Asi NO aparece como faltante en el arqueo.
+  // Caso real: pagar a un proveedor "A pagar" con MP estando la caja abierta.
+  let registradoEnSesion = false;
+  const medioEfectivoPago = (medio || m.medioPago || '').toLowerCase();
+  const montoSalida = Number(m.salidaTotal || m.salidaARS || 0);
+  if (estadoCaja.abierta && montoSalida > 0) {
+    // Match exacto: sólo las dos cajas que se arquean afectan el esperado del
+    // turno. Mercado Pago Pablo es la cuenta del recupero y no se arquea.
+    const bucket = medioEfectivoPago === CAJA_EFECTIVO.toLowerCase() ? 'efectivo'
+      : medioEfectivoPago === CAJA_MP.toLowerCase() ? 'mp' : null;
+    if (bucket) {
+      estadoCaja.gastosSesion = estadoCaja.gastosSesion || [];
+      estadoCaja.gastosSesion.push({
+        bucket, monto: montoSalida,
+        descripcion: descripcionSesion || `Pago pendiente: ${m.proveedor}`,
+        ts: new Date().toISOString(),
+        usuario: usuario || '',
+      });
+      registradoEnSesion = true;
+      // Respaldo en planilla. Este era el único camino que empujaba a
+      // gastosSesion sin guardarlo: un reinicio de Railway entre el pago y el
+      // cierre borraba el descuento y la noche cerraba con un faltante que no
+      // existía. Los otros tres caminos ya lo hacían.
+      guardarEstadoCaja(estadoCaja);
+    }
+  }
+  return { ok: true, proveedor: m.proveedor, monto: m.salidaARS, medio, registradoEnSesion, rowIndex: idx };
+}
+
+// POST /api/pagos/pagar — el botón "Pagar" de la sección Pagos.
 app.post('/api/pagos/pagar', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { rowIndex, proveedor, medioPago } = req.body;
-    const idx = parseInt(rowIndex);
-    if (!idx || idx < 2) return res.status(400).json({ ok: false, error: 'Falta el registro a pagar' });
-
-    // Releer la fila para validar que sigue siendo la que el usuario eligió
-    const movs = await getMovimientos();
-    const m = movs.find(x => x.rowIndex === idx);
-    if (!m) return res.status(404).json({ ok: false, error: 'No se encontró el registro. Refrescá la página e intentá de nuevo.' });
-    if (m.pagado) return res.status(400).json({ ok: false, error: `"${m.proveedor}" ya figura como Pagado.` });
-    if (proveedor && m.proveedor && proveedor.trim().toLowerCase() !== m.proveedor.toLowerCase()) {
-      return res.status(409).json({ ok: false, error: 'La planilla cambió desde que abriste el modal. Refrescá e intentá de nuevo.' });
-    }
-
-    const medio = normalizarMedio(medioPago);
-    const auth = getAuth();
-    const sheets = google.sheets({ version: 'v4', auth });
-    const data = [{ range: `Movimientos!D${idx}`, values: [['Pagado']] }];
-    if (medio) data.push({ range: `Movimientos!L${idx}`, values: [[medio]] });
-    await sheets.spreadsheets.values.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
-      requestBody: { valueInputOption: 'USER_ENTERED', data },
-    });
-    clearCache();
-
-    // Si la caja esta ABIERTA, este dinero YA salio de una caja arqueada al pagar
-    // la cuenta pendiente. Se anota en la sesion para descontarlo del esperado en el
-    // cierre (igual que /api/gastos-rapidos). Asi NO aparece como faltante en el arqueo.
-    // Caso real: pagar a un proveedor "A pagar" con MP estando la caja abierta.
-    let registradoEnSesion = false;
-    const medioEfectivoPago = (medio || m.medioPago || '').toLowerCase();
-    const montoSalida = Number(m.salidaTotal || m.salidaARS || 0);
-    if (estadoCaja.abierta && montoSalida > 0) {
-      // Match exacto: sólo las dos cajas que se arquean afectan el esperado del
-      // turno. Mercado Pago Pablo es la cuenta del recupero y no se arquea.
-      const bucket = medioEfectivoPago === CAJA_EFECTIVO.toLowerCase() ? 'efectivo'
-        : medioEfectivoPago === CAJA_MP.toLowerCase() ? 'mp' : null;
-      if (bucket) {
-        estadoCaja.gastosSesion = estadoCaja.gastosSesion || [];
-        estadoCaja.gastosSesion.push({
-          bucket, monto: montoSalida,
-          descripcion: `Pago pendiente: ${m.proveedor}`,
-          ts: new Date().toISOString(),
-          usuario: req.user.nombre,
-        });
-        registradoEnSesion = true;
-      }
-    }
-    res.json({ ok: true, message: `${m.proveedor} marcado como Pagado`, proveedor: m.proveedor, monto: m.salidaARS, medio, registradoEnSesion });
+    const r = await marcarFilaPagada({ rowIndex, proveedor, medioPago, usuario: req.user.nombre });
+    if (!r.ok) return res.status(r.status).json({ ok: false, error: r.error });
+    res.json({ ok: true, message: `${r.proveedor} marcado como Pagado`, ...r });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
@@ -2108,6 +2132,182 @@ app.put('/api/mantenimiento/:id', authMiddleware, async (req, res) => {
     const permitidos = req.user.rol === 'admin' ? null : CAMPOS_ENCARGADO;
     res.json({ ok: true, data: await mantenimiento.actualizarItem(req.params.id, req.body, permitidos) });
   } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+// ─── Pedidos por día ────────────────────────────────────────────────────────
+//
+// Qué llega cada día, si hay que pagarlo y cuánto. Reemplaza el Google Doc
+// "PEDIDOS X DIA". La pantalla la abre el encargado o el cocinero, así que
+// TODO esto es accesible a los dos roles — sólo borrar es del admin, igual que
+// en Mantenimiento.
+//
+// Las rutas viven acá y no en un archivo aparte por lo mismo que la ingesta de
+// facturas (ver el comentario largo más arriba): necesitan tres cosas que son
+// de este archivo — `marcarFilaPagada`, `registrarGastoEnLibro` y `getMovimientos`.
+// `src/pedidos.js` no sabe nada de Movimientos y no tiene que saberlo.
+//
+// EL PERMISO NUEVO (15/08/2026): hasta hoy pasar una fila "A pagar" a "Pagado"
+// era sólo del admin. Desde acá lo puede hacer el encargado, porque es el que
+// está en la puerta cuando llega el proveedor y le paga en efectivo. Pagarlo y
+// no registrarlo es peor que registrarlo: la alternativa real no era que lo
+// hiciera un admin, era que no quedara anotado en ningún lado. Queda firmado
+// con su nombre (columna H de la hoja Pedidos) y el monto sale del formulario,
+// no de la fila, así que un pago parcial se ve.
+
+app.get('/api/pedidos', authMiddleware, async (req, res) => {
+  try {
+    const dias = parseInt(req.query.dias);
+    res.json({ ok: true, data: await pedidos.listPedidos({ dias: Number.isFinite(dias) ? dias : undefined }) });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post('/api/pedidos', authMiddleware, async (req, res) => {
+  try { res.json({ ok: true, data: await pedidos.crearPedido(req.body) }); }
+  catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.put('/api/pedidos/:id', authMiddleware, async (req, res) => {
+  try { res.json({ ok: true, data: await pedidos.actualizarPedido(req.params.id, req.body) }); }
+  catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.delete('/api/pedidos/:id', authMiddleware, adminOnly, async (req, res) => {
+  try { await pedidos.borrarPedido(req.params.id); res.json({ ok: true, message: 'Pedido eliminado' }); }
+  catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+// GET /api/pedidos/a-pagar?proveedor=X — las filas "A pagar" de ese proveedor,
+// para poder cerrar la que corresponde en vez de escribir una nueva. Es el caso
+// que más importa: la compra ya estaba cargada (por el bot, o a mano) y el pago
+// en la puerta la cierra.
+//
+// Mismo filtro que /api/pagos, pero sin abrirle el listado completo al
+// encargado: devuelve sólo las de un proveedor y sólo lo que se necesita para
+// elegir. Las filas madre de compras en cuotas quedan afuera porque no se pagan
+// (se pagan sus cuotas).
+app.get('/api/pedidos/a-pagar', authMiddleware, async (req, res) => {
+  try {
+    const proveedor = (req.query.proveedor || '').toString().trim().toLowerCase();
+    if (!proveedor) return res.json({ ok: true, data: [] });
+    const movs = await getMovimientos();
+    const data = movs
+      .filter(m => m.tipo === 'Gasto' && !m.pagado && !m.esCambio && !m.esFondeo && !m.esCompraEnCuotas)
+      .filter(m => (m.proveedor || '').toLowerCase() === proveedor)
+      .map(m => ({
+        rowIndex: m.rowIndex,
+        proveedor: m.proveedor,
+        fecha: m.fecha.toISOString().split('T')[0],
+        vencimiento: m.vencimiento || '',
+        descripcion: m.descripcion || '',
+        categoria: m.categoria || '',
+        medioPago: m.medioPago || '',
+        monto: m.salidaARS || 0,
+        cuota: m.esCuota ? `${m.cuotaNum}/${m.cuotasTotal || '?'}` : '',
+      }))
+      .sort((a, b) => (a.vencimiento || '').localeCompare(b.vencimiento || '') || a.fecha.localeCompare(b.fecha));
+    res.json({ ok: true, data });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+/**
+ * POST /api/pedidos/:id/recibir — llegó la mercadería.
+ *
+ * Tres caminos según `pago`, y los tres terminan en el MISMO libro por las
+ * mismas funciones que usa el resto de la app:
+ *
+ *   'no'      → no se toca Movimientos. Llegó, la plata se define después.
+ *   'pagado'  → con `rowIndexExistente`: marcarFilaPagada() — la misma función
+ *               que el botón "Pagar" de Pagos. Sin él: registrarGastoEnLibro()
+ *               con estado Pagado, que escribe UNA fila nueva.
+ *   'a pagar' → registrarGastoEnLibro() con estado "A pagar" y vencimiento, así
+ *               la deuda aparece en la sección Pagos en vez de quedar sólo acá.
+ *
+ * El orden es LIBRO PRIMERO, hoja Pedidos después, y el pedido sólo se marca si
+ * el asiento salió bien. Al revés, un fallo de Sheets en el medio dejaría un
+ * pedido que dice "pagado" sin ninguna fila que lo respalde — exactamente el
+ * agujero que esta pantalla viene a tapar.
+ *
+ * La idempotencia la da `registrarGastoEnLibro`: el id del pedido va a la
+ * columna H (ID Compra) y se relee antes de escribir, así que dos toques al
+ * botón — o un reintento por timeout desde el teléfono en el salón — no
+ * duplican el gasto.
+ */
+app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
+  try {
+    const pedido = await pedidos.getPedido(req.params.id);
+    if (!pedido) return res.status(404).json({ ok: false, error: 'No se encontró ese pedido' });
+    if (pedido.pago !== 'no') {
+      return res.status(400).json({ ok: false, error: `Este pedido ya figura como "${pedido.pago}".` });
+    }
+
+    const pago = pedidos.normalizarPago(req.body.pago);
+    const monto = Number(req.body.monto) || 0;
+    const medioPago = (req.body.medioPago || '').toString();
+    let ref = '', asiento = null;
+
+    if (pago !== 'no') {
+      if (monto <= 0) return res.status(400).json({ ok: false, error: 'Poné cuánto se pagó.' });
+
+      const idx = parseInt(req.body.rowIndexExistente);
+      if (pago === 'pagado' && idx) {
+        const r = await marcarFilaPagada({
+          rowIndex: idx,
+          proveedor: pedido.proveedor,
+          medioPago,
+          usuario: req.user.nombre,
+          descripcionSesion: `Pedido recibido: ${pedido.proveedor}`,
+        });
+        if (!r.ok) return res.status(r.status).json({ ok: false, error: r.error });
+        ref = `fila ${r.rowIndex}`;
+        asiento = { tipo: 'fila-existente', ...r };
+      } else {
+        const r = await registrarGastoEnLibro({
+          facturaId: pedido.id,
+          fecha: pedido.fecha,
+          proveedor: pedido.proveedor,
+          categoria: req.body.categoria || 'Mercaderia',
+          monto,
+          descripcion: pedido.detalle || `Pedido ${pedido.proveedor}`,
+          medioPago,
+          estado: pago === 'a pagar' ? 'A pagar' : 'Pagado',
+          vencimiento: req.body.vencimiento || pedido.fecha,
+          usuario: req.user.nombre,
+        });
+        if (!r.ok) return res.status(400).json({ ok: false, error: r.error });
+        ref = pedido.id;
+        asiento = { tipo: r.yaExistia ? 'ya-estaba' : 'fila-nueva', ...r };
+      }
+    }
+
+    const data = await pedidos.marcarRecibido(pedido.id, {
+      pago, monto, medioPago, ref, usuario: req.user.nombre,
+    });
+    res.json({ ok: true, data, asiento });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─── El cuadro semanal ──────────────────────────────────────────────────────
+// La rutina fija ("los jueves entrega Barracas"). No crea filas de pedido: se
+// muestra dentro de cada día como previsto. Ver el encabezado de pedidos.js.
+app.get('/api/pedidos/semanal', authMiddleware, async (req, res) => {
+  try { res.json({ ok: true, data: await pedidos.listSemanal() }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post('/api/pedidos/semanal', authMiddleware, async (req, res) => {
+  try { res.json({ ok: true, data: await pedidos.crearSemanal(req.body) }); }
+  catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+// El drag & drop del cuadro es un PUT con { dia, orden }.
+app.put('/api/pedidos/semanal/:id', authMiddleware, async (req, res) => {
+  try { res.json({ ok: true, data: await pedidos.actualizarSemanal(req.params.id, req.body) }); }
+  catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.delete('/api/pedidos/semanal/:id', authMiddleware, adminOnly, async (req, res) => {
+  try { await pedidos.borrarSemanal(req.params.id); res.json({ ok: true, message: 'Ítem eliminado del cuadro' }); }
+  catch (err) { res.status(400).json({ ok: false, error: err.message }); }
 });
 
 // ─── Informe diario ─────────────────────────────────────────────────────────

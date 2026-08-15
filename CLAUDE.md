@@ -130,12 +130,14 @@ Since 2026-08-12 the menu is **four top-level groups** (`TAB_GROUPS` in `public/
 |---|---|---|
 | `negocio` | how are we doing | Dashboard · Balance · Servicios · Restaurant · Informe |
 | `caja` | today's money | Arqueo · Cajas · Pagos · Historial |
-| `operacion` | the bar running | Bebidas · Mantenimiento · Costos · Config · Propinas |
+| `operacion` | the bar running | Pedidos · Bebidas · Mantenimiento · Costos · Propinas · Más |
 | `plan` | what's coming | Resumen · Calculadora · Inversiones · Finanzas · Proyección Mes |
 
 Grouping by **the reader's question** rather than by data source is the whole point. Two concrete failures forced it: the top bar uses `overflow-x` with a *hidden* scrollbar, so with ten items the last sections silently scrolled off a narrow window; and the phone bar pinned three slots, so seven of ten lived inside a "Más" sheet. There were also two different things called "Servicios" — a top-level section and a report inside Reportes, with different default ranges. The per-night list is now **Servicios** and the historical analysis is **Restaurant**.
 
 **The reorganization renamed no panel.** All 23 `id="tab-*"` and every branch of `cargarPanel()` were left alone; only `TAB_GROUPS`, the labels, and four hardcoded group ids changed. Keep it that way when adding things: a new submenu is one line in `TAB_GROUPS` + its `tab-<id>` panel + its branch in `cargarPanel()`. **If a group reaches six subs, that is the signal to rethink the grouping, not to add a seventh.**
+
+That rule was exercised on 2026-08-15: adding Pedidos would have made `operacion` seven. The sixth slot is now a **`⋯ Más`** submenu (`tab-operacion-mas`) holding Config. de costos and Historial de propinas — both were the *tail of another sub*, not a topic of their own. Their panels and loaders were untouched, same as when `tab-proveedores` was archived; `abrirDesdeMas(tab)` activates the panel and leaves the "Más" subtab marked, since that is honestly where you are. The criterion for whatever comes next: **if a sub is the detail of another sub, it goes into Más.**
 
 `MAX_BOTTOM_NAV` is 5 — the iOS/Android tab-bar maximum. With four groups plus `inicio` that means the "Más" sheet never appears for anyone; it survives only as a fallback. Measured at 420px: five 84px buttons, no truncation.
 
@@ -154,6 +156,24 @@ One consequence worth knowing before touching this: `phonePrio` is `?? 99`, not 
 The "Anotar" button opens a bottom sheet that POSTs to the same `/api/mantenimiento` as the section, asking only for text and urgency — the sector is filled in later from the section, because having to pick one now is exactly what stops anything being logged mid-service. The sheet stays open if the save fails; closing it would leave the impression the item was recorded.
 
 `MQ_PHONE`'s change listener moves off `inicio` when the viewport grows, otherwise the active panel would be one the desktop CSS hides — a blank screen.
+
+### Pedidos por día: the one screen where the encargado closes a payment
+
+`src/pedidos.js` replaces the "PEDIDOS X DIA" Google Doc: what arrives each day, whether it has to be paid and how much. Two auto-created sheets in `SPREADSHEET_ID` — `Pedidos` (one row per expected delivery on a date) and `Pedidos Semanal` (the fixed weekly routine: "Thursdays Barracas, Coca and Bendito deliver").
+
+**The weekly grid writes nothing.** Its entries surface inside each day as *previstos* and only become a row when somebody marks one received. Materializing them ahead of time — by cron or by a "pull the week" button — forces an answer for the day nobody touched (do they vanish? do they stay unreceived forever?) and a duplicate-resolution rule every time the grid is edited. As it stands, editing the grid shows up instantly and the only thing ever written is what actually happened. A previsto is hidden when a real pedido for that supplier already exists that day, and past days offer no previstos at all — a delivery that "usually happens Thursdays" is not going to happen last Thursday.
+
+**A past day only disappears once nothing is open on it.** `estaAbierto()` is the rule: not received, or received with the payment undecided. Those days come back at the top marked `atrasado`. `pago: 'a pagar'` counts as settled here — it has its row in the ledger and the Pagos section chases it, which is its job.
+
+**The ledger write is the same function the Pagos button uses, not a copy.** `marcarFilaPagada({ rowIndex, proveedor, medioPago, usuario })` in `server.js` was extracted out of the `POST /api/pagos/pagar` handler precisely so both entry points share it — including the effect on the open register (`gastosSesion`), which is the part a copy-paste forgets. When no pending row exists the write goes through `registrarGastoEnLibro`, which already rejects a medio that isn't a caja name and is idempotent on column H — the pedido's own id is the key, so a double tap on a phone in the middle of service cannot book the expense twice. Order is **ledger first, `Pedidos` sheet second**, and the pedido is only marked if the entry succeeded; the reverse leaves a pedido reading "paid" with nothing behind it, which is the exact hole this screen exists to close.
+
+**Since 2026-08-15 the encargado can turn an "A pagar" row into "Pagado"**, which until then was `adminOnly`. He is the one at the door when the supplier arrives and gets paid in cash. The real alternative was never "an admin does it" — it was that nothing got recorded. It is signed with his name in the sheet, and the amount comes from the form rather than from the row, so a partial payment shows. `POST /api/pagos/pagar` itself stays admin-only.
+
+**When the supplier has more than one pending account, nothing is preselected and the modal will not submit until one is picked.** The convenient default would be "new expense", and there a distracted Confirm writes a row duplicating an account that was already loaded — the most expensive mistake this screen can make and the only one that leaves no trace. With exactly one pending account it *is* preselected: that is almost certainly the one being paid, and it stays changeable.
+
+`RefMovimiento` in the sheet is informational and is **never** used to find the row again — rows move when the spreadsheet is hand-edited (see the `Cajas` section). What a pedido owes is answered by its own columns J/K/L.
+
+The weekly grid is drag & drop (`PUT /api/pedidos/semanal/:id` with `{ dia, orden }`, which renumbers both the source and destination day so two items never share an order). HTML5 drag does not exist on touch, so every block also carries a `⋮` button opening the same form with a day selector — without it the feature is unusable on the device where it is mostly used.
 
 ### Mantenimiento: the fix-it list, also outside the ledger
 
@@ -259,7 +279,7 @@ All three analysts are **read-only**: no informe ever writes to `Movimientos`. T
 
 ### Auth model
 
-JWT-based (`JWT_SECRET`), two hardcoded roles read from env vars (`ADMIN_PASSWORD`, `CHARLY_PASSWORD`) — not a user table. Most `/api/*` routes require `adminOnly`; a small subset (cash-register open/close, quick expenses) is available to the `encargado` (manager-on-duty) role too. Cash-register state (`estadoCaja`) is held in-memory in the Node process, not persisted — a server restart loses an open, unclosed register session.
+JWT-based (`JWT_SECRET`), two hardcoded roles read from env vars (`ADMIN_PASSWORD`, `CHARLY_PASSWORD`) — not a user table. Most `/api/*` routes require `adminOnly`; a subset is available to the `encargado` (manager-on-duty) role too: cash-register open/close, quick expenses, Mantenimiento, and since 2026-08-15 all of `/api/pedidos/*` — which includes flipping an "A pagar" row to "Pagado" through `POST /api/pedidos/:id/recibir`. That is the only path by which a non-admin settles a ledger row; `POST /api/pagos/pagar` is still admin-only. Deleting is admin-only everywhere. Cash-register state (`estadoCaja`) is held in-memory in the Node process, not persisted — a server restart loses an open, unclosed register session.
 
 ### Timezone
 
