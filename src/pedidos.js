@@ -95,9 +95,16 @@ const TIPO_DEFAULT = 'entrega';
 const DETALLE_MAX = 500;
 const NOTAS_MAX = 1000;
 
-// Cuántos días para adelante se arma la lista. Dos semanas: alcanza para ver la
-// semana que viene entera sin convertir la pantalla en un calendario.
-const DIAS_ADELANTE = 14;
+// Cuántos días para adelante se arma la lista. Una semana justa: hoy y los 7
+// siguientes, así el último día que aparece es el mismo día de la semana que
+// hoy (sábado 15 → sábado 22) y no queda medio calendario abierto.
+//
+// Eran 14 y se bajó a 7 el 2026-08-15: con dos semanas la pantalla mostraba
+// pedidos de dentro de trece días mezclados con los de mañana, y lo que se
+// mira todos los días es la semana entrante. El corte vale también para los
+// previstos del cuadro semanal — se generan por fecha dentro de este mismo
+// horizonte (ver armarDias), así que el cuadro tampoco proyecta más lejos.
+const DIAS_ADELANTE = 7;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Fechas — puras, sin I/O.
