@@ -311,10 +311,22 @@ function bloqueParaModelo(notas, { ahora = new Date() } = {}) {
         const sobre = n.hallazgo ? ` sobre "${n.hallazgo}"` : '';
         lineas.push(dice(n)
           ? `    - [${cuando(n)}] ${quien(n)}${sobre}: ${dice(n)}`
-          : `    - [${cuando(n)}] ${quien(n)}${sobre}: ya lo sabían. No hace falta que se los cuentes de nuevo.`);
+          : `    - [${cuando(n)}] ${quien(n)}${sobre}: no les sirvió y no dijeron por qué. O ya lo sabían o no les cambia ninguna decisión: no vuelvas a contarlo.`);
       }
     }
-    secciones.push('YA TE EXPLICARON QUE ESTO ES NORMAL:', ...lineas, '');
+    // El botón dice "No me sirvió" desde el 17/8/2026 (antes decía "Ya lo sé"),
+    // así que el encabezado dice lo que ahora significa apretarlo. El veredicto
+    // guardado sigue llamándose `normal` para no dejar huérfanas las notas ya
+    // escritas, pero lo que el modelo tiene que aprender es más amplio que "esto
+    // es normal": un hallazgo puede ser correcto y aun así no servir para nada,
+    // que es exactamente lo que pasaba con los costos mensuales y con los
+    // proveedores que dejaban de aparecer.
+    secciones.push(
+      'ESTO NO LES SIRVIÓ — no lo vuelvas a emitir salvo que la magnitud haya cambiado de verdad.',
+      'Puede ser porque ya lo sabían, porque es normal y te explican por qué, o porque no',
+      'le cambia ninguna decisión al negocio. En los tres casos, repetirlo es la forma más',
+      'rápida de que dejen de leer el informe:',
+      ...lineas, '');
   }
 
   // ── 3. Qué les sirvió ─────────────────────────────────────────────────────

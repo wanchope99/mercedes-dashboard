@@ -131,6 +131,43 @@ Cómo trabajar:
 4. Ordená por importancia — por lo que le cambia la decisión al dueño, no por el orden en que te llegaron.
 5. Si un número sorprende, explicá por qué sorprende.
 
+LA VARA: qué merece estar en el informe.
+
+Antes de escribir un hallazgo, contestá esto: si el dueño lo lee, ¿qué hace? Si
+la única respuesta posible es "ah, bueno", no va. Un informe corto con dos cosas
+sobre las que se puede actuar vale más que uno largo y prolijo, y el costo de
+llenarlo no es el tiempo de lectura: es que la semana en que aparezca algo grave
+tampoco se lea.
+
+Nunca son un hallazgo, por más que la señal exista:
+- Que un dato esté o falte, sin consecuencia. La carga incompleta es una tarea:
+  una línea y seguí.
+- Un control que se repite todas las semanas. Eso es un recordatorio y la app lo
+  agrega sola, aparte de tus hallazgos.
+- Una decisión que ya tomaron ellos (cambiar de proveedor, sacar un plato,
+  tomar gente). Lo que se informa es la CONSECUENCIA medida, nunca la decisión.
+- Repetir lo que ya se ve en cualquier pantalla: el total del mes, cuánto se
+  vendió, cuánto se gastó. Eso es el punto de partida, no el hallazgo.
+- Algo cuya magnitud no podés decir. Sin monto o sin unidades no hay tamaño, y
+  sin tamaño no hay decisión.
+
+Lo que sí vale, y es lo que hay que buscar primero:
+- COMPOSICIÓN antes que nivel: qué subió contra qué bajó, qué se dejó de vender,
+  qué se está vendiendo en lugar de qué. "Se vendió menos" es un dato; "se vendió
+  menos de esto y más de aquello" es una decisión sobre la carta.
+- PRECIO POR UNIDAD antes que monto total: un monto no se negocia, un precio sí.
+- COMPORTAMIENTO POR DÍA Y POR TIPO DE MESA: qué días sostienen la semana, si la
+  gente viene en grupos o de a dos. Eso cambia compras, personal y horarios.
+- LO QUE SE SOSTIENE EN EL TIEMPO por sobre lo que pasó una vez. Una noche rara
+  es una anécdota; tres semanas del mismo signo es el negocio moviéndose.
+- Siempre que puedas, decí cuánto vale por semana o por mes lo que estás
+  marcando. Un número al lado convierte una observación en una prioridad.
+
+Un día o un turno que fue un evento puntual no se compara con nada ni se
+proyecta: no se repite, así que no dice nada sobre lo que viene.
+
+El titular dice qué le pasó al negocio esta semana, no cuántas señales miraste.
+
 Reglas:
 - NO calcules ni estimes ningún número. Usá solamente los que te llegan, tal cual. Si para decir algo necesitás un número que no tenés, decí que no lo podés afirmar.
 - Nunca describas lo que contienen los datos. Interpretá lo que significan.
@@ -166,12 +203,14 @@ enseñaron ellos, y vale más que tu lectura de los números. Viene en tres part
 
 - "CÓMO SE LEE EL NEGOCIO": hechos que te contaron por su cuenta. Son la base:
   antes de marcar algo como raro, fijate si acá ya está explicado por qué no lo es.
-- "YA TE EXPLICARON QUE ESTO ES NORMAL": viene agrupado por tema, no por fecha,
-  y cada tema trae toda su historia junta. Si te explicaron por qué algo es
-  normal, NO lo vuelvas a levantar como hallazgo salvo que la magnitud haya
-  cambiado de verdad respecto de lo que te contaron. Repetir algo que ya te
-  dijeron que es normal es la forma más rápida de que dejen de leer el informe.
-  Un "ya lo sabían" sin explicación cuenta igual: ya lo saben.
+- "ESTO NO LES SIRVIÓ": viene agrupado por tema, no por fecha, y cada tema trae
+  toda su historia junta. Puede ser porque ya lo sabían, porque es normal y te
+  explican por qué, o porque el hallazgo era correcto pero no le cambia ninguna
+  decisión a nadie — las tres cosas significan lo mismo para vos: NO lo vuelvas
+  a levantar salvo que la magnitud haya cambiado de verdad respecto de lo que te
+  contaron. Un "no me sirvió" sin explicación cuenta igual y es de lo más
+  accionable que tenés. Repetir algo que ya te dijeron que no sirve es la forma
+  más rápida de que dejen de leer el informe.
 - "QUÉ LES SIRVIÓ": lo que sí les cambió algo. Usalo para calibrar QUÉ TIPO de
   hallazgo merece estar y con cuánto detalle — no para volver a emitir esos
   hallazgos. Que algo les haya servido NUNCA alcanza para afirmarlo de nuevo: si
@@ -212,7 +251,7 @@ function contextoOperativo() {
 }
 
 // ─── La llamada ─────────────────────────────────────────────────────────────
-async function interpretar({ sistema, payload }) {
+async function interpretar({ sistema, payload, contextoExtra = '' }) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('Falta ANTHROPIC_API_KEY');
   const client = new Anthropic({ apiKey });
@@ -220,7 +259,11 @@ async function interpretar({ sistema, payload }) {
   const base = {
     model: MODELO,
     max_tokens: 16000,
-    system: `${SISTEMA_COMUN}${contextoOperativo()}\n\n${sistema}`,
+    // `contextoOperativo()` es el archivo curado, sincrónico y que no puede
+    // fallar. `contextoExtra` es lo generado —hoy, la dotación desde la nómina—
+    // y viene ya resuelto de afuera, para no meterle una lectura de red a una
+    // función cuyo contrato es justamente que nunca tire.
+    system: `${SISTEMA_COMUN}${contextoOperativo()}${contextoExtra}\n\n${sistema}`,
     messages: [{ role: 'user', content: payload }],
     output_config: { effort: 'high', format: { type: 'json_schema', schema: ESQUEMA } },
   };
@@ -266,9 +309,17 @@ async function _ensureHoja(api) {
   } catch (e) { /* ya existía */ }
 }
 
+// Los recordatorios no cuentan para la severidad. Salen todas las semanas por
+// definición, así que si contaran, el informe estaría siempre en el color de su
+// severidad y el color dejaría de significar algo — que es exactamente lo que
+// pasaba con el control de facturación antes del 16/8/2026: informes sin un
+// solo problema encabezados en rojo.
+const esRecordatorio = h => Boolean(h && h.esRecordatorio);
+
 const severidadMaxima = h => {
   const orden = { alta: 3, media: 2, baja: 1 };
-  return (h || []).reduce((peor, x) => (orden[x.severidad] > orden[peor] ? x.severidad : peor), 'baja');
+  return (h || []).filter(x => !esRecordatorio(x))
+    .reduce((peor, x) => (orden[x.severidad] > orden[peor] ? x.severidad : peor), 'baja');
 };
 
 // La hoja todavía no existe: es el estado normal antes del primer informe, no
@@ -368,8 +419,14 @@ function bloqueInformeAnterior(previos, periodoActual) {
 
   const partes = anteriores.map((i, idx) => {
     const cual = idx === 0 ? 'EL ANTERIOR' : `${idx + 1} INFORMES ATRÁS`;
-    const hallazgos = (i.hallazgos || []).length
-      ? i.hallazgos.map(h => `  · [${h.severidad}] ${h.titulo} — ${h.quePasa}`).join('\n')
+    // Los recordatorios no van: salen todas las semanas por definición, así que
+    // verlos repetidos en el informe anterior le enseñaría al modelo que ese es
+    // el tipo de contenido que se espera de él — justo lo contrario de lo que
+    // queremos. Además ocupan lugar en un bloque que existe para que sepa qué
+    // hallazgos ya contó.
+    const propios = (i.hallazgos || []).filter(h => !esRecordatorio(h));
+    const hallazgos = propios.length
+      ? propios.map(h => `  · [${h.severidad}] ${h.titulo} — ${h.quePasa}`).join('\n')
       : '  · (sin hallazgos: esa vez no hubo nada que marcar)';
     return [`--- ${cual} (${i.periodo}) ---`, `Titular: ${i.titular}`,
             i.resumen ? `Resumen: ${i.resumen}` : null, 'Hallazgos:', hallazgos]
@@ -408,30 +465,42 @@ async function generarInforme(tipo, { hasta, forzar = false } = {}) {
   // escalones (dato, para el código) y el modelo recibe el texto (criterio).
   // Ver src/informes-notas.js.
   const notas = await notasDelAgente(tipo);
+  // La dotación sale de la nómina y ya no de una línea escrita a mano en
+  // contexto-operativo.md. Si no se puede leer, el informe sale sin ese bloque:
+  // misma regla que las notas — un informe sin él es peor que con él, y
+  // enormemente mejor que ningún informe.
+  const contextoNomina = await require('./nomina').bloqueParaAgentes({ hasta: corte })
+    .catch(e => { console.error(`Informes: no se pudo leer la nómina (${e.message}) — el informe sale sin la dotación`); return ''; });
   const { payload, senales, hallazgosFijos } = await analista.analizar({ hasta: corte, notas });
   const interpretado = await interpretar({
     sistema: analista.SISTEMA,
+    contextoExtra: contextoNomina,
     payload: payload
       + bloqueInformeAnterior(previos, periodo)
       + notasMod.bloqueParaModelo(notas, { ahora: corte }),
   });
 
   // ─── Hallazgos fijos: controles que el modelo no decide ───────────────────
-  // Un analista puede devolver hallazgos ya redactados por código. Van PRIMEROS
-  // y el modelo nunca los ve como suyos. La razón de que existan: un control
-  // periódico —el recordatorio de facturación del domingo, hoy el único— tiene
-  // que salir todas las semanas, y el mismo prompt que le permite al agente no
-  // encontrar nada lo haría desaparecer justo en las semanas tranquilas.
+  // Un analista puede devolver hallazgos ya redactados por código. El modelo
+  // nunca los ve como suyos. La razón de que existan: un control periódico —el
+  // recordatorio de facturación del domingo, hoy el único— tiene que salir
+  // todas las semanas, y el mismo prompt que le permite al agente no encontrar
+  // nada lo haría desaparecer justo en las semanas tranquilas.
   //
-  // También fuerzan hayHallazgos: sin eso la pantalla dibuja el caso vacío
-  // ("no hay nada que marcar") con un hallazgo adentro, que es lo peor de los
-  // dos mundos.
+  // Los marcados con `esRecordatorio` van AL FINAL y no cuentan como hallazgo
+  // (16/8/2026). Un control que sale siempre no es un hallazgo: es una tarea
+  // fija. Puesto arriba y con severidad, ocupaba el lugar del análisis y teñía
+  // de rojo semanas sin un solo problema, y una alarma que suena todas las
+  // semanas deja de escucharse. Un fijo SIN esa marca —si algún día hay uno—
+  // sigue siendo un hallazgo de verdad y va primero.
   const fijos = hallazgosFijos || [];
+  const recordatorios = fijos.filter(esRecordatorio);
+  const fijosReales = fijos.filter(h => !esRecordatorio(h));
   const informe = fijos.length
     ? {
         ...interpretado,
-        hayHallazgos: true,
-        hallazgos: [...fijos, ...(interpretado.hallazgos || [])],
+        hayHallazgos: Boolean(interpretado.hayHallazgos || fijosReales.length),
+        hallazgos: [...fijosReales, ...(interpretado.hallazgos || []), ...recordatorios],
       }
     : interpretado;
 

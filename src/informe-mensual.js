@@ -16,12 +16,21 @@
 const {
   mediana, norm, diaISO, mesISO, redondear, MESES, DIAS_SEMANA, mesPlanillaDe,
 } = require('./informes-util');
+const { separarExcepciones } = require('./informes-excepciones');
 
 const TIPO = 'mensual';
 const TITULO = 'Balance del mes';
 
 // Categorías que se leen como costo de mercadería para el ratio de gestión.
 const CATEGORIAS_MERCADERIA = ['mercaderia', 'mercadería', 'bebidas', 'bebida', 'insumos'];
+
+// Los costos de cadencia mensual. El informe SEMANAL de plata no los mira —en
+// una semana suelta un cargo mensual o aparece entero o no aparece, y las dos
+// cosas son ruido— así que el único lugar donde se juzgan es acá, con el mes
+// cerrado. Si este bloque no existiera, sueldos, alquiler, servicios e
+// impuestos no los miraría nadie.
+const SUPERGRUPOS_MENSUALES = new Set(['Personal', 'Fijos', 'Fiscales']);
+const MESES_DE_HISTORIA = 4;
 
 function analizarMes(movimientos, dias, { mes } = {}) {
   // `mes` es el primer día del mes analizado.
@@ -70,8 +79,70 @@ function analizarMes(movimientos, dias, { mes } = {}) {
     };
   };
 
+  // ── Costos de cadencia mensual, concepto por concepto ────────────────────
+  //
+  // Acá sí corresponde mirarlos: el mes está cerrado, el cargo ya ocurrió (o
+  // debería haber ocurrido) y comparar contra los meses anteriores dice algo.
+  // Dos preguntas, las dos accionables a fin de mes: ¿subió?, y ¿falta cargar
+  // algo?
+  //
+  // OJO con la columna Mes: guarda sólo el nombre ("Julio"), sin año. Para los
+  // totales del mes se filtra igual que el Dashboard —comparación pelada por
+  // nombre— porque el informe y la pantalla no pueden decir números distintos.
+  // Pero para recorrer varios meses hacia atrás ese filtro traería también el
+  // mismo mes del año pasado, así que acá se le suma la condición de que la
+  // fecha esté cerca: un pago diferido cae a lo sumo unos meses después del mes
+  // al que pertenece, nunca a un año.
+  const delMesConAnio = (m, ref) => {
+    if (m.mes !== mesPlanillaDe(ref)) return false;
+    return Math.abs((m.fecha - ref) / 86400000) <= 150;
+  };
+
+  const costosMensuales = (() => {
+    const refs = [];
+    for (let i = 0; i < MESES_DE_HISTORIA; i++) refs.push(new Date(mes.getFullYear(), mes.getMonth() - i, 1));
+
+    const gastosMensuales = operativos.filter(m => m.tipo === 'Gasto'
+      && (m.salidaTotal || 0) > 0 && SUPERGRUPOS_MENSUALES.has(m.superGrupo));
+
+    const categorias = [...new Set(gastosMensuales.map(g => g.categoria || 'Sin categoría'))];
+    const conceptos = categorias.map(categoria => {
+      const filas = gastosMensuales.filter(g => (g.categoria || 'Sin categoría') === categoria);
+      const serie = refs.map(ref => ({
+        mes: `${MESES[ref.getMonth()]} ${ref.getFullYear()}`,
+        montoARS: redondear(filas.filter(f => delMesConAnio(f, ref)).reduce((s, f) => s + f.salidaTotal, 0)),
+      }));
+      const actual = serie[0].montoARS;
+      const previos = serie.slice(1).map(s => s.montoARS).filter(x => x > 0);
+      const habitual = previos.length ? mediana(previos) : 0;
+      return {
+        categoria, montoARS: actual,
+        habitualARS: redondear(habitual),
+        variacionPct: habitual > 0 ? Number((((actual - habitual) / habitual) * 100).toFixed(1)) : null,
+        historial: serie,
+        // Con historia en los meses previos y nada (o casi nada) en el mes
+        // cerrado, lo más probable no es que el gasto haya desaparecido sino
+        // que falte cargarlo. A fin de mes eso sí es accionable.
+        pareceSinCargar: previos.length >= 2 && habitual > 0 && actual < habitual * 0.4,
+      };
+    }).sort((a, b) => b.montoARS - a.montoARS);
+
+    return {
+      conceptos,
+      totalMesARS: redondear(conceptos.reduce((s, c) => s + c.montoARS, 0)),
+      totalHabitualARS: redondear(conceptos.reduce((s, c) => s + c.habitualARS, 0)),
+      nota: 'Sueldos y cargas, alquiler, servicios e impuestos. El informe semanal de plata no los '
+        + 'mira a propósito (son mensuales: en una semana suelta aparecen enteros o no aparecen). '
+        + 'Este es el único lugar donde se los juzga.',
+    };
+  })();
+
   const fechaDe = d => { const [y, m, x] = (d.fecha || '').split('-').map(Number); return new Date(y, m - 1, x); };
-  const validos = (dias || []).filter(d => d && d.fecha && d.encontrado !== false && (d.pax > 0 || d.total > 0))
+  // Los días que no fueron un servicio normal (eventos puntuales) quedan fuera
+  // del lado salón: un evento suelto corre el promedio del mes y el de ese día
+  // de semana. Ver src/informes-excepciones.js.
+  const { dias: diasComparables, excluidos: diasNoComparables } = separarExcepciones(dias);
+  const validos = (diasComparables || []).filter(d => d && d.fecha && d.encontrado !== false && (d.pax > 0 || d.total > 0))
     .map(d => ({ ...d, _f: fechaDe(d) }));
 
   const resumenSalon = (a, b) => {
@@ -139,7 +210,7 @@ function analizarMes(movimientos, dias, { mes } = {}) {
   return {
     mes: mesISO(inicio),
     mesNombre: `${MESES[inicio.getMonth()]} ${inicio.getFullYear()}`,
-    plata, salon,
+    plata, salon, costosMensuales, diasNoComparables,
     mesAnterior: { plata: plataPrev, salon: salonPrev, mesNombre: `${MESES[inicioPrev.getMonth()]} ${inicioPrev.getFullYear()}` },
     puente,
   };
@@ -150,6 +221,7 @@ const SISTEMA = `Este informe es MENSUAL y es un BALANCE EJECUTIVO del mes que c
 Te llegan dos fuentes cruzadas del mes cerrado y del mes anterior:
 - PLATA (libro de movimientos): ingresos, gastos por grupo, resultado, margen, mayores proveedores.
 - SALÓN (Fudo): cubiertos, ingresos, ticket promedio, mix comida/bebida, mejor y peor noche, comportamiento por día de semana, categorías vendidas.
+- COSTOS MENSUALES: sueldos y cargas, alquiler, servicios e impuestos, concepto por concepto, contra los meses anteriores. Los informes semanales NO los miran —son mensuales y en una semana suelta son ruido— así que este es el único lugar donde se juzgan: si alguno subió de nivel, decilo; si alguno viene marcado como "pareceSinCargar", avisá que probablemente falte cargarlo, que a fin de mes sí es accionable.
 - PUENTE: los cruces entre las dos.
 
 Qué tiene que responder el balance, en este orden:
@@ -195,6 +267,7 @@ async function analizar({ hasta } = {}) {
   const payload = [
     `Balance ejecutivo de ${a.mesNombre} (mes cerrado). Se compara contra ${a.mesAnterior.mesNombre}.`, '',
     'PLATA DEL MES (libro):', JSON.stringify(a.plata, null, 1), '',
+    'COSTOS DE CADENCIA MENSUAL:', JSON.stringify(a.costosMensuales, null, 1), '',
     'SALÓN DEL MES (Fudo):', JSON.stringify(a.salon, null, 1), '',
     'CRUCE ENTRE LAS DOS FUENTES:', JSON.stringify(a.puente, null, 1), '',
     `MES ANTERIOR (${a.mesAnterior.mesNombre}):`, JSON.stringify(a.mesAnterior, null, 1),

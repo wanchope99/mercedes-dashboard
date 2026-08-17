@@ -30,6 +30,7 @@ const informesNotas = require('./informes-notas');
 const propinas = require('./propinas');
 const mantenimiento = require('./mantenimiento');
 const pedidos = require('./pedidos');
+const nomina = require('./nomina');
 const stockBebidas = require('./stock-bebidas');
 const { iniciarCron } = require('./cron');
 const { cargarEstadoCaja, guardarEstadoCaja } = require('./estado-caja');
@@ -1916,8 +1917,11 @@ async function leerVariables() {
 app.get('/api/proyecciones', authMiddleware, adminOnly, async (req, res) => {
   try {
     const horizonte = Math.min(parseInt(req.query.meses) || 3, 24);
-    const [movimientos, resumen, variables, planData] = await Promise.all([
+    // La nómina se inyecta desde acá y nunca hace fallar la respuesta: sin ella,
+    // el costo laboral vuelve a la heurística de siempre. Ver src/nomina.js.
+    const [movimientos, resumen, variables, planData, nominaBase] = await Promise.all([
       getMovimientos(), getResumenMensual({}), leerVariables(), plan.listPlan(),
+      nomina.getNominaParaBaselines(),
     ]);
     // Incluir el Plan de Inversiones en la proyección: query param si viene, si no
     // el default guardado en la config del plan.
@@ -1925,7 +1929,7 @@ app.get('/api/proyecciones', authMiddleware, adminOnly, async (req, res) => {
       ? (req.query.incluirPlan === '1' || req.query.incluirPlan === 'true')
       : !!planData.config.incluirEnProyeccion;
     const planGastos = incluirPlan ? await plan.planGastosProgramados() : [];
-    const data = proyectar({ movimientos, resumen, variables, planGastos, horizonte });
+    const data = proyectar({ movimientos, resumen, variables, planGastos, horizonte, nomina: nominaBase });
     res.json({ ok: true, data: { ...data, variables, incluirPlan } });
   } catch (err) {
     console.error('Error /api/proyecciones:', err.message);
@@ -2103,6 +2107,31 @@ app.post('/api/propinas/personas', authMiddleware, adminOnly, async (req, res) =
 app.delete('/api/propinas/personas/:nombre', authMiddleware, adminOnly, async (req, res) => {
   try { await propinas.deletePersona(req.params.nombre); res.json({ ok: true, message: 'Persona eliminada' }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─── Nómina — el costo laboral, de sólo lectura ─────────────────────────────
+// Son sueldos de gente real: TODO acá es adminOnly, el encargado no entra. Y la
+// nómina por persona no sale de estas tres rutas — el resto del sistema (punto
+// de equilibrio, proyecciones, agentes) recibe sólo totales y dotación.
+// La planilla es de los dueños y este módulo no le escribe nada: ver src/nomina.js.
+app.get('/api/nomina', authMiddleware, adminOnly, async (req, res) => {
+  try { res.json({ ok: true, data: await nomina.getNomina({ mesId: req.query.mes }) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get('/api/nomina/mes/:mesId', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [empleados, costos] = await Promise.all([nomina.getEmpleados(), nomina.getCostos()]);
+    const feriados = Number(req.query.feriados) || 0;
+    res.json({ ok: true, data: nomina.calcularMes({ empleados, costos, mesId: req.params.mesId, feriados }) });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.get('/api/nomina/proyeccion', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const meses = Math.min(Math.max(parseInt(req.query.meses) || 12, 1), 24);
+    res.json({ ok: true, data: await nomina.getProyeccion({ meses }) });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 // ─── Mantenimiento — la libreta de lo que hay que arreglar ──────────────────
@@ -2846,8 +2875,10 @@ app.post('/api/calculadora', authMiddleware, adminOnly, async (req, res) => {
 // Defaults de la calculadora a partir de los datos reales (para precargar inputs)
 app.get('/api/calculadora/defaults', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const [movimientos, resumen] = await Promise.all([getMovimientos(), getResumenMensual({})]);
-    const base = require('./proyecciones').calcularBaselines(movimientos);
+    const [movimientos, resumen, nominaBase] = await Promise.all([
+      getMovimientos(), getResumenMensual({}), nomina.getNominaParaBaselines(),
+    ]);
+    const base = require('./proyecciones').calcularBaselines(movimientos, new Date(), { nomina: nominaBase });
     res.json({ ok: true, data: base });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
@@ -2855,8 +2886,8 @@ app.get('/api/calculadora/defaults', authMiddleware, adminOnly, async (req, res)
 // ─── Punto de equilibrio diario (Servicios) ──────────────────────────────────
 app.get('/api/punto-equilibrio', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const movimientos = await getMovimientos();
-    const base = calcularBaselines(movimientos);
+    const [movimientos, nominaBase] = await Promise.all([getMovimientos(), nomina.getNominaParaBaselines()]);
+    const base = calcularBaselines(movimientos, new Date(), { nomina: nominaBase });
     res.json({
       ok: true,
       data: {
@@ -2866,8 +2897,16 @@ app.get('/api/punto-equilibrio', authMiddleware, adminOnly, async (req, res) => 
         pctCostoVariable: base.pctCostoVariable,
         diasServicioEquilibrio: base.diasServicioEquilibrio,
         diasServicio28: base.diasServicio28,
+        // De dónde salió el costo laboral y con cuánta gente. La pantalla lo
+        // muestra: un objetivo diario sin origen es un número que nadie audita.
+        personalFuente: base.personalFuente,
+        dotacion: base.dotacion,
+        nominaIncompletos: base.nominaIncompletos,
         desglose: {
           personal: base.personalMensual,
+          // El aguinaldo devengado: un doceavo todos los meses. Antes no estaba
+          // en el costo fijo y por eso junio y diciembre quedaban por debajo.
+          sac: base.sacDevengadoMensual,
           fijos: base.fijosMensual,
           fiscales: base.fiscalesMensual,
           financieros: base.financierosMensual,
@@ -2885,8 +2924,10 @@ app.get('/api/punto-equilibrio', authMiddleware, adminOnly, async (req, res) => 
 // ─── Proyección del MES en curso (real acumulado + forecast a fin de mes) ──────
 app.get('/api/proyeccion-mes', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const [movimientos, variables] = await Promise.all([getMovimientos(), leerVariables().catch(() => [])]);
-    res.json({ ok: true, data: proyeccionMes({ movimientos, variables }) });
+    const [movimientos, variables, nominaBase] = await Promise.all([
+      getMovimientos(), leerVariables().catch(() => []), nomina.getNominaParaBaselines(),
+    ]);
+    res.json({ ok: true, data: proyeccionMes({ movimientos, variables, nomina: nominaBase }) });
   } catch (err) {
     console.error('Error /api/proyeccion-mes:', err.message);
     res.status(500).json({ ok: false, error: err.message });

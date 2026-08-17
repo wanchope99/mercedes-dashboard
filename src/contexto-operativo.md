@@ -15,6 +15,9 @@ Qué va acá y qué no:
   (hoja `Informes Notas`), lo escriben los dueños y queda firmado.
 - **No acá:** cómo se comporta la app (que una pestaña se crea sola, que un botón
   hace tal cosa). Eso no cambia la lectura de ningún número y sólo gasta atención.
+- **No acá:** lo que alguna planilla ya puede afirmar sola. Lo que sabe la nómina
+  lo dice la nómina, con fecha y sin desactualizarse. Este archivo guarda lo que
+  no está en ninguna planilla.
 
 ---
 
@@ -40,10 +43,57 @@ faltante conocido, no un cobro que no existió.
 
 ## Personal
 
-**Desde julio de 2026 son 4 empleados más Pablo trabajando: 5 sueldos.** Antes
-eran 2. Todo lo que dependa de la dotación —cargas sociales, VEP de ARCA,
-sueldos, la categoría Personal— está en un nivel nuevo y más alto de forma
-permanente. Puede que entre más personal todavía.
+**La dotación y el costo laboral ya NO se escriben acá.** Desde el 17/8/2026 los
+informes reciben un bloque generado desde la nómina (`src/nomina.js`) con cuánta
+gente hay, cuánto cuesta el mes y en qué meses se paga el aguinaldo. Si hace
+falta corregir eso, se corrige la planilla de nómina, no este archivo.
+
+Lo que sí vive acá, porque no está en ninguna planilla:
+
+**Durante 2026 crecieron las dos cosas a la vez: entró gente y además se
+registraron más empleados en blanco.** Por eso las cargas sociales y el VEP de
+ARCA subieron más de lo que explicaría sólo la cantidad de personas. Puede que
+entre más personal todavía.
+
+**Las cargas sociales se cargan dentro de la categoría Personal, no en
+Fiscales.** Medido contra el libro el 17/8/2026: en Fiscales sólo hay ARCA por
+$137.949 en mayo y $65.535 en junio, contra $1,64M mensuales de cargas reales.
+Así que el gasto de Personal del libro incluye sueldos y cargas juntos.
+
+## Proveedores: cambiar de proveedor es una decisión, no una anomalía
+
+**Los dueños saben a quién le compran y a quién dejaron de comprarle.** Que un
+proveedor deje de aparecer en el libro no es un hallazgo: fue una decisión que
+tomaron ellos. Los casos testigo son Ichiban y El Criollo, señalados el 16/8/2026
+como ejemplo de lo que NO hay que informar. Lo único que aporta valor es el
+resultado de ese cambio, medido: qué pasó con el costo por unidad de lo que
+compraban, con el gasto semanal de esa categoría y con la frecuencia de entrega.
+
+## Costos mensuales: sólo se juzgan con el mes cerrado
+
+**Sueldos y cargas, alquiler, servicios e impuestos se pagan una vez por mes.**
+En una semana suelta, o aparecen enteros o no aparecen, y las dos cosas son el
+calendario, no información. Decir un día 16 que "falta cargar los costos de
+personal" no aporta nada: el cargo todavía no ocurrió. Estos costos se analizan
+únicamente en el balance mensual, concepto por concepto, y ahí sí corresponde
+avisar si alguno subió de nivel o si parece faltar una carga.
+
+## El horario que informa Fudo no sirve para analizar
+
+**La "apertura" de un día en Fudo es cuándo se abrió la PRIMERA MESA, no cuándo
+abrió el bar**, y los timestamps vienen en UTC mientras todo el resto del
+análisis razona en hora argentina. Una mesa cargada a las 15:30 movía la apertura
+tres horas. Además, y por encima de todo: el horario hoy no es una decisión que
+esté en discusión. Los informes ya no reciben ese dato y no hay que pedirlo ni
+razonar sobre él.
+
+## Días que no fueron un servicio normal
+
+**El 25 de mayo de 2026 se armó un turno puntual para el evento de esa fecha.**
+Cayó lunes, el día que el bar no abre, y no se repite. Está excluido de todos los
+análisis por código (`src/informes-excepciones.js`): no se compara nada contra
+él, no se lo cuenta como día cerrado y no se lo menciona. Si aparece nombrado en
+un informe anterior, es un informe viejo — no vuelve a levantarse.
 
 ## Diferencias conocidas que ya se investigaron
 

@@ -702,6 +702,70 @@ async function getServicioDebug(fecha) {
   };
 }
 
+// ─── Tamaño de mesa por día de servicio ────────────────────────────────────────
+//
+// Cuántas mesas chicas y cuántas grandes se atendieron cada noche. Es una
+// pregunta distinta de "cuántos cubiertos vinieron": 60 cubiertos en 30 mesas de
+// dos y 60 cubiertos en 10 mesas de seis son dos noches distintas —otro ritmo de
+// cocina, otro consumo, otro ticket— y el total las confunde.
+//
+// Va DIRECTO contra las ventas crudas y no contra los detalles diarios porque el
+// detalle diario ya viene agregado (pax y ventas sumados) y además los días
+// viejos se sirven desde el snapshot de la hoja "Fudo Historico", que se guardó
+// sin esta información. Yendo a `sales` la serie entera queda disponible hoy
+// mismo, sin rehacer un solo snapshot. No cuesta una llamada extra: loadRaw está
+// cacheado y el informe ya lo pidió.
+//
+// `people` lo carga el mozo y a veces queda en cero. Esas ventas se cuentan como
+// mesas pero no entran en la distribución, y el resultado dice qué porcentaje de
+// las mesas tenía el dato — el modelo necesita saber sobre cuánto está opinando.
+const TRAMOS_MESA = [
+  { clave: '1-2', min: 1, max: 2 },
+  { clave: '3-4', min: 3, max: 4 },
+  { clave: '5-6', min: 5, max: 6 },
+  { clave: '7 o más', min: 7, max: Infinity },
+];
+
+const tramoDeMesa = p => (TRAMOS_MESA.find(t => p >= t.min && p <= t.max) || {}).clave || null;
+
+async function getMesasPorDia({ desde, hasta } = {}) {
+  const { sales } = await loadRaw();
+  const dias = {};
+
+  for (const s of sales) {
+    const a = s.attributes || {};
+    if (!ventaComputable(a)) continue;
+    const fecha = fechaServicio(a.closedAt);
+    if ((desde && fecha < desde) || (hasta && fecha > hasta)) continue;
+
+    const d = dias[fecha] || (dias[fecha] = {
+      fecha, mesas: 0, mesasConPax: 0, pax: 0, totalARS: 0,
+      porTamano: Object.fromEntries(TRAMOS_MESA.map(t => [t.clave, { mesas: 0, pax: 0, totalARS: 0 }])),
+    });
+
+    d.mesas++;
+    d.totalARS += a.total || 0;
+    const p = a.people || 0;
+    const tramo = p > 0 ? tramoDeMesa(p) : null;
+    if (!tramo) continue;
+    d.mesasConPax++;
+    d.pax += p;
+    const t = d.porTamano[tramo];
+    t.mesas++; t.pax += p; t.totalARS += a.total || 0;
+  }
+
+  return Object.values(dias)
+    .map(d => ({
+      ...d,
+      totalARS: Math.round(d.totalARS),
+      porTamano: Object.fromEntries(Object.entries(d.porTamano)
+        .map(([k, v]) => [k, { ...v, totalARS: Math.round(v.totalARS) }])),
+      paxPromedioPorMesa: d.mesasConPax > 0 ? Math.round((d.pax / d.mesasConPax) * 100) / 100 : null,
+      pctMesasConPaxCargado: d.mesas > 0 ? Math.round((d.mesasConPax / d.mesas) * 1000) / 10 : 0,
+    }))
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+
 // ─── Agregado de productos/categorías sobre un rango (multi-día) ─────────────────
 // Suma todas las ventas por categoría y por producto en el período, para responder
 // "¿se vendió más PARA COMER o PARA PICAR en general?" sin entrar día por día.
@@ -1022,6 +1086,7 @@ async function probeStockMovements() {
 module.exports = {
   getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos,
   getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo,
+  getMesasPorDia, TRAMOS_MESA, tramoDeMesa,
   clearFudoCache, grupoDeCategoria, fechaServicio, fechaServicioHoy,
   probeStock, probeStockMovements, getProductosConStock, getVentasItems, getVentasConCosto,
 };

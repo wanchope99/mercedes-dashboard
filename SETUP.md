@@ -38,7 +38,21 @@ npm run dev
      ```
      {"type":"service_account","project_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\n..."}
      ```
+   - `NOMINA_SHEET_ID` = id de la planilla de nómina (`10yDUZWZZl528NgrmmkIxfxFldOaVId38X3ayve5oBcM`)
 4. Railway detecta `railway.toml` y hace el deploy automáticamente
+
+### La planilla de nómina
+
+Vive **aparte** de Gestión Mercedes y se lee con `NOMINA_SHEET_ID`. Hay que
+compartirla con la cuenta de servicio (`dashboardviewer@…`, alcanza rol Lector).
+
+A diferencia de `PROVEEDORES_SHEET_ID`, esta variable **no cae a
+`SPREADSHEET_ID`** si falta: son sueldos de gente real y el fallback los pondría
+en la planilla que ve más gente. Sin la variable, la sección Nómina devuelve
+error y el punto de equilibrio vuelve a estimar el costo laboral como antes —
+nada más se rompe.
+
+La app **no le escribe nada**: la planilla se sigue editando a mano.
 
 ### Usuarios
 

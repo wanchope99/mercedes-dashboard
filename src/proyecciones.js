@@ -6,13 +6,19 @@
 //    servicio estimados por mes (frecuencia observada en esos 28 días).
 //  · Costo variable (Mercadería + Insumos): % promedio sobre ingresos de los
 //    últimos 28 días, aplicado al ingreso proyectado.
-//  · Personal: masa salarial del último mes completo con sueldos cargados.
+//  · Personal: la NÓMINA cuando está configurada (src/nomina.js, inyectada desde
+//    server.js). Sin nómina, la masa salarial del último mes completo con
+//    sueldos cargados, y como última red una constante.
 //  · Alquiler: último alquiler registrado.
 //  · Operativos + Impuestos: promedio diario de los últimos 28 días × 30.44
 //    (excluye alquiler, que va aparte).
 //  · Equipamiento / inversión y cuotas: EXCLUIDOS (no son gasto recurrente).
-//  · Aguinaldos: Junio = 50% de la masa salarial · Diciembre = 50% (configurable
-//    via env AGUINALDO_JUNIO_PCT / AGUINALDO_DICIEMBRE_PCT).
+//  · Aguinaldo: se cuenta de DOS maneras distintas y no se suman. En el punto de
+//    equilibrio va DEVENGADO —un doceavo todos los meses— porque se gana durante
+//    todo el año y cada noche tiene que cubrir su parte. En la proyección mes a
+//    mes va como CAJA, entero en junio y en diciembre, que es cuando sale la
+//    plata. Con nómina el monto sale de la masa salarial real; sin nómina,
+//    de AGUINALDO_JUNIO_ARS / AGUINALDO_DICIEMBRE_ARS.
 //  · Variables personalizadas: definidas por el usuario desde la app (hoja
 //    "Proyeccion Variables"): gasto o ingreso mensual, meses elegidos,
 //    "se repite cada año" o "una sola vez".
@@ -40,8 +46,25 @@ const DIAS_MES_PROM = 30.44;
 // circunstanciales de frecuencia. Configurable por env si el ritmo real cambia.
 const DIAS_SERVICIO_EQUILIBRIO = parseFloat(process.env.DIAS_SERVICIO_EQUILIBRIO || '21');
 
+// El aguinaldo del próximo junio (o diciembre) según la nómina. Se busca por el
+// número de mes dentro de `sacPorMes`, cuyas claves son AAAAMM: así el supuesto
+// que se muestra en pantalla es el mismo monto que usa la proyección.
+function sacDelPrimerMes(nomina, numeroDeMes, porDefecto) {
+  const mapa = (nomina && nomina.sacPorMes) || null;
+  if (!mapa) return porDefecto;
+  const clave = Object.keys(mapa).sort().find(k => Number(k.slice(4, 6)) === numeroDeMes);
+  return clave ? mapa[clave] : 0;
+}
+
 // ─── Baselines a partir de movimientos reales ──────────────────────────────────
-function calcularBaselines(movimientos, hoy = new Date()) {
+//
+// `nomina` es opcional y llega INYECTADA, no importada: esta función es pura y
+// sincrónica, la llaman cuatro lugares distintos, y hacerla async para que
+// leyera una planilla rompería a los cuatro y la volvería imposible de
+// ejercitar sin red. El `await` lo hace server.js. Sin nómina —porque no está
+// configurada, o porque la planilla no se pudo leer— todo sigue funcionando
+// como antes de que existiera. Ver src/nomina.js.
+function calcularBaselines(movimientos, hoy = new Date(), { nomina = null } = {}) {
   const corte = new Date(hoy.getTime() - DIAS_VENTANA * DIA_MS);
   const enVentana = movimientos.filter(m =>
     !m.esCambio && !m.esFondeo && m.fecha >= corte && m.fecha <= hoy);
@@ -105,7 +128,31 @@ function calcularBaselines(movimientos, hoy = new Date()) {
   // Fallback: si no hubo ningún mes anterior con personal, tomar el máximo cargado.
   if (!personalRef) personalRef = Math.max(0, ...Object.values(personalPorMes));
   // Piso: si la referencia es baja, defaultear al personal esperado de un mes completo.
-  const personalMensual = personalRef < PERSONAL_UMBRAL_MIN ? PERSONAL_MENSUAL_DEFAULT : personalRef;
+  const personalDelLibro = personalRef < PERSONAL_UMBRAL_MIN ? PERSONAL_MENSUAL_DEFAULT : personalRef;
+
+  // Con nómina configurada, el costo laboral sale de la nómina y no de adivinar
+  // qué mes tenía los sueldos cargados. El umbral y el default quedan SÓLO como
+  // red para cuando no hay nómina: un punto de equilibrio en cero diría "todas
+  // las noches zafás", que es el error más caro que puede cometer este KPI.
+  //
+  // El número que se usa NO es el costo total de la nómina sino
+  // `costoParaPuntoDeEquilibrioARS`, que deja afuera las cargas sociales: esas
+  // ya entran acá abajo por `fiscalesMensual`, que suma los VEP de ARCA reales
+  // del libro. Sumar las dos cosas contaría ARCA dos veces. Ver el encabezado
+  // de src/nomina.js, punto 3.
+  const personalMensual = nomina && nomina.costoLaboralMensualARS > 0
+    ? nomina.costoLaboralMensualARS
+    : personalDelLibro;
+  const personalFuente = nomina && nomina.costoLaboralMensualARS > 0
+    ? 'nomina'
+    : (personalRef >= PERSONAL_UMBRAL_MIN ? 'libro' : 'default');
+
+  // El aguinaldo devengado: un doceavo del SAC todos los meses, no el golpe de
+  // junio y diciembre. El aguinaldo se gana durante todo el año y se paga dos
+  // veces; si el objetivo diario sólo subiera en junio, en junio ya sería tarde.
+  // El desembolso concentrado sigue estando, en la proyección de caja de más
+  // abajo — son dos preguntas distintas y no se suman.
+  const sacDevengadoMensual = nomina ? (nomina.sacDevengadoMensualARS || 0) : 0;
 
   // Alquiler: último registrado
   let alquilerMensual = 0, alquilerFecha = null;
@@ -120,7 +167,8 @@ function calcularBaselines(movimientos, hoy = new Date()) {
   // inversión no recurrente) prorrateados por DIAS_SERVICIO_EQUILIBRIO (fijo,
   // no el diasServicioMes observado — ver nota arriba), elevados por el % de
   // costo variable para que la venta cubra también su propio CMV.
-  const fixedMensual = personalMensual + fijosMensual + fiscalesMensual + financierosMensual + extraordinariosMensual + otrosMensual;
+  const fixedMensual = personalMensual + sacDevengadoMensual + fijosMensual + fiscalesMensual
+    + financierosMensual + extraordinariosMensual + otrosMensual;
   const fixedDiario = DIAS_SERVICIO_EQUILIBRIO > 0 ? fixedMensual / DIAS_SERVICIO_EQUILIBRIO : 0;
   const puntoEquilibrioDiario = pctCostoVariable < 1 ? fixedDiario / (1 - pctCostoVariable) : null;
 
@@ -130,6 +178,12 @@ function calcularBaselines(movimientos, hoy = new Date()) {
     pctCostoVariable, operativosMensual, personalMensual, alquilerMensual,
     fijosMensual, fiscalesMensual, financierosMensual, extraordinariosMensual, otrosMensual,
     fixedMensual, fixedDiario, puntoEquilibrioDiario, diasServicioEquilibrio: DIAS_SERVICIO_EQUILIBRIO,
+    // De dónde salió el costo laboral, para que la pantalla lo pueda decir en
+    // vez de presentar el número como un hecho sin origen.
+    personalFuente, sacDevengadoMensual,
+    dotacion: nomina ? nomina.dotacion : null,
+    // Filas de la nómina sin sueldo cargado: si hay alguna, este número está bajo.
+    nominaIncompletos: nomina ? (nomina.incompletos || []) : [],
   };
 }
 
@@ -139,8 +193,8 @@ function calcularBaselines(movimientos, hoy = new Date()) {
 //   del Plan de Inversiones agendados a un mes concreto. Se suman a los gastos del mes
 //   que coincide en (mes, anio). Aditivo y seguro: el capex está excluido de las
 //   baselines, así que no se duplica. Ver src/plan.js.
-function proyectar({ movimientos, resumen, variables = [], planGastos = [], hoy = new Date(), horizonte = 12 }) {
-  const base = calcularBaselines(movimientos, hoy);
+function proyectar({ movimientos, resumen, variables = [], planGastos = [], hoy = new Date(), horizonte = 12, nomina = null }) {
+  const base = calcularBaselines(movimientos, hoy, { nomina });
   const mesActualIdx = hoy.getMonth();
   const anioActual = hoy.getFullYear();
   const mesActualNombre = ORDEN_MESES[mesActualIdx];
@@ -172,9 +226,22 @@ function proyectar({ movimientos, resumen, variables = [], planGastos = [], hoy 
     const alquiler = base.alquilerMensual;
     const operativos = base.operativosMensual;
 
+    // Acá el aguinaldo va como CAJA: el desembolso concentrado en junio y
+    // diciembre, que es la pregunta que contesta una proyección mes a mes.
+    // Es distinto del devengado que carga el punto de equilibrio todos los
+    // meses (ver calcularBaselines) y los dos NO se suman: uno dice cuánto hay
+    // que ganar por noche, el otro cuándo sale la plata.
+    //
+    // Con nómina, el monto de cada mes de SAC viene ya calculado y prorrateado
+    // por antigüedad (`sacPorMes`, con clave AAAAMM). No se deriva del devengado
+    // multiplicando por seis: en el primer semestre de alguien que entró a mitad
+    // de año el SAC es una fracción, y esa cuenta lo cuadruplicaba.
+    const mesIdProy = `${anio}${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const sacDeCaja = nomina && nomina.sacPorMes ? nomina.sacPorMes[mesIdProy] : null;
     let aguinaldo = 0;
-    if (mesNombre === 'Junio') aguinaldo = AGUINALDO_JUNIO_ARS;
-    if (mesNombre === 'Diciembre') aguinaldo = AGUINALDO_DICIEMBRE_ARS;
+    if (sacDeCaja != null) aguinaldo = sacDeCaja;
+    else if (mesNombre === 'Junio') aguinaldo = nomina ? 0 : AGUINALDO_JUNIO_ARS;
+    else if (mesNombre === 'Diciembre') aguinaldo = nomina ? 0 : AGUINALDO_DICIEMBRE_ARS;
 
     // Variables personalizadas
     let varGastos = 0, varIngresos = 0;
@@ -219,8 +286,10 @@ function proyectar({ movimientos, resumen, variables = [], planGastos = [], hoy 
     proyeccion,
     supuestos: {
       ...base,
-      aguinaldoJunioARS: AGUINALDO_JUNIO_ARS,
-      aguinaldoDiciembreARS: AGUINALDO_DICIEMBRE_ARS,
+      // El próximo pago de cada mes de SAC que caiga dentro del horizonte; sin
+      // nómina, las constantes de env.
+      aguinaldoJunioARS: sacDelPrimerMes(nomina, 6, AGUINALDO_JUNIO_ARS),
+      aguinaldoDiciembreARS: sacDelPrimerMes(nomina, 12, AGUINALDO_DICIEMBRE_ARS),
       generado: hoy.toISOString(),
     },
   };
@@ -363,7 +432,7 @@ function calcularCalculadora(input = {}) {
 // y proyecta linealmente hasta fin de mes según el ritmo diario observado, sumando
 // además los costos fijos del mes (alquiler, personal, servicios) que quizá aún no
 // se registraron. Devuelve series diarias para el gráfico acumulado.
-function proyeccionMes({ movimientos, variables = [], hoy = new Date() }) {
+function proyeccionMes({ movimientos, variables = [], hoy = new Date(), nomina = null }) {
   const anio = hoy.getFullYear();
   const mesIdx = hoy.getMonth();
   const mesNombre = ORDEN_MESES[mesIdx];
@@ -375,7 +444,7 @@ function proyeccionMes({ movimientos, variables = [], hoy = new Date() }) {
 
   // Baseline estable de los ultimos 28 dias (ingreso por dia de servicio, % costo
   // variable, operativos, personal, alquiler). Esto NO se sesga por el dia del mes.
-  const base = calcularBaselines(movimientos, hoy);
+  const base = calcularBaselines(movimientos, hoy, { nomina });
 
   const delMes = (movimientos || []).filter(m =>
     !m.esCambio && !m.esFondeo && !m.esCuota &&
@@ -435,17 +504,34 @@ function proyeccionMes({ movimientos, variables = [], hoy = new Date() }) {
     else { varGastoOtros += monto; varDetalle.push({ nombre: v.nombre, tipo: 'gasto', monto }); }
   }
 
-  // Personal del mes: lo ya registrado + lo que falte para llegar al objetivo
-  // (variable custom si existe; si no, baseline). Nunca menos que lo ya pagado.
-  const objetivoPersonal = varPersonal > 0 ? varPersonal : base.personalMensual;
+  // Personal del mes: lo ya registrado + lo que falte para llegar al objetivo.
+  // Nunca menos que lo ya pagado, y nunca la suma de los dos.
+  //
+  // La NÓMINA gana sobre la variable custom (17/8/2026). Hasta que existió la
+  // nómina, la única forma de modelar un sueldo era una fila de texto libre en
+  // `Proyeccion Variables` matcheada por el regex de arriba, y esa fila mandaba.
+  // Ahora hay una fuente de verdad y una fila escrita a mano no puede pisarla en
+  // silencio — pero tampoco se borra: se informa cuál se ignoró, porque acá la
+  // regla es mostrar la discrepancia y no elegir un lado callado.
+  const objetivoPersonal = base.personalMensual > 0 && base.personalFuente === 'nomina'
+    ? base.personalMensual
+    : (varPersonal > 0 ? varPersonal : base.personalMensual);
+  const varPersonalIgnorada = base.personalFuente === 'nomina'
+    ? varDetalle.filter(v => v.concepto === 'personal')
+    : [];
   const personalFaltante = Math.max(0, objetivoPersonal - personalRegistrado);
   const objetivoAlquiler = varAlquiler > 0 ? varAlquiler : base.alquilerMensual;
   const alquilerFaltante = Math.max(0, objetivoAlquiler - alquilerRegistrado);
 
-  // Aguinaldo (Junio/Diciembre) sobre el objetivo de personal.
+  // Aguinaldo: el DESEMBOLSO del mes, no el devengado. Con nómina sale ya
+  // prorrateado por antigüedad (ver la nota en proyectar); sin nómina, la
+  // constante de env de siempre.
+  const mesIdActual = `${anio}${String(mesIdx + 1).padStart(2, '0')}`;
+  const sacDeCaja = nomina && nomina.sacPorMes ? nomina.sacPorMes[mesIdActual] : null;
   let aguinaldo = 0;
-  if (mesNombre === 'Junio') aguinaldo = AGUINALDO_JUNIO_ARS;
-  if (mesNombre === 'Diciembre') aguinaldo = AGUINALDO_DICIEMBRE_ARS;
+  if (sacDeCaja != null) aguinaldo = sacDeCaja;
+  else if (mesNombre === 'Junio') aguinaldo = nomina ? 0 : AGUINALDO_JUNIO_ARS;
+  else if (mesNombre === 'Diciembre') aguinaldo = nomina ? 0 : AGUINALDO_DICIEMBRE_ARS;
 
   // ── Totales forecast ──
   const ingresoForecast = ingresoReal + ingresoFuturoServicios + varIngresoMes;
@@ -494,6 +580,10 @@ function proyeccionMes({ movimientos, variables = [], hoy = new Date() }) {
       personalRegistrado: Math.round(personalRegistrado),
       personalFaltante: Math.round(personalFaltante),
       objetivoPersonal: Math.round(objetivoPersonal),
+      personalFuente: base.personalFuente,
+      // Filas de `Proyeccion Variables` que quedaron sin efecto porque la nómina
+      // manda. Se informan en vez de desaparecer.
+      varPersonalIgnorada,
       alquilerRegistrado: Math.round(alquilerRegistrado),
       alquilerFaltante: Math.round(alquilerFaltante),
       costoVarRegistrado: Math.round(costoVarRegistrado),

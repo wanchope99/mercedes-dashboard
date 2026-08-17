@@ -1382,6 +1382,23 @@
      servicio (acá o por Telegram) y después se ordena por semana o prioridad.
      El encargado entra: puede agregar y mover estados, no borrar. No toca la
      contabilidad del bar. Ver src/mantenimiento.js. -->
+<!-- ═══ NÓMINA ════════════════════════════════════════════════════════════════
+     Quiénes trabajan y cuánto cuesta el mes. Es de SÓLO LECTURA: la planilla es
+     de los dueños y se sigue editando ahí; acá no hay altas ni ediciones a
+     propósito. Es además la fuente del costo laboral del punto de equilibrio.
+     Sólo admin. Ver src/nomina.js.                                           -->
+<div id="tab-nomina" class="tab-panel">
+  <main>
+    <div class="card">
+      <div class="card-title"><span>Nómina</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· se edita en la planilla, acá se lee</span>
+        <button class="btn btn-secondary" style="margin-left:auto" onclick="loadNomina(this)">↻</button>
+      </div>
+      <div id="nomina-cuerpo"><div style="color:var(--text-muted);font-size:13px">Cargando...</div></div>
+    </div>
+  </main>
+</div>
+
 <!-- ═══ PEDIDOS POR DÍA ═══════════════════════════════════════════════════════
      Qué llega cada día, si hay que pagarlo y cuánto. Reemplaza el Google Doc
      "PEDIDOS X DIA". Ver src/pedidos.js y la sección de JS más abajo.        -->
@@ -1508,6 +1525,8 @@
     <div class="card">
       <div class="card-title"><span>Más de Operación</span></div>
       <div class="mas-grid" style="margin-top:6px">
+        <button class="btn mas-item" onclick="abrirDesdeMas('propinas')">
+          <span style="font-size:22px">💸</span><span>Propinas</span></button>
         <button class="btn mas-item" onclick="abrirDesdeMas('costos-config')">
           <span style="font-size:22px">⚙️</span><span>Config. de costos</span></button>
         <button class="btn mas-item" onclick="abrirDesdeMas('propinas-historial')">
@@ -3215,7 +3234,11 @@ const TAB_GROUPS = {
     { id: 'vinos',          label: '🥂 Bebidas' },
     { id: 'mantenimiento',  label: '🔧 Mantenimiento' },
     { id: 'costos-resumen', label: '🧮 Costos', soloAdmin: true },
-    { id: 'propinas',       label: '💸 Propinas', soloAdmin: true },
+    // Nómina entró el 17/08/2026 y Propinas bajó a "Más" para dejarle el lugar:
+    // el grupo ya estaba en seis y la regla es repensar, no agregar un séptimo.
+    // Propinas se junta ahí con su propio Historial, y es una tarea semanal de
+    // administración, no algo que se abra durante el servicio.
+    { id: 'nomina',         label: '👥 Nómina', soloAdmin: true },
     { id: 'operacion-mas',  label: '⋯ Más', soloAdmin: true },
   ] },
 
@@ -3359,6 +3382,7 @@ function cargarPanel(tab) {
   else if (tab === 'informes') loadInformes();
   else if (tab === 'propinas') loadPropinas();
   else if (tab === 'propinas-historial') loadPropinasHistorial();
+  else if (tab === 'nomina') loadNomina();
   else if (tab === 'inversiones') loadPlan();
   else if (tab === 'plan') loadPlan();
 }
@@ -5643,7 +5667,11 @@ function renderProySupuestos(s) {
   document.getElementById('proy-supuestos').innerHTML = `
     📈 <b>Ingresos:</b> promedio por día de servicio de los últimos ${s.ventanaDias || 28} días (${fmt(s.ingresoPorDiaServicio || 0)} × ${(s.diasServicioMes || 0).toFixed(1)} días/mes = ${fmt(s.ingresoMensual || 0)}/mes).<br>
     🛒 <b>Mercadería + Insumos:</b> ${((s.pctCostoVariable || 0) * 100).toFixed(1)}% de los ingresos (observado en la misma ventana).<br>
-    👥 <b>Personal:</b> ${fmt(s.personalMensual || 0)}/mes (último mes completo de sueldos) · Aguinaldo: Junio ${((s.aguinaldoJunioPct || 0) * 100)}% / Diciembre ${((s.aguinaldoDiciembrePct || 0) * 100)}%.<br>
+    👥 <b>Personal:</b> ${fmt(s.personalMensual || 0)}/mes ${s.personalFuente === 'nomina'
+      ? `(nómina${s.dotacion ? `, ${s.dotacion} personas` : ''})`
+      : s.personalFuente === 'libro' ? '(último mes completo de sueldos)' : '(valor por defecto)'} ·
+    Aguinaldo: ${fmt(s.aguinaldoJunioARS || 0)} en junio y ${fmt(s.aguinaldoDiciembreARS || 0)} en diciembre${
+      s.sacDevengadoMensual > 0 ? `, guardando ${fmt(s.sacDevengadoMensual)}/mes` : ''}.<br>
     🏠 <b>Alquiler:</b> ${fmt(s.alquilerMensual || 0)}/mes (último registrado, sin ajuste por inflación).<br>
     ⚙️ <b>Operativos + Impuestos:</b> ${fmt(s.operativosMensual || 0)}/mes (promedio de la ventana).<br>
     🚫 <b>Excluido:</b> equipamiento/inversión y pagos de cuotas (no son gasto recurrente).`;
@@ -6554,7 +6582,15 @@ function renderInformes() {
 // formularios de feedback se pisarían.
 function informeCuerpoHTML(inf, { prefijo = 'sec' } = {}) {
   const sev = INFORME_SEVERIDAD[inf.severidad] || INFORME_SEVERIDAD.baja;
-  const hallazgos = inf.hallazgos || [];
+  const todos = inf.hallazgos || [];
+  // Los recordatorios se separan de los hallazgos (16/8/2026). Un control que
+  // sale todas las semanas —hoy el de facturación— no es algo que el agente
+  // encontró: es una tarea fija. Mezclado con los hallazgos ocupaba el primer
+  // renglón del informe cada domingo, pintaba de rojo semanas sin un solo
+  // problema y empujaba el análisis hacia abajo. Va al final, en gris, sin
+  // severidad y sin pedir feedback: no hay nada que corregirle.
+  const hallazgos = todos.filter(h => !h.esRecordatorio);
+  const recordatorios = todos.filter(h => h.esRecordatorio);
   // En el balance mensual la severidad es importancia para el negocio, no
   // gravedad de un problema: pintarlo de rojo diría algo que no es.
   const esBalance = inf.tipo === 'mensual';
@@ -6600,7 +6636,17 @@ function informeCuerpoHTML(inf, { prefijo = 'sec' } = {}) {
     `<div style="margin-top:16px;padding:12px 14px;background:var(--bg-alt,rgba(127,127,127,.08));border-radius:8px">
       <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Lo que haría</div>
       <div style="font-size:14px;line-height:1.6;margin-top:4px">${escapeHtml(inf.loQueHariaHoy)}</div>
-    </div>`;
+    </div>` +
+    (recordatorios.length
+      ? `<div style="margin-top:12px;padding:12px 14px;border:1px dashed var(--border);border-radius:8px">
+           <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Recordatorio${recordatorios.length > 1 ? 's' : ''} de todas las semanas</div>
+           ${recordatorios.map(h => `
+             <div style="margin-top:8px">
+               <div style="font-size:13px;font-weight:700">${escapeHtml(h.titulo)}</div>
+               <div style="font-size:13px;line-height:1.65;color:var(--text-muted);margin-top:2px">${escapeHtml(h.quePasa)}</div>
+             </div>`).join('')}
+         </div>`
+      : '');
 }
 
 async function marcarInformeLeido(tipo, periodo, btn) {
@@ -6738,10 +6784,10 @@ function notaFeedbackHTML(k) {
 
   return `<div class="nota-fb" id="nota-fb-${k}">
       <button class="nota-btn" onclick="notaSirve('${k}', this)">👍 Me sirvió</button>
-      <button class="nota-btn" onclick="notaAbrir('${k}')">✓ Ya lo sé</button>
+      <button class="nota-btn" onclick="notaAbrir('${k}')">👎 No me sirvió</button>
     </div>
     <div class="nota-form" id="nota-form-${k}" style="display:none">
-      <textarea id="nota-texto-${k}" rows="2" placeholder="¿Por qué es normal? (ej: pasamos de 2 a 4 empleados, se duplica la carga)"></textarea>
+      <textarea id="nota-texto-${k}" rows="2" placeholder="¿Por qué no te sirvió? (ej: ya lo sabía; es un costo mensual, no cambia ninguna decisión)"></textarea>
       ${casilla}
       <div class="nota-error" id="nota-error-${k}" style="display:none"></div>
       <div class="nota-acciones">
@@ -6850,6 +6896,12 @@ async function notaGuardar(k, btn) {
       method: 'POST',
       body: JSON.stringify({
         tipo: ref.tipo, periodo: ref.periodo, hallazgo: ref.hallazgo,
+        // El botón dice "No me sirvió" (17/8/2026) y el veredicto guardado sigue
+        // siendo `normal`: es la clave con la que están escritas todas las notas
+        // que ya existen en la hoja, y renombrarla las dejaría fuera de su grupo
+        // sin ganar nada. La etiqueta es lo que el dueño lee; el veredicto es un
+        // identificador interno. Lo que sí cambió con el botón es cómo se le
+        // presenta al modelo — ver bloqueParaModelo en src/informes-notas.js.
         veredicto: 'normal',
         texto: document.getElementById('nota-texto-' + k).value,
         // Salen del hallazgo, no de algo que el dueño haya tenido que escribir.
@@ -6969,7 +7021,7 @@ async function notaGuardarLibre(btn) {
 // material tal como él lo lee, y no como un registro de cuándo se apretó qué.
 const NOTA_GRUPOS = [
   ['contexto', 'Cómo se lee el negocio', 'Lo que le contaron sin que preguntara. Es la base de todo lo que interpreta.'],
-  ['normal',   'Lo que ya sabe que es normal', 'Por esto dejó de marcarlo. Si algo de acá dejó de ser cierto, archivalo.'],
+  ['normal',   'Lo que no les sirvió', 'Por esto dejó de marcarlo. Si algo de acá dejó de ser cierto, archivalo.'],
   ['sirve',    'Lo que les sirvió', 'Con esto calibra qué vale la pena contarles. No lo repite por estar acá.'],
 ];
 
@@ -6980,7 +7032,7 @@ function notaListaHTML() {
   const notas = state.informeNotas || [];
   if (!notas.length) {
     return `<div style="margin-top:22px;padding-top:14px;border-top:1px solid var(--border);font-size:13px;color:var(--text-muted);line-height:1.7">
-        Todavía no le dijeron nada. Cada 👍 y cada "ya lo sé" de un informe queda acá,
+        Todavía no le dijeron nada. Cada 👍 y cada 👎 de un informe queda acá,
         y el agente los lee antes de escribir el siguiente.
       </div>`;
   }
@@ -9266,6 +9318,10 @@ function openPuntoEquilibrioModal() {
   const pctCV = (pctCostoVariable || 0) * 100;
   const rows = [
     ['Personal', desglose.personal],
+    // El aguinaldo devengado. Va como fila propia y no adentro de Personal
+    // porque es la parte del costo que no se paga este mes: verla separada es lo
+    // que hace que junio y diciembre no sorprendan.
+    ['Aguinaldo (se guarda todos los meses)', desglose.sac],
     ['Fijos', desglose.fijos],
     ['Fiscales', desglose.fiscales],
     ['Financieros', desglose.financieros],
@@ -9273,9 +9329,23 @@ function openPuntoEquilibrioModal() {
     ['Otros', desglose.otros],
   ].filter(([, v]) => v > 0)
    .map(([label, v]) => [label, fmt(v), fixedMensual > 0 ? pct((v / fixedMensual) * 100) : '-']);
+
+  // De dónde salió el costo laboral. Un objetivo diario sin origen es un número
+  // que nadie puede auditar — y hasta el 17/8/2026 salía de adivinar cuál fue el
+  // último mes con los sueldos cargados, o de una constante.
+  const fuente = {
+    nomina: 'El personal sale de la <b>nómina</b>' + (pe.dotacion ? ` (${pe.dotacion} personas)` : '') + ', con las vacaciones y el aguinaldo devengados mes a mes.',
+    libro: 'El personal sale del <b>último mes con sueldos cargados</b> en el libro. Cargando la nómina, este número deja de ser una estimación.',
+    default: 'El personal es un <b>valor por defecto</b>: no hay nómina configurada y el libro no tiene un mes con los sueldos completos. Es el número menos confiable de este cálculo.',
+  }[pe.personalFuente] || '';
+  const faltan = (pe.nominaIncompletos || []).length
+    ? `<div style="color:var(--red,#c33);margin-top:6px">Falta cargar en la nómina: ${pe.nominaIncompletos.map(i => escapeHtml(i.nombre)).join(', ')} — este objetivo está por debajo de lo real.</div>`
+    : '';
+
   const body = '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.6">'
     + 'Se toman los costos fijos de los últimos 28 días y se prorratean sobre ' + Math.round(diasServicioEquilibrio) + ' servicios estimados por mes (frecuencia habitual del local, no días calendario). '
     + 'El resultado se ajusta por el % de costo variable (CMV), para que la facturación también cubra su propio costo variable.'
+    + (fuente ? '<div style="margin-top:8px">' + fuente + '</div>' : '') + faltan
     + '</div>'
     + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Costos fijos mensuales por rubro</div>'
     + miniTabla([{label:'Rubro'},{label:'Monto',align:'right'},{label:'% del total',align:'right'}], rows)
@@ -11435,6 +11505,109 @@ document.addEventListener('DOMContentLoaded', () => {
   const ov = document.getElementById('mant-edit-overlay');
   if (ov) ov.addEventListener('click', function (e) { if (e.target === this) closeMantenimientoEdit(); });
 });
+
+// ═══ NÓMINA ═════════════════════════════════════════════════════════════════
+// Quiénes trabajan, cuánto cuesta el mes y qué se viene. Ver src/nomina.js.
+//
+// Es una pantalla de LECTURA: no hay alta, ni edición, ni borrado, y eso es una
+// decisión y no una etapa pendiente — la planilla es de los dueños y sigue
+// siendo la fuente. Lo único que la app agrega es el cálculo, la proyección y
+// el aviso de lo que falta cargar.
+//
+// Tres bloques, en el orden en que se preguntan las cosas: quiénes están, qué
+// cuesta este mes, y qué meses vienen cargados (el del aguinaldo, sobre todo).
+const nomState = { data: null, proyeccion: null };
+
+async function loadNomina(btn) {
+  if (btn) btn.classList.add('spinning');
+  const cont = document.getElementById('nomina-cuerpo');
+  try {
+    const [{ data }, proy] = await Promise.all([
+      api('/api/nomina'),
+      api('/api/nomina/proyeccion?meses=8').catch(() => ({ data: [] })),
+    ]);
+    nomState.data = data;
+    nomState.proyeccion = proy.data || [];
+    renderNomina();
+  } catch (e) {
+    cont.innerHTML = `<div class="prop-error">No se pudo cargar: ${escapeHtml(e.message)}</div>`
+      + (/NOMINA_SHEET_ID/.test(e.message)
+        ? '<div style="font-size:12px;color:var(--text-muted);margin-top:8px">Falta configurar la planilla de nómina en el servidor.</div>'
+        : '');
+  } finally { if (btn) btn.classList.remove('spinning'); }
+}
+
+function renderNomina() {
+  const { empleados, resumen, mes } = nomState.data || {};
+  if (!resumen) return;
+  const cont = document.getElementById('nomina-cuerpo');
+  const fila = (izq, der, extra = '') => `<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
+      <span>${izq}</span><span style="text-align:right;white-space:nowrap">${der}${extra}</span></div>`;
+
+  // Lo que falta cargar va PRIMERO y no escondido al final: si falta alguien, el
+  // costo total está bajo y con él el punto de equilibrio, y eso hay que verlo
+  // sin tener que hacer la cuenta.
+  const alerta = (resumen.incompletos || []).length
+    ? `<div class="prop-error" style="margin-bottom:12px">
+         Falta cargar en la planilla: ${resumen.incompletos.map(i => `<b>${escapeHtml(i.nombre)}</b> (${escapeHtml(i.leFalta.join(' y '))})`).join(' · ')}.
+         Hasta que estén, el costo laboral y el punto de equilibrio quedan por debajo de lo real.
+       </div>` : '';
+
+  const gente = (empleados || []).map(e => {
+    const meses = e.ingresoISO ? mesesDesde(e.ingresoISO) : null;
+    return fila(
+      `<b>${escapeHtml(e.nombre)}</b>${e.esSocio ? ' <span style="font-size:11px;color:var(--text-muted)">socio</span>' : ''}`
+        + `<span style="display:block;font-size:11px;color:var(--text-muted)">`
+        + (e.ingresoISO ? `desde ${fechaCorta(e.ingresoISO)}${meses != null ? ` · ${meses} ${meses === 1 ? 'mes' : 'meses'}` : ''}` : 'sin fecha de ingreso')
+        + (e.enBlancoNetoARS > 0 ? ` · ${fmt(e.enBlancoNetoARS)} en blanco` : e.esSocio ? '' : ' · sin parte registrada')
+        + `</span>`,
+      e.sueldoActualARS > 0 ? fmt(e.sueldoActualARS) : '<span style="color:var(--red,#c33)">falta</span>');
+  }).join('');
+
+  // El detalle del costo del mes. `origen` dice si el número salió de la hoja de
+  // costos o de aplicar la regla, porque hay filas pisadas a mano.
+  const detalle = (resumen.detalle || []).map(d => fila(
+    `${escapeHtml(d.nombre)}<span style="display:block;font-size:11px;color:var(--text-muted)">`
+      + `${fmt(d.netoARS)} en mano${d.cargasARS > 0 ? ` · ${fmt(d.cargasARS)} de cargas` : ''}`
+      + `${d.provisionesARS > 0 ? ` · ${fmt(d.provisionesARS)} de vacaciones y aguinaldo` : ''}`
+      + `${Math.abs(d.difContraLaReglaARS) > 1 ? ` · <span title="La planilla tiene un valor puesto a mano que no sale de la fórmula">planilla ${d.difContraLaReglaARS > 0 ? '+' : ''}${fmt(d.difContraLaReglaARS)} vs la regla</span>` : ''}`
+      + `</span>`,
+    `<b>${fmt(d.totalARS)}</b>`)).join('');
+
+  const proy = (nomState.proyeccion || []).map(m => fila(
+    `${escapeHtml(m.mes)} ${m.anio}${m.esMesDeSAC ? ' <span style="font-size:11px;color:var(--accent)">· aguinaldo</span>' : ''}`,
+    fmt(m.totales.costoTotalARS),
+    m.totales.sacARS > 0 ? `<span style="display:block;font-size:11px;color:var(--text-muted)">+ ${fmt(m.totales.sacARS)} de SAC a pagar</span>` : '')).join('');
+
+  cont.innerHTML = alerta
+    + `<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:14px">
+         <div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Costo del mes</div>
+              <div style="font-size:22px;font-weight:700">${fmt(resumen.costoTotalMensualARS)}</div></div>
+         <div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Personas</div>
+              <div style="font-size:22px;font-weight:700">${resumen.dotacion}</div></div>
+       </div>`
+    + `<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-top:8px">Quiénes están</div>${gente}`
+    + `<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-top:16px">Qué cuesta cada uno por mes</div>${detalle}`
+    + fila('<b>Total</b>', `<b>${fmt(resumen.costoTotalMensualARS)}</b>`)
+    + `<div style="font-size:12px;color:var(--text-muted);line-height:1.7;margin-top:10px">
+         ${fmt(resumen.netoTrabajadoresARS)} en mano · ${fmt(resumen.cargasARS)} de cargas ·
+         ${fmt(resumen.provisionesARS)} de vacaciones y aguinaldo devengados.
+         Las vacaciones y el aguinaldo no salen de la caja este mes: se guardan todos los meses
+         para que junio y diciembre no sean una sorpresa. Este total es el que usa el punto de
+         equilibrio de la sección Servicios.
+       </div>`
+    + (proy ? `<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-top:16px">Lo que viene</div>${proy}` : '');
+}
+
+// Meses completos desde una fecha ISO hasta hoy. Sirve para la antigüedad, que es
+// lo que define cuántos días de vacaciones corresponden.
+function mesesDesde(iso) {
+  const [a, m, d] = iso.split('-').map(Number);
+  const hoy = new Date();
+  let n = (hoy.getFullYear() - a) * 12 + (hoy.getMonth() + 1 - m);
+  if (hoy.getDate() < d) n--;
+  return Math.max(0, n);
+}
 
 // ═══ PEDIDOS POR DÍA ════════════════════════════════════════════════════════
 // Qué llega cada día, si hay que pagarlo y cuánto. Ver src/pedidos.js.
