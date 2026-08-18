@@ -2145,6 +2145,28 @@ app.get('/api/cierre-cocina', authMiddleware, async (req, res) => {
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// Guardar la foto del servicio. Quién firma sale del token, nunca del body.
+// El 409 es el caso de "ya hay un cierre para esta noche": no se pisa solo,
+// hay que mandar `reemplazar` a propósito.
+app.post('/api/cierre-cocina', authMiddleware, async (req, res) => {
+  try {
+    const data = await cierreCocina.guardarCierre(req.body, { usuario: req.user.nombre, rol: req.user.rol });
+    res.json({ ok: true, data });
+  } catch (err) {
+    res.status(err.code === 'YA_EXISTE' ? 409 : 400).json({ ok: false, error: err.message, cierre: err.cierre });
+  }
+});
+
+app.get('/api/cierre-cocina/cierres', authMiddleware, async (req, res) => {
+  try { res.json({ ok: true, data: await cierreCocina.listarCierres({ limite: Math.min(parseInt(req.query.limite) || 20, 100) }) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get('/api/cierre-cocina/cierres/:id', authMiddleware, async (req, res) => {
+  try { res.json({ ok: true, data: await cierreCocina.detalleCierre(req.params.id) }); }
+  catch (err) { res.status(404).json({ ok: false, error: err.message }); }
+});
+
 // ─── Mantenimiento — la libreta de lo que hay que arreglar ──────────────────
 // A diferencia de casi todo lo demás, el ENCARGADO entra acá: es el que está en
 // el salón cuando se quema la lámpara, y si tiene que avisar para que otro lo

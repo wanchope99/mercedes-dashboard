@@ -39,6 +39,7 @@ npm run dev
      {"type":"service_account","project_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\n..."}
      ```
    - `NOMINA_SHEET_ID` = id de la planilla de nómina (`10yDUZWZZl528NgrmmkIxfxFldOaVId38X3ayve5oBcM`)
+   - `STOCKS_SHEET_ID` = id de la planilla de Stocks (`1gEt0H5Rou22jmtpiNFjH79oj8-n_b5azLXKJVZ_zgSk`)
 4. Railway detecta `railway.toml` y hace el deploy automáticamente
 
 ### La planilla de nómina
@@ -53,6 +54,19 @@ error y el punto de equilibrio vuelve a estimar el costo laboral como antes —
 nada más se rompe.
 
 La app **no le escribe nada**: la planilla se sigue editando a mano.
+
+### La planilla de Stocks
+
+El cierre de cocina (qué comprar, qué producir). Se lee con `STOCKS_SHEET_ID` y
+**acá la cuenta de servicio necesita rol Editor**, no Lector como en nómina: la
+app escribe el estado y los comentarios de los ítems que se marcan, y crea dos
+hojas propias de historial (`Cierre Cocina`, `Cierre Cocina Detalle`).
+
+Lo que la app escribe está acotado a propósito: la columna `Estado` y columnas
+que agrega al final (`Comentario`, `Actualizado`), y **sólo en las filas que
+alguien marcó**. `Checklist seteo` no se toca nunca. Tampoco cae a
+`SPREADSHEET_ID` si falta la variable — sin ella la sección dice que no está
+configurada y nada más se rompe.
 
 ### Usuarios
 

@@ -340,14 +340,327 @@ async function estadoActual({ rol } = {}) {
   };
 }
 
+// ─── Escritura ──────────────────────────────────────────────────────────────
+//
+// Dos destinos y son de naturaleza distinta:
+//
+//   · LAS HOJAS DE PABLO reciben el estado y el comentario de los ítems que
+//     alguien tocó en este cierre. SÓLO ESOS. No se recorre la lista entera
+//     normalizando todo: si lo hiciéramos, "comprar semana 17/8 (barcos?)" se
+//     convertiría en un estado y un comentario prolijos en las 109 filas de una,
+//     y eso es reescribir el documento de otro. Lo que no se tocó queda tal cual
+//     está escrito.
+//   · LAS HOJAS PROPIAS reciben la foto: append-only, inmutable, firmada.
+//
+// Y se escribe CELDA POR CELDA. `pedidos` y `mantenimiento` actualizan la fila
+// completa porque son dueños de esas filas; acá cualquier columna que no sea
+// nuestra puede tener una fórmula o algo que no leímos.
+const HOJA_CIERRES = process.env.CC_HOJA_CIERRES || 'Cierre Cocina';
+const HOJA_DETALLE = process.env.CC_HOJA_DETALLE || 'Cierre Cocina Detalle';
+const HEADER_CIERRES = ['ID', 'Fecha Servicio', 'Firmado Por', 'Estado', 'Nota', 'Resumen', 'Guardado'];
+const HEADER_DETALLE = ['CierreID', 'Hoja', 'Grupo', 'Item', 'Estado', 'Comentario', 'Hecho', 'Actualizado'];
+
+// Los nombres de las columnas que la app agrega al final de las hojas de Pablo.
+const COLS_APP = { estado: 'Estado', comentario: 'Comentario', actualizado: 'Actualizado' };
+
+function colLetra(i) {
+  let s = '', n = i;
+  while (n >= 0) { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; }
+  return s;
+}
+
+// Qué columna usa cada cosa, y cuáles hay que crear.
+//
+// `libre` es la primera columna que no tiene NADA, ni header ni un dato en
+// ninguna fila. Reclamar sólo a partir de ahí es la única garantía de que no le
+// pisamos una columna a nadie — es la lección de las columnas Q/R/S/T de la hoja
+// Movimientos, donde dar por libre una columna ocupada costó caro.
+function resolverColumnas(filas, solapa) {
+  const cab = (filas || [])[0] || [];
+  const porNombre = n => cab.findIndex(c => norm(c) === norm(n));
+
+  let libre = 0;
+  for (const f of (filas || [])) {
+    for (let i = 0; i < (f || []).length; i++) if (celda(f[i])) libre = Math.max(libre, i + 1);
+  }
+
+  const nuevas = [];
+  const asignar = (etiqueta, colDeclarada) => {
+    // ¿La columna que declara el mapeo ya existe de verdad (tiene header o datos)?
+    if (colDeclarada != null && colDeclarada < libre) return colDeclarada;
+    // ¿Existe una columna con ese nombre puesta por la app en una corrida anterior?
+    const porN = porNombre(etiqueta);
+    if (porN >= 0) return porN;
+    // Si no, se reclama la primera vacía de verdad.
+    const col = libre++;
+    nuevas.push({ col, nombre: etiqueta });
+    return col;
+  };
+
+  return {
+    estado: asignar(COLS_APP.estado, solapa.cols.estado),
+    comentario: asignar(COLS_APP.comentario, null),
+    actualizado: asignar(COLS_APP.actualizado, null),
+    nuevas,
+  };
+}
+
+// Una hoja de Google tiene un ancho de grilla, y no es infinito: `Checklist
+// produ` viene con 6 columnas, así que escribir en la G falla con "exceeds grid
+// limits" antes de tocar un solo dato. Hay que ensanchar la hoja primero.
+//
+// Es la única operación estructural que la app hace sobre una hoja de Pablo, y
+// sólo agrega columnas vacías a la derecha: no mueve, no borra y no reordena
+// nada de lo que ya está.
+async function _asegurarAncho(api, hoja, colNecesaria) {
+  const meta = await api.spreadsheets.get({ spreadsheetId: SHEET_ID, fields: 'sheets.properties' });
+  const props = (meta.data.sheets || []).map(s => s.properties).find(p => p.title === hoja);
+  if (!props) throw new Error(`No existe la hoja "${hoja}"`);
+  const ancho = (props.gridProperties || {}).columnCount || 0;
+  if (colNecesaria < ancho) return;
+  await api.spreadsheets.batchUpdate({
+    spreadsheetId: SHEET_ID,
+    requestBody: {
+      requests: [{
+        appendDimension: { sheetId: props.sheetId, dimension: 'COLUMNS', length: colNecesaria - ancho + 1 },
+      }],
+    },
+  });
+}
+
+async function _ensureHojaPropia(api, titulo, header) {
+  try {
+    await api.spreadsheets.batchUpdate({
+      spreadsheetId: SHEET_ID,
+      requestBody: { requests: [{ addSheet: { properties: { title: titulo } } }] },
+    });
+    await api.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${titulo}!A1:${colLetra(header.length - 1)}1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [header] },
+    });
+  } catch (e) {
+    if (!String(e.message || '').toLowerCase().includes('already exists')) throw e;
+  }
+}
+
+async function _leerHojaPropia(api, titulo) {
+  try {
+    const r = await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${titulo}!A:H` });
+    return r.data.values || [];
+  } catch (e) {
+    // Todavía no existe: es el estado normal antes del primer cierre.
+    if (/unable to parse range/i.test(e.message || '')) return [];
+    throw e;
+  }
+}
+
+function parsearCierres(filas) {
+  const out = [];
+  for (let i = 1; i < (filas || []).length; i++) {
+    const f = filas[i] || [];
+    if (!celda(f[0])) continue;
+    let resumen = {};
+    try { resumen = JSON.parse(f[5] || '{}'); } catch (e) { resumen = {}; }
+    out.push({
+      id: celda(f[0]), fechaServicio: celda(f[1]), firmadoPor: celda(f[2]),
+      estado: celda(f[3]) || 'vigente', nota: celda(f[4]), resumen,
+      guardado: celda(f[6]), rowIndex: i + 1,
+    });
+  }
+  return out;
+}
+
+const fechaServicioActual = () => require('./fudo').fechaServicioHoy();
+
+async function listarCierres({ limite = 20 } = {}) {
+  if (!configurada()) return [];
+  const cierres = parsearCierres(await _leerHojaPropia(_sheets(), HOJA_CIERRES));
+  return cierres
+    .sort((a, b) => (b.guardado || '').localeCompare(a.guardado || ''))
+    .slice(0, limite)
+    .map(({ rowIndex, ...resto }) => resto);
+}
+
+async function detalleCierre(cierreId) {
+  if (!configurada()) throw new Error('Falta STOCKS_SHEET_ID');
+  const api = _sheets();
+  const cierre = parsearCierres(await _leerHojaPropia(api, HOJA_CIERRES)).find(c => c.id === cierreId);
+  if (!cierre) throw new Error('No existe ese cierre');
+  const filas = await _leerHojaPropia(api, HOJA_DETALLE);
+  const items = [];
+  for (let i = 1; i < filas.length; i++) {
+    const f = filas[i] || [];
+    if (celda(f[0]) !== cierreId) continue;
+    items.push({
+      hoja: celda(f[1]), grupo: celda(f[2]), nombre: celda(f[3]),
+      estado: celda(f[4]), comentario: celda(f[5]),
+      hecho: /^(si|sí|true|1)$/i.test(celda(f[6])), actualizado: celda(f[7]),
+    });
+  }
+  const { rowIndex, ...cab } = cierre;
+  return { cierre: cab, items };
+}
+
+// ─── Guardar la foto del servicio ───────────────────────────────────────────
+//
+// `cambios` son SÓLO los ítems que alguien tocó: [{ solapa, grupo, nombre,
+// estado, comentario }]. La firma sale de `usuario`, que el server saca del
+// token — nunca del body.
+//
+// No hay riesgo de escribir en la fila equivocada porque no se confía en ningún
+// rowIndex traído del navegador: se relee la hoja fresca y se busca por la clave
+// natural (solapa + grupo + nombre). Si un ítem ya no está —Pablo lo borró
+// mientras alguien tenía la pantalla abierta— no se escribe nada en su lugar: se
+// reporta y el cierre se guarda igual. La foto es lo que dijo la persona, y un
+// desacuerdo con la planilla no puede hacer que se pierda.
+async function guardarCierre({ fechaServicio, cambios = [], nota = '', reemplazar = false } = {}, { usuario, rol } = {}) {
+  if (!configurada()) throw new Error('Falta STOCKS_SHEET_ID');
+  if (!usuario) throw new Error('Falta el usuario');
+
+  const fecha = fechaServicio || fechaServicioActual();
+  const esAdmin = rol === 'admin';
+  const permitidas = SOLAPAS.filter(s => s.escribible && (esAdmin || !s.soloAdmin));
+  const idsPermitidos = new Set(permitidas.map(s => s.id));
+
+  for (const c of cambios) {
+    if (!idsPermitidos.has(c.solapa)) throw new Error(`No podés marcar ítems de "${c.solapa}"`);
+    if (c.estado && c.estado !== SIN_TOCAR && !ESTADOS.includes(c.estado)) throw new Error(`Estado inválido: ${c.estado}`);
+  }
+
+  const api = _sheets(false);
+  await _ensureHojaPropia(api, HOJA_CIERRES, HEADER_CIERRES);
+  await _ensureHojaPropia(api, HOJA_DETALLE, HEADER_DETALLE);
+
+  // Idempotencia por servicio: dos personas cerrando la misma noche no se pisan
+  // en silencio. Reemplazar es explícito y conserva el anterior.
+  const previos = parsearCierres(await _leerHojaPropia(api, HOJA_CIERRES));
+  const vigente = previos.find(c => c.fechaServicio === fecha && c.estado !== 'reemplazado');
+  if (vigente && !reemplazar) {
+    const e = new Error(`Ya hay un cierre cargado para el servicio del ${fecha}, firmado por ${vigente.firmadoPor}.`);
+    e.code = 'YA_EXISTE';
+    e.cierre = { id: vigente.id, firmadoPor: vigente.firmadoPor, guardado: vigente.guardado };
+    throw e;
+  }
+
+  const ahora = new Date().toISOString();
+  const cambiosPorSolapa = new Map();
+  for (const c of cambios) {
+    if (!cambiosPorSolapa.has(c.solapa)) cambiosPorSolapa.set(c.solapa, []);
+    cambiosPorSolapa.get(c.solapa).push(c);
+  }
+
+  const celdas = [];
+  const conflictos = [];
+  const detalle = [];
+  const resumenPorSolapa = {};
+
+  for (const solapa of permitidas) {
+    // Relectura fresca: es lo que hace que la clave natural sea suficiente.
+    const filas = await _leer(solapa);
+    const items = leerFilas(filas, solapa);
+    const porClave = new Map(items.map(it => [claveDe(solapa.id, it), it]));
+
+    const misCambios = cambiosPorSolapa.get(solapa.id) || [];
+    let cols = null;
+    if (misCambios.length) {
+      cols = resolverColumnas(filas, solapa);
+      if (cols.nuevas.length) {
+        // Las columnas nuevas se reclaman sólo entre las que están vacías de
+        // punta a punta (ver resolverColumnas), y la hoja tiene que ser lo
+        // bastante ancha para que existan.
+        await _asegurarAncho(api, solapa.hoja, Math.max(...cols.nuevas.map(n => n.col)));
+        await api.spreadsheets.values.batchUpdate({
+          spreadsheetId: SHEET_ID,
+          requestBody: {
+            valueInputOption: 'RAW',
+            data: cols.nuevas.map(n => ({ range: `${solapa.hoja}!${colLetra(n.col)}1`, values: [[n.nombre]] })),
+          },
+        });
+      }
+    }
+
+    for (const c of misCambios) {
+      const clave = claveDe(solapa.id, c);
+      const item = porClave.get(clave);
+      if (!item) {
+        conflictos.push({ solapa: solapa.id, grupo: c.grupo, nombre: c.nombre, motivo: 'ya no está en la planilla' });
+        continue;
+      }
+      const fila = item.rowIndex;
+      const estadoTexto = c.estado === SIN_TOCAR ? '' : (c.estado || '');
+      celdas.push({ range: `${solapa.hoja}!${colLetra(cols.estado)}${fila}`, values: [[estadoTexto]] });
+      celdas.push({ range: `${solapa.hoja}!${colLetra(cols.comentario)}${fila}`, values: [[c.comentario || '']] });
+      celdas.push({ range: `${solapa.hoja}!${colLetra(cols.actualizado)}${fila}`, values: [[`${usuario} · ${ahora.slice(0, 16).replace('T', ' ')}`]] });
+      // El estado nuevo pisa al leído para que la foto salga con lo de ahora.
+      item.estado = c.estado || SIN_TOCAR;
+      item.comentario = c.comentario || '';
+    }
+
+    // La foto guarda TODO lo que no está en el default, lo hayan tocado ahora o
+    // ya estuviera escrito. Los `sinTocar` no se escriben: una noche entera en
+    // orden son cero filas de detalle, y el total vive en el resumen.
+    for (const it of items) {
+      if (it.estado === SIN_TOCAR) continue;
+      detalle.push([solapa.hoja, it.grupo, it.nombre, it.estado, it.comentario || '', '', ahora]);
+    }
+    resumenPorSolapa[solapa.id] = resumenCierre(items);
+  }
+
+  if (celdas.length) {
+    await api.spreadsheets.values.batchUpdate({
+      spreadsheetId: SHEET_ID,
+      requestBody: { valueInputOption: 'RAW', data: celdas },
+    });
+  }
+
+  // Si se reemplaza, el anterior se marca — no se borra. Una celda, en una fila
+  // que es nuestra.
+  if (vigente && reemplazar) {
+    await api.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${HOJA_CIERRES}!D${vigente.rowIndex}`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [['reemplazado']] },
+    });
+  }
+
+  const id = `cc${Date.now()}`;
+  const resumen = {
+    solapas: permitidas.map(s => s.id),
+    porSolapa: resumenPorSolapa,
+    cambios: cambios.length,
+    conflictos: conflictos.length,
+  };
+  await api.spreadsheets.values.append({
+    spreadsheetId: SHEET_ID,
+    range: `${HOJA_CIERRES}!A:G`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [[id, fecha, usuario, 'vigente', nota || '', JSON.stringify(resumen), ahora]] },
+  });
+  if (detalle.length) {
+    await api.spreadsheets.values.append({
+      spreadsheetId: SHEET_ID,
+      range: `${HOJA_DETALLE}!A:H`,
+      valueInputOption: 'RAW',
+      requestBody: { values: detalle.map(d => [id, ...d]) },
+    });
+  }
+
+  clearCache();
+  return { id, fechaServicio: fecha, firmadoPor: usuario, resumen, conflictos, itemsEnLaFoto: detalle.length };
+}
+
 function clearCache() { cache.flushAll(); }
 
 module.exports = {
   // I/O
   estadoActual, leerSolapa, leerSolapaCacheada, clearCache, configurada,
+  guardarCierre, listarCierres, detalleCierre, fechaServicioActual,
   // Puras — se ejercitan sin red
   parsearEstado, leerFilas, notasSueltas, claveDe, duplicadosDe, resumenCierre, avisosDeHeaders,
-  norm, celda, esError,
+  resolverColumnas, colLetra, parsearCierres, norm, celda, esError,
   // Constantes
-  SOLAPAS, ESTADOS, SIN_TOCAR, solapaDe,
+  SOLAPAS, ESTADOS, SIN_TOCAR, solapaDe, HOJA_CIERRES, HOJA_DETALLE,
 };
