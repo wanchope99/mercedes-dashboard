@@ -2389,7 +2389,9 @@
       </select>
       <select id="pagos-filter-mp" onchange="loadPagos()">
         <option value="">Todas las formas de pago</option>
-        <option value="Efectivo">Efectivo</option>
+        <option value="Efectivo Local">Efectivo Local</option>
+        <option value="Efectivo Pablo">Efectivo Pablo</option>
+        <option value="Efectivo Tincho">Efectivo Tincho</option>
         <option value="Galicia">Galicia</option>
         <option value="Mercado Pago">Mercado Pago (Tincho y Pablo)</option>
         <option value="Echeq">Echeq</option>
@@ -2779,8 +2781,13 @@
       </div>
       <div class="form-group">
         <label>Medio de pago</label>
+        <!-- "Efectivo" a secas salió el 18/08/2026: no dice de qué caja sale la
+             plata, y las tres son distintas. Los nombres van EXACTOS como la
+             columna A de la hoja Cajas. Ver src/medios-pago.js. -->
         <select id="f-medio">
-          <option value="Efectivo">Efectivo</option>
+          <option value="Efectivo Local">Efectivo Local (cajón del bar)</option>
+          <option value="Efectivo Pablo">Efectivo Pablo</option>
+          <option value="Efectivo Tincho">Efectivo Tincho</option>
           <option value="Galicia">Galicia (transferencia)</option>
           <option value="Mercado Pago Tincho">Mercado Pago Tincho</option>
           <option value="Echeq">Echeq</option>
@@ -8010,9 +8017,10 @@ function selectPgRow(idx) {
     const provSheet = state.proveedores[(p.proveedor || '').toLowerCase()];
     const sugerido = mapMedioOption((s && s.medioPago) || (provSheet && provSheet.formaPago) || '');
     if (sugerido) {
-      const mapeado = sugerido === 'Efectivo' ? 'Efectivo Local' : sugerido;
-      setSelectValue(medioSel, mapeado);
-      hint.textContent = `⚠️ La fila no tenía medio de pago — sugerido por proveedor: ${mapeado}`;
+      // El parche de "Efectivo" → "Efectivo Local" que había acá se fue adentro
+      // de mapMedioOption: ya no existe un valor "Efectivo" que traducir.
+      setSelectValue(medioSel, sugerido);
+      hint.textContent = `⚠️ La fila no tenía medio de pago — sugerido por proveedor: ${sugerido}`;
     } else {
       medioSel.value = '';
       hint.textContent = '⚠️ La fila no tiene medio de pago y no hay datos del proveedor — elegilo a mano.';
@@ -8155,7 +8163,10 @@ function mapMedioOption(texto) {
     // opción de estos selects, así que mapear a ella dejaría el select en blanco.
     { kw: 'mercado', val: 'Mercado Pago Tincho' },
     { kw: 'galicia', val: 'Galicia' },
-    { kw: 'efectivo', val: 'Efectivo' },
+    // Un "efectivo" suelto en los datos del proveedor no dice de qué caja sale,
+    // así que se sugiere la del bar — que es la que el normalizador del server
+    // ya venía asumiendo al escribir. Es una sugerencia y se puede cambiar.
+    { kw: 'efectivo', val: 'Efectivo Local' },
   ];
   // gana el que aparece primero en el texto (ej: "Mercado Pago / Galicia" → Mercado Pago)
   let best = null, bestIdx = Infinity;

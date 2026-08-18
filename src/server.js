@@ -1462,23 +1462,9 @@ function mesDeFecha(fechaStr) {
 // `MP Pablo USD` (12/08/2026) se llama así y no "MP USD Pablo": es la caja donde
 // se vaultea en dólares una parte del capital de recupero. Su moneda sale de la
 // columna C de la hoja (USD), no de acá — getCajas() ya la lee.
-const MEDIOS_CANONICOS = [
-  'Efectivo Local', 'Efectivo Pablo', 'Efectivo Tincho',
-  'Mercado Pago Tincho', 'Mercado Pago Pablo',
-  'Galicia', 'USD Pablo', 'USD Tincho', 'MP Pablo USD',
-];
-
-function normalizarMedio(medio) {
-  const m = (medio || '').toString().trim();
-  if (!m) return '';                       // vacío es válido: fila madre de cuotas
-  const low = m.toLowerCase();
-  if (low === 'echeq' || low.includes('cheque')) return 'Galicia';
-  const canonico = MEDIOS_CANONICOS.find(c => c.toLowerCase() === low);
-  if (canonico) return canonico;           // corrige capitalización
-  if (low === 'efectivo' || low === 'cash' || low.startsWith('contado')) return 'Efectivo Local';
-  if (low === 'mp' || low === 'mercado pago') return CAJA_MP;
-  return m;                                // desconocido: se deja tal cual
-}
+// MEDIOS_CANONICOS y normalizarMedio viven en src/medios-pago.js: los usa
+// tambien la lectura, para que la app no muestre un 'Efectivo' que ya no ofrece.
+const { MEDIOS_CANONICOS, normalizarMedio } = require('./medios-pago');
 
 // Creación de compras/pagos: accesible también para el encargado (botón "Nueva compra"),
 // a diferencia del listado (GET) y el marcado de pagado, que permanecen solo admin.

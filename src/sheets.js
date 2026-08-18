@@ -1,5 +1,6 @@
 const { google } = require('googleapis');
 const NodeCache = require('node-cache');
+const { normalizarMedio } = require('./medios-pago');
 
 const cache = new NodeCache({ stdTTL: 120 });
 
@@ -343,7 +344,17 @@ async function getMovimientos() {
       categoria,
       grupo: getGrupo(categoria),
       descripcion: row[10] || '',
-      medioPago: (row[11] || '').trim(),
+      // El medio se normaliza AL LEER, no sólo al escribir. Hasta el 18/8/2026
+      // sólo pasaba por el funnel en la escritura, así que las 124 filas viejas
+      // con "Efectivo" a secas se seguían mostrando así en toda la app — un
+      // valor que ya no se puede elegir en ningún lado. Ahora la pantalla dice
+      // el nombre de la caja y la celda queda como está: la planilla se corrige
+      // cuando se corrige, no la reescribe la app.
+      //
+      // `medioPagoOriginal` conserva el texto crudo para poder auditar la
+      // traducción. Ver src/medios-pago.js.
+      medioPago: normalizarMedio(row[11]),
+      medioPagoOriginal: (row[11] || '').trim(),
       entradaARS,
       entradaUSD,
       salidaARS,
