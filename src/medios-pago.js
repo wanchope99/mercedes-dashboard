@@ -25,6 +25,31 @@
 //
 // `medioPagoOriginal` conserva lo que decía la celda, para que ese supuesto se
 // pueda auditar y deshacer.
+//
+// ─── LA PLANILLA NO SE TOCA. Decidido el 18/8/2026 ──────────────────────────
+//
+// Es tentador "arreglar" esas filas de una pasada. NO se hace, y la decisión es
+// del dueño: en su momento "Efectivo" era un valor válido, hoy ya no, y está
+// bien que el libro conserve lo que efectivamente se escribió. Cuál de las tres
+// cajas pagó cada una de esas filas es un dato que nadie tiene: escribirlo
+// sería inventar precisión sobre gastos de 2026 ya cerrados.
+//
+// Consecuencia asumida: el `SUMIFS` de la hoja `Cajas` sigue sin contarlas,
+// porque mira la celda y la celda no cambió. Es una diferencia CONOCIDA, no un
+// error a investigar de nuevo.
+//
+// El audit trail —las 153 filas identificadas una por una, con fila, fecha,
+// proveedor, monto y qué dice cada una— está en
+// `PROYECTOS/Proyectos/Mercedes/06_entregables/medios-pago-legacy.csv`, y el
+// razonamiento completo en `04_decisiones/2026-08-18-medios-de-pago-legacy.md`.
+//
+// ─── "Legacy" no es un valor roto ───────────────────────────────────────────
+//
+// Hay 29 filas que dicen `Legacy` y NO se traducen a ninguna caja. Son de marzo
+// de 2026, anteriores a la apertura: fondo de comercio, escribanía, honorarios,
+// adelanto del alquiler. Se pagaron antes de que las cajas existieran, así que
+// `Legacy` significa algo — mapearlas a una caja sería peor que dejarlas. Se
+// muestran tal cual y no se ofrecen para elegir.
 
 const CAJA_EFECTIVO = process.env.CAJA_EFECTIVO || 'Efectivo Local';
 const CAJA_MP = process.env.CAJA_MP || 'Mercado Pago Tincho';
