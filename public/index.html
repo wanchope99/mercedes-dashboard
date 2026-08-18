@@ -387,6 +387,36 @@
     .mant-item.resuelto { opacity: 0.5; }
     .mant-item.resuelto .mant-item-titulo { text-decoration: line-through; }
     /* La barrita de color al costado es la prioridad: se ve de un vistazo sin leer. */
+    /* ── Cierre de cocina ──────────────────────────────────────────────────
+       Copia la forma de .mant-* y no inventa un solo color: el trío del repo
+       es background var(--X-dim) + color var(--X) + border var(--X). */
+    .cc-solapas { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 14px; }
+    .cc-solapa { padding: 7px 14px; border-radius: 99px; font-size: 13px; font-weight: 600; cursor: pointer;
+                 background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); }
+    .cc-solapa:hover { color: var(--text); }
+    .cc-solapa.active { background: var(--accent); border-color: var(--accent); color: var(--text); }
+    .cc-solapa-n { font-size: 11px; opacity: .7; margin-left: 5px; }
+    .cc-grupo { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin: 16px 0 4px; }
+    .cc-item { display: flex; gap: 10px; align-items: center; padding: 9px 0 9px 12px; border-top: 1px solid var(--border); }
+    .cc-franja { width: 4px; border-radius: 2px; align-self: stretch; margin: -9px 0 -9px -12px; background: var(--border); }
+    .cc-franja.ok { background: var(--green); }
+    .cc-franja.hacer { background: var(--orange); }
+    .cc-franja.pedido { background: var(--blue); }
+    .cc-franja.dudoso { background: var(--text-muted); }
+    /* Sin tocar: punteado y transparente. En esta app lo que todavía no es una
+       fila se dibuja punteado, y un ítem que nadie miró todavía no es nada. */
+    .cc-item.sinTocar .cc-franja { background: transparent; border-left: 2px dashed var(--border); width: 2px; }
+    .cc-nombre { font-size: 14px; line-height: 1.4; flex: 1; }
+    .cc-coment { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+    .cc-chip { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap;
+               background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); }
+    .cc-chip.ok { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+    .cc-chip.hacer { background: var(--orange-dim); border-color: var(--orange); color: var(--orange); }
+    .cc-chip.pedido { background: var(--blue-dim); border-color: var(--blue); color: var(--blue); }
+    .cc-chip.dudoso { background: var(--surface); border-color: var(--border); color: var(--text-muted); }
+    .cc-chip.sinTocar { border-style: dashed; background: transparent; }
+    .cc-aviso { padding: 10px 12px; border-radius: 8px; background: var(--orange-dim); border: 1px solid var(--orange);
+                color: var(--orange); font-size: 12px; line-height: 1.6; margin-bottom: 12px; }
     .mant-franja { align-self: stretch; margin: -12px 0; }
     .mant-franja.urgente { background: var(--red); }
     .mant-franja.normal { background: var(--orange); }
@@ -1382,6 +1412,24 @@
      servicio (acá o por Telegram) y después se ordena por semana o prioridad.
      El encargado entra: puede agregar y mover estados, no borrar. No toca la
      contabilidad del bar. Ver src/mantenimiento.js. -->
+<!-- ═══ CIERRE DE COCINA ══════════════════════════════════════════════════════
+     Qué comprar y qué producir, que Pablo anota al cerrar cada servicio. Vive
+     en una planilla aparte y por ahora esto la LEE: el marcado llega después.
+     El encargado entra, pero sólo ve Producir y Seteo — lo decide el server,
+     no esta pantalla. Ver src/cierre-cocina.js.                              -->
+<div id="tab-cierre" class="tab-panel">
+  <main>
+    <div class="card">
+      <div class="card-title"><span>Cierre de cocina</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· se edita en la planilla, acá se lee</span>
+        <button class="btn btn-secondary" style="margin-left:auto" onclick="loadCierreCocina(this)">↻</button>
+      </div>
+      <div id="cc-solapas" class="cc-solapas"></div>
+      <div id="cc-cuerpo"><div style="color:var(--text-muted);font-size:13px">Cargando...</div></div>
+    </div>
+  </main>
+</div>
+
 <!-- ═══ NÓMINA ════════════════════════════════════════════════════════════════
      Quiénes trabajan y cuánto cuesta el mes. Es de SÓLO LECTURA: la planilla es
      de los dueños y se sigue editando ahí; acá no hay altas ni ediciones a
@@ -1525,6 +1573,8 @@
     <div class="card">
       <div class="card-title"><span>Más de Operación</span></div>
       <div class="mas-grid" style="margin-top:6px">
+        <button class="btn mas-item" onclick="abrirDesdeMas('costos-resumen')">
+          <span style="font-size:22px">🧮</span><span>Costos</span></button>
         <button class="btn mas-item" onclick="abrirDesdeMas('propinas')">
           <span style="font-size:22px">💸</span><span>Propinas</span></button>
         <button class="btn mas-item" onclick="abrirDesdeMas('costos-config')">
@@ -3233,7 +3283,12 @@ const TAB_GROUPS = {
     { id: 'pedidos',        label: '📦 Pedidos' },
     { id: 'vinos',          label: '🥂 Bebidas' },
     { id: 'mantenimiento',  label: '🔧 Mantenimiento' },
-    { id: 'costos-resumen', label: '🧮 Costos', soloAdmin: true },
+    // Cierre entró el 17/08/2026 y Costos bajó a "Más" por la misma regla que
+    // movió a Propinas: el grupo ya estaba en seis. Costos es una pantalla de
+    // análisis que se abre cada tanto y su propia Config. de costos YA vivía
+    // adentro de Más, así que juntarlas es reunir una cosa con su detalle.
+    // Cierre, en cambio, se abre todas las noches y lo usa también el encargado.
+    { id: 'cierre',         label: '🍳 Cierre' },
     // Nómina entró el 17/08/2026 y Propinas bajó a "Más" para dejarle el lugar:
     // el grupo ya estaba en seis y la regla es repensar, no agregar un séptimo.
     // Propinas se junta ahí con su propio Historial, y es una tarea semanal de
@@ -3383,6 +3438,7 @@ function cargarPanel(tab) {
   else if (tab === 'propinas') loadPropinas();
   else if (tab === 'propinas-historial') loadPropinasHistorial();
   else if (tab === 'nomina') loadNomina();
+  else if (tab === 'cierre') loadCierreCocina();
   else if (tab === 'inversiones') loadPlan();
   else if (tab === 'plan') loadPlan();
 }
@@ -11505,6 +11561,109 @@ document.addEventListener('DOMContentLoaded', () => {
   const ov = document.getElementById('mant-edit-overlay');
   if (ov) ov.addEventListener('click', function (e) { if (e.target === this) closeMantenimientoEdit(); });
 });
+
+// ═══ CIERRE DE COCINA ═══════════════════════════════════════════════════════
+// Qué comprar y qué producir. Ver src/cierre-cocina.js.
+//
+// Por ahora es de LECTURA: muestra la planilla tal como está, con el estado ya
+// separado del comentario. El marcado desde acá viene después, y ese orden es a
+// propósito — primero se mira la pantalla al lado de la planilla y se confirma
+// que dicen lo mismo, recién después se empieza a escribir.
+//
+// Las solapas NO están hardcodeadas: se arman con las que manda el server, que
+// es quien decide qué ve cada rol. El encargado no recibe Comprar ni Insumos.
+const ccState = { data: null, solapa: null };
+
+async function loadCierreCocina(btn) {
+  if (btn) btn.classList.add('spinning');
+  const cont = document.getElementById('cc-cuerpo');
+  try {
+    const { data } = await api('/api/cierre-cocina');
+    ccState.data = data;
+    if (!data.solapas.some(s => s.id === ccState.solapa)) {
+      ccState.solapa = data.solapas.length ? data.solapas[0].id : null;
+    }
+    renderCierreCocina();
+  } catch (e) {
+    document.getElementById('cc-solapas').innerHTML = '';
+    cont.innerHTML = `<div class="prop-error">No se pudo cargar: ${escapeHtml(e.message)}</div>`;
+  } finally { if (btn) btn.classList.remove('spinning'); }
+}
+
+function ccElegirSolapa(id) { ccState.solapa = id; renderCierreCocina(); }
+
+const CC_LABEL = { ok: 'OK', hacer: 'Hacer', pedido: 'Pedido', dudoso: 'Ver', sinTocar: 'Sin marcar' };
+
+function renderCierreCocina() {
+  const d = ccState.data;
+  const cont = document.getElementById('cc-cuerpo');
+  const nav = document.getElementById('cc-solapas');
+  if (!d) return;
+
+  if (!d.configurada) {
+    nav.innerHTML = '';
+    cont.innerHTML = `<div class="prop-error">${escapeHtml(d.avisos[0] || 'No configurado')}</div>`;
+    return;
+  }
+
+  // La tira de solapas sale de lo que mandó el server, no de una lista de acá.
+  nav.innerHTML = d.solapas.map(s => {
+    const r = (d.hojas[s.id] || {}).resumen || {};
+    const pendientes = (r.hacer || 0) + (r.dudoso || 0);
+    return `<button class="cc-solapa${s.id === ccState.solapa ? ' active' : ''}" onclick="ccElegirSolapa('${s.id}')">
+        ${escapeHtml(s.label)}${pendientes ? `<span class="cc-solapa-n">${pendientes}</span>` : ''}
+      </button>`;
+  }).join('');
+
+  const solapa = d.solapas.find(s => s.id === ccState.solapa);
+  const hoja = d.hojas[ccState.solapa];
+  if (!solapa || !hoja) { cont.innerHTML = ''; return; }
+
+  if (hoja.error) {
+    cont.innerHTML = `<div class="prop-error">No se pudo leer "${escapeHtml(solapa.hoja)}": ${escapeHtml(hoja.error)}</div>`;
+    return;
+  }
+
+  // Los avisos de ESTA hoja: headers corridos, ítems repetidos, notas sueltas.
+  // Van arriba de todo: son cosas que alguien tiene que arreglar en la planilla.
+  const mios = (d.avisos || []).filter(a => a.includes(solapa.hoja));
+  const avisos = mios.length ? `<div class="cc-aviso">${mios.map(escapeHtml).join('<br>')}</div>` : '';
+
+  const r = hoja.resumen;
+  const kpis = solapa.escribible
+    ? `<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:6px;font-size:13px">
+         <span><b>${r.hacer}</b> <span style="color:var(--orange)">por hacer</span></span>
+         ${r.pedido ? `<span><b>${r.pedido}</b> <span style="color:var(--blue)">pedidos</span></span>` : ''}
+         ${r.dudoso ? `<span><b>${r.dudoso}</b> <span style="color:var(--text-muted)">para ver</span></span>` : ''}
+         <span><b>${r.ok}</b> <span style="color:var(--green)">ok</span></span>
+         ${r.sinTocar ? `<span><b>${r.sinTocar}</b> <span style="color:var(--text-muted)">sin marcar</span></span>` : ''}
+       </div>`
+    : `<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">
+         ${r.total} cosas para setear. Esta lista es de consulta: no se tilda.
+       </div>`;
+
+  // Agrupado por plato o categoría, respetando el orden de la planilla — que
+  // lleva la intención de quien la escribió.
+  const grupos = new Map();
+  for (const it of hoja.items) {
+    const k = it.grupo || '(sin ' + (solapa.etiquetaGrupo || 'grupo').toLowerCase() + ')';
+    if (!grupos.has(k)) grupos.set(k, []);
+    grupos.get(k).push(it);
+  }
+
+  cont.innerHTML = avisos + kpis + [...grupos.entries()].map(([grupo, items]) => `
+      <div class="cc-grupo">${escapeHtml(grupo)}</div>
+      ${items.map(it => `
+        <div class="cc-item ${escapeHtml(it.estado)}">
+          <span class="cc-franja ${escapeHtml(it.estado)}"></span>
+          <span class="cc-nombre">${escapeHtml(it.nombre)}
+            ${it.comentario ? `<span class="cc-coment">${escapeHtml(it.comentario)}</span>` : ''}
+          </span>
+          ${it.extra ? `<span class="cc-chip">${escapeHtml(it.extra)}</span>` : ''}
+          ${solapa.escribible ? `<span class="cc-chip ${escapeHtml(it.estado)}">${escapeHtml(CC_LABEL[it.estado] || it.estado)}</span>` : ''}
+        </div>`).join('')}
+    `).join('');
+}
 
 // ═══ NÓMINA ═════════════════════════════════════════════════════════════════
 // Quiénes trabajan, cuánto cuesta el mes y qué se viene. Ver src/nomina.js.

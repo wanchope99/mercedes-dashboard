@@ -31,6 +31,7 @@ const propinas = require('./propinas');
 const mantenimiento = require('./mantenimiento');
 const pedidos = require('./pedidos');
 const nomina = require('./nomina');
+const cierreCocina = require('./cierre-cocina');
 const stockBebidas = require('./stock-bebidas');
 const { iniciarCron } = require('./cron');
 const { cargarEstadoCaja, guardarEstadoCaja } = require('./estado-caja');
@@ -2132,6 +2133,16 @@ app.get('/api/nomina/proyeccion', authMiddleware, adminOnly, async (req, res) =>
     const meses = Math.min(Math.max(parseInt(req.query.meses) || 12, 1), 24);
     res.json({ ok: true, data: await nomina.getProyeccion({ meses }) });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─── Cierre de cocina — qué comprar y qué producir ──────────────────────────
+// `authMiddleware` sin `adminOnly` a propósito: el encargado entra, porque la
+// checklist de producción la lee toda la cocina. Lo que NO ve es Mercadería ni
+// Insumos, y eso no lo decide el navegador — `estadoActual` arma la respuesta
+// según el rol y esas dos solapas directamente no viajan. Ver src/cierre-cocina.js.
+app.get('/api/cierre-cocina', authMiddleware, async (req, res) => {
+  try { res.json({ ok: true, data: await cierreCocina.estadoActual({ rol: req.user.rol }) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 // ─── Mantenimiento — la libreta de lo que hay que arreglar ──────────────────
