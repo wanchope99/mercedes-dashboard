@@ -32,6 +32,7 @@ const mantenimiento = require('./mantenimiento');
 const pedidos = require('./pedidos');
 const nomina = require('./nomina');
 const cierreCocina = require('./cierre-cocina');
+const notificaciones = require('./notificaciones');
 const stockBebidas = require('./stock-bebidas');
 const { iniciarCron } = require('./cron');
 const { cargarEstadoCaja, guardarEstadoCaja } = require('./estado-caja');
@@ -1374,20 +1375,9 @@ app.post('/api/refresh', authMiddleware, adminOnly, (req, res) => {
 });
 
 // ─── Pagos (solo admin) ───────────────────────────────────────────────────────
-function calcUrgencia(vencimiento) {
-  if (!vencimiento) return { urgencia: 'sin-fecha', diasHastaVenc: null, vencDate: null };
-  const parts = vencimiento.trim().split('/');
-  if (parts.length !== 3) return { urgencia: 'sin-fecha', diasHastaVenc: null, vencDate: null };
-  let [d, m, y] = parts.map(Number);
-  if (y < 100) y += 2000;
-  const vencDate = new Date(y, m - 1, d);
-  if (isNaN(vencDate.getTime())) return { urgencia: 'sin-fecha', diasHastaVenc: null, vencDate: null };
-  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-  const dias = Math.ceil((vencDate - hoy) / (1000 * 60 * 60 * 24));
-  const urgencia = dias < 0 ? 'vencido' : dias === 0 ? 'hoy' : dias <= 3 ? 'urgente' : dias <= 10 ? 'proximo' : 'ok';
-  const vencISO = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-  return { urgencia, diasHastaVenc: dias, vencDate: vencISO };
-}
+// calcUrgencia vive en src/urgencia.js: la comparten esta seccion y las
+// notificaciones, y tienen que clasificar igual.
+const { calcUrgencia } = require('./urgencia');
 
 app.get('/api/pagos', authMiddleware, adminOnly, async (req, res) => {
   try {
@@ -2133,6 +2123,23 @@ app.get('/api/nomina/proyeccion', authMiddleware, adminOnly, async (req, res) =>
     const meses = Math.min(Math.max(parseInt(req.query.meses) || 12, 1), 24);
     res.json({ ok: true, data: await nomina.getProyeccion({ meses }) });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─── Notificaciones — la campanita ──────────────────────────────────────────
+// `authMiddleware` sin `adminOnly`: el encargado también tiene campanita. Lo
+// que cambia es el contenido — las notificaciones de plata las filtra el módulo
+// por rol, así que la campanita nunca es la puerta de atrás a algo que la app
+// no le muestra. Ver src/notificaciones.js.
+app.get('/api/notificaciones', authMiddleware, async (req, res) => {
+  try { res.json({ ok: true, data: await notificaciones.getNotificaciones({ usuario: req.user.usuario, rol: req.user.rol }) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Abrir la campanita apaga los EVENTOS, no los estados. Quién marca sale del
+// token: una marca de visto ajena no significaría nada.
+app.post('/api/notificaciones/visto', authMiddleware, async (req, res) => {
+  try { res.json({ ok: true, data: await notificaciones.marcarVisto(req.user.usuario) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 // ─── Cierre de cocina — qué comprar y qué producir ──────────────────────────

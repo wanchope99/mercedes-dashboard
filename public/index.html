@@ -800,6 +800,36 @@
     .prov-empty { text-align:center; color:var(--text-muted); padding:48px 24px; font-size:14px; }
 
     /* Panel de notificaciones (pendientes) */
+    /* ── La campanita ──────────────────────────────────────────────────────
+       Vive en el header, así que se ve desde cualquier sección. El badge usa
+       el mismo rojo que .prov-badge, que ya era el color de "esto reclama
+       atención" en esta app. */
+    .campana { position:relative; background:transparent; border:1px solid var(--border); color:var(--text);
+               border-radius:8px; padding:6px 10px; cursor:pointer; font-size:15px; line-height:1; font-family:inherit; }
+    .campana:hover { background:var(--surface2); }
+    .campana-badge { position:absolute; top:-6px; right:-6px; display:inline-flex; align-items:center; justify-content:center;
+                     min-width:18px; height:18px; padding:0 5px; border-radius:99px; background:var(--red); color:#fff;
+                     font-size:10px; font-weight:700; }
+    #notis-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:450; }
+    #notis-overlay.open { display:block; }
+    #notis-panel { position:fixed; right:0; top:0; bottom:0; width:min(460px,96vw); background:var(--surface);
+                   border-left:1px solid var(--border); z-index:451; padding:24px; overflow-y:auto; }
+    .noti { display:flex; gap:10px; align-items:flex-start; padding:12px 0 12px 12px; border-top:1px solid var(--border); }
+    .noti:first-child { border-top:none; }
+    .noti-franja { width:4px; border-radius:2px; align-self:stretch; margin:-12px 0 -12px -12px; background:var(--border); }
+    .noti-franja.alta { background:var(--red); }
+    .noti-franja.media { background:var(--orange); }
+    .noti-cuerpo { flex:1; }
+    .noti-titulo { font-size:14px; font-weight:600; line-height:1.4; }
+    .noti-detalle { font-size:12px; color:var(--text-muted); margin-top:3px; line-height:1.5; }
+    .noti-ir { background:transparent; border:1px solid var(--border); color:var(--text-muted); cursor:pointer;
+               border-radius:6px; padding:4px 10px; font-size:12px; font-family:inherit; white-space:nowrap; }
+    .noti-ir:hover { color:var(--text); border-color:var(--accent); }
+    /* Lo que pasó desde la última vez que abriste. Un punto, no un color: el
+       color ya lo usa la severidad y dos códigos encima del mismo renglón no
+       se leen. */
+    .noti-nuevo { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--blue); margin-left:6px; vertical-align:middle; }
+    .noti-vacio { padding:24px 4px; font-size:13px; color:var(--green); line-height:1.7; }
     #prov-notif-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:450; }
     #prov-notif-overlay.open { display:block; }
     #prov-notif-panel { position:fixed; right:0; top:0; bottom:0; width:min(560px,96vw); background:var(--surface); border-left:1px solid var(--border); z-index:451; padding:28px; overflow-y:auto; }
@@ -1009,6 +1039,9 @@
   </div>
   <div class="header-right">
     <span id="last-updated" style="display:none"></span>
+    <button class="campana" id="btn-campana" onclick="abrirNotis()" title="Notificaciones" style="display:none">🔔
+      <span id="campana-badge" class="campana-badge" style="display:none">0</span>
+    </button>
     <span id="header-usuario" style="font-size:13px;color:var(--text-muted)"></span>
     <button class="btn" id="btn-refresh" style="display:none" onclick="refreshData()"><span class="refresh-icon">↻</span> Actualizar</button>
     <button class="btn" onclick="doLogout()" style="font-size:12px">Salir</button>
@@ -1720,6 +1753,19 @@
 </div>
 
 <!-- Drawer pendientes de proveedores -->
+<!-- La campanita. Vive en el header y por eso se ve desde cualquier sección;
+     el 🔔 de facturas de acá abajo sigue existiendo adentro de Pagos, que es
+     donde se resuelven. Ver src/notificaciones.js. -->
+<div id="notis-overlay" onclick="if(event.target===this)cerrarNotis()">
+  <div id="notis-panel">
+    <div class="drawer-header">
+      <div class="drawer-title">🔔 Notificaciones</div>
+      <button class="btn-close" onclick="cerrarNotis()">×</button>
+    </div>
+    <div id="notis-list"><div class="loading"><div class="spinner"></div></div></div>
+  </div>
+</div>
+
 <div id="prov-notif-overlay" onclick="if(event.target===this)closeProvNotif()">
   <div id="prov-notif-panel">
     <div class="drawer-header">
@@ -3087,6 +3133,11 @@ function onLoginSuccess(rol, nombre) {
     // sola persona, y por eso queda en la rama de arriba.
     setTimeout(checkRelease, 1200);
   }
+
+  // La campanita es para los DOS roles, por eso arranca acá afuera y no dentro
+  // de una rama. Lo que cambia es el contenido: las notificaciones de plata las
+  // filtra el server según el rol.
+  iniciarNotis();
 
   // En el teléfono la app abre en Inicio, para los dos roles. En la computadora
   // Inicio no existe y cada rol arranca donde arrancaba antes.
@@ -8690,6 +8741,75 @@ async function loadProvSerie() {
       <td>${r.compras}</td>
     </tr>`).join('');
   }
+}
+
+// ═══ LA CAMPANITA ═══════════════════════════════════════════════════════════
+// Ver src/notificaciones.js. Dos clases de notificación y se comportan distinto:
+// los ESTADOS ("5 pagos vencidos") siguen contando hasta que se resuelven, los
+// EVENTOS ("Charly anotó algo") se apagan cuando abrís el panel.
+//
+// El refresco copia al aviso de informes: al entrar, al volver a la pestaña, y
+// cada tantos minutos. El del medio es el que importa — alguien que dejó la app
+// abierta desde ayer no recarga ni vuelve a entrar.
+const notisState = { data: null, timer: null };
+const NOTIS_CADA_MS = 4 * 60 * 1000;
+
+async function refreshNotis() {
+  if (!getToken()) return;
+  try {
+    const { data } = await api('/api/notificaciones');
+    notisState.data = data;
+    const badge = document.getElementById('campana-badge');
+    const btn = document.getElementById('btn-campana');
+    if (btn) btn.style.display = '';
+    if (badge) {
+      badge.textContent = data.cuenta > 99 ? '99+' : data.cuenta;
+      badge.style.display = data.cuenta > 0 ? 'inline-flex' : 'none';
+    }
+    // Si el panel está abierto, que se actualice solo en vez de mostrar algo viejo.
+    if (document.getElementById('notis-overlay').classList.contains('open')) renderNotis();
+  } catch (e) { /* la campanita nunca puede romper la pantalla */ }
+}
+
+function iniciarNotis() {
+  refreshNotis();
+  clearInterval(notisState.timer);
+  notisState.timer = setInterval(refreshNotis, NOTIS_CADA_MS);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshNotis(); });
+}
+
+async function abrirNotis() {
+  document.getElementById('notis-overlay').classList.add('open');
+  renderNotis();
+  if (!notisState.data) await refreshNotis();
+  // Abrir apaga los eventos. Los estados no se tocan: siguen pasando.
+  try {
+    await api('/api/notificaciones/visto', { method: 'POST' });
+    await refreshNotis();
+  } catch (e) { /* no bloqueante: se vuelve a intentar la próxima */ }
+}
+
+function cerrarNotis() { document.getElementById('notis-overlay').classList.remove('open'); }
+
+function notisIr(tab) { cerrarNotis(); switchTab(tab); }
+
+function renderNotis() {
+  const cont = document.getElementById('notis-list');
+  const d = notisState.data;
+  if (!d) { cont.innerHTML = '<div class="loading"><div class="spinner"></div></div>'; return; }
+  if (!d.notificaciones.length) {
+    cont.innerHTML = `<div class="noti-vacio">✓ No hay nada pendiente. Ni pagos por vencer, ni pedidos sin cerrar, ni arreglos nuevos.</div>`;
+    return;
+  }
+  cont.innerHTML = d.notificaciones.map(n => `
+    <div class="noti">
+      <span class="noti-franja ${escapeHtml(n.severidad)}"></span>
+      <div class="noti-cuerpo">
+        <div class="noti-titulo">${escapeHtml(n.titulo)}${n.clase === 'evento' ? '<span class="noti-nuevo" title="Nuevo desde la última vez"></span>' : ''}</div>
+        ${n.detalle ? `<div class="noti-detalle">${escapeHtml(n.detalle)}</div>` : ''}
+      </div>
+      ${n.ir && n.ir.tab ? `<button class="noti-ir" onclick="notisIr('${escapeHtml(n.ir.tab)}')">Ir</button>` : ''}
+    </div>`).join('');
 }
 
 // ─── Badge + panel de pendientes ───────────────────────────────────────────────
