@@ -30,6 +30,7 @@ const {
   DIAS_SEMANA, DIAS_VENTANA, SEMANAS_REFERENCIA,
 } = require('./informes-util');
 const { separarExcepciones, esDiaExcluido } = require('./informes-excepciones');
+const { DIAS_SERVICIO } = require('./calendario');
 
 const TIPO = 'servicios';
 const TITULO = 'El salón de la semana';
@@ -418,8 +419,11 @@ function analizarServicios(dias, { hasta, mesas } = {}) {
     // Un día excluido no está "sin servicio": está fuera del análisis. Marcarlo
     // como cerrado sería volver a meterlo por la ventana.
     if (esDiaExcluido(k)) continue;
+    // Un día en el que el bar no abre no es un "día sin servicio": es martes.
+    // Hasta el 18/8/2026 acá sólo se salteaba el lunes, así que CADA DOMINGO
+    // entraba como candidato a "suele abrir y no abrió". Ver src/calendario.js.
     const dow = d.getDay();
-    if (dow === 1) continue;   // los lunes cierra: no es noticia
+    if (!DIAS_SERVICIO.includes(dow)) continue;
     const ref = refDia.get(dow) || [];
     if (ref.length < MIN_REFERENCIA) continue;
     cerrados.push({ fecha: k, diaSemana: DIAS_SEMANA[dow], sueleAbrirEseDia: ref.length });

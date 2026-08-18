@@ -3060,7 +3060,24 @@ async function api(path, opts = {}) {
   if (res.status === 401) { doLogout(); throw new Error('Sesión expirada'); }
   const json = await res.json();
   if (!json.ok) throw new Error(json.error);
+  // Cualquier acción que haya salido bien puede haber resuelto una notificación:
+  // pagaste, recibiste el pedido, cerraste un arreglo. Se engancha acá y no en
+  // cada pantalla porque acá pasan TODAS, incluidas las que se agreguen después
+  // — si dependiera de que cada botón se acuerde de avisar, el que se olvide
+  // deja la campanita mintiendo, que es justo lo que pasaba.
+  if (opts.method && opts.method !== 'GET') notisRefrescarPronto(path);
   return json;
+}
+
+// Con un respiro, por dos razones: una acción suele disparar varias llamadas
+// seguidas (guardar y recargar), y el server necesita un instante para que su
+// propia caché del libro se invalide antes de que le preguntemos de nuevo.
+let _notisTimer = null;
+function notisRefrescarPronto(path) {
+  // La propia marca de visto no cuenta: refrescar por ella sería un bucle.
+  if (typeof path === 'string' && path.includes('/api/notificaciones')) return;
+  clearTimeout(_notisTimer);
+  _notisTimer = setTimeout(() => { if (typeof refreshNotis === 'function') refreshNotis(); }, 900);
 }
 
 async function doLogin() {

@@ -177,7 +177,7 @@ Reglas:
 
 Contexto del negocio, que cambia cómo se lee todo:
 - Argentina con inflación de ~1,9% mensual. Que algo suba en pesos es lo normal, no un hallazgo. Las señales ya vienen comparadas contra la mediana móvil de las semanas previas, que absorbe la inflación: lo que te llega ya se despegó de esa deriva.
-- El bar abre de noche y cierra los lunes. Un martes flojo no es una anomalía; compará cada día contra el mismo día de semana.
+- El bar abre de noche y ${require('./calendario').comoSeDice()}. Que un domingo o un lunes no haya ventas es lo normal y NUNCA es un hallazgo. Un martes flojo tampoco es una anomalía: compará cada día contra el mismo día de semana.
 - Las compras en cuotas figuran una sola vez, en el mes de la compra.
 - Los movimientos entre cajas propias no son ni ingreso ni gasto y no te llegan.
 

@@ -184,13 +184,13 @@ function deCocina(ultimoCierre, { servicioAnterior }) {
   })];
 }
 
-// El servicio anterior al que está en curso: el corte de Fudo es a las 16:00, así
-// que "anoche" no es simplemente ayer.
+// El último servicio anterior al que está en curso. NO es "ayer": el bar abre de
+// martes a sábado, así que el martes el servicio anterior es el sábado y no el
+// lunes. Reclamar el cierre de una noche en la que el bar no abrió es la forma
+// más rápida de que la campanita pierda credibilidad. Ver src/calendario.js.
 function servicioAnteriorA(fechaServicioHoy) {
   if (!fechaServicioHoy) return null;
-  const [y, m, d] = fechaServicioHoy.split('-').map(Number);
-  const dt = new Date(y, m - 1, d - 1);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+  return require('./calendario').ultimoDiaDeServicio(fechaServicioHoy);
 }
 
 // El armado, puro: entra lo que ya leyeron otros módulos, sale la lista.

@@ -60,6 +60,16 @@ Fiscales.** Medido contra el libro el 17/8/2026: en Fiscales sólo hay ARCA por
 $137.949 en mayo y $65.535 en junio, contra $1,64M mensuales de cargas reales.
 Así que el gasto de Personal del libro incluye sueldos y cargas juntos.
 
+## Qué días abre
+
+**Mercedes abre de martes a sábado. Domingo y lunes está cerrado**, y por lo
+tanto un domingo o un lunes sin ventas, sin pedidos y sin producción es lo
+esperado — nunca un hallazgo ni algo que falte cargar. Son 5 días de servicio
+por semana, unos 21 al mes.
+
+Esto vive en `src/calendario.js` y de ahí lo leen los informes, la campanita y
+el resto: si alguna vez cambian los días, se cambia ahí y no en seis lados.
+
 ## Proveedores: cambiar de proveedor es una decisión, no una anomalía
 
 **Los dueños saben a quién le compran y a quién dejaron de comprarle.** Que un
