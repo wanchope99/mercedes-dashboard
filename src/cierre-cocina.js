@@ -74,6 +74,8 @@ const SOLAPAS = [
     escribible: true,
     cols: { grupo: 0, nombre: 3, estado: 4 },
     headers: { grupo: 'Plato' },
+    // Una produccion no se 'pide': o se hace o no. Sin 'pedido'.
+    estados: ['ok', 'hacer', 'dudoso'],
     etiquetaGrupo: 'Plato',
   },
   {
@@ -85,6 +87,7 @@ const SOLAPAS = [
     escribible: true,
     cols: { grupo: 0, nombre: 1, estado: 2 },
     headers: { grupo: 'Categoría', nombre: 'Ingrediente', estado: 'Estado' },
+    estados: ['ok', 'hacer', 'pedido', 'dudoso'],
     etiquetaGrupo: 'Categoría',
   },
   {
@@ -99,6 +102,7 @@ const SOLAPAS = [
     // exactamente "sin tocar".
     cols: { grupo: 0, nombre: 1, estado: 2 },
     headers: { grupo: 'Categoría', nombre: 'Item' },
+    estados: ['ok', 'hacer', 'pedido', 'dudoso'],
     etiquetaGrupo: 'Categoría',
   },
   {
@@ -333,7 +337,7 @@ async function estadoActual({ rol } = {}) {
       id: s.id, label: s.label, hoja: s.hoja, forma: s.forma,
       escribible: s.escribible,
       etiquetaGrupo: s.etiquetaGrupo, etiquetaExtra: s.etiquetaExtra || null,
-      estados: s.escribible ? ESTADOS : [],
+      estados: s.escribible ? (s.estados || ESTADOS) : [],
     })),
     hojas,
     avisos,
@@ -526,7 +530,12 @@ async function guardarCierre({ fechaServicio, cambios = [], nota = '', reemplaza
 
   for (const c of cambios) {
     if (!idsPermitidos.has(c.solapa)) throw new Error(`No podés marcar ítems de "${c.solapa}"`);
-    if (c.estado && c.estado !== SIN_TOCAR && !ESTADOS.includes(c.estado)) throw new Error(`Estado inválido: ${c.estado}`);
+    // Cada lista declara qué estados le aplican: "pedido" no existe en una
+    // producción. Se valida contra los de esa lista, no contra los cuatro.
+    const validos = (solapaDe(c.solapa).estados || ESTADOS);
+    if (c.estado && c.estado !== SIN_TOCAR && !validos.includes(c.estado)) {
+      throw new Error(`Estado inválido para "${c.solapa}": ${c.estado}`);
+    }
   }
 
   const api = _sheets(false);

@@ -417,6 +417,22 @@
     .cc-chip.sinTocar { border-style: dashed; background: transparent; }
     .cc-aviso { padding: 10px 12px; border-radius: 8px; background: var(--orange-dim); border: 1px solid var(--orange);
                 color: var(--orange); font-size: 12px; line-height: 1.6; margin-bottom: 12px; }
+    /* Lo que se tocó y todavía no se guardó: se marca, para que la diferencia
+       entre "lo dije" y "quedó escrito" nunca sea invisible. */
+    .cc-item.tocado { background: rgba(80,37,31,.18); }
+    button.cc-chip { cursor: pointer; font-family: inherit; }
+    button.cc-chip:hover { filter: brightness(1.25); }
+    .cc-chip.sel { outline: 2px solid currentColor; outline-offset: 1px; }
+    .cc-mas { background: transparent; border: 1px solid var(--border); color: var(--text-muted); cursor: pointer;
+              border-radius: 6px; padding: 2px 7px; font-size: 13px; line-height: 1; }
+    .cc-mas:hover { color: var(--text); }
+    .cc-panel { padding: 8px 0 12px 26px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .cc-estados { display: flex; gap: 6px; flex-wrap: wrap; }
+    .cc-input { flex: 1; min-width: 200px; background: var(--surface2); border: 1px solid var(--border);
+                color: var(--text); border-radius: 8px; padding: 7px 10px; font-size: 13px; font-family: inherit; }
+    .cc-singuardar { position: sticky; top: 0; z-index: 5; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+                     padding: 10px 12px; margin-bottom: 10px; border-radius: 8px;
+                     background: var(--accent); border: 1px solid var(--accent); font-size: 13px; }
     .mant-franja { align-self: stretch; margin: -12px 0; }
     .mant-franja.urgente { background: var(--red); }
     .mant-franja.normal { background: var(--orange); }
@@ -11572,7 +11588,22 @@ document.addEventListener('DOMContentLoaded', () => {
 //
 // Las solapas NO están hardcodeadas: se arman con las que manda el server, que
 // es quien decide qué ve cada rol. El encargado no recibe Comprar ni Insumos.
-const ccState = { data: null, solapa: null };
+// Los cambios NO se guardan de a uno: se juntan en memoria y se escriben todos
+// juntos con "Guardar el cierre". Es una sola escritura, y sobre todo encaja con
+// lo que la foto es — un documento que se firma una vez, no un chorro de
+// ediciones. La contra es que se pueden perder, así que hay banner permanente y
+// un guard de salida.
+const ccState = { data: null, solapa: null, cambios: new Map(), abierto: null, guardando: false };
+
+// La clave es el texto crudo, sin normalizar: el server construye la suya con
+// grupo y nombre tal como los mandamos, así que acá alcanza con que sea única.
+const ccClave = (solapaId, it) => `${solapaId} ${it.grupo} ${it.nombre}`;
+const ccPendiente = clave => ccState.cambios.get(clave) || null;
+const ccEstadoDe = (solapaId, it) => (ccPendiente(ccClave(solapaId, it)) || it).estado;
+const ccComentDe = (solapaId, it) => {
+  const p = ccPendiente(ccClave(solapaId, it));
+  return p ? (p.comentario || '') : (it.comentario || '');
+};
 
 async function loadCierreCocina(btn) {
   if (btn) btn.classList.add('spinning');
@@ -11590,9 +11621,111 @@ async function loadCierreCocina(btn) {
   } finally { if (btn) btn.classList.remove('spinning'); }
 }
 
-function ccElegirSolapa(id) { ccState.solapa = id; renderCierreCocina(); }
+function ccElegirSolapa(id) { ccState.solapa = id; ccState.abierto = null; renderCierreCocina(); }
 
 const CC_LABEL = { ok: 'OK', hacer: 'Hacer', pedido: 'Pedido', dudoso: 'Ver', sinTocar: 'Sin marcar' };
+// "Hacer" quiere decir cosas distintas según la lista, y el botón tiene que
+// decir la palabra que usa quien lo aprieta.
+const ccLabelEstado = (solapaId, estado) =>
+  (estado === 'hacer' && solapaId !== 'produ') ? 'Comprar' : CC_LABEL[estado] || estado;
+
+// El camino corto: un toque alterna entre "está bien" y "hay que hacerlo", que
+// es el 90% de lo que pasa al cierre. Los otros estados están a un toque más,
+// abriendo la fila.
+function ccToggle(solapaId, grupo, nombre) {
+  const it = (ccState.data.hojas[solapaId].items || []).find(x => x.grupo === grupo && x.nombre === nombre);
+  if (!it) return;
+  const actual = ccEstadoDe(solapaId, it);
+  ccMarcar(solapaId, grupo, nombre, actual === 'hacer' ? 'ok' : 'hacer');
+}
+
+function ccMarcar(solapaId, grupo, nombre, estado) {
+  const it = (ccState.data.hojas[solapaId].items || []).find(x => x.grupo === grupo && x.nombre === nombre);
+  if (!it) return;
+  const clave = ccClave(solapaId, it);
+  const comentario = ccComentDe(solapaId, it);
+  // Volver al estado original saca el cambio de la lista en vez de guardar uno
+  // que no cambia nada.
+  if (estado === it.estado && comentario === (it.comentario || '')) ccState.cambios.delete(clave);
+  else ccState.cambios.set(clave, { solapa: solapaId, grupo, nombre, estado, comentario });
+  renderCierreCocina();
+}
+
+function ccComentar(solapaId, grupo, nombre, valor) {
+  const it = (ccState.data.hojas[solapaId].items || []).find(x => x.grupo === grupo && x.nombre === nombre);
+  if (!it) return;
+  const clave = ccClave(solapaId, it);
+  const estado = ccEstadoDe(solapaId, it);
+  if (estado === it.estado && valor === (it.comentario || '')) ccState.cambios.delete(clave);
+  else ccState.cambios.set(clave, { solapa: solapaId, grupo, nombre, estado, comentario: valor });
+  ccRenderBanner();
+}
+
+function ccAbrir(clave) { ccState.abierto = ccState.abierto === clave ? null : clave; renderCierreCocina(); }
+
+function ccRenderBanner() {
+  const el = document.getElementById('cc-banner');
+  if (!el) return;
+  const n = ccState.cambios.size;
+  el.innerHTML = n
+    ? `<div class="cc-singuardar">
+         <span><b>${n}</b> ${n === 1 ? 'marca sin guardar' : 'marcas sin guardar'}</span>
+         <button class="btn" onclick="ccGuardar(this)"${ccState.guardando ? ' disabled' : ''}>Guardar el cierre</button>
+         <button class="nota-btn" onclick="ccDescartar()">Descartar</button>
+       </div>`
+    : '';
+}
+
+function ccDescartar() {
+  if (!ccState.cambios.size) return;
+  ccState.cambios.clear();
+  renderCierreCocina();
+}
+
+async function ccGuardar(btn) {
+  if (!ccState.cambios.size || ccState.guardando) return;
+  ccState.guardando = true;
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+  const cambios = [...ccState.cambios.values()];
+  try {
+    const { data } = await api('/api/cierre-cocina', { method: 'POST', body: JSON.stringify({ cambios }) });
+    ccState.cambios.clear();
+    await loadCierreCocina();
+    // Los conflictos no son un error: el cierre se guardó igual. Pero hay que
+    // decir cuáles no se pudieron escribir, y por qué.
+    if ((data.conflictos || []).length) {
+      showResultadoModal({ ok: true, titulo: 'Cierre guardado, con avisos',
+        detalle: `Se guardó la foto del servicio del ${data.fechaServicio}. `
+          + `${data.conflictos.length} ${data.conflictos.length === 1 ? 'ítem ya no está' : 'ítems ya no están'} en la planilla `
+          + `y no se pudieron marcar: ${data.conflictos.map(c => c.nombre).join(', ')}.` });
+    } else {
+      showToast(`Cierre del ${data.fechaServicio} guardado`);
+    }
+  } catch (e) {
+    // 409: ya hay un cierre de esta noche. Reemplazarlo es una decisión, no un
+    // reintento automático.
+    if (/Ya hay un cierre/.test(e.message)) {
+      if (confirm(e.message + '\n\n¿Reemplazarlo? El anterior queda guardado igual.')) {
+        try {
+          const { data } = await api('/api/cierre-cocina', { method: 'POST', body: JSON.stringify({ cambios, reemplazar: true }) });
+          ccState.cambios.clear();
+          await loadCierreCocina();
+          showToast(`Cierre del ${data.fechaServicio} reemplazado`);
+        } catch (e2) { showToast('Error: ' + e2.message, 4000); }
+      }
+    } else {
+      showToast('Error: ' + e.message, 4000);
+    }
+  } finally {
+    ccState.guardando = false;
+    if (btn) { btn.disabled = false; btn.textContent = 'Guardar el cierre'; }
+  }
+}
+
+// Perder veinte marcas por un reload sería peor que seguir usando la planilla.
+window.addEventListener('beforeunload', (e) => {
+  if (ccState.cambios.size) { e.preventDefault(); e.returnValue = ''; }
+});
 
 function renderCierreCocina() {
   const d = ccState.data;
@@ -11651,18 +11784,48 @@ function renderCierreCocina() {
     grupos.get(k).push(it);
   }
 
-  cont.innerHTML = avisos + kpis + [...grupos.entries()].map(([grupo, items]) => `
+  const sid = solapa.id;
+  const arg = it => `'${sid}',${JSON.stringify(it.grupo)},${JSON.stringify(it.nombre)}`.replace(/"/g, '&quot;');
+
+  cont.innerHTML = `<div id="cc-banner"></div>` + avisos + kpis + [...grupos.entries()].map(([grupo, items]) => `
       <div class="cc-grupo">${escapeHtml(grupo)}</div>
-      ${items.map(it => `
-        <div class="cc-item ${escapeHtml(it.estado)}">
-          <span class="cc-franja ${escapeHtml(it.estado)}"></span>
+      ${items.map(it => {
+        const clave = ccClave(sid, it);
+        const estado = ccEstadoDe(sid, it);
+        const coment = ccComentDe(sid, it);
+        const tocado = ccState.cambios.has(clave);
+        const abierto = ccState.abierto === clave;
+        return `
+        <div class="cc-item ${escapeHtml(estado)}${tocado ? ' tocado' : ''}">
+          <span class="cc-franja ${escapeHtml(estado)}"></span>
           <span class="cc-nombre">${escapeHtml(it.nombre)}
-            ${it.comentario ? `<span class="cc-coment">${escapeHtml(it.comentario)}</span>` : ''}
+            ${coment ? `<span class="cc-coment">${escapeHtml(coment)}</span>` : ''}
+            ${tocado && it.estado !== estado ? `<span class="cc-coment">antes: ${escapeHtml(ccLabelEstado(sid, it.estado))}</span>` : ''}
           </span>
           ${it.extra ? `<span class="cc-chip">${escapeHtml(it.extra)}</span>` : ''}
-          ${solapa.escribible ? `<span class="cc-chip ${escapeHtml(it.estado)}">${escapeHtml(CC_LABEL[it.estado] || it.estado)}</span>` : ''}
-        </div>`).join('')}
+          ${solapa.escribible ? `
+            <button class="cc-chip ${escapeHtml(estado)}" onclick="ccToggle(${arg(it)})"
+                    title="Un toque: pasa de OK a ${escapeHtml(ccLabelEstado(sid, 'hacer'))} y al revés">
+              ${escapeHtml(ccLabelEstado(sid, estado))}
+            </button>
+            <button class="cc-mas" onclick="ccAbrir(${JSON.stringify(clave).replace(/"/g, '&quot;')})" title="Más estados y comentario">⋯</button>
+          ` : ''}
+        </div>
+        ${abierto ? `
+        <div class="cc-panel">
+          <div class="cc-estados">
+            ${(solapa.estados || []).map(e => `
+              <button class="cc-chip ${escapeHtml(e)}${e === estado ? ' sel' : ''}" onclick="ccMarcar(${arg(it)},'${e}')">
+                ${escapeHtml(ccLabelEstado(sid, e))}
+              </button>`).join('')}
+          </div>
+          <input class="cc-input" type="text" placeholder="Comentario (cuánto, para cuándo, con quién)"
+                 value="${escapeHtml(coment)}"
+                 oninput="ccComentar(${arg(it)}, this.value)">
+        </div>` : ''}`;
+      }).join('')}
     `).join('');
+  ccRenderBanner();
 }
 
 // ═══ NÓMINA ═════════════════════════════════════════════════════════════════
