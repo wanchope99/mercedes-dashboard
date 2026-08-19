@@ -78,6 +78,21 @@ const DIAS_CUADRO = ['martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 const ESTADOS = ['esperado', 'recibido', 'cancelado'];
 const ESTADO_DEFAULT = 'esperado';
 
+// "Este jueves CCU no viene": una fila CANCELADA cuyo único trabajo es tapar el
+// previsto que el cuadro semanal genera para esa fecha.
+//
+// No hay estructura nueva y es a propósito. Un previsto YA se esconde cuando
+// existe un pedido real de ese proveedor ese día — la omisión es ese mismo
+// mecanismo con el pedido en cero: llegó a existir como fila, y esa fila dice
+// que no va a pasar. La alternativa era una hoja de excepciones aparte, que
+// obliga a mantener dos listas que hablan del mismo día y a decidir cuál gana.
+//
+// Se distingue por `origen` y no por el estado: 'cancelado' a secas puede querer
+// decir "el pedido existía y se cayó", que es otra cosa y no debería poder
+// deshacerse desde el botón de un previsto.
+const ORIGEN_OMITIDO = 'omitido';
+const esOmision = p => p.estado === 'cancelado' && p.origen === ORIGEN_OMITIDO;
+
 // El estado del pago es de tres valores y no un sí/no: "todavía nada" y "llegó,
 // quedó a pagar" son situaciones distintas y la segunda tiene una fila en el
 // libro esperando. Sin el tercer valor, un pedido recibido sin pagar se
@@ -407,8 +422,15 @@ function armarDias(pedidos, semanal, { hoy, dias = DIAS_ADELANTE } = {}) {
     .sort();
 
   const armar = (fecha, atrasado) => {
-    const delDia = (porDia[fecha] || []).filter(p => p.estado !== 'cancelado');
-    const nombres = new Set(delDia.map(p => p.proveedor.toLowerCase()));
+    const todos = porDia[fecha] || [];
+    const delDia = todos.filter(p => p.estado !== 'cancelado');
+    const omitidos = todos.filter(esOmision);
+
+    // Los CANCELADOS también cuentan para tapar el previsto, no sólo los vivos.
+    // Un pedido que se cayó tampoco va a llegar, así que seguir ofreciendo
+    // recibirlo sería ofrecer marcar algo que ya sabemos que no pasa.
+    const nombres = new Set(todos.map(p => p.proveedor.toLowerCase()));
+    const omitidosNombres = new Set(omitidos.map(p => p.proveedor.toLowerCase()));
     const dia = diaSemanaDe(fecha);
     const delCuadro = activos.filter(s => s.dia === dia);
 
@@ -417,7 +439,12 @@ function armarDias(pedidos, semanal, { hoy, dias = DIAS_ADELANTE } = {}) {
     const previstos = atrasado ? [] : delCuadro
       .filter(s => s.tipo === 'entrega' && !nombres.has(s.proveedor.toLowerCase()))
       .map(s => ({ ...s, fecha }));
-    const paraPedir = atrasado ? [] : delCuadro.filter(s => s.tipo === 'pedir');
+    // "Para pedir" se filtra SÓLO por las omisiones, no por los pedidos reales:
+    // que ya haya llegado algo de ese proveedor no quiere decir que no haya que
+    // encargarle lo de la semana que viene. Que alguien haya dicho "este día no"
+    // sí lo quiere decir.
+    const paraPedir = atrasado ? [] : delCuadro
+      .filter(s => s.tipo === 'pedir' && !omitidosNombres.has(s.proveedor.toLowerCase()));
 
     return {
       fecha,
@@ -428,6 +455,10 @@ function armarDias(pedidos, semanal, { hoy, dias = DIAS_ADELANTE } = {}) {
       pedidos: delDia.map(_publico),
       previstos: previstos.map(_publico),
       paraPedir: paraPedir.map(_publico),
+      // Lo que alguien dijo que este día NO viene. Se devuelve para poder
+      // mostrarlo y deshacerlo: una omisión invisible es indistinguible de un
+      // previsto que nunca existió, y al día siguiente nadie sabe por qué falta.
+      omitidos: omitidos.map(_publico),
       abiertos: delDia.filter(estaAbierto).length,
       totalEstimado: delDia.reduce((s, p) => s + (p.montoPagado || p.costoEstimado || 0), 0),
     };
@@ -606,6 +637,54 @@ async function marcarRecibido(id, { pago = 'no', monto = 0, medioPago = '', ref 
   return _publico(nuevo);
 }
 
+/**
+ * "Este día ese proveedor no viene."
+ *
+ * Escribe la fila cancelada que tapa el previsto. Es idempotente por
+ * (fecha, proveedor): tocar dos veces el botón no deja dos filas muertas en la
+ * hoja, y si ya hay un pedido REAL de ese proveedor ese día no hace nada —
+ * el previsto ya estaba tapado y lo que hay que hacer con el pedido real es
+ * borrarlo, no esconderlo detrás de una omisión.
+ */
+async function omitirPrevisto({ fecha, proveedor, nota = '', usuario = '' } = {}) {
+  const f = normalizarFecha(fecha);
+  if (!f) throw new Error('Falta la fecha');
+  const nombre = _txt(proveedor);
+  if (!nombre) throw new Error('Falta el proveedor');
+
+  const existentes = (await _loadPedidos()).filter(p =>
+    p.fecha === f && p.proveedor.toLowerCase() === nombre.toLowerCase());
+  const yaOmitido = existentes.find(esOmision);
+  if (yaOmitido) return _publico(yaOmitido);
+  const real = existentes.find(p => p.estado !== 'cancelado');
+  if (real) {
+    throw new Error(`Ya hay un pedido cargado de ${nombre} para ese día. Borralo desde el día en vez de omitirlo.`);
+  }
+
+  return crearPedido({
+    fecha: f,
+    proveedor: nombre,
+    estado: 'cancelado',
+    origen: ORIGEN_OMITIDO,
+    notas: _txt(nota) || (usuario ? `No viene este día — lo marcó ${usuario}` : 'No viene este día'),
+  });
+}
+
+/**
+ * Deshacer una omisión: el previsto vuelve a aparecer.
+ *
+ * Sólo borra filas que SON una omisión. Con el id de un pedido de verdad no
+ * hace nada — este camino lo puede usar el encargado, y un botón que dice
+ * "deshacer" no puede terminar borrando una entrega cargada.
+ */
+async function restaurarOmitido(id) {
+  const item = (await _loadPedidos()).find(p => p.id === _txt(id));
+  if (!item) throw new Error('No se encontró esa omisión');
+  if (!esOmision(item)) throw new Error('Eso no es una omisión del cuadro semanal');
+  await borrarPedido(item.id);
+  return { id: item.id, fecha: item.fecha, proveedor: item.proveedor };
+}
+
 async function borrarPedido(id) {
   await _borrarFila(HOJA, await _buscarFila(_leerPedidos, id));
   cache.del(CACHE_PEDIDOS);
@@ -759,10 +838,11 @@ function clearCache() { cache.del(CACHE_PEDIDOS); cache.del(CACHE_SEMANAL); }
 
 module.exports = {
   listPedidos, getPedido, crearPedido, actualizarPedido, marcarRecibido, borrarPedido,
+  omitirPrevisto, restaurarOmitido,
   listSemanal, crearSemanal, actualizarSemanal, borrarSemanal,
   // Puras, exportadas para poder ejercitarlas sin tocar Google.
-  armarDias, estaAbierto, pagoSinDefinir, diaSemanaDe, etiquetaDia, normalizarFecha, normalizarDia,
+  armarDias, estaAbierto, pagoSinDefinir, esOmision, diaSemanaDe, etiquetaDia, normalizarFecha, normalizarDia,
   normalizarEstado, normalizarPago, normalizarTipo, hoyAR,
   clearCache,
-  DIAS, DIAS_CUADRO, ESTADOS, PAGOS, TIPOS, HOJA, HOJA_SEMANAL, DIAS_ADELANTE,
+  DIAS, DIAS_CUADRO, ESTADOS, PAGOS, TIPOS, HOJA, HOJA_SEMANAL, DIAS_ADELANTE, ORIGEN_OMITIDO,
 };

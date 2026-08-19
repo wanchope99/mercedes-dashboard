@@ -2252,6 +2252,34 @@ app.put('/api/pedidos/:id', authMiddleware, async (req, res) => {
   catch (err) { res.status(400).json({ ok: false, error: err.message }); }
 });
 
+// Omitir un previsto de UN día: "este jueves CCU no viene".
+//
+// No toca el cuadro semanal. Sacar a CCU del cuadro diría que dejó de entregar
+// los jueves, que es otra afirmación y la que rompería las otras semanas. Lo que
+// se está diciendo es sobre una fecha, y por eso se escribe en la fecha.
+//
+// Lo puede hacer el encargado: es quien está cuando el proveedor avisa que no
+// llega, y el flujo alternativo era que no quedara anotado en ningún lado.
+// Deshacerlo también, porque sólo devuelve a la vista algo que el cuadro ya
+// decía — no destruye nada (ver restaurarOmitido, que rechaza cualquier id que
+// no sea una omisión).
+app.post('/api/pedidos/omitir', authMiddleware, async (req, res) => {
+  try {
+    const data = await pedidos.omitirPrevisto({
+      fecha: req.body.fecha,
+      proveedor: req.body.proveedor,
+      nota: req.body.nota,
+      usuario: req.user.nombre,
+    });
+    res.json({ ok: true, data });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.delete('/api/pedidos/omitir/:id', authMiddleware, async (req, res) => {
+  try { res.json({ ok: true, data: await pedidos.restaurarOmitido(req.params.id) }); }
+  catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
 app.delete('/api/pedidos/:id', authMiddleware, adminOnly, async (req, res) => {
   try { await pedidos.borrarPedido(req.params.id); res.json({ ok: true, message: 'Pedido eliminado' }); }
   catch (err) { res.status(400).json({ ok: false, error: err.message }); }

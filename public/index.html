@@ -529,7 +529,21 @@
     .ped-acciones button.plata:hover { background: var(--green-dim); }
     .ped-acciones button.cuenta { border-color: rgba(224,138,92,0.4); color: var(--orange); }
     .ped-acciones button.cuenta:hover { background: var(--orange-dim); }
-    .ped-pedir { font-size: 11.5px; color: var(--text-muted); border-top: 1px dashed var(--border); padding-top: 9px; margin-top: 4px; line-height: 1.7; }
+    .ped-pedir { font-size: 11.5px; color: var(--text-muted); border-top: 1px dashed var(--border); padding-top: 9px; margin-top: 4px; line-height: 1.9; }
+    /* La ✕ de "este día no". Chiquita y sin borde: está al lado de cada cosa
+       que el cuadro anuncia, y tiene que poder tocarse sin parecer un botón
+       principal — lo normal es que el previsto SÍ venga. */
+    .ped-x { background: none; border: none; color: var(--text-muted); cursor: pointer;
+             font-size: 11px; padding: 0 3px; line-height: 1; opacity: .55; font-family: inherit; }
+    .ped-x:hover { opacity: 1; color: var(--red); }
+    /* Lo omitido no desaparece: queda tachado y con "Deshacer". Una omisión
+       invisible es indistinguible de un previsto que nunca existió, y al día
+       siguiente nadie sabe por qué falta. */
+    .ped-omitido { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+                   font-size: 11.5px; color: var(--text-muted); padding: 6px 0 6px 12px; }
+    .ped-omitido .tachado { text-decoration: line-through; opacity: .7; }
+    .ped-omitido button { background: none; border: none; color: var(--accent); cursor: pointer;
+                          font-size: 11.5px; font-family: inherit; padding: 0; text-decoration: underline; }
     .ped-vacio { color: var(--text-muted); font-size: 12.5px; padding: 6px 0 10px; }
     .ped-chip { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap;
                 background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); }
@@ -12343,14 +12357,19 @@ function diaPedidos(d) {
     d.paraPedir.length ? `<span>${d.paraPedir.length} para pedir</span>` : '',
   ].filter(Boolean).join('');
 
+  const omitidos = d.omitidos || [];
   const cuerpo = [
     ...d.pedidos.map(itemPedido),
     ...d.previstos.map(p => itemPrevisto(p, d.fecha)),
-    !d.pedidos.length && !d.previstos.length ? '<div class="ped-vacio">Nada esperado este día.</div>' : '',
+    !d.pedidos.length && !d.previstos.length && !omitidos.length
+      ? '<div class="ped-vacio">Nada esperado este día.</div>' : '',
     d.paraPedir.length
       ? `<div class="ped-pedir"><b>Para pedir:</b> ${d.paraPedir.map(s =>
-          escapeHtml(s.proveedor) + (s.nota ? ' — ' + escapeHtml(s.nota) : '')).join(' · ')}</div>`
+          `<span>${escapeHtml(s.proveedor)}${s.nota ? ' — ' + escapeHtml(s.nota) : ''}`
+          + `<button class="ped-x" onclick="pedOmitir('${d.fecha}',${JSON.stringify(s.proveedor).replace(/"/g, '&quot;')})"`
+          + ` title="Este día no">✕</button></span>`).join(' · ')}</div>`
       : '',
+    ...omitidos.map(itemOmitido),
   ].filter(Boolean).join('');
 
   return `<div class="${clases}" id="ped-dia-${d.fecha}">
@@ -12432,8 +12451,51 @@ function itemPrevisto(s, fecha) {
       <button class="cuenta" onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}','cuenta')">📒 Recibido, pago a cuenta</button>
       <button class="ok" onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}','aparte')">🔁 Recibido, pago aparte</button>
       <button onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}',null)">＋ Esperarlo</button>
+      <button onclick="pedOmitir('${fecha}',${JSON.stringify(s.proveedor).replace(/"/g, '&quot;')})"
+              title="Sabemos que este día no viene">✕ No viene</button>
     </div>
   </div>`;
+}
+
+// Lo que alguien marcó como "este día no viene". No es un pedido: es la
+// ausencia de uno, dicha a propósito. Se muestra tachado para que quede claro
+// que el cuadro semanal lo anunciaba y alguien lo sacó — y con Deshacer, porque
+// el proveedor puede volver a confirmar.
+function itemOmitido(p) {
+  return `<div class="ped-omitido">
+    <span class="tachado">${escapeHtml(p.proveedor)}</span>
+    <span>no viene este día</span>
+    <button onclick="pedRestaurar('${escapeHtml(p.id)}')">Deshacer</button>
+  </div>`;
+}
+
+/**
+ * "Este jueves CCU no viene."
+ *
+ * NO toca el cuadro semanal, y esa es toda la diferencia: sacar a CCU del cuadro
+ * diría que dejó de entregar los jueves y afectaría todas las semanas. Acá se
+ * está diciendo algo de UNA fecha.
+ */
+async function pedOmitir(fecha, proveedor) {
+  showToast('⏳ Guardando...');
+  try {
+    await api('/api/pedidos/omitir', {
+      method: 'POST', body: JSON.stringify({ fecha, proveedor }),
+    });
+    pedState.abiertos.add(fecha);
+    await loadPedidos();
+    showToast(`${proveedor}: marcado como que no viene`);
+  } catch (e) { showToast('Error: ' + e.message, 4000); }
+}
+
+async function pedRestaurar(id) {
+  showToast('⏳ Guardando...');
+  try {
+    const { data } = await api('/api/pedidos/omitir/' + encodeURIComponent(id), { method: 'DELETE' });
+    if (data && data.fecha) pedState.abiertos.add(data.fecha);
+    await loadPedidos();
+    showToast('Vuelve a aparecer');
+  } catch (e) { showToast('Error: ' + e.message, 4000); }
 }
 
 // ─── Alta ───────────────────────────────────────────────────────────────────
