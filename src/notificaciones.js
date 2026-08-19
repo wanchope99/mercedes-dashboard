@@ -127,14 +127,53 @@ function deMantenimiento(items, { vistoHasta }) {
 // ── Pedidos del día sin recibir: estado ─────────────────────────────────────
 // Sólo los de HOY y los atrasados. Un pedido que llega mañana no es una
 // notificación, es una agenda.
-// "Abierto" es exactamente lo que entiende la pantalla de Pedidos: no recibido,
-// o recibido y con el pago sin definir. Un pedido recibido y marcado "a pagar"
-// NO está abierto — ya tiene su fila en el libro y lo persigue Pagos, que es su
-// trabajo. Duplicar esa regla acá con otro criterio haría que la campanita y la
-// sección se contradigan.
-const pedidoAbierto = p => p.estado !== 'cancelado' && (p.estado !== 'recibido' || p.pago === 'no');
+//
+// "Abierto" es exactamente lo que entiende la pantalla de Pedidos: NO RECIBIDO.
+// Nada más. Es la misma pregunta que hace `estaAbierto` en src/pedidos.js y
+// tiene que seguir siéndolo — duplicar la regla acá con otro criterio haría que
+// la campanita y la sección se contradigan, que es la forma más rápida de que
+// nadie crea en ninguna de las dos.
+//
+// Un pedido recibido nunca está abierto, ni siquiera con el pago sin definir:
+// eso es otra cosa y tiene su propia notificación abajo (`pedidos-sin-pago`).
+const pedidoAbierto = p => p.estado !== 'cancelado' && p.estado !== 'recibido';
 
-function dePedidos(dias, { hoy }) {
+// El aviso diario por lo que llegó y nunca se registró en Movimientos.
+//
+// Es EVENTO y no estado, y el reloj es la medianoche de hoy: mientras la fila
+// siga sin pago, cada día vuelve a nacer una notificación con `cuando` nuevo,
+// así que aparece una vez, se apaga cuando abrís la campanita, y reaparece al
+// día siguiente. Como estado nunca se apagaría y el badge quedaría clavado en
+// un número que nadie mira; como evento común se apagaría para siempre la
+// primera vez y la fila quedaría enterrada. Una vez por día es el único ritmo
+// que sigue molestando sin volverse ruido.
+//
+// Se apaga solo: en cuanto alguien le registra el pago (efectivo, a cuenta o
+// pago aparte), `pago` deja de ser 'no' y el server deja de emitirla.
+function dePedidosSinPago(sinPago, { hoy, vistoHasta }) {
+  const items = sinPago || [];
+  if (!items.length) return [];
+  // Medianoche de hoy en Buenos Aires, en ISO UTC para poder compararla como
+  // string contra la marca de visto (que se guarda con toISOString()).
+  const cuando = new Date(`${hoy}T00:00:00-03:00`).toISOString();
+  if (vistoHasta && cuando <= vistoHasta) return [];
+  const quienes = [...new Set(items.map(p => p.proveedor).filter(Boolean))];
+  return [nota({
+    id: 'pedidos-sin-pago',
+    fuente: 'pedidos',
+    clase: 'evento',
+    severidad: 'media',
+    cuando,
+    titulo: items.length === 1
+      ? '1 pedido recibido sin registrar el pago'
+      : `${items.length} pedidos recibidos sin registrar el pago`,
+    detalle: `Llegaron pero no tienen fila en Movimientos: ${quienes.slice(0, 4).join(', ')}`
+      + (quienes.length > 4 ? ` y ${quienes.length - 4} más` : ''),
+    ir: { tab: 'pedidos' },
+  })];
+}
+
+function dePedidos({ dias, sinPago } = {}, { hoy, vistoHasta } = {}) {
   const abiertos = [];
   for (const d of (dias || [])) {
     if (!d || !d.fecha || d.fecha > hoy) continue;
@@ -150,7 +189,7 @@ function dePedidos(dias, { hoy }) {
   if (atrasados.length) {
     out.push(nota({
       id: 'pedidos-atrasados', fuente: 'pedidos', severidad: 'alta',
-      titulo: atrasados.length === 1 ? '1 pedido de días pasados sin cerrar' : `${atrasados.length} pedidos de días pasados sin cerrar`,
+      titulo: atrasados.length === 1 ? '1 pedido de días pasados sin recibir' : `${atrasados.length} pedidos de días pasados sin recibir`,
       detalle: [...new Set(atrasados.map(p => p.proveedor).filter(Boolean))].slice(0, 4).join(', '),
       ir: { tab: 'pedidos' },
     }));
@@ -163,6 +202,7 @@ function dePedidos(dias, { hoy }) {
       ir: { tab: 'pedidos' },
     }));
   }
+  out.push(...dePedidosSinPago(sinPago, { hoy, vistoHasta }));
   return out;
 }
 
@@ -198,7 +238,7 @@ function armar({ pagos, mantenimiento, pedidos, ultimoCierre }, { rol, vistoHast
   const todas = [
     ...dePagos(pagos, { rol }),
     ...deMantenimiento(mantenimiento, { vistoHasta }),
-    ...dePedidos(pedidos, { hoy }),
+    ...dePedidos(pedidos, { hoy, vistoHasta }),
     ...deCocina(ultimoCierre, { servicioAnterior }),
   ].filter(n => VISIBLE_PARA[n.fuente] ? VISIBLE_PARA[n.fuente](rol) : true);
 
@@ -318,7 +358,9 @@ async function getNotificaciones({ usuario, rol } = {}) {
         .map(p => ({ ...p, ...calcUrgencia(p.vencimiento) }));
     }, []) : Promise.resolve([]),
     seguro('mantenimiento', async () => (await require('./mantenimiento').listMantenimiento()).items, []),
-    seguro('pedidos', async () => (await require('./pedidos').listPedidos({ dias: 1 })).dias, []),
+    // El objeto entero y no sólo `.dias`: `sinPago` vive al lado y no está
+    // adentro de ningún día — justamente porque no traba ninguno.
+    seguro('pedidos', async () => require('./pedidos').listPedidos({ dias: 1 }), {}),
     seguro('cocina', async () => {
       const cc = require('./cierre-cocina');
       if (!cc.configurada()) return null;
@@ -341,6 +383,6 @@ function clearCache() { cache.flushAll(); }
 module.exports = {
   getNotificaciones, marcarVisto, vistoDe, clearCache,
   // Puras
-  armar, dePagos, deMantenimiento, dePedidos, deCocina, servicioAnteriorA,
+  armar, dePagos, deMantenimiento, dePedidos, dePedidosSinPago, deCocina, servicioAnteriorA,
   HOJA, MAX_POR_FUENTE,
 };

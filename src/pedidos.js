@@ -341,16 +341,39 @@ function _publico({ rowIndex, ...rest }) { return rest; }
 /**
  * ¿Este pedido todavía pide algo de alguien?
  *
- * Es lo que decide si un día que ya pasó sigue a la vista. Un pedido que nunca
- * llegó, o que llegó y quedó sin definir si se pagó, son las dos cosas que no
- * pueden desaparecer solas de la pantalla: son justamente las que se olvidan.
- * "a pagar" ya está resuelto acá — tiene su fila en el libro y lo persigue la
- * sección Pagos, que es su lugar.
+ * Es lo que decide si un día que ya pasó sigue a la vista, y desde el
+ * 2026-08-19 pregunta UNA sola cosa: ¿llegó la mercadería? Un pedido recibido
+ * no vuelve a trabar un día pasado, aunque su pago haya quedado sin definir.
+ *
+ * Antes el pago sin definir también contaba, y era la causa de un día que se
+ * quedaba en rojo con "sin resolver" sin que hubiera nada que resolver: el
+ * botón "✓ Recibido" guardaba `pago: 'no'` — que quiere decir "la plata se ve
+ * después" — y ningún botón sacaba de ese estado, así que el día no se iba
+ * nunca. Con los tres botones de recepción (efectivo / a cuenta / pago aparte)
+ * el pago SIEMPRE queda decidido al recibir, así que `pago: 'no'` sólo puede
+ * quedar en filas viejas.
+ *
+ * Esas filas viejas no se pierden: no traban la pantalla, pero `pagoSinDefinir`
+ * las junta y la campanita avisa por ellas una vez por día hasta que alguien
+ * les registre el pago. Ver `sinPago` en listPedidos y dePedidos en
+ * src/notificaciones.js.
  */
 function estaAbierto(p) {
   if (p.estado === 'cancelado') return false;
-  if (p.estado !== 'recibido') return true;
-  return p.pago === 'no';
+  return p.estado !== 'recibido';
+}
+
+/**
+ * Llegó, pero nunca se dijo qué pasó con la plata.
+ *
+ * No es lo mismo que "abierto": no reclama nada en la pantalla del día, porque
+ * la mercadería ya está adentro y el día se cumplió. Lo que falta es el asiento
+ * en Movimientos, y eso se persigue por la campanita, no manteniendo un día en
+ * rojo. "a pagar" NO cuenta acá — ya tiene su fila en el libro y lo persigue la
+ * sección Pagos, que es su lugar.
+ */
+function pagoSinDefinir(p) {
+  return p.estado === 'recibido' && p.pago === 'no';
 }
 
 /**
@@ -426,6 +449,15 @@ async function listPedidos({ dias = DIAS_ADELANTE } = {}) {
   return {
     hoy,
     dias: armarDias(pedidos, semanal, { hoy, dias }),
+    // Las filas que llegaron y nunca dijeron qué pasó con la plata. Van aparte
+    // de `dias` a propósito: no traban ningún día (ver estaAbierto) pero
+    // alguien tiene que enterarse de que existen. Sólo las de días PASADOS —
+    // un pedido recibido hace un rato todavía no es un olvido, es el rato que
+    // tarda alguien en cargar el monto.
+    sinPago: pedidos
+      .filter(p => pagoSinDefinir(p) && p.fecha && p.fecha < hoy)
+      .sort((a, b) => a.fecha.localeCompare(b.fecha))
+      .map(_publico),
     semanal: semanal.map(_publico),
     diasSemana: DIAS,
     // Las columnas del cuadro. El navegador dibuja éstas y no las siete: ver
@@ -729,7 +761,7 @@ module.exports = {
   listPedidos, getPedido, crearPedido, actualizarPedido, marcarRecibido, borrarPedido,
   listSemanal, crearSemanal, actualizarSemanal, borrarSemanal,
   // Puras, exportadas para poder ejercitarlas sin tocar Google.
-  armarDias, estaAbierto, diaSemanaDe, etiquetaDia, normalizarFecha, normalizarDia,
+  armarDias, estaAbierto, pagoSinDefinir, diaSemanaDe, etiquetaDia, normalizarFecha, normalizarDia,
   normalizarEstado, normalizarPago, normalizarTipo, hoyAR,
   clearCache,
   DIAS, DIAS_CUADRO, ESTADOS, PAGOS, TIPOS, HOJA, HOJA_SEMANAL, DIAS_ADELANTE,

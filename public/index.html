@@ -489,6 +489,8 @@
     .ped-acciones button.ok:hover { border-color: var(--green); color: var(--green); }
     .ped-acciones button.plata { border-color: rgba(76,175,130,0.4); color: var(--green); }
     .ped-acciones button.plata:hover { background: var(--green-dim); }
+    .ped-acciones button.cuenta { border-color: rgba(224,138,92,0.4); color: var(--orange); }
+    .ped-acciones button.cuenta:hover { background: var(--orange-dim); }
     .ped-pedir { font-size: 11.5px; color: var(--text-muted); border-top: 1px dashed var(--border); padding-top: 9px; margin-top: 4px; line-height: 1.7; }
     .ped-vacio { color: var(--text-muted); font-size: 12.5px; padding: 6px 0 10px; }
     .ped-chip { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap;
@@ -496,6 +498,7 @@
     .ped-chip.pagado { background: var(--green-dim); color: var(--green); border-color: rgba(76,175,130,0.4); }
     .ped-chip.apagar { background: var(--orange-dim); color: var(--orange); border-color: rgba(224,138,92,0.4); }
     .ped-chip.atrasado { background: var(--red-dim); color: var(--red); border-color: var(--red); }
+    .ped-chip.sinpago { background: var(--orange-dim); color: var(--orange); border-color: rgba(224,138,92,0.4); }
 
     /* ── El cuadro semanal ──────────────────────────────────────────────── */
     /* Cuántas columnas lo dice renderPedidosSemana() por --ped-cols: son cinco
@@ -1539,17 +1542,11 @@
      explícitamente qué va a pasar en la planilla antes de confirmar. -->
 <div class="modal-overlay" id="ped-recibir-overlay">
   <div class="modal" style="max-width:520px">
-    <div class="modal-title">Recibir pedido</div>
+    <!-- El título dice cuál de los tres botones se apretó. NO hay un select de
+         "¿se pagó?" adentro: la pregunta ya se contestó afuera, y repetirla acá
+         era pedir dos veces la misma decisión. Para cambiar de idea, Cancelar. -->
+    <div class="modal-title" id="ped-r-titulo">Recibir pedido</div>
     <div id="ped-r-cabecera" style="font-size:13px;color:var(--text-muted);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;line-height:1.8;margin-bottom:14px"></div>
-
-    <div class="form-group full" style="margin-bottom:12px">
-      <label>¿Se pagó?</label>
-      <select id="ped-r-pago" onchange="onPedPagoChange()" style="width:100%">
-        <option value="pagado">Sí, se pagó ahora</option>
-        <option value="a pagar">Todavía no — queda a pagar</option>
-        <option value="no">Sólo recibido, la plata se ve después</option>
-      </select>
-    </div>
 
     <div id="ped-r-plata">
       <div class="form-group full" id="ped-r-lista-wrap" style="display:none;margin-bottom:12px">
@@ -1557,11 +1554,11 @@
         <div id="ped-r-lista"></div>
       </div>
       <div class="form-group full" style="margin-bottom:12px">
-        <label>Cuánto se pagó</label>
+        <label id="ped-r-monto-label">Cuánto se pagó</label>
         <input type="text" id="ped-r-monto" inputmode="numeric" placeholder="0" style="width:100%">
       </div>
-      <div class="form-group full" style="margin-bottom:12px">
-        <label>Con qué medio</label>
+      <div class="form-group full" id="ped-r-medio-wrap" style="margin-bottom:12px">
+        <label id="ped-r-medio-label">Con qué medio</label>
         <select id="ped-r-medio" style="width:100%"></select>
       </div>
       <div class="form-group full" id="ped-r-venc-wrap" style="display:none;margin-bottom:12px">
@@ -12093,6 +12090,7 @@ const pedState = {
   // no, marcar algo recibido cerraría el día que estabas mirando.
   abiertos: new Set(),
   recibiendo: null,       // el pedido que está en el modal
+  modo: null,             // cuál de los tres botones lo abrió: ver PED_MODOS
   cuentas: [],            // filas "A pagar" del proveedor de ese pedido
   cuentaElegida: null,
   editandoSem: null,
@@ -12105,6 +12103,54 @@ const pedState = {
 // ninguna caja resta nunca. El server igual valida contra los nombres exactos.
 const PED_MEDIOS = ['Efectivo Local', 'Efectivo Tincho', 'Efectivo Pablo',
                     'Mercado Pago Tincho', 'Galicia', 'Echeq'];
+
+// ─── Los tres modos de recibir ──────────────────────────────────────────────
+//
+// Toda entrega termina en uno de estos tres y no hay un cuarto. Antes había un
+// botón "✓ Recibido" que guardaba `pago: 'no'` — "llegó, la plata se ve
+// después" — y ese estado no tenía después: nada lo sacaba de ahí, el día
+// quedaba en rojo con "sin resolver" para siempre y nadie sabía qué hacer con
+// él. La forma de arreglarlo no era agregar un botón "resolver": era que al
+// recibir SIEMPRE se diga qué pasó con la plata.
+//
+//   efectivo → se pagó ahora, en la puerta, de la caja. Siempre Efectivo Local:
+//              es el único medio que se usa en el momento de la entrega, y
+//              hacer elegir entre seis para que se elija siempre el mismo es
+//              un paso de más en el peor momento posible.
+//   cuenta   → llegó y no se paga ahora. Escribe una fila "A pagar" en
+//              Movimientos y desde ahí lo persigue la sección Pagos.
+//   aparte   → el pago no pasa por la puerta: ya estaba pago (Mercado Libre),
+//              se transfiere, o va por otro medio en otro momento. Termina
+//              "Pagado" igual que efectivo, pero eligiendo el medio — y sobre
+//              todo, cerrando la cuenta "A pagar" que ese pedido ya tenía en
+//              vez de escribir una fila nueva al lado.
+//
+// `pago` es lo que entiende el server (POST /api/pedidos/:id/recibir): efectivo
+// y aparte son los dos 'pagado', y lo que los distingue es de dónde sale el
+// medio. El tercer valor 'no' sigue existiendo en la hoja por las filas viejas,
+// pero ya no hay forma de crear una nueva desde acá.
+const PED_MODOS = {
+  efectivo: {
+    pago: 'pagado',
+    titulo: 'Recibido y pagado',
+    medioFijo: 'Efectivo Local',
+    montoLabel: 'Cuánto se pagó',
+  },
+  cuenta: {
+    pago: 'a pagar',
+    titulo: 'Recibido — queda a cuenta',
+    montoLabel: 'Cuánto queda a pagar',
+    medioLabel: 'Con qué medio se va a pagar',
+  },
+  aparte: {
+    pago: 'pagado',
+    titulo: 'Recibido — pago aparte',
+    montoLabel: 'Cuánto es',
+    medioLabel: 'Con qué medio se pagó',
+  },
+};
+
+function pedModo() { return PED_MODOS[pedState.modo] || PED_MODOS.efectivo; }
 
 function pedEsAdmin() { return getRol() === 'admin'; }
 
@@ -12181,7 +12227,7 @@ function diaPedidos(d) {
   const clases = ['ped-dia', abierto ? 'abierto' : '', d.esHoy ? 'hoy' : '', d.atrasado ? 'atrasado' : ''].filter(Boolean).join(' ');
 
   const chips = [
-    d.atrasado ? '<span class="ped-chip atrasado">sin resolver</span>' : '',
+    d.atrasado ? '<span class="ped-chip atrasado">sin recibir</span>' : '',
     d.esHoy ? '<span class="ped-chip">hoy</span>' : '',
     d.pedidos.length ? `<span>${d.pedidos.length} pedido${d.pedidos.length !== 1 ? 's' : ''}</span>` : '',
     d.previstos.length ? `<span>${d.previstos.length} previsto${d.previstos.length !== 1 ? 's' : ''}</span>` : '',
@@ -12232,6 +12278,11 @@ function itemPedido(p) {
       : p.costoEstimado ? `<span>~${fmt(p.costoEstimado)}</span>` : '',
     p.medioPrevisto && p.pago === 'no' ? `<span class="ped-chip">${escapeHtml(p.medioPrevisto)}</span>` : '',
     recibido && p.recibidoPor ? `<span>✓ recibió ${escapeHtml(p.recibidoPor)}</span>` : '',
+    // Fila vieja: llegó, pero nunca se registró el pago en Movimientos. Ya no
+    // traba el día (ver estaAbierto en src/pedidos.js) — el aviso lo da la
+    // campanita una vez por día — pero acá tiene que decirlo, porque acá es
+    // donde se arregla: cualquiera de los tres botones la cierra.
+    recibido && p.pago === 'no' ? '<span class="ped-chip sinpago">falta registrar el pago</span>' : '',
   ].filter(Boolean).join('');
 
   // Un pedido con el pago ya registrado no ofrece volver atrás: la fila del
@@ -12240,8 +12291,9 @@ function itemPedido(p) {
   const acciones = p.pago !== 'no'
     ? (pedEsAdmin() ? `<button onclick="borrarPedido('${id}')">🗑️</button>` : '')
     : [
-        `<button class="plata" onclick="openPedRecibir('${id}')">💵 Recibido y pagado</button>`,
-        !recibido ? `<button class="ok" onclick="recibirSinPlata('${id}')">✓ Recibido</button>` : '',
+        `<button class="plata" onclick="openPedRecibir('${id}','efectivo')">💵 Recibido y pagado</button>`,
+        `<button class="cuenta" onclick="openPedRecibir('${id}','cuenta')">📒 Queda a cuenta</button>`,
+        `<button class="ok" onclick="openPedRecibir('${id}','aparte')">🔁 Pago aparte</button>`,
         pedEsAdmin() ? `<button onclick="borrarPedido('${id}')">🗑️</button>` : '',
       ].filter(Boolean).join('');
 
@@ -12270,8 +12322,9 @@ function itemPrevisto(s, fecha) {
       <div class="ped-item-meta">${meta}</div>
     </div>
     <div class="ped-acciones">
-      <button class="plata" onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}',true)">💵 Recibido y pagado</button>
-      <button class="ok" onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}',false)">✓ Recibido</button>
+      <button class="plata" onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}','efectivo')">💵 Recibido y pagado</button>
+      <button class="cuenta" onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}','cuenta')">📒 Queda a cuenta</button>
+      <button class="ok" onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}','aparte')">🔁 Pago aparte</button>
       <button onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}',null)">＋ Esperarlo</button>
     </div>
   </div>`;
@@ -12322,11 +12375,11 @@ async function crearPedido(btn) {
 /**
  * Un previsto pasa a ser una fila real.
  *
- * `conPlata` decide qué sigue: true abre el modal de pago, false lo marca
- * recibido sin tocar el libro, null lo deja simplemente esperado (para poder
- * editarle el detalle o el costo antes de que llegue).
+ * `modo` es uno de los tres de PED_MODOS y abre el modal ya en ese modo, o
+ * null para dejarlo simplemente esperado (y poder editarle el detalle o el
+ * costo antes de que llegue).
  */
-async function materializarPrevisto(idSemanal, fecha, conPlata) {
+async function materializarPrevisto(idSemanal, fecha, modo) {
   const s = (pedState.data.semanal || []).find(x => x.id === idSemanal);
   if (!s) return;
   showToast('⏳ Guardando...');
@@ -12339,20 +12392,8 @@ async function materializarPrevisto(idSemanal, fecha, conPlata) {
       }),
     });
     await loadPedidos();
-    if (conPlata === true) openPedRecibir(data.id);
-    else if (conPlata === false) await recibirSinPlata(data.id);
+    if (modo) openPedRecibir(data.id, modo);
     else showToast('Agregado al día');
-  } catch (e) { showToast('Error: ' + e.message, 4000); }
-}
-
-async function recibirSinPlata(id) {
-  showToast('⏳ Guardando...');
-  try {
-    await api('/api/pedidos/' + encodeURIComponent(id) + '/recibir', {
-      method: 'POST', body: JSON.stringify({ pago: 'no' }),
-    });
-    await loadPedidos();
-    showToast('Marcado como recibido');
   } catch (e) { showToast('Error: ' + e.message, 4000); }
 }
 
@@ -12369,16 +12410,19 @@ async function borrarPedido(id) {
 // Es lo único de esta pantalla que escribe en Movimientos, así que dice en
 // palabras qué va a pasar en la planilla ANTES de confirmar.
 
-async function openPedRecibir(id) {
+async function openPedRecibir(id, modo) {
   const p = pedBuscar(id);
   if (!p) return;
   pedState.recibiendo = p;
+  pedState.modo = PED_MODOS[modo] ? modo : 'efectivo';
   pedState.cuentas = [];
   pedState.cuentaElegida = null;
+  const m = pedModo();
 
   document.getElementById('ped-r-error').textContent = '';
-  document.getElementById('ped-r-pago').value = 'pagado';
+  document.getElementById('ped-r-titulo').textContent = m.titulo;
   document.getElementById('ped-r-monto').value = p.costoEstimado || '';
+  document.getElementById('ped-r-monto-label').textContent = m.montoLabel;
   document.getElementById('ped-r-venc').value = p.fecha;
   document.getElementById('ped-r-lista-wrap').style.display = 'none';
   document.getElementById('ped-r-lista').innerHTML = '';
@@ -12387,9 +12431,19 @@ async function openPedRecibir(id) {
     + `Esperado para el ${new Date(p.fecha + 'T12:00:00').toLocaleDateString('es-AR')}`
     + (p.costoEstimado ? ` · estimado ${fmt(p.costoEstimado)}` : '');
 
+  // El vencimiento sólo tiene sentido en "queda a cuenta": es lo único que
+  // genera una deuda con fecha. En los otros dos la plata ya está resuelta.
+  document.getElementById('ped-r-venc-wrap').style.display = pedState.modo === 'cuenta' ? '' : 'none';
+
+  // "Recibido y pagado" no pregunta el medio: es siempre Efectivo Local, que es
+  // lo único que se usa en la puerta. El select igual se completa, porque es lo
+  // que se manda al server y lo que valida contra las cajas del sistema.
   const medioSel = document.getElementById('ped-r-medio');
-  setSelectValue(medioSel, p.medioPrevisto || 'Efectivo Local');
-  onPedPagoChange();
+  setSelectValue(medioSel, m.medioFijo || p.medioPrevisto || 'Efectivo Local');
+  document.getElementById('ped-r-medio-wrap').style.display = m.medioFijo ? 'none' : '';
+  if (m.medioLabel) document.getElementById('ped-r-medio-label').textContent = m.medioLabel;
+
+  pedExplicar();
   document.getElementById('ped-recibir-overlay').classList.add('open');
 
   // Las cuentas pendientes de ese proveedor. Si hay una, lo más probable es que
@@ -12405,8 +12459,19 @@ async function openPedRecibir(id) {
 function renderPedCuentas() {
   const wrap = document.getElementById('ped-r-lista-wrap');
   const lista = document.getElementById('ped-r-lista');
-  const modo = document.getElementById('ped-r-pago').value;
-  if (!pedState.cuentas.length || modo !== 'pagado') { wrap.style.display = 'none'; return; }
+  // Los dos modos que terminan "Pagado" (efectivo y aparte) tienen que poder
+  // cerrar la cuenta que ese pedido ya tiene abierta en vez de escribir una
+  // fila nueva al lado. "Queda a cuenta" no elige nada: está creando la deuda,
+  // no cerrándola — pero si el proveedor ya tenía una, pedExplicar lo avisa.
+  if (!pedState.cuentas.length || pedModo().pago !== 'pagado') {
+    wrap.style.display = 'none';
+    // pedExplicar igual: las cuentas llegan DESPUÉS de abrir el modal, y en modo
+    // "queda a cuenta" son justamente lo que dispara el aviso de "este proveedor
+    // ya tiene una deuda abierta, fijate si no es ésta". Sin esta línea el aviso
+    // se calculaba con la lista todavía vacía y no aparecía nunca.
+    pedExplicar();
+    return;
+  }
 
   document.getElementById('ped-r-lista-label').textContent = pedState.cuentas.length === 1
     ? 'Este proveedor tiene una cuenta pendiente — ¿es ésta la que estás pagando?'
@@ -12454,50 +12519,61 @@ function elegirPedCuenta(rowIndex) {
   pedExplicar();
 }
 
-function onPedPagoChange() {
-  const modo = document.getElementById('ped-r-pago').value;
-  document.getElementById('ped-r-plata').style.display = modo === 'no' ? 'none' : '';
-  document.getElementById('ped-r-venc-wrap').style.display = modo === 'a pagar' ? '' : 'none';
-  if (modo !== 'pagado') pedState.cuentaElegida = null;
-  renderPedCuentas();
-  pedExplicar();
-}
-
 // Decir en una línea qué va a pasar en la planilla. Es lo que hace que un error
-// se vea antes de escribirlo y no después.
+// se vea antes de escribirlo y no después. Nunca se escribe nada sin que esta
+// línea lo haya anunciado primero.
 function pedExplicar() {
-  const modo = document.getElementById('ped-r-pago').value;
   const el = document.getElementById('ped-r-que-hace');
+  const modo = pedState.modo;
   const c = pedState.cuentas.find(x => x.rowIndex === pedState.cuentaElegida);
-  if (modo === 'no') { el.innerHTML = ''; return; }
-  if (modo === 'a pagar') {
-    el.innerHTML = '→ Se agrega una fila <b>A pagar</b> en Movimientos y aparece en la sección Pagos.';
+
+  if (modo === 'cuenta') {
+    el.innerHTML = '→ Se agrega una fila <b>A pagar</b> en Movimientos y aparece en la sección Pagos.'
+      + (pedState.cuentas.length
+        ? ` <span style="color:var(--orange)">Ojo: este proveedor ya tiene ${pedState.cuentas.length} `
+          + `cuenta${pedState.cuentas.length !== 1 ? 's' : ''} pendiente${pedState.cuentas.length !== 1 ? 's' : ''} `
+          + 'sin pagar. Si es la misma deuda, cerrala con "Pago aparte" en vez de anotar otra.</span>'
+        : '');
     return;
   }
+
   if (pedState.cuentaElegida === null && pedState.cuentas.length) {
     el.innerHTML = '<span style="color:var(--orange)">Elegí arriba cuál de las cuentas estás pagando (o que es un gasto nuevo).</span>';
     return;
   }
-  el.innerHTML = c
-    ? `→ La cuenta pendiente de ${fmt(c.monto)} pasa a <b>Pagado</b>. No se agrega ninguna fila.`
-    : '→ Se agrega una fila nueva en Movimientos como <b>Pagado</b>.';
+
+  // "Pago aparte" existe porque el pedido normalmente YA tiene su fila "A
+  // pagar" cargada, y lo correcto es actualizar ésa. Que no aparezca ninguna es
+  // el caso raro, así que se dice en voz alta antes de escribir una nueva.
+  if (c) {
+    el.innerHTML = `→ La cuenta pendiente de ${fmt(c.monto)} pasa a <b>Pagado</b>. No se agrega ninguna fila.`;
+    return;
+  }
+  el.innerHTML = '→ Se agrega una fila nueva en Movimientos como <b>Pagado</b>'
+    + (pedState.modo === 'efectivo' ? ' (Efectivo Local).' : '.')
+    + (modo === 'aparte' && !pedState.cuentas.length
+      ? ' <span style="color:var(--orange)">Este proveedor no tiene ninguna cuenta pendiente cargada, '
+        + 'así que se anota como gasto nuevo.</span>'
+      : '');
 }
 
 function closePedRecibir() {
   document.getElementById('ped-recibir-overlay').classList.remove('open');
   pedState.recibiendo = null;
+  pedState.modo = null;
 }
 
 async function confirmarPedRecibir() {
   const p = pedState.recibiendo;
   if (!p) return;
-  const modo = document.getElementById('ped-r-pago').value;
+  const m = pedModo();
+  const pago = m.pago;
   const monto = pedNumero(document.getElementById('ped-r-monto').value);
-  const medioPago = document.getElementById('ped-r-medio').value;
+  const medioPago = m.medioFijo || document.getElementById('ped-r-medio').value;
   const err = document.getElementById('ped-r-error');
 
-  if (modo !== 'no' && monto <= 0) { err.textContent = 'Poné cuánto se pagó.'; return; }
-  if (modo === 'pagado' && pedState.cuentas.length && pedState.cuentaElegida === null) {
+  if (monto <= 0) { err.textContent = 'Poné el monto.'; return; }
+  if (pago === 'pagado' && pedState.cuentas.length && pedState.cuentaElegida === null) {
     err.textContent = 'Elegí cuál cuenta pendiente estás pagando, o marcá que es un gasto nuevo.';
     return;
   }
@@ -12508,8 +12584,8 @@ async function confirmarPedRecibir() {
     const { asiento } = await api('/api/pedidos/' + encodeURIComponent(p.id) + '/recibir', {
       method: 'POST',
       body: JSON.stringify({
-        pago: modo, monto, medioPago,
-        rowIndexExistente: modo === 'pagado' ? pedState.cuentaElegida : null,
+        pago, monto, medioPago,
+        rowIndexExistente: pago === 'pagado' ? pedState.cuentaElegida : null,
         vencimiento: document.getElementById('ped-r-venc').value,
       }),
     });
@@ -12518,13 +12594,13 @@ async function confirmarPedRecibir() {
     const queHizo = !asiento ? 'No se tocó Movimientos: sólo quedó marcado como recibido.'
       : asiento.tipo === 'fila-existente' ? `La cuenta pendiente pasó de A pagar a <b>Pagado</b>.`
       : asiento.tipo === 'ya-estaba' ? 'Este pedido ya tenía su fila en Movimientos: no se duplicó.'
-      : modo === 'a pagar' ? 'Se agregó una fila <b>A pagar</b> — ya aparece en Pagos.'
+      : pago === 'a pagar' ? 'Se agregó una fila <b>A pagar</b> — ya aparece en Pagos.'
       : 'Se agregó una fila nueva como <b>Pagado</b>.';
 
     showResultadoModal({
       ok: true,
       titulo: 'Pedido recibido',
-      detalle: `<b>${escapeHtml(p.proveedor)}</b>${modo !== 'no' ? ' · ' + fmt(monto) : ''}<br>${queHizo}`
+      detalle: `<b>${escapeHtml(p.proveedor)}</b> · ${fmt(monto)}<br>${queHizo}`
         + (asiento && asiento.registradoEnSesion
             ? '<br><span style="font-size:11px">Se descontó del esperado del arqueo en curso ✓</span>' : ''),
     });
