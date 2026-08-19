@@ -3063,7 +3063,11 @@ async function api(path, opts = {}) {
   const res = await fetch(path, { ...opts, headers });
   if (res.status === 401) { doLogout(); throw new Error('Sesión expirada'); }
   const json = await res.json();
-  if (!json.ok) throw new Error(json.error);
+  // El cuerpo entero viaja con el error. Hay rechazos que no son un fallo sino
+  // una pregunta — el 409 de "este proveedor ya tiene una cuenta sin pagar"
+  // viene con la lista para poder elegir — y sin esto el que llama sólo recibe
+  // un texto y no puede hacer nada con él.
+  if (!json.ok) { const e = new Error(json.error); e.payload = json; throw e; }
   // Cualquier acción que haya salido bien puede haber resuelto una notificación:
   // pagaste, recibiste el pedido, cerraste un arreglo. Se engancha acá y no en
   // cada pantalla porque acá pasan TODAS, incluidas las que se agreguen después
@@ -12422,6 +12426,7 @@ async function openPedRecibir(id, modo) {
   document.getElementById('ped-r-error').textContent = '';
   document.getElementById('ped-r-titulo').textContent = m.titulo;
   document.getElementById('ped-r-monto').value = p.costoEstimado || '';
+  document.getElementById('ped-r-monto').disabled = false;
   document.getElementById('ped-r-monto-label').textContent = m.montoLabel;
   document.getElementById('ped-r-venc').value = p.fecha;
   document.getElementById('ped-r-lista-wrap').style.display = 'none';
@@ -12459,23 +12464,28 @@ async function openPedRecibir(id, modo) {
 function renderPedCuentas() {
   const wrap = document.getElementById('ped-r-lista-wrap');
   const lista = document.getElementById('ped-r-lista');
-  // Los dos modos que terminan "Pagado" (efectivo y aparte) tienen que poder
-  // cerrar la cuenta que ese pedido ya tiene abierta en vez de escribir una
-  // fila nueva al lado. "Queda a cuenta" no elige nada: está creando la deuda,
-  // no cerrándola — pero si el proveedor ya tenía una, pedExplicar lo avisa.
-  if (!pedState.cuentas.length || pedModo().pago !== 'pagado') {
+  // La lista se muestra en los TRES modos, y en los tres significa lo mismo:
+  // "esto que estás por anotar, ¿no está anotado ya?". Lo que cambia es qué
+  // pasa al elegir — efectivo y aparte CIERRAN la fila; queda a cuenta no
+  // escribe nada y sólo la vincula, porque la deuda ya estaba.
+  //
+  // Que "queda a cuenta" no preguntara era el agujero más grande: es el modo
+  // que escribe una fila "A pagar" nueva, y lo más probable es que esa deuda ya
+  // esté cargada. Dos filas "A pagar" por la misma mercadería se pagan dos
+  // veces y nadie se entera.
+  if (!pedState.cuentas.length) {
     wrap.style.display = 'none';
-    // pedExplicar igual: las cuentas llegan DESPUÉS de abrir el modal, y en modo
-    // "queda a cuenta" son justamente lo que dispara el aviso de "este proveedor
-    // ya tiene una deuda abierta, fijate si no es ésta". Sin esta línea el aviso
-    // se calculaba con la lista todavía vacía y no aparecía nunca.
+    // pedExplicar igual: las cuentas llegan DESPUÉS de abrir el modal, así que
+    // el texto que se calculó al abrirlo lo hizo con la lista todavía vacía.
     pedExplicar();
     return;
   }
 
+  const aCuenta = pedState.modo === 'cuenta';
+  const verbo = aCuenta ? 'es esta entrega' : 'estás pagando';
   document.getElementById('ped-r-lista-label').textContent = pedState.cuentas.length === 1
-    ? 'Este proveedor tiene una cuenta pendiente — ¿es ésta la que estás pagando?'
-    : `Este proveedor tiene ${pedState.cuentas.length} cuentas pendientes — elegí cuál estás pagando`;
+    ? `Este proveedor ya tiene una cuenta sin pagar — ¿${aCuenta ? 'es ésta' : 'es ésta la que estás pagando'}?`
+    : `Este proveedor tiene ${pedState.cuentas.length} cuentas sin pagar — elegí cuál ${verbo}`;
 
   lista.innerHTML = pedState.cuentas.map(c => {
     const venc = c.vencimiento ? `vence ${escapeHtml(c.vencimiento)}` : 'sin vencimiento';
@@ -12489,8 +12499,8 @@ function renderPedCuentas() {
     </div>`;
   }).join('')
   + `<div class="ped-cuenta" id="ped-cuenta-0" onclick="elegirPedCuenta(0)">
-      <div><div>Ninguna — es un gasto nuevo</div>
-      <div class="ped-cuenta-sub">se escribe una fila nueva en Movimientos</div></div></div>`;
+      <div><div>Ninguna — es ${aCuenta ? 'otra deuda' : 'un gasto nuevo'}</div>
+      <div class="ped-cuenta-sub">se escribe una fila nueva en Movimientos como <b>${aCuenta ? 'A pagar' : 'Pagado'}</b></div></div></div>`;
   wrap.style.display = '';
 
   // Con UNA sola pendiente viene elegida: es lo más probable, y quien esté
@@ -12516,6 +12526,14 @@ function elegirPedCuenta(rowIndex) {
     document.getElementById('ped-r-monto').value = c.monto || '';
     if (c.medioPago) setSelectValue(document.getElementById('ped-r-medio'), c.medioPago);
   }
+  // Elegir una fila en "queda a cuenta" quiere decir que no se escribe nada,
+  // así que el monto y el medio pasan a ser informativos: los manda la fila.
+  const soloVincula = pedState.modo === 'cuenta' && rowIndex;
+  document.getElementById('ped-r-monto').disabled = !!soloVincula;
+  document.getElementById('ped-r-medio-wrap').style.display =
+    (soloVincula || pedModo().medioFijo) ? 'none' : '';
+  document.getElementById('ped-r-venc-wrap').style.display =
+    (pedState.modo === 'cuenta' && !soloVincula) ? '' : 'none';
   pedExplicar();
 }
 
@@ -12527,18 +12545,20 @@ function pedExplicar() {
   const modo = pedState.modo;
   const c = pedState.cuentas.find(x => x.rowIndex === pedState.cuentaElegida);
 
-  if (modo === 'cuenta') {
-    el.innerHTML = '→ Se agrega una fila <b>A pagar</b> en Movimientos y aparece en la sección Pagos.'
-      + (pedState.cuentas.length
-        ? ` <span style="color:var(--orange)">Ojo: este proveedor ya tiene ${pedState.cuentas.length} `
-          + `cuenta${pedState.cuentas.length !== 1 ? 's' : ''} pendiente${pedState.cuentas.length !== 1 ? 's' : ''} `
-          + 'sin pagar. Si es la misma deuda, cerrala con "Pago aparte" en vez de anotar otra.</span>'
-        : '');
+  if (pedState.cuentaElegida === null && pedState.cuentas.length) {
+    el.innerHTML = '<span style="color:var(--orange)">Elegí arriba cuál de las cuentas corresponde a este pedido, '
+      + 'o marcá que ninguna.</span>';
     return;
   }
 
-  if (pedState.cuentaElegida === null && pedState.cuentas.length) {
-    el.innerHTML = '<span style="color:var(--orange)">Elegí arriba cuál de las cuentas estás pagando (o que es un gasto nuevo).</span>';
+  // El caso que más se repite en "queda a cuenta": la deuda YA está cargada.
+  // Lo correcto entonces no es escribir, es no escribir — y decirlo, porque
+  // "no se hace nada" es justo lo que uno duda de haber hecho bien.
+  if (modo === 'cuenta') {
+    el.innerHTML = c
+      ? `→ <b>No se escribe nada</b> en Movimientos: este pedido queda vinculado a `
+        + `la fila <b>A pagar</b> de ${fmt(c.monto)} que ya estaba cargada.`
+      : '→ Se agrega una fila <b>A pagar</b> en Movimientos y aparece en la sección Pagos.';
     return;
   }
 
@@ -12572,12 +12592,19 @@ async function confirmarPedRecibir() {
   const medioPago = m.medioFijo || document.getElementById('ped-r-medio').value;
   const err = document.getElementById('ped-r-error');
 
-  if (monto <= 0) { err.textContent = 'Poné el monto.'; return; }
-  if (pago === 'pagado' && pedState.cuentas.length && pedState.cuentaElegida === null) {
-    err.textContent = 'Elegí cuál cuenta pendiente estás pagando, o marcá que es un gasto nuevo.';
+  // Vincular una fila que ya existe no necesita monto: lo dice la fila.
+  const soloVincula = pedState.modo === 'cuenta' && !!pedState.cuentaElegida;
+  if (!soloVincula && monto <= 0) { err.textContent = 'Poné el monto.'; return; }
+
+  // Vale para los tres modos: si el proveedor tiene cuentas sin pagar, hay que
+  // decir cuál es ésta antes de escribir nada. El server lo vuelve a exigir por
+  // su cuenta — esto es sólo para no hacer viajar un pedido que va a rebotar.
+  if (pedState.cuentas.length && pedState.cuentaElegida === null) {
+    err.textContent = 'Elegí cuál de las cuentas pendientes corresponde a este pedido, o marcá que ninguna.';
     return;
   }
 
+  const modoActual = pedState.modo;
   closePedRecibir();
   showToast('⏳ Actualizando planilla...');
   try {
@@ -12585,7 +12612,13 @@ async function confirmarPedRecibir() {
       method: 'POST',
       body: JSON.stringify({
         pago, monto, medioPago,
-        rowIndexExistente: pago === 'pagado' ? pedState.cuentaElegida : null,
+        // La fila elegida vale para los tres modos. En los que terminan Pagado
+        // la cierra; en "queda a cuenta" sólo la vincula y no se escribe nada.
+        rowIndexExistente: pedState.cuentaElegida || null,
+        // Sólo lo manda un humano que vio la lista y dijo que ninguna es ésta.
+        // Sin esto el server rechaza escribir una fila nueva cuando el
+        // proveedor ya tiene deuda abierta. Ver POST /api/pedidos/:id/recibir.
+        confirmaNuevo: pedState.cuentaElegida === 0,
         vencimiento: document.getElementById('ped-r-venc').value,
       }),
     });
@@ -12593,6 +12626,7 @@ async function confirmarPedRecibir() {
 
     const queHizo = !asiento ? 'No se tocó Movimientos: sólo quedó marcado como recibido.'
       : asiento.tipo === 'fila-existente' ? `La cuenta pendiente pasó de A pagar a <b>Pagado</b>.`
+      : asiento.tipo === 'ya-cargada' ? 'La deuda ya estaba cargada en Movimientos: se vinculó a este pedido y <b>no se escribió ninguna fila</b>.'
       : asiento.tipo === 'ya-estaba' ? 'Este pedido ya tenía su fila en Movimientos: no se duplicó.'
       : pago === 'a pagar' ? 'Se agregó una fila <b>A pagar</b> — ya aparece en Pagos.'
       : 'Se agregó una fila nueva como <b>Pagado</b>.';
@@ -12605,6 +12639,20 @@ async function confirmarPedRecibir() {
             ? '<br><span style="font-size:11px">Se descontó del esperado del arqueo en curso ✓</span>' : ''),
     });
   } catch (e) {
+    // El server encontró cuentas sin pagar que esta pantalla no tenía — pasa
+    // cuando la página quedó abierta desde antes, o cuando alguien cargó la
+    // factura desde otro lado hace un rato. NO es un error: es la pregunta que
+    // había que hacer, y viene con la lista para contestarla. Se reabre el
+    // modal con lo que dijo el server, que es la versión que manda.
+    const pl = e.payload;
+    if (pl && pl.codigo === 'cuenta-pendiente') {
+      await openPedRecibir(p.id, modoActual);
+      pedState.cuentas = pl.cuentas || [];
+      pedState.cuentaElegida = null;
+      renderPedCuentas();
+      document.getElementById('ped-r-error').textContent = e.message;
+      return;
+    }
     showResultadoModal({
       ok: false,
       titulo: 'No se pudo registrar',

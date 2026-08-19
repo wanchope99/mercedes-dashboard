@@ -1564,11 +1564,20 @@ async function leerProveedoresSheet() {
  * del pedido (la fila ya no está, ya figura pagada, la planilla cambió): son
  * respuestas para el usuario, no fallas del servidor.
  */
-async function marcarFilaPagada({ rowIndex, proveedor, medioPago, usuario, descripcionSesion } = {}) {
+/**
+ * Releer una fila "A pagar" y comprobar que sigue siendo la que el usuario
+ * eligió. Las filas de Movimientos SE MUEVEN cuando alguien edita la planilla a
+ * mano (ver la sección Cajas del CLAUDE.md), así que un rowIndex que viajó por
+ * la red no es una identidad: es una pista que hay que confirmar antes de
+ * escribir sobre ella. Marcar la fila equivocada como Pagada es peor que fallar.
+ *
+ * Vive aparte porque lo necesitan dos caminos con efectos distintos:
+ * marcarFilaPagada (que la escribe) y el "queda a cuenta" de Pedidos (que sólo
+ * la vincula, sin tocar nada). Dos validaciones separadas se desincronizan.
+ */
+async function verificarFilaPendiente({ rowIndex, proveedor } = {}) {
   const idx = parseInt(rowIndex);
   if (!idx || idx < 2) return { ok: false, status: 400, error: 'Falta el registro a pagar' };
-
-  // Releer la fila para validar que sigue siendo la que el usuario eligió
   const movs = await getMovimientos();
   const m = movs.find(x => x.rowIndex === idx);
   if (!m) return { ok: false, status: 404, error: 'No se encontró el registro. Refrescá la página e intentá de nuevo.' };
@@ -1576,6 +1585,42 @@ async function marcarFilaPagada({ rowIndex, proveedor, medioPago, usuario, descr
   if (proveedor && m.proveedor && proveedor.trim().toLowerCase() !== m.proveedor.toLowerCase()) {
     return { ok: false, status: 409, error: 'La planilla cambió desde que abriste el modal. Refrescá e intentá de nuevo.' };
   }
+  return { ok: true, m, idx };
+}
+
+/**
+ * Las filas "A pagar" de un proveedor.
+ *
+ * Es la respuesta a "¿esto que estoy por anotar ya está anotado?", y por eso la
+ * usan tanto el GET que llena el modal como el control de duplicados del server
+ * — que es el que manda. Las filas madre de compras en cuotas quedan afuera
+ * porque no se pagan: se pagan sus cuotas.
+ */
+async function cuentasPendientesDe(proveedor) {
+  const nombre = (proveedor || '').toString().trim().toLowerCase();
+  if (!nombre) return [];
+  const movs = await getMovimientos();
+  return movs
+    .filter(m => m.tipo === 'Gasto' && !m.pagado && !m.esCambio && !m.esFondeo && !m.esCompraEnCuotas)
+    .filter(m => (m.proveedor || '').toLowerCase() === nombre)
+    .map(m => ({
+      rowIndex: m.rowIndex,
+      proveedor: m.proveedor,
+      fecha: m.fecha.toISOString().split('T')[0],
+      vencimiento: m.vencimiento || '',
+      descripcion: m.descripcion || '',
+      categoria: m.categoria || '',
+      medioPago: m.medioPago || '',
+      monto: m.salidaARS || 0,
+      cuota: m.esCuota ? `${m.cuotaNum}/${m.cuotasTotal || '?'}` : '',
+    }))
+    .sort((a, b) => (a.vencimiento || '').localeCompare(b.vencimiento || '') || a.fecha.localeCompare(b.fecha));
+}
+
+async function marcarFilaPagada({ rowIndex, proveedor, medioPago, usuario, descripcionSesion } = {}) {
+  const v = await verificarFilaPendiente({ rowIndex, proveedor });
+  if (!v.ok) return v;
+  const { m, idx } = v;
 
   const medio = normalizarMedio(medioPago);
   const auth = getAuth();
@@ -2242,25 +2287,7 @@ app.delete('/api/pedidos/:id', authMiddleware, adminOnly, async (req, res) => {
 // (se pagan sus cuotas).
 app.get('/api/pedidos/a-pagar', authMiddleware, async (req, res) => {
   try {
-    const proveedor = (req.query.proveedor || '').toString().trim().toLowerCase();
-    if (!proveedor) return res.json({ ok: true, data: [] });
-    const movs = await getMovimientos();
-    const data = movs
-      .filter(m => m.tipo === 'Gasto' && !m.pagado && !m.esCambio && !m.esFondeo && !m.esCompraEnCuotas)
-      .filter(m => (m.proveedor || '').toLowerCase() === proveedor)
-      .map(m => ({
-        rowIndex: m.rowIndex,
-        proveedor: m.proveedor,
-        fecha: m.fecha.toISOString().split('T')[0],
-        vencimiento: m.vencimiento || '',
-        descripcion: m.descripcion || '',
-        categoria: m.categoria || '',
-        medioPago: m.medioPago || '',
-        monto: m.salidaARS || 0,
-        cuota: m.esCuota ? `${m.cuotaNum}/${m.cuotasTotal || '?'}` : '',
-      }))
-      .sort((a, b) => (a.vencimiento || '').localeCompare(b.vencimiento || '') || a.fecha.localeCompare(b.fecha));
-    res.json({ ok: true, data });
+    res.json({ ok: true, data: await cuentasPendientesDe(req.query.proveedor) });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
@@ -2271,11 +2298,44 @@ app.get('/api/pedidos/a-pagar', authMiddleware, async (req, res) => {
  * mismas funciones que usa el resto de la app:
  *
  *   'no'      → no se toca Movimientos. Llegó, la plata se define después.
+ *               Ya no se puede pedir desde la app; queda por las filas viejas.
  *   'pagado'  → con `rowIndexExistente`: marcarFilaPagada() — la misma función
  *               que el botón "Pagar" de Pagos. Sin él: registrarGastoEnLibro()
  *               con estado Pagado, que escribe UNA fila nueva.
- *   'a pagar' → registrarGastoEnLibro() con estado "A pagar" y vencimiento, así
- *               la deuda aparece en la sección Pagos en vez de quedar sólo acá.
+ *   'a pagar' → con `rowIndexExistente`: NO SE ESCRIBE NADA. La deuda ya estaba
+ *               cargada y el pedido queda vinculado a esa fila; ése es el caso
+ *               normal, no la excepción. Sin él: registrarGastoEnLibro() con
+ *               estado "A pagar" y vencimiento.
+ *
+ * ─── El control de duplicados vive ACÁ, no en el navegador ──────────────────
+ *
+ * Desde que esta pantalla la usa el personal y no sólo los dueños, "el modal no
+ * te deja confirmar sin elegir" dejó de ser una garantía: es una regla de una
+ * página que puede estar vieja, recargada a medias o abierta en dos teléfonos.
+ * La única garantía es la que se comprueba del lado del server, y son dos,
+ * distintas y complementarias:
+ *
+ *   1. EL MISMO PEDIDO, DOS VECES → lo tapa `registrarGastoEnLibro`: el id del
+ *      pedido va a la columna H y se relee (sin caché) antes de escribir. Un
+ *      doble toque en un teléfono en el medio del servicio, o un reintento por
+ *      timeout, no pueden escribir dos filas.
+ *   2. LA MISMA MERCADERÍA YA CARGADA POR OTRO CAMINO (Pablo a mano, el bot de
+ *      facturas) → la tapa el chequeo de abajo: si el proveedor tiene filas "A
+ *      pagar" y nadie dijo explícitamente que esto es otra cosa, el server
+ *      RECHAZA con 409 y devuelve las cuentas para que se elija. El default es
+ *      NO escribir. Duplicar una deuda ya cargada es el error más caro de esta
+ *      pantalla y el único que no deja rastro de que pasó.
+ *
+ * `confirmaNuevo` es la respuesta a ese 409 y significa una sola cosa: un humano
+ * vio la lista de cuentas pendientes y dijo que ninguna es ésta. El navegador no
+ * lo puede mandar por las suyas al abrir el modal.
+ *
+ * Lo que este control NO garantiza: las cuentas salen de `getMovimientos()`, que
+ * está cacheado unos minutos, así que una fila cargada hace un instante desde
+ * otra sesión podría no verse todavía. Es a propósito — releer el libro entero
+ * sin caché en cada recepción es lento justo cuando el proveedor está en la
+ * puerta — y el caso que más se repite (el mismo pedido dos veces) lo cubre el
+ * punto 1, que sí lee sin caché.
  *
  * El orden es LIBRO PRIMERO, hoja Pedidos después, y el pedido sólo se marca si
  * el asiento salió bien. Al revés, un fallo de Sheets en el medio dejaría un
@@ -2296,15 +2356,41 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
     }
 
     const pago = pedidos.normalizarPago(req.body.pago);
-    const monto = Number(req.body.monto) || 0;
+    let monto = Number(req.body.monto) || 0;
     const medioPago = (req.body.medioPago || '').toString();
+    const idx = parseInt(req.body.rowIndexExistente) || 0;
     let ref = '', asiento = null;
 
     if (pago !== 'no') {
-      if (monto <= 0) return res.status(400).json({ ok: false, error: 'Poné cuánto se pagó.' });
+      // Sin fila elegida, este camino va a ESCRIBIR una fila nueva. Antes hay
+      // que estar seguro de que no está ya cargada — punto 2 del comentario de
+      // arriba. Ante la duda no se escribe: se pregunta.
+      if (!idx) {
+        const pendientes = await cuentasPendientesDe(pedido.proveedor);
+        if (pendientes.length && !req.body.confirmaNuevo) {
+          return res.status(409).json({
+            ok: false,
+            codigo: 'cuenta-pendiente',
+            cuentas: pendientes,
+            error: `"${pedido.proveedor}" ya tiene ${pendientes.length} `
+              + `cuenta${pendientes.length !== 1 ? 's' : ''} sin pagar en Movimientos. `
+              + 'No se escribió nada: elegí cuál corresponde a este pedido, o confirmá que es otra cosa.',
+          });
+        }
+      }
 
-      const idx = parseInt(req.body.rowIndexExistente);
-      if (pago === 'pagado' && idx) {
+      if (pago === 'a pagar' && idx) {
+        // La deuda ya está en el libro: lo único que falta es dejar dicho que
+        // ESTE pedido es esa fila. No se escribe en Movimientos — ni el monto,
+        // ni el estado, ni el medio. La fila es de quien la cargó y puede tener
+        // fórmulas, cuotas o un vencimiento negociado que acá no conocemos.
+        const v = await verificarFilaPendiente({ rowIndex: idx, proveedor: pedido.proveedor });
+        if (!v.ok) return res.status(v.status).json({ ok: false, error: v.error });
+        ref = `fila ${idx}`;
+        monto = v.m.salidaARS || monto;
+        asiento = { tipo: 'ya-cargada', rowIndex: idx, monto, proveedor: v.m.proveedor };
+      } else if (pago === 'pagado' && idx) {
+        if (monto <= 0) return res.status(400).json({ ok: false, error: 'Poné cuánto se pagó.' });
         const r = await marcarFilaPagada({
           rowIndex: idx,
           proveedor: pedido.proveedor,
@@ -2316,6 +2402,7 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
         ref = `fila ${r.rowIndex}`;
         asiento = { tipo: 'fila-existente', ...r };
       } else {
+        if (monto <= 0) return res.status(400).json({ ok: false, error: 'Poné cuánto se pagó.' });
         const r = await registrarGastoEnLibro({
           facturaId: pedido.id,
           fecha: pedido.fecha,
