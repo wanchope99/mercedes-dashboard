@@ -418,24 +418,34 @@
        y en qué estado está (der). El comentario dejó de estar escondido detrás
        de un "⋯" porque es la mitad del dato: "hacer" sin decir cuánto ni para
        cuándo obliga a preguntarle a Pablo, que es lo que esta pantalla evita. */
-    .cc-item { display: grid; grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) auto;
-               gap: 10px; align-items: center; padding: 9px 0 9px 12px; border-top: 1px solid var(--border);
+    .cc-item { display: grid; grid-template-columns: minmax(130px, 230px) minmax(0, 1fr) auto;
+               gap: 12px; align-items: center; padding: 9px 0 9px 14px; border-top: 1px solid var(--border);
                position: relative; }
-    .cc-franja { width: 4px; border-radius: 2px; align-self: stretch; margin: -9px 0 -9px -12px; background: var(--border); }
+    /* La franja va POSICIONADA, no como celda de la grilla. Cuando la fila era
+       flex daba igual, pero en una grilla de tres columnas un cuarto hijo se va
+       a una segunda fila y descoloca todo: el nombre se comía la columna del
+       comentario y los botones caían abajo. Sacarla del flujo es lo que deja
+       que las tres zonas sean exactamente tres. */
+    .cc-franja { position: absolute; left: 0; top: 0; bottom: 0;
+                 width: 4px; border-radius: 2px; background: var(--border); }
     .cc-franja.ok { background: var(--green); }
     .cc-franja.hacer { background: var(--orange); }
     .cc-franja.pedido { background: var(--blue); }
     .cc-franja.dudoso { background: var(--text-muted); }
     /* Sin tocar: punteado y transparente. En esta app lo que todavía no es una
        fila se dibuja punteado, y un ítem que nadie miró todavía no es nada. */
-    .cc-item.sinTocar .cc-franja { background: transparent; border-left: 2px dashed var(--border); width: 2px; }
+    .cc-item.sinTocar .cc-franja { background: transparent; border-left: 2px dashed var(--border); width: 0; }
     .cc-nombre { font-size: 14px; line-height: 1.4; min-width: 0; }
-    .cc-estados { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+    /* Sin wrap: tres o cuatro chips cortos entran siempre en una línea, y
+       dejarlos partirse era la otra mitad de la fila rota. */
+    .cc-estados { display: flex; gap: 5px; flex-wrap: nowrap; justify-content: flex-end; }
     /* El comentario obligatorio (estado "Ver") se marca en el borde: es lo
        único que puede frenar el guardado, así que tiene que verse desde lejos. */
     .cc-input.falta { border-color: var(--orange); }
     .cc-input.falta::placeholder { color: var(--orange); opacity: .8; }
-    .cc-coment { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+    /* Bloque, no inline: es el renglón chico de abajo ("antes: Hacer"), y con la
+       columna del nombre ya angosta, en línea se enredaba con el propio nombre. */
+    .cc-coment { display: block; font-size: 11px; color: var(--text-muted); margin-top: 3px; }
     .cc-chip { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap;
                background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); }
     .cc-chip.ok { background: var(--green-dim); border-color: var(--green); color: var(--green); }
@@ -451,8 +461,12 @@
     button.cc-chip { cursor: pointer; font-family: inherit; }
     button.cc-chip:hover { filter: brightness(1.25); }
     .cc-chip.sel { outline: 2px solid currentColor; outline-offset: 1px; }
-    .cc-input { width: 100%; background: var(--surface2); border: 1px solid var(--border);
-                color: var(--text); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; font-family: inherit; }
+    /* Un renglón, y que se quede en uno: son comentarios de pocas palabras
+       ("quedan 2", "falta ají"), no un campo de notas. `min-width: 0` es lo que
+       evita que un texto largo estire la columna y vuelva a romper la fila. */
+    .cc-input { width: 100%; min-width: 0; background: var(--surface2); border: 1px solid var(--border);
+                color: var(--text); border-radius: 8px; padding: 6px 10px; font-size: 12.5px;
+                font-family: inherit; line-height: 1.4; text-overflow: ellipsis; }
     .cc-input:focus { border-color: var(--accent); outline: none; }
     .cc-singuardar { position: sticky; top: 0; z-index: 5; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
                      padding: 10px 12px; margin-bottom: 10px; border-radius: 8px;
@@ -957,7 +971,7 @@
          el comentario abajo a lo ancho, y los estados debajo alineados a la
          izquierda para que el pulgar los alcance. */
       .cc-item { grid-template-columns: 1fr; gap: 7px; }
-      .cc-estados { justify-content: flex-start; }
+      .cc-estados { justify-content: flex-start; flex-wrap: wrap; }
       /* ── Barras superiores: menos padding lateral, todo más compacto ── */
       /* El header tiene que entrar en una línea. Sobra el nombre del bar (ya está
          el logo) y el nombre del usuario, que no aportan nada parado en la calle.
