@@ -76,6 +76,11 @@ if (!JWT_SECRET) {
 // `pablo` y `tincho` son cuentas propias con los mismos permisos que admin. Son
 // separadas y no un login compartido porque el JWT lleva el `usuario`, que es lo
 // que después permite mandarle notificaciones a cada uno por su lado.
+//
+// `charly`, `juan` y `ezequiel` son el personal: rol `encargado`. Cada uno con
+// su cuenta por la misma razón —lo que se marca en Pedidos y en Mantenimiento
+// queda firmado con el nombre de quien lo marcó, y con un login compartido eso
+// sería una firma que no dice nada.
 const USUARIOS = Object.create(null);
 
 function _registrarUsuario(clave, { password, rol, nombre }) {
@@ -87,6 +92,8 @@ _registrarUsuario('admin',  { password: process.env.ADMIN_PASSWORD,  rol: 'admin
 _registrarUsuario('charly', { password: process.env.CHARLY_PASSWORD, rol: 'encargado', nombre: 'Charly' });
 _registrarUsuario('pablo',  { password: process.env.PABLO_PASSWORD,  rol: 'admin',     nombre: 'Pablo' });
 _registrarUsuario('tincho', { password: process.env.TINCHO_PASSWORD, rol: 'admin',     nombre: 'Tincho' });
+_registrarUsuario('juan',   { password: process.env.JUAN_PASSWORD,   rol: 'encargado', nombre: 'Juan' });
+_registrarUsuario('ezequiel', { password: process.env.EZEQUIEL_PASSWORD, rol: 'encargado', nombre: 'Ezequiel' });
 
 // Se listan al arrancar (sin las claves). Una cuenta sin su variable no se crea,
 // y eso desde afuera se ve igual que una contraseña mal tipeada: este log es la
@@ -96,7 +103,10 @@ if (!_cuentas.length) {
   console.error('NO HAY NINGUNA CUENTA HABILITADA. Cargá al menos ADMIN_PASSWORD; nadie puede entrar.');
 } else {
   console.log(`Cuentas habilitadas: ${_cuentas.join(', ')}`);
-  for (const [clave, envVar] of [['admin', 'ADMIN_PASSWORD'], ['charly', 'CHARLY_PASSWORD'], ['pablo', 'PABLO_PASSWORD'], ['tincho', 'TINCHO_PASSWORD']]) {
+  for (const [clave, envVar] of [
+    ['admin', 'ADMIN_PASSWORD'], ['charly', 'CHARLY_PASSWORD'], ['pablo', 'PABLO_PASSWORD'],
+    ['tincho', 'TINCHO_PASSWORD'], ['juan', 'JUAN_PASSWORD'], ['ezequiel', 'EZEQUIEL_PASSWORD'],
+  ]) {
     if (!USUARIOS[clave]) console.warn(`  · "${clave}" deshabilitado: falta ${envVar}`);
   }
 }

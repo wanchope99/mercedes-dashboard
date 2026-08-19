@@ -81,6 +81,8 @@ no la tiene, no existe y no se puede usar para entrar.
 | `CHARLY_PASSWORD` | Usuario `charly` (rol encargado) | La cuenta no existe |
 | `PABLO_PASSWORD` | Usuario `pablo` (rol admin) | La cuenta no existe |
 | `TINCHO_PASSWORD` | Usuario `tincho` (rol admin) | La cuenta no existe |
+| `JUAN_PASSWORD` | Usuario `juan` (rol encargado) | La cuenta no existe |
+| `EZEQUIEL_PASSWORD` | Usuario `ezequiel` (rol encargado) | La cuenta no existe |
 
 `JWT_SECRET` tiene que ser largo y aleatorio, y **no se comparte con nadie**:
 quien la tenga puede firmarse un token que diga `rol: admin` y entrar sin

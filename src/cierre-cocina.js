@@ -60,6 +60,15 @@ const cache = new NodeCache({ stdTTL: 300 });
 const ESTADOS = ['ok', 'hacer', 'pedido', 'dudoso'];
 const SIN_TOCAR = 'sinTocar';
 
+// `dudoso` se muestra como "Ver", y "ver" sin decir QUÉ hay que ver no dice
+// nada: al día siguiente alguien encuentra el ítem marcado y tiene que salir a
+// preguntar. Así que en ese estado el comentario es obligatorio, y se exige acá
+// además de en la pantalla — el navegador es una comodidad, la regla vive donde
+// se escribe. En los otros tres es opcional: ahí la palabra ya alcanza, y pedir
+// un texto para poder marcar cuarenta ítems en orden es garantizar que nadie
+// los marque.
+const ESTADOS_CON_COMENTARIO_OBLIGATORIO = ['dudoso'];
+
 // ─── El mapeo, en un solo lugar ─────────────────────────────────────────────
 // `col` es la posición y es la autoridad. `header` es lo que esperamos leer en
 // la fila 1 y sirve únicamente para avisar que la hoja cambió de forma — ver la
@@ -538,6 +547,18 @@ async function guardarCierre({ fechaServicio, cambios = [], nota = '', reemplaza
     }
   }
 
+  // Sólo se exige sobre lo que se está marcando AHORA. Lo que ya estaba escrito
+  // así en la planilla no es responsabilidad de quien cierra hoy, y bloquearle
+  // el cierre por eso lo dejaría sin poder guardar nada.
+  const sinComentario = cambios.filter(c =>
+    ESTADOS_CON_COMENTARIO_OBLIGATORIO.includes(c.estado) && !txt(c.comentario));
+  if (sinComentario.length) {
+    throw new Error(
+      `Hay ${sinComentario.length} ${sinComentario.length === 1 ? 'ítem marcado' : 'ítems marcados'} `
+      + `para ver sin decir qué hay que ver: ${sinComentario.slice(0, 5).map(c => c.nombre).join(', ')}`
+      + `${sinComentario.length > 5 ? ` y ${sinComentario.length - 5} más` : ''}. No se guardó nada.`);
+  }
+
   const api = _sheets(false);
   await _ensureHojaPropia(api, HOJA_CIERRES, HEADER_CIERRES);
   await _ensureHojaPropia(api, HOJA_DETALLE, HEADER_DETALLE);
@@ -671,5 +692,5 @@ module.exports = {
   parsearEstado, leerFilas, notasSueltas, claveDe, duplicadosDe, resumenCierre, avisosDeHeaders,
   resolverColumnas, colLetra, parsearCierres, norm, celda, esError,
   // Constantes
-  SOLAPAS, ESTADOS, SIN_TOCAR, solapaDe, HOJA_CIERRES, HOJA_DETALLE,
+  SOLAPAS, ESTADOS, SIN_TOCAR, solapaDe, HOJA_CIERRES, HOJA_DETALLE, ESTADOS_CON_COMENTARIO_OBLIGATORIO,
 };

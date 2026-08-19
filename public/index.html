@@ -396,8 +396,31 @@
     .cc-solapa:hover { color: var(--text); }
     .cc-solapa.active { background: var(--accent); border-color: var(--accent); color: var(--text); }
     .cc-solapa-n { font-size: 11px; opacity: .7; margin-left: 5px; }
-    .cc-grupo { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin: 16px 0 4px; }
-    .cc-item { display: flex; gap: 10px; align-items: center; padding: 9px 0 9px 12px; border-top: 1px solid var(--border); }
+    /* La cabecera de cada categoría: se pliega, y lleva los dos botones que
+       marcan la categoría entera de una. Con 40 ítems en pantalla, tocar uno
+       por uno es la razón por la que la planilla se seguía usando a mano. */
+    .cc-grupo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+                font-size: 11px; color: var(--text-muted); text-transform: uppercase;
+                letter-spacing: .5px; margin: 18px 0 4px; }
+    .cc-grupo-tit { display: flex; align-items: center; gap: 7px; cursor: pointer; flex: 1; min-width: 0; }
+    .cc-grupo-tit:hover { color: var(--text); }
+    .cc-flecha { font-size: 9px; transition: transform .15s; display: inline-block; }
+    .cc-grupo.plegado .cc-flecha { transform: rotate(-90deg); }
+    .cc-grupo-n { opacity: .6; font-weight: 400; letter-spacing: 0; text-transform: none; }
+    .cc-todos { display: flex; gap: 6px; }
+    .cc-todos button { background: transparent; border: 1px solid var(--border); color: var(--text-muted);
+                       cursor: pointer; border-radius: 99px; padding: 3px 10px; font-size: 10.5px;
+                       font-weight: 600; font-family: inherit; text-transform: none; letter-spacing: 0; white-space: nowrap; }
+    .cc-todos button.ok:hover { border-color: var(--green); color: var(--green); background: var(--green-dim); }
+    .cc-todos button.hacer:hover { border-color: var(--orange); color: var(--orange); background: var(--orange-dim); }
+
+    /* Tres zonas fijas: qué es (izq), el comentario (centro, SIEMPRE presente)
+       y en qué estado está (der). El comentario dejó de estar escondido detrás
+       de un "⋯" porque es la mitad del dato: "hacer" sin decir cuánto ni para
+       cuándo obliga a preguntarle a Pablo, que es lo que esta pantalla evita. */
+    .cc-item { display: grid; grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) auto;
+               gap: 10px; align-items: center; padding: 9px 0 9px 12px; border-top: 1px solid var(--border);
+               position: relative; }
     .cc-franja { width: 4px; border-radius: 2px; align-self: stretch; margin: -9px 0 -9px -12px; background: var(--border); }
     .cc-franja.ok { background: var(--green); }
     .cc-franja.hacer { background: var(--orange); }
@@ -406,7 +429,12 @@
     /* Sin tocar: punteado y transparente. En esta app lo que todavía no es una
        fila se dibuja punteado, y un ítem que nadie miró todavía no es nada. */
     .cc-item.sinTocar .cc-franja { background: transparent; border-left: 2px dashed var(--border); width: 2px; }
-    .cc-nombre { font-size: 14px; line-height: 1.4; flex: 1; }
+    .cc-nombre { font-size: 14px; line-height: 1.4; min-width: 0; }
+    .cc-estados { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+    /* El comentario obligatorio (estado "Ver") se marca en el borde: es lo
+       único que puede frenar el guardado, así que tiene que verse desde lejos. */
+    .cc-input.falta { border-color: var(--orange); }
+    .cc-input.falta::placeholder { color: var(--orange); opacity: .8; }
     .cc-coment { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
     .cc-chip { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap;
                background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); }
@@ -423,13 +451,9 @@
     button.cc-chip { cursor: pointer; font-family: inherit; }
     button.cc-chip:hover { filter: brightness(1.25); }
     .cc-chip.sel { outline: 2px solid currentColor; outline-offset: 1px; }
-    .cc-mas { background: transparent; border: 1px solid var(--border); color: var(--text-muted); cursor: pointer;
-              border-radius: 6px; padding: 2px 7px; font-size: 13px; line-height: 1; }
-    .cc-mas:hover { color: var(--text); }
-    .cc-panel { padding: 8px 0 12px 26px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .cc-estados { display: flex; gap: 6px; flex-wrap: wrap; }
-    .cc-input { flex: 1; min-width: 200px; background: var(--surface2); border: 1px solid var(--border);
-                color: var(--text); border-radius: 8px; padding: 7px 10px; font-size: 13px; font-family: inherit; }
+    .cc-input { width: 100%; background: var(--surface2); border: 1px solid var(--border);
+                color: var(--text); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; font-family: inherit; }
+    .cc-input:focus { border-color: var(--accent); outline: none; }
     .cc-singuardar { position: sticky; top: 0; z-index: 5; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
                      padding: 10px 12px; margin-bottom: 10px; border-radius: 8px;
                      background: var(--accent); border: 1px solid var(--accent); font-size: 13px; }
@@ -929,6 +953,11 @@
        Si este número cambia, cambiarlo también en la constante MQ_PHONE del JS.
        ══════════════════════════════════════════════════════════════════════ */
     @media (max-width: 640px) {
+      /* En el teléfono las tres zonas no entran en una línea: el nombre arriba,
+         el comentario abajo a lo ancho, y los estados debajo alineados a la
+         izquierda para que el pulgar los alcance. */
+      .cc-item { grid-template-columns: 1fr; gap: 7px; }
+      .cc-estados { justify-content: flex-start; }
       /* ── Barras superiores: menos padding lateral, todo más compacto ── */
       /* El header tiene que entrar en una línea. Sobra el nombre del bar (ya está
          el logo) y el nombre del usuario, que no aportan nada parado en la calle.
@@ -11738,7 +11767,13 @@ document.addEventListener('DOMContentLoaded', () => {
 // lo que la foto es — un documento que se firma una vez, no un chorro de
 // ediciones. La contra es que se pueden perder, así que hay banner permanente y
 // un guard de salida.
-const ccState = { data: null, solapa: null, cambios: new Map(), abierto: null, guardando: false };
+const ccState = {
+  data: null, solapa: null, cambios: new Map(), guardando: false,
+  // Qué categorías están plegadas, con clave solapa|grupo. Sobrevive a los
+  // re-render (que son uno por marca) porque si no, plegar algo y marcar el
+  // ítem siguiente lo volvería a desplegar.
+  plegados: new Set(),
+};
 
 // La clave es el texto crudo, sin normalizar: el server construye la suya con
 // grupo y nombre tal como los mandamos, así que acá alcanza con que sea única.
@@ -11749,6 +11784,21 @@ const ccComentDe = (solapaId, it) => {
   const p = ccPendiente(ccClave(solapaId, it));
   return p ? (p.comentario || '') : (it.comentario || '');
 };
+
+// "Ver" quiere decir "mirá esto", y sin decir QUÉ hay que mirar no dice nada:
+// al día siguiente alguien encuentra un ítem en amarillo y tiene que preguntar.
+// Por eso en ese estado el comentario es obligatorio. En "OK", "Hacer" y
+// "Pedido" es opcional: ahí la palabra ya alcanza, y exigir un texto para poder
+// marcar cuarenta ítems en orden sería garantizar que nadie los marque.
+const ccComentObligatorio = estado => estado === 'dudoso';
+
+// Los cambios sin el comentario que su estado exige. Es lo que frena el
+// guardado, y se calcula sobre los CAMBIOS y no sobre la planilla entera: lo
+// que ya estaba escrito así no es responsabilidad de quien cierra hoy.
+function ccFaltantes() {
+  return [...ccState.cambios.values()].filter(c =>
+    ccComentObligatorio(c.estado) && !(c.comentario || '').trim());
+}
 
 async function loadCierreCocina(btn) {
   if (btn) btn.classList.add('spinning');
@@ -11766,7 +11816,37 @@ async function loadCierreCocina(btn) {
   } finally { if (btn) btn.classList.remove('spinning'); }
 }
 
-function ccElegirSolapa(id) { ccState.solapa = id; ccState.abierto = null; renderCierreCocina(); }
+function ccElegirSolapa(id) { ccState.solapa = id; renderCierreCocina(); }
+
+const ccClaveGrupo = (solapaId, grupo) => `${solapaId}|${grupo}`;
+
+function ccPlegar(solapaId, grupo) {
+  const k = ccClaveGrupo(solapaId, grupo);
+  if (ccState.plegados.has(k)) ccState.plegados.delete(k);
+  else ccState.plegados.add(k);
+  renderCierreCocina();
+}
+
+/**
+ * Marcar una categoría entera.
+ *
+ * Lo normal al cierre es que una categoría esté toda bien y haya una o dos
+ * excepciones. Marcar treinta ítems de a uno para llegar a eso es la razón por
+ * la que la planilla se seguía llenando a mano: el camino corto tiene que ser
+ * el caso normal, y las excepciones se corrigen después una por una.
+ *
+ * Los comentarios que ya estaban NO se tocan: se cambia el estado y nada más.
+ */
+function ccMarcarGrupo(solapaId, grupo, estado) {
+  const items = (ccState.data.hojas[solapaId].items || []).filter(it => (it.grupo || '') === grupo);
+  for (const it of items) {
+    const clave = ccClave(solapaId, it);
+    const comentario = ccComentDe(solapaId, it);
+    if (estado === it.estado && comentario === (it.comentario || '')) ccState.cambios.delete(clave);
+    else ccState.cambios.set(clave, { solapa: solapaId, grupo: it.grupo, nombre: it.nombre, estado, comentario });
+  }
+  renderCierreCocina();
+}
 
 const CC_LABEL = { ok: 'OK', hacer: 'Hacer', pedido: 'Pedido', dudoso: 'Ver', sinTocar: 'Sin marcar' };
 // "Hacer" quiere decir cosas distintas según la lista, y el botón tiene que
@@ -11774,15 +11854,6 @@ const CC_LABEL = { ok: 'OK', hacer: 'Hacer', pedido: 'Pedido', dudoso: 'Ver', si
 const ccLabelEstado = (solapaId, estado) =>
   (estado === 'hacer' && solapaId !== 'produ') ? 'Comprar' : CC_LABEL[estado] || estado;
 
-// El camino corto: un toque alterna entre "está bien" y "hay que hacerlo", que
-// es el 90% de lo que pasa al cierre. Los otros estados están a un toque más,
-// abriendo la fila.
-function ccToggle(solapaId, grupo, nombre) {
-  const it = (ccState.data.hojas[solapaId].items || []).find(x => x.grupo === grupo && x.nombre === nombre);
-  if (!it) return;
-  const actual = ccEstadoDe(solapaId, it);
-  ccMarcar(solapaId, grupo, nombre, actual === 'hacer' ? 'ok' : 'hacer');
-}
 
 function ccMarcar(solapaId, grupo, nombre, estado) {
   const it = (ccState.data.hojas[solapaId].items || []).find(x => x.grupo === grupo && x.nombre === nombre);
@@ -11796,29 +11867,35 @@ function ccMarcar(solapaId, grupo, nombre, estado) {
   renderCierreCocina();
 }
 
-function ccComentar(solapaId, grupo, nombre, valor) {
+// Escribir NO re-renderiza la lista: perdería el foco en cada tecla. Se toca el
+// banner (que cuenta y avisa qué falta) y el borde del propio input.
+function ccComentar(solapaId, grupo, nombre, valor, input) {
   const it = (ccState.data.hojas[solapaId].items || []).find(x => x.grupo === grupo && x.nombre === nombre);
   if (!it) return;
   const clave = ccClave(solapaId, it);
   const estado = ccEstadoDe(solapaId, it);
   if (estado === it.estado && valor === (it.comentario || '')) ccState.cambios.delete(clave);
   else ccState.cambios.set(clave, { solapa: solapaId, grupo, nombre, estado, comentario: valor });
+  if (input) input.classList.toggle('falta', ccComentObligatorio(estado) && !valor.trim());
   ccRenderBanner();
 }
-
-function ccAbrir(clave) { ccState.abierto = ccState.abierto === clave ? null : clave; renderCierreCocina(); }
 
 function ccRenderBanner() {
   const el = document.getElementById('cc-banner');
   if (!el) return;
   const n = ccState.cambios.size;
-  el.innerHTML = n
-    ? `<div class="cc-singuardar">
-         <span><b>${n}</b> ${n === 1 ? 'marca sin guardar' : 'marcas sin guardar'}</span>
-         <button class="btn" onclick="ccGuardar(this)"${ccState.guardando ? ' disabled' : ''}>Guardar el cierre</button>
-         <button class="nota-btn" onclick="ccDescartar()">Descartar</button>
-       </div>`
-    : '';
+  if (!n) { el.innerHTML = ''; return; }
+  // Los que están en "Ver" sin decir qué hay que ver. El botón se deshabilita y
+  // se nombran: un botón gris sin explicación es peor que no tenerlo.
+  const faltan = ccFaltantes();
+  el.innerHTML = `<div class="cc-singuardar">
+       <span><b>${n}</b> ${n === 1 ? 'marca sin guardar' : 'marcas sin guardar'}</span>
+       <button class="btn" onclick="ccGuardar(this)"${(ccState.guardando || faltan.length) ? ' disabled' : ''}>Guardar el cierre</button>
+       <button class="nota-btn" onclick="ccDescartar()">Descartar</button>
+       ${faltan.length ? `<span style="font-size:12px">Falta escribir qué hay que ver en: `
+         + `<b>${faltan.slice(0, 4).map(c => escapeHtml(c.nombre)).join(', ')}</b>`
+         + `${faltan.length > 4 ? ` y ${faltan.length - 4} más` : ''}.</span>` : ''}
+     </div>`;
 }
 
 function ccDescartar() {
@@ -11931,45 +12008,60 @@ function renderCierreCocina() {
 
   const sid = solapa.id;
   const arg = it => `'${sid}',${JSON.stringify(it.grupo)},${JSON.stringify(it.nombre)}`.replace(/"/g, '&quot;');
+  const argGrupo = grupo => `'${sid}',${JSON.stringify(grupo)}`.replace(/"/g, '&quot;');
 
-  cont.innerHTML = `<div id="cc-banner"></div>` + avisos + kpis + [...grupos.entries()].map(([grupo, items]) => `
-      <div class="cc-grupo">${escapeHtml(grupo)}</div>
-      ${items.map(it => {
-        const clave = ccClave(sid, it);
-        const estado = ccEstadoDe(sid, it);
-        const coment = ccComentDe(sid, it);
-        const tocado = ccState.cambios.has(clave);
-        const abierto = ccState.abierto === clave;
-        return `
-        <div class="cc-item ${escapeHtml(estado)}${tocado ? ' tocado' : ''}">
-          <span class="cc-franja ${escapeHtml(estado)}"></span>
-          <span class="cc-nombre">${escapeHtml(it.nombre)}
-            ${coment ? `<span class="cc-coment">${escapeHtml(coment)}</span>` : ''}
-            ${tocado && it.estado !== estado ? `<span class="cc-coment">antes: ${escapeHtml(ccLabelEstado(sid, it.estado))}</span>` : ''}
-          </span>
-          ${it.extra ? `<span class="cc-chip">${escapeHtml(it.extra)}</span>` : ''}
-          ${solapa.escribible ? `
-            <button class="cc-chip ${escapeHtml(estado)}" onclick="ccToggle(${arg(it)})"
-                    title="Un toque: pasa de OK a ${escapeHtml(ccLabelEstado(sid, 'hacer'))} y al revés">
-              ${escapeHtml(ccLabelEstado(sid, estado))}
-            </button>
-            <button class="cc-mas" onclick="ccAbrir(${JSON.stringify(clave).replace(/"/g, '&quot;')})" title="Más estados y comentario">⋯</button>
-          ` : ''}
-        </div>
-        ${abierto ? `
-        <div class="cc-panel">
-          <div class="cc-estados">
+  cont.innerHTML = `<div id="cc-banner"></div>` + avisos + kpis + [...grupos.entries()].map(([grupo, items]) => {
+    const plegado = ccState.plegados.has(ccClaveGrupo(sid, grupo));
+    // Cuántos de esta categoría reclaman algo. Es lo que hace que valga la pena
+    // plegarla: se ve de un vistazo si adentro hay algo o está toda en orden.
+    const pendientes = items.filter(it => {
+      const e = ccEstadoDe(sid, it);
+      return e === 'hacer' || e === 'dudoso' || e === 'sinTocar';
+    }).length;
+
+    const cabecera = `<div class="cc-grupo${plegado ? ' plegado' : ''}">
+        <span class="cc-grupo-tit" onclick="ccPlegar(${argGrupo(grupo)})">
+          <span class="cc-flecha">▼</span>
+          <span>${escapeHtml(grupo)}</span>
+          <span class="cc-grupo-n">${items.length}${pendientes ? ` · ${pendientes} pendiente${pendientes !== 1 ? 's' : ''}` : ''}</span>
+        </span>
+        ${solapa.escribible ? `<span class="cc-todos">
+          <button class="ok" onclick="ccMarcarGrupo(${argGrupo(grupo)},'ok')">OK a todos</button>
+          <button class="hacer" onclick="ccMarcarGrupo(${argGrupo(grupo)},'hacer')">${escapeHtml(ccLabelEstado(sid, 'hacer'))} a todos</button>
+        </span>` : ''}
+      </div>`;
+
+    if (plegado) return cabecera;
+
+    return cabecera + items.map(it => {
+      const estado = ccEstadoDe(sid, it);
+      const coment = ccComentDe(sid, it);
+      const tocado = ccState.cambios.has(ccClave(sid, it));
+      const falta = ccComentObligatorio(estado) && !coment.trim();
+      return `
+      <div class="cc-item ${escapeHtml(estado)}${tocado ? ' tocado' : ''}">
+        <span class="cc-franja ${escapeHtml(estado)}"></span>
+        <span class="cc-nombre">${escapeHtml(it.nombre)}
+          ${tocado && it.estado !== estado ? `<span class="cc-coment">antes: ${escapeHtml(ccLabelEstado(sid, it.estado))}</span>` : ''}
+        </span>
+        ${solapa.escribible ? `
+          <input class="cc-input${falta ? ' falta' : ''}" type="text"
+                 placeholder="${falta ? '¿Qué hay que ver? (obligatorio)' : 'Comentario (opcional)'}"
+                 value="${escapeHtml(coment)}"
+                 oninput="ccComentar(${arg(it)}, this.value, this)">
+          <span class="cc-estados">
             ${(solapa.estados || []).map(e => `
               <button class="cc-chip ${escapeHtml(e)}${e === estado ? ' sel' : ''}" onclick="ccMarcar(${arg(it)},'${e}')">
                 ${escapeHtml(ccLabelEstado(sid, e))}
               </button>`).join('')}
-          </div>
-          <input class="cc-input" type="text" placeholder="Comentario (cuánto, para cuándo, con quién)"
-                 value="${escapeHtml(coment)}"
-                 oninput="ccComentar(${arg(it)}, this.value)">
-        </div>` : ''}`;
-      }).join('')}
-    `).join('');
+          </span>
+        ` : `
+          <span class="cc-coment" style="margin:0">${escapeHtml(coment)}</span>
+          ${it.extra ? `<span class="cc-chip">${escapeHtml(it.extra)}</span>` : '<span></span>'}
+        `}
+      </div>`;
+    }).join('');
+  }).join('');
   ccRenderBanner();
 }
 
