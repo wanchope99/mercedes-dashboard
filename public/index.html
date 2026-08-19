@@ -540,11 +540,6 @@
     #ped-recibir-overlay input[type="date"] { color-scheme: dark; }
     /* Las cuentas pendientes del proveedor: se elige una y esa es la que se
        cierra. Mismo componente que el modal de Pagos (.pg-item). */
-    .ped-cuenta { display: flex; justify-content: space-between; align-items: center; gap: 10px; background: var(--surface2);
-                  border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; cursor: pointer; font-size: 12.5px; }
-    .ped-cuenta:hover { border-color: #5a5a7a; }
-    .ped-cuenta.selected { border-color: var(--accent); background: var(--border); }
-    .ped-cuenta-sub { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
 
     @media (max-width: 900px) {
       .ped-alta { grid-template-columns: 1fr 1fr; }
@@ -1542,20 +1537,21 @@
      explícitamente qué va a pasar en la planilla antes de confirmar. -->
 <div class="modal-overlay" id="ped-recibir-overlay">
   <div class="modal" style="max-width:520px">
-    <!-- El título dice cuál de los tres botones se apretó. NO hay un select de
-         "¿se pagó?" adentro: la pregunta ya se contestó afuera, y repetirla acá
-         era pedir dos veces la misma decisión. Para cambiar de idea, Cancelar. -->
+    <!-- El título dice cuál de los tres botones se apretó. Adentro no se decide
+         nada más: ni si se pagó (lo dijo el botón) ni contra qué fila de
+         Movimientos va (lo resuelve el server). Sólo se pregunta lo que hace
+         falta para escribir una fila si no existiera. Para cambiar de idea,
+         Cancelar. -->
     <div class="modal-title" id="ped-r-titulo">Recibir pedido</div>
     <div id="ped-r-cabecera" style="font-size:13px;color:var(--text-muted);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;line-height:1.8;margin-bottom:14px"></div>
 
-    <div id="ped-r-plata">
-      <div class="form-group full" id="ped-r-lista-wrap" style="display:none;margin-bottom:12px">
-        <label id="ped-r-lista-label">Este proveedor ya tiene cuentas pendientes</label>
-        <div id="ped-r-lista"></div>
-      </div>
+    <div>
       <div class="form-group full" style="margin-bottom:12px">
         <label id="ped-r-monto-label">Cuánto se pagó</label>
-        <input type="text" id="ped-r-monto" inputmode="numeric" placeholder="0" style="width:100%">
+        <!-- El monto decide qué fila matchea (el monto exacto manda sobre la
+             fecha), así que al tipearlo se vuelve a preguntar el plan. -->
+        <input type="text" id="ped-r-monto" inputmode="numeric" placeholder="0"
+               oninput="onPedMontoChange()" style="width:100%">
       </div>
       <div class="form-group full" id="ped-r-medio-wrap" style="margin-bottom:12px">
         <label id="ped-r-medio-label">Con qué medio</label>
@@ -12095,8 +12091,7 @@ const pedState = {
   abiertos: new Set(),
   recibiendo: null,       // el pedido que está en el modal
   modo: null,             // cuál de los tres botones lo abrió: ver PED_MODOS
-  cuentas: [],            // filas "A pagar" del proveedor de ese pedido
-  cuentaElegida: null,
+  plan: null,             // qué dijo el server que va a hacer: ver pedCargarPlan
   editandoSem: null,
   arrastrando: null,
   msgTimer: null,
@@ -12129,28 +12124,29 @@ const PED_MEDIOS = ['Efectivo Local', 'Efectivo Tincho', 'Efectivo Pablo',
 //              todo, cerrando la cuenta "A pagar" que ese pedido ya tenía en
 //              vez de escribir una fila nueva al lado.
 //
-// `pago` es lo que entiende el server (POST /api/pedidos/:id/recibir): efectivo
-// y aparte son los dos 'pagado', y lo que los distingue es de dónde sale el
-// medio. El tercer valor 'no' sigue existiendo en la hoja por las filas viejas,
-// pero ya no hay forma de crear una nueva desde acá.
+// Lo que el navegador NO hace: decidir contra qué fila de Movimientos va cada
+// uno. Eso lo resuelve `planificarAsiento` en el server — quien usa esta
+// pantalla es un cocinero con el proveedor en la puerta, que no sabe qué hay
+// cargado en la planilla y no tiene por qué saberlo. Acá sólo se manda el
+// nombre del modo y lo mínimo que hace falta para escribir una fila si no
+// existe: el monto, el vencimiento o el medio según el caso.
 const PED_MODOS = {
   efectivo: {
-    pago: 'pagado',
     titulo: 'Recibido y pagado',
-    medioFijo: 'Efectivo Local',
     montoLabel: 'Cuánto se pagó',
+    // El único medio que se usa en la puerta. No se pregunta.
+    medioFijo: 'Efectivo Local',
   },
   cuenta: {
-    pago: 'a pagar',
-    titulo: 'Recibido — queda a cuenta',
+    titulo: 'Recibido, pago a cuenta',
     montoLabel: 'Cuánto queda a pagar',
-    medioLabel: 'Con qué medio se va a pagar',
+    pideVencimiento: true,
   },
   aparte: {
-    pago: 'pagado',
-    titulo: 'Recibido — pago aparte',
+    titulo: 'Recibido, pago aparte',
     montoLabel: 'Cuánto es',
     medioLabel: 'Con qué medio se pagó',
+    pideMedio: true,
   },
 };
 
@@ -12296,8 +12292,8 @@ function itemPedido(p) {
     ? (pedEsAdmin() ? `<button onclick="borrarPedido('${id}')">🗑️</button>` : '')
     : [
         `<button class="plata" onclick="openPedRecibir('${id}','efectivo')">💵 Recibido y pagado</button>`,
-        `<button class="cuenta" onclick="openPedRecibir('${id}','cuenta')">📒 Queda a cuenta</button>`,
-        `<button class="ok" onclick="openPedRecibir('${id}','aparte')">🔁 Pago aparte</button>`,
+        `<button class="cuenta" onclick="openPedRecibir('${id}','cuenta')">📒 Recibido, pago a cuenta</button>`,
+        `<button class="ok" onclick="openPedRecibir('${id}','aparte')">🔁 Recibido, pago aparte</button>`,
         pedEsAdmin() ? `<button onclick="borrarPedido('${id}')">🗑️</button>` : '',
       ].filter(Boolean).join('');
 
@@ -12327,8 +12323,8 @@ function itemPrevisto(s, fecha) {
     </div>
     <div class="ped-acciones">
       <button class="plata" onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}','efectivo')">💵 Recibido y pagado</button>
-      <button class="cuenta" onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}','cuenta')">📒 Queda a cuenta</button>
-      <button class="ok" onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}','aparte')">🔁 Pago aparte</button>
+      <button class="cuenta" onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}','cuenta')">📒 Recibido, pago a cuenta</button>
+      <button class="ok" onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}','aparte')">🔁 Recibido, pago aparte</button>
       <button onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}',null)">＋ Esperarlo</button>
     </div>
   </div>`;
@@ -12410,249 +12406,159 @@ async function borrarPedido(id) {
   } catch (e) { showToast('Error: ' + e.message, 4000); }
 }
 
-// ─── Recibir con plata ──────────────────────────────────────────────────────
-// Es lo único de esta pantalla que escribe en Movimientos, así que dice en
-// palabras qué va a pasar en la planilla ANTES de confirmar.
+// ─── Recibir ────────────────────────────────────────────────────────────────
+//
+// El modal NO pregunta contra qué fila de Movimientos va el pedido. Eso lo
+// resuelve el server (`planificarAsiento`), y acá sólo se muestra lo que dijo
+// que va a hacer. Quien usa esta pantalla es un cocinero o el encargado con el
+// proveedor en la puerta: no sabe qué hay cargado en la planilla, no tiene por
+// qué saberlo, y hacerlo elegir entre filas es hacerlo adivinar.
+//
+// Hasta el 2026-08-19 el modal listaba las cuentas pendientes y exigía elegir
+// una. Andaba con los dueños y no con quien de verdad lo usa. Lo que queda es:
+// se pregunta el monto (y el vencimiento o el medio según el modo), se muestra
+// qué va a pasar, y al confirmar se informa qué pasó de verdad.
 
 async function openPedRecibir(id, modo) {
   const p = pedBuscar(id);
   if (!p) return;
   pedState.recibiendo = p;
   pedState.modo = PED_MODOS[modo] ? modo : 'efectivo';
-  pedState.cuentas = [];
-  pedState.cuentaElegida = null;
+  pedState.plan = null;
   const m = pedModo();
 
   document.getElementById('ped-r-error').textContent = '';
   document.getElementById('ped-r-titulo').textContent = m.titulo;
   document.getElementById('ped-r-monto').value = p.costoEstimado || '';
-  document.getElementById('ped-r-monto').disabled = false;
   document.getElementById('ped-r-monto-label').textContent = m.montoLabel;
   document.getElementById('ped-r-venc').value = p.fecha;
-  document.getElementById('ped-r-lista-wrap').style.display = 'none';
-  document.getElementById('ped-r-lista').innerHTML = '';
   document.getElementById('ped-r-cabecera').innerHTML =
     `<b>${escapeHtml(p.proveedor)}</b>${p.detalle ? ' · ' + escapeHtml(p.detalle) : ''}<br>`
     + `Esperado para el ${new Date(p.fecha + 'T12:00:00').toLocaleDateString('es-AR')}`
     + (p.costoEstimado ? ` · estimado ${fmt(p.costoEstimado)}` : '');
 
-  // El vencimiento sólo tiene sentido en "queda a cuenta": es lo único que
-  // genera una deuda con fecha. En los otros dos la plata ya está resuelta.
-  document.getElementById('ped-r-venc-wrap').style.display = pedState.modo === 'cuenta' ? '' : 'none';
+  // El vencimiento sólo en "pago a cuenta": es lo único que genera una deuda
+  // con fecha. El medio sólo en "pago aparte": en la puerta es siempre efectivo
+  // del local, y una deuda todavía no se pagó con nada.
+  document.getElementById('ped-r-venc-wrap').style.display = m.pideVencimiento ? '' : 'none';
+  document.getElementById('ped-r-medio-wrap').style.display = m.pideMedio ? '' : 'none';
+  if (m.pideMedio) {
+    document.getElementById('ped-r-medio-label').textContent = m.medioLabel;
+    setSelectValue(document.getElementById('ped-r-medio'), p.medioPrevisto || 'Mercado Pago Tincho');
+  }
 
-  // "Recibido y pagado" no pregunta el medio: es siempre Efectivo Local, que es
-  // lo único que se usa en la puerta. El select igual se completa, porque es lo
-  // que se manda al server y lo que valida contra las cajas del sistema.
-  const medioSel = document.getElementById('ped-r-medio');
-  setSelectValue(medioSel, m.medioFijo || p.medioPrevisto || 'Efectivo Local');
-  document.getElementById('ped-r-medio-wrap').style.display = m.medioFijo ? 'none' : '';
-  if (m.medioLabel) document.getElementById('ped-r-medio-label').textContent = m.medioLabel;
-
-  pedExplicar();
   document.getElementById('ped-recibir-overlay').classList.add('open');
+  pedPlanCargando();
+  await pedCargarPlan();
+}
 
-  // Las cuentas pendientes de ese proveedor. Si hay una, lo más probable es que
-  // el pago que se está haciendo sea justamente ésa — cerrar la que existe en
-  // vez de escribir una nueva es lo que evita contar el gasto dos veces.
+// El monto cambia qué fila matchea (el monto exacto manda sobre la fecha), así
+// que al tipearlo se vuelve a preguntar. Con rebote: si no, es una consulta por
+// tecla.
+let _pedPlanTimer = null;
+function onPedMontoChange() {
+  clearTimeout(_pedPlanTimer);
+  pedPlanCargando();
+  _pedPlanTimer = setTimeout(pedCargarPlan, 500);
+}
+
+function pedPlanCargando() {
+  document.getElementById('ped-r-que-hace').innerHTML =
+    '<span style="color:var(--text-muted)">Buscando en Movimientos…</span>';
+}
+
+async function pedCargarPlan() {
+  const p = pedState.recibiendo;
+  if (!p) return;
+  const modo = pedState.modo;
+  const monto = pedNumero(document.getElementById('ped-r-monto').value);
   try {
-    const { data } = await api('/api/pedidos/a-pagar?proveedor=' + encodeURIComponent(p.proveedor));
-    pedState.cuentas = data || [];
-    renderPedCuentas();
-  } catch (e) { /* sin cuentas: se crea una fila nueva, que es el otro camino válido */ }
-}
-
-function renderPedCuentas() {
-  const wrap = document.getElementById('ped-r-lista-wrap');
-  const lista = document.getElementById('ped-r-lista');
-  // La lista se muestra en los TRES modos, y en los tres significa lo mismo:
-  // "esto que estás por anotar, ¿no está anotado ya?". Lo que cambia es qué
-  // pasa al elegir — efectivo y aparte CIERRAN la fila; queda a cuenta no
-  // escribe nada y sólo la vincula, porque la deuda ya estaba.
-  //
-  // Que "queda a cuenta" no preguntara era el agujero más grande: es el modo
-  // que escribe una fila "A pagar" nueva, y lo más probable es que esa deuda ya
-  // esté cargada. Dos filas "A pagar" por la misma mercadería se pagan dos
-  // veces y nadie se entera.
-  if (!pedState.cuentas.length) {
-    wrap.style.display = 'none';
-    // pedExplicar igual: las cuentas llegan DESPUÉS de abrir el modal, así que
-    // el texto que se calculó al abrirlo lo hizo con la lista todavía vacía.
+    const { data } = await api(`/api/pedidos/${encodeURIComponent(p.id)}/plan`
+      + `?modo=${encodeURIComponent(modo)}&monto=${monto}`);
+    // Puede haber llegado tarde: si el usuario ya cerró o cambió de modo, se tira.
+    if (pedState.recibiendo !== p || pedState.modo !== modo) return;
+    pedState.plan = data;
     pedExplicar();
-    return;
+  } catch (e) {
+    pedState.plan = null;
+    document.getElementById('ped-r-que-hace').innerHTML =
+      '<span style="color:var(--orange)">No se pudo consultar Movimientos ('
+      + escapeHtml(e.message) + '). Podés confirmar igual: el server vuelve a buscar.</span>';
   }
-
-  const aCuenta = pedState.modo === 'cuenta';
-  const verbo = aCuenta ? 'es esta entrega' : 'estás pagando';
-  document.getElementById('ped-r-lista-label').textContent = pedState.cuentas.length === 1
-    ? `Este proveedor ya tiene una cuenta sin pagar — ¿${aCuenta ? 'es ésta' : 'es ésta la que estás pagando'}?`
-    : `Este proveedor tiene ${pedState.cuentas.length} cuentas sin pagar — elegí cuál ${verbo}`;
-
-  lista.innerHTML = pedState.cuentas.map(c => {
-    const venc = c.vencimiento ? `vence ${escapeHtml(c.vencimiento)}` : 'sin vencimiento';
-    return `<div class="ped-cuenta" id="ped-cuenta-${c.rowIndex}" onclick="elegirPedCuenta(${c.rowIndex})">
-      <div>
-        <div>${venc}${c.cuota ? ` · cuota ${escapeHtml(c.cuota)}` : ''}</div>
-        ${c.descripcion ? `<div class="ped-cuenta-sub">${escapeHtml(c.descripcion.slice(0, 50))}</div>` : ''}
-        <div class="ped-cuenta-sub">registrada ${escapeHtml(c.fecha)}</div>
-      </div>
-      <div><b>${fmt(c.monto)}</b></div>
-    </div>`;
-  }).join('')
-  + `<div class="ped-cuenta" id="ped-cuenta-0" onclick="elegirPedCuenta(0)">
-      <div><div>Ninguna — es ${aCuenta ? 'otra deuda' : 'un gasto nuevo'}</div>
-      <div class="ped-cuenta-sub">se escribe una fila nueva en Movimientos como <b>${aCuenta ? 'A pagar' : 'Pagado'}</b></div></div></div>`;
-  wrap.style.display = '';
-
-  // Con UNA sola pendiente viene elegida: es lo más probable, y quien esté
-  // pagando otra cosa la puede cambiar con el ítem de abajo.
-  //
-  // Con VARIAS no se elige ninguna y el botón no deja avanzar hasta que se
-  // elija. El default cómodo sería "gasto nuevo", y ahí un Confirmar distraído
-  // escribe una fila que duplica una cuenta que ya estaba cargada — el error
-  // más caro que puede cometer esta pantalla, y el único que no se ve.
-  if (pedState.cuentas.length === 1) elegirPedCuenta(pedState.cuentas[0].rowIndex);
-  else { pedState.cuentaElegida = null; pedExplicar(); }
 }
 
-// `cuentaElegida`: null = todavía no eligió · 0 = eligió "es un gasto nuevo" ·
-// un número = la fila que se va a cerrar. Los tres estados son distintos: sin
-// el primero no se puede exigir que elija.
-function elegirPedCuenta(rowIndex) {
-  pedState.cuentaElegida = rowIndex;
-  document.querySelectorAll('.ped-cuenta').forEach(el =>
-    el.classList.toggle('selected', el.id === 'ped-cuenta-' + rowIndex));
-  const c = pedState.cuentas.find(x => x.rowIndex === rowIndex);
-  if (c) {
-    document.getElementById('ped-r-monto').value = c.monto || '';
-    if (c.medioPago) setSelectValue(document.getElementById('ped-r-medio'), c.medioPago);
-  }
-  // Elegir una fila en "queda a cuenta" quiere decir que no se escribe nada,
-  // así que el monto y el medio pasan a ser informativos: los manda la fila.
-  const soloVincula = pedState.modo === 'cuenta' && rowIndex;
-  document.getElementById('ped-r-monto').disabled = !!soloVincula;
-  document.getElementById('ped-r-medio-wrap').style.display =
-    (soloVincula || pedModo().medioFijo) ? 'none' : '';
-  document.getElementById('ped-r-venc-wrap').style.display =
-    (pedState.modo === 'cuenta' && !soloVincula) ? '' : 'none';
-  pedExplicar();
-}
-
-// Decir en una línea qué va a pasar en la planilla. Es lo que hace que un error
-// se vea antes de escribirlo y no después. Nunca se escribe nada sin que esta
-// línea lo haya anunciado primero.
+// Un renglón que diga, en castellano, qué va a pasar en la planilla. No es
+// decorativo: es lo que hace que un error se vea antes de escribirlo. El texto
+// sale del plan que armó el SERVER, no de una regla reimplementada acá — dos
+// copias de esta decisión discreparían el día que una se toque.
 function pedExplicar() {
   const el = document.getElementById('ped-r-que-hace');
-  const modo = pedState.modo;
-  const c = pedState.cuentas.find(x => x.rowIndex === pedState.cuentaElegida);
+  const plan = pedState.plan;
+  if (!plan) { el.innerHTML = ''; return; }
+  const f = plan.fila;
+  const cuando = f && f.fecha ? ` del ${escapeHtml(f.fecha)}` : '';
+  const n = plan.otrasPendientes || 0;
+  const otras = n > 0
+    ? ` <span style="color:var(--orange)">Este proveedor tiene además ${n} `
+      + `cuenta${n !== 1 ? 's' : ''} sin pagar que no se ${n === 1 ? 'toca' : 'tocan'}.</span>`
+    : '';
 
-  if (pedState.cuentaElegida === null && pedState.cuentas.length) {
-    el.innerHTML = '<span style="color:var(--orange)">Elegí arriba cuál de las cuentas corresponde a este pedido, '
-      + 'o marcá que ninguna.</span>';
-    return;
-  }
+  const texto = {
+    'cerrar-fila': () => `→ Se encontró la fila <b>A pagar</b> de ${fmt(f.monto)}${cuando} `
+      + 'y pasa a <b>Pagado</b>. No se agrega ninguna fila.',
+    'vincular-fila': () => `→ Ya está cargada en Movimientos: la fila de ${fmt(f.monto)}${cuando}. `
+      + '<b>No se escribe nada</b>, el pedido queda vinculado a ésa.',
+    'crear-pagado': () => '→ No hay ninguna fila cargada para esto, así que se agrega una nueva como <b>Pagado</b>.',
+    'crear-a-pagar': () => '→ No hay ninguna fila cargada para esto, así que se agrega una nueva como '
+      + '<b>A pagar</b> y aparece en la sección Pagos.',
+  }[plan.accion];
 
-  // El caso que más se repite en "queda a cuenta": la deuda YA está cargada.
-  // Lo correcto entonces no es escribir, es no escribir — y decirlo, porque
-  // "no se hace nada" es justo lo que uno duda de haber hecho bien.
-  if (modo === 'cuenta') {
-    el.innerHTML = c
-      ? `→ <b>No se escribe nada</b> en Movimientos: este pedido queda vinculado a `
-        + `la fila <b>A pagar</b> de ${fmt(c.monto)} que ya estaba cargada.`
-      : '→ Se agrega una fila <b>A pagar</b> en Movimientos y aparece en la sección Pagos.';
-    return;
-  }
-
-  // "Pago aparte" existe porque el pedido normalmente YA tiene su fila "A
-  // pagar" cargada, y lo correcto es actualizar ésa. Que no aparezca ninguna es
-  // el caso raro, así que se dice en voz alta antes de escribir una nueva.
-  if (c) {
-    el.innerHTML = `→ La cuenta pendiente de ${fmt(c.monto)} pasa a <b>Pagado</b>. No se agrega ninguna fila.`;
-    return;
-  }
-  el.innerHTML = '→ Se agrega una fila nueva en Movimientos como <b>Pagado</b>'
-    + (pedState.modo === 'efectivo' ? ' (Efectivo Local).' : '.')
-    + (modo === 'aparte' && !pedState.cuentas.length
-      ? ' <span style="color:var(--orange)">Este proveedor no tiene ninguna cuenta pendiente cargada, '
-        + 'así que se anota como gasto nuevo.</span>'
-      : '');
+  el.innerHTML = (texto ? texto() : '') + otras;
 }
 
 function closePedRecibir() {
+  clearTimeout(_pedPlanTimer);
   document.getElementById('ped-recibir-overlay').classList.remove('open');
   pedState.recibiendo = null;
   pedState.modo = null;
+  pedState.plan = null;
 }
 
 async function confirmarPedRecibir() {
   const p = pedState.recibiendo;
   if (!p) return;
   const m = pedModo();
-  const pago = m.pago;
   const monto = pedNumero(document.getElementById('ped-r-monto').value);
-  const medioPago = m.medioFijo || document.getElementById('ped-r-medio').value;
   const err = document.getElementById('ped-r-error');
 
-  // Vincular una fila que ya existe no necesita monto: lo dice la fila.
-  const soloVincula = pedState.modo === 'cuenta' && !!pedState.cuentaElegida;
-  if (!soloVincula && monto <= 0) { err.textContent = 'Poné el monto.'; return; }
+  // El monto sólo hace falta si hay que ESCRIBIR una fila. Si el plan dice que
+  // ya existe, el monto lo pone la fila. El server exige lo mismo por su cuenta;
+  // esto es para no hacer viajar algo que va a rebotar.
+  const vaAEscribir = !pedState.plan || pedState.plan.accion.startsWith('crear');
+  if (vaAEscribir && monto <= 0) { err.textContent = 'Poné el monto.'; return; }
 
-  // Vale para los tres modos: si el proveedor tiene cuentas sin pagar, hay que
-  // decir cuál es ésta antes de escribir nada. El server lo vuelve a exigir por
-  // su cuenta — esto es sólo para no hacer viajar un pedido que va a rebotar.
-  if (pedState.cuentas.length && pedState.cuentaElegida === null) {
-    err.textContent = 'Elegí cuál de las cuentas pendientes corresponde a este pedido, o marcá que ninguna.';
-    return;
-  }
-
-  const modoActual = pedState.modo;
+  // Todo lo que hace falta se lee ANTES de cerrar: closePedRecibir limpia el
+  // modo y el plan, y el body se arma después.
+  const cuerpo = {
+    modo: pedState.modo,
+    monto,
+    medioPago: m.medioFijo || document.getElementById('ped-r-medio').value,
+    vencimiento: document.getElementById('ped-r-venc').value,
+  };
   closePedRecibir();
   showToast('⏳ Actualizando planilla...');
   try {
     const { asiento } = await api('/api/pedidos/' + encodeURIComponent(p.id) + '/recibir', {
       method: 'POST',
-      body: JSON.stringify({
-        pago, monto, medioPago,
-        // La fila elegida vale para los tres modos. En los que terminan Pagado
-        // la cierra; en "queda a cuenta" sólo la vincula y no se escribe nada.
-        rowIndexExistente: pedState.cuentaElegida || null,
-        // Sólo lo manda un humano que vio la lista y dijo que ninguna es ésta.
-        // Sin esto el server rechaza escribir una fila nueva cuando el
-        // proveedor ya tiene deuda abierta. Ver POST /api/pedidos/:id/recibir.
-        confirmaNuevo: pedState.cuentaElegida === 0,
-        vencimiento: document.getElementById('ped-r-venc').value,
-      }),
+      body: JSON.stringify(cuerpo),
     });
     await loadPedidos();
-
-    const queHizo = !asiento ? 'No se tocó Movimientos: sólo quedó marcado como recibido.'
-      : asiento.tipo === 'fila-existente' ? `La cuenta pendiente pasó de A pagar a <b>Pagado</b>.`
-      : asiento.tipo === 'ya-cargada' ? 'La deuda ya estaba cargada en Movimientos: se vinculó a este pedido y <b>no se escribió ninguna fila</b>.'
-      : asiento.tipo === 'ya-estaba' ? 'Este pedido ya tenía su fila en Movimientos: no se duplicó.'
-      : pago === 'a pagar' ? 'Se agregó una fila <b>A pagar</b> — ya aparece en Pagos.'
-      : 'Se agregó una fila nueva como <b>Pagado</b>.';
-
     showResultadoModal({
       ok: true,
       titulo: 'Pedido recibido',
-      detalle: `<b>${escapeHtml(p.proveedor)}</b> · ${fmt(monto)}<br>${queHizo}`
-        + (asiento && asiento.registradoEnSesion
-            ? '<br><span style="font-size:11px">Se descontó del esperado del arqueo en curso ✓</span>' : ''),
+      detalle: `<b>${escapeHtml(p.proveedor)}</b><br>${pedQueHizo(asiento)}`,
     });
   } catch (e) {
-    // El server encontró cuentas sin pagar que esta pantalla no tenía — pasa
-    // cuando la página quedó abierta desde antes, o cuando alguien cargó la
-    // factura desde otro lado hace un rato. NO es un error: es la pregunta que
-    // había que hacer, y viene con la lista para contestarla. Se reabre el
-    // modal con lo que dijo el server, que es la versión que manda.
-    const pl = e.payload;
-    if (pl && pl.codigo === 'cuenta-pendiente') {
-      await openPedRecibir(p.id, modoActual);
-      pedState.cuentas = pl.cuentas || [];
-      pedState.cuentaElegida = null;
-      renderPedCuentas();
-      document.getElementById('ped-r-error').textContent = e.message;
-      return;
-    }
     showResultadoModal({
       ok: false,
       titulo: 'No se pudo registrar',
@@ -12661,6 +12567,34 @@ async function confirmarPedRecibir() {
   }
 }
 
+// El informe de lo que REALMENTE pasó. Es la contraparte de haberle sacado la
+// decisión al usuario: si el sistema elige solo, tiene que rendir cuentas de lo
+// que eligió, con el número y la fila, para que después alguien pueda revisarlo.
+function pedQueHizo(a) {
+  if (!a) return 'No se tocó Movimientos: sólo quedó marcado como recibido.';
+  const f = a.fila;
+  const cuando = f && f.fecha ? ` del ${escapeHtml(f.fecha)}` : '';
+  const base =
+    a.yaEstaba ? 'Este pedido ya tenía su fila en Movimientos: <b>no se duplicó</b>.'
+    : a.accion === 'cerrar-fila' ? `Se cerró la fila <b>A pagar</b> de ${fmt(f.monto)}${cuando}: `
+        + 'ahora figura <b>Pagado</b>. No se agregó ninguna fila.'
+    : a.accion === 'vincular-fila' ? `Ya estaba cargado en Movimientos (fila de ${fmt(f.monto)}${cuando}). `
+        + '<b>No se escribió nada</b>: el pedido quedó vinculado a ésa.'
+    : a.accion === 'crear-a-pagar' ? 'No había nada cargado, así que se agregó una fila '
+        + '<b>A pagar</b>. Ya aparece en la sección Pagos.'
+    : 'No había nada cargado, así que se agregó una fila nueva como <b>Pagado</b>.';
+
+  const n = a.otrasPendientes || 0;
+  const otras = n > 0
+    ? `<br><span style="font-size:11px;color:var(--orange)">Ojo: a este proveedor le `
+      + `${n === 1 ? 'queda' : 'quedan'} ${n} cuenta${n !== 1 ? 's' : ''} sin pagar `
+      + `que no se ${n === 1 ? 'tocó' : 'tocaron'}.</span>`
+    : '';
+  const caja = a.registradoEnSesion
+    ? '<br><span style="font-size:11px">Se descontó del esperado del arqueo en curso ✓</span>'
+    : '';
+  return base + otras + caja;
+}
 function pedBuscar(id) {
   for (const d of (pedState.data?.dias || [])) {
     const p = d.pedidos.find(x => x.id === id);

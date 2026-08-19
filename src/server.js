@@ -1588,35 +1588,6 @@ async function verificarFilaPendiente({ rowIndex, proveedor } = {}) {
   return { ok: true, m, idx };
 }
 
-/**
- * Las filas "A pagar" de un proveedor.
- *
- * Es la respuesta a "¿esto que estoy por anotar ya está anotado?", y por eso la
- * usan tanto el GET que llena el modal como el control de duplicados del server
- * — que es el que manda. Las filas madre de compras en cuotas quedan afuera
- * porque no se pagan: se pagan sus cuotas.
- */
-async function cuentasPendientesDe(proveedor) {
-  const nombre = (proveedor || '').toString().trim().toLowerCase();
-  if (!nombre) return [];
-  const movs = await getMovimientos();
-  return movs
-    .filter(m => m.tipo === 'Gasto' && !m.pagado && !m.esCambio && !m.esFondeo && !m.esCompraEnCuotas)
-    .filter(m => (m.proveedor || '').toLowerCase() === nombre)
-    .map(m => ({
-      rowIndex: m.rowIndex,
-      proveedor: m.proveedor,
-      fecha: m.fecha.toISOString().split('T')[0],
-      vencimiento: m.vencimiento || '',
-      descripcion: m.descripcion || '',
-      categoria: m.categoria || '',
-      medioPago: m.medioPago || '',
-      monto: m.salidaARS || 0,
-      cuota: m.esCuota ? `${m.cuotaNum}/${m.cuotasTotal || '?'}` : '',
-    }))
-    .sort((a, b) => (a.vencimiento || '').localeCompare(b.vencimiento || '') || a.fecha.localeCompare(b.fecha));
-}
-
 async function marcarFilaPagada({ rowIndex, proveedor, medioPago, usuario, descripcionSesion } = {}) {
   const v = await verificarFilaPendiente({ rowIndex, proveedor });
   if (!v.ok) return v;
@@ -2276,76 +2247,172 @@ app.delete('/api/pedidos/:id', authMiddleware, adminOnly, async (req, res) => {
   catch (err) { res.status(400).json({ ok: false, error: err.message }); }
 });
 
-// GET /api/pedidos/a-pagar?proveedor=X — las filas "A pagar" de ese proveedor,
-// para poder cerrar la que corresponde en vez de escribir una nueva. Es el caso
-// que más importa: la compra ya estaba cargada (por el bot, o a mano) y el pago
-// en la puerta la cierra.
-//
-// Mismo filtro que /api/pagos, pero sin abrirle el listado completo al
-// encargado: devuelve sólo las de un proveedor y sólo lo que se necesita para
-// elegir. Las filas madre de compras en cuotas quedan afuera porque no se pagan
-// (se pagan sus cuotas).
-app.get('/api/pedidos/a-pagar', authMiddleware, async (req, res) => {
-  try {
-    res.json({ ok: true, data: await cuentasPendientesDe(req.query.proveedor) });
-  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
-});
+// Los tres botones de la pantalla de Pedidos, del lado del server. El cliente
+// manda el nombre del modo y nada más: qué significa cada uno —qué estado deja
+// en el pedido y con qué medio— se decide acá, porque es lo que termina en la
+// planilla. `medioFijo` es el que no se pregunta: pagar en la puerta es siempre
+// en efectivo del local.
+const MODOS_RECIBIR = {
+  efectivo: { pago: 'pagado', medioFijo: 'Efectivo Local' },
+  cuenta:   { pago: 'a pagar' },
+  aparte:   { pago: 'pagado' },
+};
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Qué fila de Movimientos le corresponde a un pedido que acaba de llegar
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Quien toca esto es un cocinero o el encargado con el proveedor en la puerta.
+// NO sabe qué hay cargado en la planilla, no tiene por qué saberlo, y pedirle
+// que elija entre filas es pedirle que adivine — con el costo de que una
+// elección distraída duplica una deuda o cierra la que no era.
+//
+// Así que decide el sistema. La pantalla pregunta lo mínimo (cuánto, y en el
+// caso de "pago aparte" con qué medio) y ACÁ se resuelve contra qué fila va.
+// Lo que el usuario recibe no es una pregunta sino un informe de lo que se
+// hizo, al confirmar.
+//
+// Los tres modos buscan cosas distintas porque significan cosas distintas:
+//
+//   efectivo → se pagó en la puerta. Busca una fila "A pagar" del proveedor y
+//              la CIERRA. Sin ventana de fechas: pagar en efectivo suele ser
+//              justamente saldar lo que se venía debiendo, que puede ser de
+//              hace semanas. Si no hay ninguna, escribe una fila Pagado.
+//   cuenta   → llegó y queda debiendo. Busca una fila "A pagar" de ESTA entrega
+//              y, si la encuentra, NO ESCRIBE NADA: la deuda ya estaba anotada.
+//              Si no, escribe la fila "A pagar".
+//   aparte   → el pago no pasó por la puerta (Mercado Libre, transferencia).
+//              Busca una fila "Pagado" de ESTA entrega y, si la encuentra, no
+//              escribe nada. Si no, escribe la fila Pagado.
+//
+// La VENTANA DE FECHAS es lo que separa "esta entrega" de "otra cosa del mismo
+// proveedor". Sin ella, "pago aparte" con Mercado Libre engancharía cualquiera
+// de las decenas de filas Pagado históricas y no escribiría la de hoy: el gasto
+// desaparecería. Con ella, sólo cuenta lo cargado alrededor de la fecha del
+// pedido, que es cuando se carga lo de una entrega.
+const VENTANA_MATCH_DIAS = 7;
+
+const _diasEntre = (a, b) => Math.round((a.getTime() - b.getTime()) / 86400000);
+
+/**
+ * De varios candidatos, cuál.
+ *
+ * El monto manda sobre la fecha: si el encargado dice que pagó $47.300 y hay una
+ * fila de $47.300, es ésa y no hay más que discutir. Recién si eso no desempata
+ * gana la más cercana a la fecha del pedido. Nunca se devuelve "no sé": con
+ * candidatos siempre sale uno, y cuál salió va en el informe — un sistema que
+ * se planta y pregunta es exactamente lo que esta pantalla no puede hacer.
+ */
+function _elegirCandidata(cands, monto, fechaRef) {
+  if (!cands.length) return null;
+  let pool = cands;
+  if (monto > 0) {
+    const exactas = pool.filter(c => Math.round(c.salidaARS || 0) === Math.round(monto));
+    if (exactas.length) pool = exactas;
+  }
+  return pool.slice().sort((a, b) =>
+    Math.abs(_diasEntre(a.fecha, fechaRef)) - Math.abs(_diasEntre(b.fecha, fechaRef))
+    || a.rowIndex - b.rowIndex)[0];
+}
+
+/**
+ * Qué se va a hacer con este pedido. No escribe nada: sólo decide.
+ *
+ * Está separado de la ejecución a propósito, porque lo corren los dos: la
+ * ruta que ejecuta y el GET /plan que le muestra al usuario qué va a pasar
+ * ANTES de confirmar. Una sola función, así la pantalla no puede prometer una
+ * cosa y el server hacer otra.
+ *
+ * `accion`:
+ *   'cerrar-fila'    → hay una "A pagar" y pasa a Pagado.
+ *   'vincular-fila'  → ya está anotado como corresponde: NO se escribe nada.
+ *   'crear-pagado'   → no había nada: se escribe una fila Pagado.
+ *   'crear-a-pagar'  → no había nada: se escribe una fila "A pagar".
+ */
+async function planificarAsiento({ pedido, modo, monto = 0 }) {
+  const nombre = (pedido.proveedor || '').trim().toLowerCase();
+  const fechaRef = new Date(pedido.fecha + 'T12:00:00');
+  const movs = await getMovimientos();
+  const delProveedor = movs.filter(m =>
+    m.tipo === 'Gasto' && !m.esCambio && !m.esFondeo && !m.esCompraEnCuotas
+    && (m.proveedor || '').toLowerCase() === nombre);
+
+  const aPagar = delProveedor.filter(m => !m.pagado);
+  const enVentana = arr => arr.filter(m =>
+    Math.abs(_diasEntre(m.fecha, fechaRef)) <= VENTANA_MATCH_DIAS);
+
+  const resumen = f => f && ({
+    rowIndex: f.rowIndex,
+    monto: f.salidaARS || 0,
+    fecha: f.fechaStr || '',
+    vencimiento: f.vencimiento || '',
+    descripcion: f.descripcion || '',
+    medioPago: f.medioPago || '',
+  });
+
+  if (modo === 'efectivo') {
+    const f = _elegirCandidata(aPagar, monto, fechaRef);
+    return f
+      ? { accion: 'cerrar-fila', fila: resumen(f), otrasPendientes: aPagar.length - 1 }
+      : { accion: 'crear-pagado', fila: null, otrasPendientes: 0 };
+  }
+
+  if (modo === 'cuenta') {
+    const cands = enVentana(aPagar);
+    const f = _elegirCandidata(cands, monto, fechaRef);
+    return f
+      ? { accion: 'vincular-fila', fila: resumen(f), otrasPendientes: aPagar.length - 1 }
+      : { accion: 'crear-a-pagar', fila: null, otrasPendientes: aPagar.length };
+  }
+
+  // aparte: la fila que corresponde ya está Pagada. Ojo con lo que NO se hace
+  // acá: si el proveedor tiene una "A pagar" abierta, no se la toca ni se la
+  // cierra. Puede ser una deuda vieja que no tiene nada que ver con esta
+  // entrega, y cerrarla sería dar por pagado algo que nadie pagó. Se avisa en
+  // el informe y decide una persona, que es lo único honesto que se puede hacer
+  // con una ambigüedad real.
+  const pagadas = enVentana(delProveedor.filter(m => m.pagado));
+  const f = _elegirCandidata(pagadas, monto, fechaRef);
+  return f
+    ? { accion: 'vincular-fila', fila: resumen(f), otrasPendientes: aPagar.length }
+    : { accion: 'crear-pagado', fila: null, otrasPendientes: aPagar.length };
+}
 /**
  * POST /api/pedidos/:id/recibir — llegó la mercadería.
  *
- * Tres caminos según `pago`, y los tres terminan en el MISMO libro por las
- * mismas funciones que usa el resto de la app:
- *
- *   'no'      → no se toca Movimientos. Llegó, la plata se define después.
- *               Ya no se puede pedir desde la app; queda por las filas viejas.
- *   'pagado'  → con `rowIndexExistente`: marcarFilaPagada() — la misma función
- *               que el botón "Pagar" de Pagos. Sin él: registrarGastoEnLibro()
- *               con estado Pagado, que escribe UNA fila nueva.
- *   'a pagar' → con `rowIndexExistente`: NO SE ESCRIBE NADA. La deuda ya estaba
- *               cargada y el pedido queda vinculado a esa fila; ése es el caso
- *               normal, no la excepción. Sin él: registrarGastoEnLibro() con
- *               estado "A pagar" y vencimiento.
- *
- * ─── El control de duplicados vive ACÁ, no en el navegador ──────────────────
- *
- * Desde que esta pantalla la usa el personal y no sólo los dueños, "el modal no
- * te deja confirmar sin elegir" dejó de ser una garantía: es una regla de una
- * página que puede estar vieja, recargada a medias o abierta en dos teléfonos.
- * La única garantía es la que se comprueba del lado del server, y son dos,
- * distintas y complementarias:
- *
- *   1. EL MISMO PEDIDO, DOS VECES → lo tapa `registrarGastoEnLibro`: el id del
- *      pedido va a la columna H y se relee (sin caché) antes de escribir. Un
- *      doble toque en un teléfono en el medio del servicio, o un reintento por
- *      timeout, no pueden escribir dos filas.
- *   2. LA MISMA MERCADERÍA YA CARGADA POR OTRO CAMINO (Pablo a mano, el bot de
- *      facturas) → la tapa el chequeo de abajo: si el proveedor tiene filas "A
- *      pagar" y nadie dijo explícitamente que esto es otra cosa, el server
- *      RECHAZA con 409 y devuelve las cuentas para que se elija. El default es
- *      NO escribir. Duplicar una deuda ya cargada es el error más caro de esta
- *      pantalla y el único que no deja rastro de que pasó.
- *
- * `confirmaNuevo` es la respuesta a ese 409 y significa una sola cosa: un humano
- * vio la lista de cuentas pendientes y dijo que ninguna es ésta. El navegador no
- * lo puede mandar por las suyas al abrir el modal.
- *
- * Lo que este control NO garantiza: las cuentas salen de `getMovimientos()`, que
- * está cacheado unos minutos, así que una fila cargada hace un instante desde
- * otra sesión podría no verse todavía. Es a propósito — releer el libro entero
- * sin caché en cada recepción es lento justo cuando el proveedor está en la
- * puerta — y el caso que más se repite (el mismo pedido dos veces) lo cubre el
- * punto 1, que sí lee sin caché.
+ * `modo` es uno de los tres botones de la pantalla: 'efectivo', 'cuenta' o
+ * 'aparte'. Contra qué fila de Movimientos va NO lo decide el cliente: lo
+ * decide `planificarAsiento` acá adentro. Ver su comentario, que es donde está
+ * la regla; esta ruta sólo ejecuta lo que aquél resolvió y cuenta qué pasó.
  *
  * El orden es LIBRO PRIMERO, hoja Pedidos después, y el pedido sólo se marca si
  * el asiento salió bien. Al revés, un fallo de Sheets en el medio dejaría un
  * pedido que dice "pagado" sin ninguna fila que lo respalde — exactamente el
  * agujero que esta pantalla viene a tapar.
  *
- * La idempotencia la da `registrarGastoEnLibro`: el id del pedido va a la
- * columna H (ID Compra) y se relee antes de escribir, así que dos toques al
- * botón — o un reintento por timeout desde el teléfono en el salón — no
- * duplican el gasto.
+ * ─── Por qué el cliente ya no elige la fila ─────────────────────────────────
+ *
+ * Hasta el 2026-08-19 el modal listaba las cuentas pendientes del proveedor y
+ * exigía elegir una. Eso funcionaba con los dueños y no funciona con quien de
+ * verdad usa esto: un cocinero con el proveedor en la puerta, que no sabe qué
+ * hay cargado en la planilla y no tiene por qué saberlo. Pedirle que elija es
+ * pedirle que adivine, y una elección distraída duplica una deuda o cierra la
+ * que no era. Ahora el sistema busca, actúa, y le dice qué hizo.
+ *
+ * Lo que sigue protegiendo contra duplicados:
+ *
+ *   1. El plan NUNCA escribe una fila nueva si encontró una que corresponde —
+ *      ésa es toda su razón de ser, y ya no depende de que un humano lo elija.
+ *   2. `registrarGastoEnLibro` es idempotente sobre la columna H con el id del
+ *      pedido como clave, releída SIN caché. Un doble toque en un teléfono en
+ *      el medio del servicio no puede escribir dos filas.
+ *
+ * Lo que NO garantiza, dicho en voz alta: `planificarAsiento` lee por
+ * `getMovimientos()`, cacheado un par de minutos, así que una fila cargada hace
+ * segundos desde otra sesión puede no verse todavía. Y ante varios candidatos
+ * elige uno (monto exacto primero, después cercanía de fecha) en vez de
+ * plantarse a preguntar — cuál eligió va en el informe, que es dónde una
+ * persona lo puede revisar después sin tener que decidirlo en la puerta.
  */
 app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
   try {
@@ -2355,70 +2422,66 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
       return res.status(400).json({ ok: false, error: `Este pedido ya figura como "${pedido.pago}".` });
     }
 
-    const pago = pedidos.normalizarPago(req.body.pago);
+    const modo = MODOS_RECIBIR[req.body.modo] ? req.body.modo : null;
+    if (!modo) return res.status(400).json({ ok: false, error: 'Falta decir cómo se recibió.' });
+    const { pago, medioFijo } = MODOS_RECIBIR[modo];
     let monto = Number(req.body.monto) || 0;
-    const medioPago = (req.body.medioPago || '').toString();
-    const idx = parseInt(req.body.rowIndexExistente) || 0;
+    const medioPago = medioFijo || (req.body.medioPago || '').toString();
+
+    // Se decide contra qué fila va ANTES de tocar nada.
+    const plan = await planificarAsiento({ pedido, modo, monto });
     let ref = '', asiento = null;
 
-    if (pago !== 'no') {
-      // Sin fila elegida, este camino va a ESCRIBIR una fila nueva. Antes hay
-      // que estar seguro de que no está ya cargada — punto 2 del comentario de
-      // arriba. Ante la duda no se escribe: se pregunta.
-      if (!idx) {
-        const pendientes = await cuentasPendientesDe(pedido.proveedor);
-        if (pendientes.length && !req.body.confirmaNuevo) {
-          return res.status(409).json({
-            ok: false,
-            codigo: 'cuenta-pendiente',
-            cuentas: pendientes,
-            error: `"${pedido.proveedor}" ya tiene ${pendientes.length} `
-              + `cuenta${pendientes.length !== 1 ? 's' : ''} sin pagar en Movimientos. `
-              + 'No se escribió nada: elegí cuál corresponde a este pedido, o confirmá que es otra cosa.',
-          });
-        }
-      }
+    if (plan.accion === 'vincular-fila') {
+      // Ya está anotado como corresponde. No se escribe NADA en Movimientos: ni
+      // el monto, ni el estado, ni el medio. Esa fila es de quien la cargó y
+      // puede tener fórmulas, cuotas o un vencimiento negociado que acá no
+      // conocemos.
+      //
+      // Y no se revalida el rowIndex antes de guardarlo, a diferencia de
+      // 'cerrar-fila': acá no se escribe sobre esa fila, así que un índice que
+      // envejeció no puede romper nada. `RefMovimiento` es informativo y nunca
+      // se usa para volver a buscar la fila — las filas se mueven cuando
+      // alguien edita la planilla a mano. Ver el encabezado de src/pedidos.js.
+      ref = `fila ${plan.fila.rowIndex}`;
+      monto = plan.fila.monto || monto;
+      asiento = { ...plan, escribio: false };
 
-      if (pago === 'a pagar' && idx) {
-        // La deuda ya está en el libro: lo único que falta es dejar dicho que
-        // ESTE pedido es esa fila. No se escribe en Movimientos — ni el monto,
-        // ni el estado, ni el medio. La fila es de quien la cargó y puede tener
-        // fórmulas, cuotas o un vencimiento negociado que acá no conocemos.
-        const v = await verificarFilaPendiente({ rowIndex: idx, proveedor: pedido.proveedor });
-        if (!v.ok) return res.status(v.status).json({ ok: false, error: v.error });
-        ref = `fila ${idx}`;
-        monto = v.m.salidaARS || monto;
-        asiento = { tipo: 'ya-cargada', rowIndex: idx, monto, proveedor: v.m.proveedor };
-      } else if (pago === 'pagado' && idx) {
-        if (monto <= 0) return res.status(400).json({ ok: false, error: 'Poné cuánto se pagó.' });
-        const r = await marcarFilaPagada({
-          rowIndex: idx,
-          proveedor: pedido.proveedor,
-          medioPago,
-          usuario: req.user.nombre,
-          descripcionSesion: `Pedido recibido: ${pedido.proveedor}`,
+    } else if (plan.accion === 'cerrar-fila') {
+      const r = await marcarFilaPagada({
+        rowIndex: plan.fila.rowIndex,
+        proveedor: pedido.proveedor,
+        medioPago,
+        usuario: req.user.nombre,
+        descripcionSesion: `Pedido recibido: ${pedido.proveedor}`,
+      });
+      if (!r.ok) return res.status(r.status).json({ ok: false, error: r.error });
+      ref = `fila ${r.rowIndex}`;
+      monto = plan.fila.monto || monto;
+      asiento = { ...plan, escribio: true, registradoEnSesion: r.registradoEnSesion };
+
+    } else {
+      if (monto <= 0) {
+        return res.status(400).json({
+          ok: false,
+          error: 'No hay ninguna fila cargada para este pedido, así que hay que escribir una. Poné cuánto es.',
         });
-        if (!r.ok) return res.status(r.status).json({ ok: false, error: r.error });
-        ref = `fila ${r.rowIndex}`;
-        asiento = { tipo: 'fila-existente', ...r };
-      } else {
-        if (monto <= 0) return res.status(400).json({ ok: false, error: 'Poné cuánto se pagó.' });
-        const r = await registrarGastoEnLibro({
-          facturaId: pedido.id,
-          fecha: pedido.fecha,
-          proveedor: pedido.proveedor,
-          categoria: req.body.categoria || 'Mercaderia',
-          monto,
-          descripcion: pedido.detalle || `Pedido ${pedido.proveedor}`,
-          medioPago,
-          estado: pago === 'a pagar' ? 'A pagar' : 'Pagado',
-          vencimiento: req.body.vencimiento || pedido.fecha,
-          usuario: req.user.nombre,
-        });
-        if (!r.ok) return res.status(400).json({ ok: false, error: r.error });
-        ref = pedido.id;
-        asiento = { tipo: r.yaExistia ? 'ya-estaba' : 'fila-nueva', ...r };
       }
+      const r = await registrarGastoEnLibro({
+        facturaId: pedido.id,
+        fecha: pedido.fecha,
+        proveedor: pedido.proveedor,
+        categoria: req.body.categoria || 'Mercaderia',
+        monto,
+        descripcion: pedido.detalle || `Pedido ${pedido.proveedor}`,
+        medioPago,
+        estado: plan.accion === 'crear-a-pagar' ? 'A pagar' : 'Pagado',
+        vencimiento: req.body.vencimiento || pedido.fecha,
+        usuario: req.user.nombre,
+      });
+      if (!r.ok) return res.status(400).json({ ok: false, error: r.error });
+      ref = pedido.id;
+      asiento = { ...plan, escribio: !r.yaExistia, yaEstaba: !!r.yaExistia, registradoEnSesion: r.registradoEnSesion };
     }
 
     const data = await pedidos.marcarRecibido(pedido.id, {
@@ -2428,6 +2491,25 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// GET /api/pedidos/:id/plan?modo=X&monto=Y — qué va a pasar si confirmás.
+//
+// Corre EXACTAMENTE la misma función que la ruta que escribe. Existe para que
+// el modal pueda decir "se va a cerrar la fila de $47.300 del 14/8" en vez de
+// una frase genérica, sin que el navegador tenga que reimplementar la regla —
+// dos copias de esta decisión discreparían el día que una se toque.
+//
+// El plan es informativo y se puede quedar viejo: al confirmar se vuelve a
+// planificar contra la planilla del momento, y lo que se informa al final es lo
+// que de verdad pasó, no esto.
+app.get('/api/pedidos/:id/plan', authMiddleware, async (req, res) => {
+  try {
+    const pedido = await pedidos.getPedido(req.params.id);
+    if (!pedido) return res.status(404).json({ ok: false, error: 'No se encontró ese pedido' });
+    const modo = MODOS_RECIBIR[req.query.modo] ? req.query.modo : 'efectivo';
+    const plan = await planificarAsiento({ pedido, modo, monto: Number(req.query.monto) || 0 });
+    res.json({ ok: true, data: plan });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
 // ─── El cuadro semanal ──────────────────────────────────────────────────────
 // La rutina fija ("los jueves entrega Barracas"). No crea filas de pedido: se
 // muestra dentro de cada día como previsto. Ver el encabezado de pedidos.js.
