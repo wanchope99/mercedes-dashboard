@@ -872,6 +872,11 @@
     .noti-cuerpo { flex:1; }
     .noti-titulo { font-size:14px; font-weight:600; line-height:1.4; }
     .noti-detalle { font-size:12px; color:var(--text-muted); margin-top:3px; line-height:1.5; }
+    #notis-acciones { display:flex; justify-content:flex-end; align-items:center; gap:10px;
+                      margin:-6px 0 10px; font-size:11.5px; color:var(--text-muted); }
+    #notis-acciones button { background:transparent; border:1px solid var(--border); color:var(--text-muted);
+                             cursor:pointer; border-radius:99px; padding:4px 12px; font-size:11.5px; font-family:inherit; }
+    #notis-acciones button:hover { color:var(--text); border-color:var(--text-muted); }
     .noti-ir { background:transparent; border:1px solid var(--border); color:var(--text-muted); cursor:pointer;
                border-radius:6px; padding:4px 10px; font-size:12px; font-family:inherit; white-space:nowrap; }
     .noti-ir:hover { color:var(--text); border-color:var(--accent); }
@@ -1812,6 +1817,7 @@
       <div class="drawer-title">🔔 Notificaciones</div>
       <button class="btn-close" onclick="cerrarNotis()">×</button>
     </div>
+    <div id="notis-acciones"></div>
     <div id="notis-list"><div class="loading"><div class="spinner"></div></div></div>
   </div>
 </div>
@@ -8875,10 +8881,36 @@ function cerrarNotis() { document.getElementById('notis-overlay').classList.remo
 
 function notisIr(tab) { cerrarNotis(); switchTab(tab); }
 
+// "Limpiar todas" no borra: silencia por hoy. Los estados que sigan siendo
+// verdad mañana vuelven solos. Ver src/notificaciones.js.
+async function notisLimpiar(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Limpiando...'; }
+  try {
+    await api('/api/notificaciones/limpiar', { method: 'POST' });
+    await refreshNotis();
+    renderNotis();
+  } catch (e) {
+    showToast('No se pudo limpiar: ' + e.message, 4000);
+    if (btn) { btn.disabled = false; btn.textContent = 'Limpiar todas'; }
+  }
+}
+
 function renderNotis() {
   const cont = document.getElementById('notis-list');
+  const acciones = document.getElementById('notis-acciones');
   const d = notisState.data;
   if (!d) { cont.innerHTML = '<div class="loading"><div class="spinner"></div></div>'; return; }
+
+  // El botón sólo cuando hay algo que limpiar, y con la letra chica al lado: lo
+  // que siga pasando mañana vuelve. Decirlo acá es lo que evita que alguien lo
+  // apriete creyendo que resolvió el pago.
+  if (acciones) {
+    acciones.innerHTML = d.notificaciones.length
+      ? '<span>Lo que siga pendiente vuelve mañana</span>'
+        + `<button onclick="notisLimpiar(this)">Limpiar todas</button>`
+      : '';
+  }
+
   if (!d.notificaciones.length) {
     cont.innerHTML = `<div class="noti-vacio">✓ No hay nada pendiente. Ni pagos por vencer, ni pedidos sin cerrar, ni arreglos nuevos.</div>`;
     return;

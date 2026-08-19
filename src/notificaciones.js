@@ -39,7 +39,9 @@ const NodeCache = require('node-cache');
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const HOJA = process.env.NOTIFICACIONES_SHEET || 'Notificaciones Vistas';
-const HEADER = ['Usuario', 'Visto Hasta', 'Actualizado'];
+// D y E son el "limpiar todas": qué estados silenció esta persona y qué día lo
+// hizo. Ver silenciarTodas — el día es lo que hace que caduque solo.
+const HEADER = ['Usuario', 'Visto Hasta', 'Actualizado', 'Silenciadas', 'Silenciado Dia'];
 
 const cache = new NodeCache({ stdTTL: 60 });
 
@@ -64,6 +66,26 @@ const VISIBLE_PARA = {
 };
 
 const nota = (o) => ({ clase: 'estado', severidad: 'media', cuando: null, ir: null, ...o });
+
+// ─── "Limpiar todas", y por qué no borra ───────────────────────────────────
+//
+// Abrir la campanita ya apaga los EVENTOS. Lo que queda después son los ESTADOS,
+// que no son avisos sino hechos: "5 pagos vencidos" sigue siendo verdad la mires
+// o no. Un botón que los borrara de verdad convertiría la campanita en algo que
+// miente, y una campanita que miente deja de mirarse a la semana.
+//
+// Entonces silencia, no borra: guarda QUÉ ids estaban prendidos y DE QUÉ DÍA es
+// ese silencio. Mañana, si el pago sigue vencido, vuelve a aparecer. Caduca solo
+// —no hay cron ni limpieza— porque lo que se guarda es un día, no un plazo.
+//
+// Se silencian ids puntuales y no "todo": si mañana... perdón, si en un rato
+// aparece un estado NUEVO (un pago que recién vence, un pedido que nadie recibió),
+// su id no está en la lista y suena igual. Silenciar "todo lo que venga hasta
+// medianoche" taparía justamente lo que uno quiere que le griten.
+function silenciados({ silenciadas, silenciadoDia }, hoy) {
+  if (!silenciadoDia || silenciadoDia !== hoy) return new Set();
+  return new Set((silenciadas || '').split('|').map(x => x.trim()).filter(Boolean));
+}
 
 // ── Pagos: estado puro ──────────────────────────────────────────────────────
 // Se agrupan por urgencia en vez de emitir una por pago. Con 30 vencidos, 30
@@ -234,13 +256,17 @@ function servicioAnteriorA(fechaServicioHoy) {
 }
 
 // El armado, puro: entra lo que ya leyeron otros módulos, sale la lista.
-function armar({ pagos, mantenimiento, pedidos, ultimoCierre }, { rol, vistoHasta, hoy, servicioAnterior } = {}) {
+function armar({ pagos, mantenimiento, pedidos, ultimoCierre },
+               { rol, vistoHasta, hoy, servicioAnterior, callados = new Set() } = {}) {
   const todas = [
     ...dePagos(pagos, { rol }),
     ...deMantenimiento(mantenimiento, { vistoHasta }),
     ...dePedidos(pedidos, { hoy, vistoHasta }),
     ...deCocina(ultimoCierre, { servicioAnterior }),
-  ].filter(n => VISIBLE_PARA[n.fuente] ? VISIBLE_PARA[n.fuente](rol) : true);
+  ].filter(n => VISIBLE_PARA[n.fuente] ? VISIBLE_PARA[n.fuente](rol) : true)
+   // Sólo se silencian ESTADOS. Un evento ya se apaga solo al abrir el panel, y
+   // silenciarlo además sería apagar dos veces lo mismo.
+   .filter(n => !(n.clase === 'estado' && callados.has(n.id)));
 
   const orden = { alta: 0, media: 1, baja: 2 };
   todas.sort((a, b) => (orden[a.severidad] ?? 9) - (orden[b.severidad] ?? 9)
@@ -280,13 +306,17 @@ async function _ensureHoja(api) {
 
 async function _leerVistos(api) {
   try {
-    const r = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${HOJA}!A:C` });
+    const r = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${HOJA}!A:E` });
     const filas = r.data.values || [];
     const out = [];
     for (let i = 1; i < filas.length; i++) {
       const f = filas[i] || [];
       if (!txt(f[0])) continue;
-      out.push({ usuario: txt(f[0]), vistoHasta: txt(f[1]), rowIndex: i + 1 });
+      out.push({
+        usuario: txt(f[0]), vistoHasta: txt(f[1]),
+        silenciadas: txt(f[3]), silenciadoDia: txt(f[4]),
+        rowIndex: i + 1,
+      });
     }
     return out;
   } catch (e) {
@@ -295,44 +325,102 @@ async function _leerVistos(api) {
   }
 }
 
-// No poder leer hasta cuándo viste NO puede dejar sin campanita: se degrada a
-// "no vio nada", que muestra de más y nunca de menos.
-async function vistoDe(usuario) {
-  if (!SPREADSHEET_ID || !usuario) return '';
+// No poder leer la marca NO puede dejar sin campanita: se degrada a "no vio
+// nada, no silenció nada", que muestra de más y nunca de menos.
+const _MARCA_VACIA = { vistoHasta: '', silenciadas: '', silenciadoDia: '' };
+
+async function marcaDe(usuario) {
+  if (!SPREADSHEET_ID || !usuario) return _MARCA_VACIA;
   const hit = cache.get(`visto:${usuario}`);
   if (hit !== undefined) return hit;
   try {
     const fila = (await _leerVistos(_sheets())).find(v => v.usuario === usuario);
-    const val = fila ? fila.vistoHasta : '';
+    const val = fila
+      ? { vistoHasta: fila.vistoHasta, silenciadas: fila.silenciadas, silenciadoDia: fila.silenciadoDia }
+      : _MARCA_VACIA;
     cache.set(`visto:${usuario}`, val);
     return val;
   } catch (e) {
-    console.error(`Notificaciones: no se pudo leer el visto (${e.message})`);
-    return '';
+    console.error(`Notificaciones: no se pudo leer la marca (${e.message})`);
+    return _MARCA_VACIA;
   }
 }
 
-async function marcarVisto(usuario) {
+async function vistoDe(usuario) { return (await marcaDe(usuario)).vistoHasta; }
+
+// Una sola función escribe la fila, y por eso 'visto' y 'silenciar' no pueden
+// pisarse: quien no manda un campo conserva el que ya estaba.
+async function _guardarMarca(usuario, cambios) {
   if (!usuario) throw new Error('Falta el usuario');
   if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
   const api = _sheets();
   await _ensureHoja(api);
   const ahora = new Date().toISOString();
-  const vistos = await _leerVistos(api);
-  const fila = vistos.find(v => v.usuario === usuario);
+  const filas = await _leerVistos(api);
+  const fila = filas.find(v => v.usuario === usuario);
+  const previo = fila || _MARCA_VACIA;
+  const marca = {
+    vistoHasta: cambios.vistoHasta !== undefined ? cambios.vistoHasta : (previo.vistoHasta || ''),
+    silenciadas: cambios.silenciadas !== undefined ? cambios.silenciadas : (previo.silenciadas || ''),
+    silenciadoDia: cambios.silenciadoDia !== undefined ? cambios.silenciadoDia : (previo.silenciadoDia || ''),
+  };
+  const valores = [marca.vistoHasta, ahora, marca.silenciadas, marca.silenciadoDia];
+
   if (fila) {
     await api.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID, range: `${HOJA}!B${fila.rowIndex}:C${fila.rowIndex}`,
-      valueInputOption: 'RAW', requestBody: { values: [[ahora, ahora]] },
+      spreadsheetId: SPREADSHEET_ID, range: `${HOJA}!B${fila.rowIndex}:E${fila.rowIndex}`,
+      valueInputOption: 'RAW', requestBody: { values: [valores] },
     });
   } else {
     await api.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID, range: `${HOJA}!A:C`,
-      valueInputOption: 'RAW', requestBody: { values: [[usuario, ahora, ahora]] },
+      spreadsheetId: SPREADSHEET_ID, range: `${HOJA}!A:E`,
+      valueInputOption: 'RAW', requestBody: { values: [[usuario, ...valores]] },
     });
   }
-  cache.set(`visto:${usuario}`, ahora);
-  return { usuario, vistoHasta: ahora };
+  // Las hojas creadas antes de que existieran D y E tienen el encabezado corto:
+  // se completa al pasar, así la planilla se sigue explicando sola.
+  await api.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID, range: `${HOJA}!D1:E1`,
+    valueInputOption: 'RAW', requestBody: { values: [[HEADER[3], HEADER[4]]] },
+  }).catch(() => {});
+
+  cache.set(`visto:${usuario}`, marca);
+  return marca;
+}
+
+async function marcarVisto(usuario) {
+  const m = await _guardarMarca(usuario, { vistoHasta: new Date().toISOString() });
+  return { usuario, vistoHasta: m.vistoHasta };
+}
+
+/**
+ * "Limpiar todas": deja la campanita en cero por hoy.
+ *
+ * Apaga los eventos (marca visto) y SILENCIA los estados que están prendidos en
+ * este momento, guardando sus ids y el día. No los borra — ver el comentario de
+ * `silenciados`: un pago vencido sigue vencido, y mañana vuelve a sonar.
+ *
+ * Los ids los calcula el server, no los manda el navegador: si los mandara,
+ * bastaría con inventarse uno para apagar algo que nunca se vio.
+ */
+async function limpiarTodas({ usuario, rol } = {}) {
+  const hoy = hoyAR();
+  // Los que ya estaban callados HOY se conservan. Sin esto, el segundo toque
+  // desilenciaba todo: getNotificaciones ya devuelve la lista filtrada, así que
+  // la segunda vez vendría vacía y se guardaría vacía. Se acumula, y el día es
+  // lo que lo vacía solo.
+  const previos = silenciados(await marcaDe(usuario), hoy);
+  const actuales = await getNotificaciones({ usuario, rol });
+  for (const n of actuales.notificaciones) {
+    if (n.clase === 'estado') previos.add(n.id);
+  }
+  const ids = [...previos];
+  const m = await _guardarMarca(usuario, {
+    vistoHasta: new Date().toISOString(),
+    silenciadas: ids.join('|'),
+    silenciadoDia: hoy,
+  });
+  return { usuario, silenciadas: ids.length, vistoHasta: m.vistoHasta };
 }
 
 // Cada fuente va envuelta: una caída no puede dejar sin campanita a las otras.
@@ -347,8 +435,8 @@ async function getNotificaciones({ usuario, rol } = {}) {
   const esAdmin = rol === 'admin';
   const hoy = hoyAR();
 
-  const [vistoHasta, pagos, mantenimiento, pedidos, cocina] = await Promise.all([
-    vistoDe(usuario),
+  const [marca, pagos, mantenimiento, pedidos, cocina] = await Promise.all([
+    marcaDe(usuario),
     esAdmin ? seguro('pagos', async () => {
       const { getMovimientos, getComprasEnCuotas } = require('./sheets');
       const { calcUrgencia } = require('./urgencia');
@@ -372,7 +460,9 @@ async function getNotificaciones({ usuario, rol } = {}) {
   return armar(
     { pagos, mantenimiento, pedidos, ultimoCierre: cocina && cocina.ultimo },
     {
-      rol, vistoHasta, hoy,
+      rol, hoy,
+      vistoHasta: marca.vistoHasta,
+      callados: silenciados(marca, hoy),
       servicioAnterior: cocina ? servicioAnteriorA(cocina.servicioHoy) : null,
     },
   );
@@ -381,8 +471,8 @@ async function getNotificaciones({ usuario, rol } = {}) {
 function clearCache() { cache.flushAll(); }
 
 module.exports = {
-  getNotificaciones, marcarVisto, vistoDe, clearCache,
+  getNotificaciones, marcarVisto, limpiarTodas, vistoDe, marcaDe, clearCache,
   // Puras
-  armar, dePagos, deMantenimiento, dePedidos, dePedidosSinPago, deCocina, servicioAnteriorA,
+  armar, dePagos, deMantenimiento, dePedidos, dePedidosSinPago, deCocina, servicioAnteriorA, silenciados,
   HOJA, MAX_POR_FUENTE,
 };

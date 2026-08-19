@@ -2154,6 +2154,18 @@ app.post('/api/notificaciones/visto', authMiddleware, async (req, res) => {
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// POST /api/notificaciones/limpiar — el botón "Limpiar todas".
+//
+// Apaga los eventos y silencia HASTA MAÑANA los estados que están prendidos.
+// No borra nada: un pago vencido sigue vencido y vuelve a sonar mañana. Ver el
+// comentario de `silenciados` en src/notificaciones.js, que es donde está la
+// razón — una campanita que miente deja de mirarse a la semana.
+app.post('/api/notificaciones/limpiar', authMiddleware, async (req, res) => {
+  try {
+    res.json({ ok: true, data: await notificaciones.limpiarTodas({ usuario: req.user.usuario, rol: req.user.rol }) });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // ─── Cierre de cocina — qué comprar y qué producir ──────────────────────────
 // `authMiddleware` sin `adminOnly` a propósito: el encargado entra, porque la
 // checklist de producción la lee toda la cocina. Lo que NO ve es Mercadería ni
@@ -2336,18 +2348,66 @@ const VENTANA_MATCH_DIAS = 7;
 
 const _diasEntre = (a, b) => Math.round((a.getTime() - b.getTime()) / 86400000);
 
+// Texto comparable: sin mayúsculas, sin tildes, sin espacios de más.
+const _normTexto = v => (v == null ? '' : String(v)).trim().toLowerCase()
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ');
+
 /**
- * De varios candidatos, cuál.
+ * De varios candidatos, cuál. Cuatro pistas, en orden de cuánto prueban.
  *
- * El monto manda sobre la fecha: si el encargado dice que pagó $47.300 y hay una
- * fila de $47.300, es ésa y no hay más que discutir. Recién si eso no desempata
- * gana la más cercana a la fecha del pedido. Nunca se devuelve "no sé": con
- * candidatos siempre sale uno, y cuál salió va en el informe — un sistema que
- * se planta y pregunta es exactamente lo que esta pantalla no puede hacer.
+ * El orden importa más que las pistas, y viene de un bug real: con DOS pedidos
+ * abiertos del mismo proveedor —que es lo habitual con Mercado Libre— elegir por
+ * monto o por fecha agarraba la fila del pedido anterior. Pagar el de hoy
+ * cerraba la deuda de ayer, y el de ayer quedaba trabado.
+ *
+ *   0. Antes de elegir, se SACAN de la lista las filas que ya son de OTRO
+ *      pedido: las que llevan un ID Compra con forma de id de pedido y que no
+ *      es el nuestro. Ésa es la regla que arregla el bug — sin ella, cobrar el
+ *      pedido de hoy cerraba la deuda del de ayer, y el de ayer quedaba trabado.
+ *      Sólo se excluyen las que se reconocen como de otro pedido (prefijo `ped`,
+ *      ver crearPedido): una fila cargada a mano o por el bot de facturas tiene
+ *      otro id y sigue siendo candidata, porque puede ser justamente ésta.
+ *   1. ID COMPRA (columna H) igual al id del pedido. Es la fila que ESTE mismo
+ *      pedido escribió cuando quedó a cuenta. No es una pista: es la respuesta,
+ *      y por eso va primera y sola.
+ *   2. DESCRIPCIÓN (columna K) que coincide con el detalle del pedido. Lo que se
+ *      escribe ahí es justamente el detalle ("servilletas seteo"), así que dos
+ *      pedidos del mismo proveedor se distinguen por lo que son. Sólo cuenta si
+ *      el pedido TIENE detalle: sin él la fila dice "Pedido Mercado Libre" y eso
+ *      matchearía con todas.
+ *   3. MONTO exacto. Si alguien dice que pagó $47.300 y hay una fila de $47.300,
+ *      es ésa.
+ *   4. FECHA más cercana, como último desempate.
+ *
+ * Nunca devuelve "no sé": con candidatos siempre sale uno, y cuál salió va en el
+ * informe — un sistema que se planta y pregunta es lo que esta pantalla no puede
+ * hacer, con el proveedor en la puerta.
  */
-function _elegirCandidata(cands, monto, fechaRef) {
+// ¿Esta fila la escribió OTRO pedido? El id de un pedido tiene prefijo `ped` a
+// propósito (ver crearPedido en src/pedidos.js) justamente para poder
+// reconocerlo acá y en la planilla. Un id con otra forma —una factura del bot,
+// algo tipeado a mano— no se excluye: puede ser la fila de esta entrega.
+const _esDeOtroPedido = (c, pedidoId) => {
+  const id = (c.cuotaId || '').trim();
+  return !!id && id !== pedidoId && /^ped\d/.test(id);
+};
+
+function _elegirCandidata(cands, { monto = 0, fechaRef, pedidoId = '', detalle = '' } = {}) {
   if (!cands.length) return null;
-  let pool = cands;
+
+  const propia = cands.find(c => pedidoId && (c.cuotaId || '') === pedidoId);
+  if (propia) return propia;
+
+  let pool = cands.filter(c => !_esDeOtroPedido(c, pedidoId));
+  if (!pool.length) return null;
+  const det = _normTexto(detalle);
+  if (det) {
+    const porTexto = pool.filter(c => {
+      const d = _normTexto(c.descripcion);
+      return d && (d === det || d.includes(det) || det.includes(d));
+    });
+    if (porTexto.length) pool = porTexto;
+  }
   if (monto > 0) {
     const exactas = pool.filter(c => Math.round(c.salidaARS || 0) === Math.round(monto));
     if (exactas.length) pool = exactas;
@@ -2392,16 +2452,20 @@ async function planificarAsiento({ pedido, modo, monto = 0 }) {
     medioPago: f.medioPago || '',
   });
 
+  const pistas = { monto, fechaRef, pedidoId: pedido.id, detalle: pedido.detalle || '' };
+
   if (modo === 'efectivo') {
-    const f = _elegirCandidata(aPagar, monto, fechaRef);
+    const f = _elegirCandidata(aPagar, pistas);
     return f
       ? { accion: 'cerrar-fila', fila: resumen(f), otrasPendientes: aPagar.length - 1 }
       : { accion: 'crear-pagado', fila: null, otrasPendientes: 0 };
   }
 
   if (modo === 'cuenta') {
-    const cands = enVentana(aPagar);
-    const f = _elegirCandidata(cands, monto, fechaRef);
+    // La fila propia vale aunque esté fuera de la ventana: si este pedido ya
+    // escribió su "A pagar", ésa es su fila y la fecha no tiene nada que decir.
+    const cands = enVentana(aPagar).concat(aPagar.filter(m => (m.cuotaId || '') === pedido.id));
+    const f = _elegirCandidata(cands, pistas);
     return f
       ? { accion: 'vincular-fila', fila: resumen(f), otrasPendientes: aPagar.length - 1 }
       : { accion: 'crear-a-pagar', fila: null, otrasPendientes: aPagar.length };
@@ -2413,8 +2477,9 @@ async function planificarAsiento({ pedido, modo, monto = 0 }) {
   // entrega, y cerrarla sería dar por pagado algo que nadie pagó. Se avisa en
   // el informe y decide una persona, que es lo único honesto que se puede hacer
   // con una ambigüedad real.
-  const pagadas = enVentana(delProveedor.filter(m => m.pagado));
-  const f = _elegirCandidata(pagadas, monto, fechaRef);
+  const soloPagadas = delProveedor.filter(m => m.pagado);
+  const pagadas = enVentana(soloPagadas).concat(soloPagadas.filter(m => (m.cuotaId || '') === pedido.id));
+  const f = _elegirCandidata(pagadas, pistas);
   return f
     ? { accion: 'vincular-fila', fila: resumen(f), otrasPendientes: aPagar.length }
     : { accion: 'crear-pagado', fila: null, otrasPendientes: aPagar.length };
@@ -2471,8 +2536,43 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
     const medioPago = medioFijo || (req.body.medioPago || '').toString();
 
     // Se decide contra qué fila va ANTES de tocar nada.
-    const plan = await planificarAsiento({ pedido, modo, monto });
+    let plan = await planificarAsiento({ pedido, modo, monto });
     let ref = '', asiento = null;
+
+    // Cerrar una fila es lo único que puede fallar por culpa de la fila y no del
+    // pedido: alguien la cerró en el medio, o el libro que leímos venía de la
+    // caché. Cuando pasa, se replanifica UNA vez contra el libro fresco y se
+    // sigue por donde diga el plan nuevo — que puede ser cerrar otra fila o
+    // escribir una.
+    //
+    // Antes esto devolvía el error y la mercadería quedaba en la puerta sin
+    // poder marcarse. Es el bug que reportó Pablo: "no me dejaba recibir el
+    // nuevo pedido hasta tanto no registrara como pago el anterior". Recibir no
+    // puede depender de que otro pedido esté resuelto; son dos hechos distintos
+    // y el que importa —llegó la mercadería— ya pasó.
+    //
+    // Una sola vez: si el segundo intento tampoco sale, pasa algo de verdad y
+    // hay que decirlo en vez de seguir dando vueltas.
+    const cerrar = async () => marcarFilaPagada({
+      rowIndex: plan.fila.rowIndex,
+      proveedor: pedido.proveedor,
+      medioPago,
+      usuario: req.user.nombre,
+      descripcionSesion: `Pedido recibido: ${pedido.proveedor}`,
+    });
+
+    let cerrada = null;
+    if (plan.accion === 'cerrar-fila') {
+      cerrada = await cerrar();
+      if (!cerrada.ok) {
+        clearCache();
+        plan = { ...await planificarAsiento({ pedido, modo, monto }), replanificado: true };
+        cerrada = plan.accion === 'cerrar-fila' ? await cerrar() : null;
+        if (cerrada && !cerrada.ok) {
+          return res.status(cerrada.status).json({ ok: false, error: cerrada.error });
+        }
+      }
+    }
 
     if (plan.accion === 'vincular-fila') {
       // Ya está anotado como corresponde. No se escribe NADA en Movimientos: ni
@@ -2489,18 +2589,10 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
       monto = plan.fila.monto || monto;
       asiento = { ...plan, escribio: false };
 
-    } else if (plan.accion === 'cerrar-fila') {
-      const r = await marcarFilaPagada({
-        rowIndex: plan.fila.rowIndex,
-        proveedor: pedido.proveedor,
-        medioPago,
-        usuario: req.user.nombre,
-        descripcionSesion: `Pedido recibido: ${pedido.proveedor}`,
-      });
-      if (!r.ok) return res.status(r.status).json({ ok: false, error: r.error });
-      ref = `fila ${r.rowIndex}`;
+    } else if (cerrada) {
+      ref = `fila ${cerrada.rowIndex}`;
       monto = plan.fila.monto || monto;
-      asiento = { ...plan, escribio: true, registradoEnSesion: r.registradoEnSesion };
+      asiento = { ...plan, escribio: true, registradoEnSesion: cerrada.registradoEnSesion };
 
     } else {
       if (monto <= 0) {
@@ -2525,7 +2617,6 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
       ref = pedido.id;
       asiento = { ...plan, escribio: !r.yaExistia, yaEstaba: !!r.yaExistia, registradoEnSesion: r.registradoEnSesion };
     }
-
     const data = await pedidos.marcarRecibido(pedido.id, {
       pago, monto, medioPago, ref, usuario: req.user.nombre,
     });
