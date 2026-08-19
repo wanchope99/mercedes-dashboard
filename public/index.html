@@ -12367,7 +12367,7 @@ function diaPedidos(d) {
       ? `<div class="ped-pedir"><b>Para pedir:</b> ${d.paraPedir.map(s =>
           `<span>${escapeHtml(s.proveedor)}${s.nota ? ' — ' + escapeHtml(s.nota) : ''}`
           + `<button class="ped-x" onclick="pedOmitir('${d.fecha}',${JSON.stringify(s.proveedor).replace(/"/g, '&quot;')})"`
-          + ` title="Este día no">✕</button></span>`).join(' · ')}</div>`
+          + ` title="Eliminar de esta fecha">✕</button></span>`).join(' · ')}</div>`
       : '',
     ...omitidos.map(itemOmitido),
   ].filter(Boolean).join('');
@@ -12450,31 +12450,34 @@ function itemPrevisto(s, fecha) {
       <button class="plata" onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}','efectivo')">💵 Recibido y pagado</button>
       <button class="cuenta" onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}','cuenta')">📒 Recibido, pago a cuenta</button>
       <button class="ok" onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}','aparte')">🔁 Recibido, pago aparte</button>
-      <button onclick="materializarPrevisto('${escapeHtml(s.id)}','${fecha}',null)">＋ Esperarlo</button>
       <button onclick="pedOmitir('${fecha}',${JSON.stringify(s.proveedor).replace(/"/g, '&quot;')})"
-              title="Sabemos que este día no viene">✕ No viene</button>
+              title="Sacarlo de este día. El cuadro semanal no se toca: los demás días siguen igual.">✕ Eliminar de esta fecha</button>
     </div>
   </div>`;
 }
 
-// Lo que alguien marcó como "este día no viene". No es un pedido: es la
-// ausencia de uno, dicha a propósito. Se muestra tachado para que quede claro
-// que el cuadro semanal lo anunciaba y alguien lo sacó — y con Deshacer, porque
-// el proveedor puede volver a confirmar.
+// Lo que alguien sacó de este día. No es un pedido: es la ausencia de uno,
+// dicha a propósito. Se muestra tachado para que quede claro que el cuadro
+// semanal lo anunciaba y alguien lo sacó — y con Deshacer, por si vuelve.
+//
+// No se guarda ni se pregunta POR QUÉ. Puede ser que no haga falta esta semana,
+// que no haya que pedirlo, que se prefiera esperar: en esta pantalla ninguna de
+// esas cosas cambia nada. Lo único que tiene que contestar el día es qué pedidos
+// esperar, y a esa pregunta "eliminado" ya la contesta entera.
 function itemOmitido(p) {
   return `<div class="ped-omitido">
     <span class="tachado">${escapeHtml(p.proveedor)}</span>
-    <span>no viene este día</span>
+    <span>eliminado de este día</span>
     <button onclick="pedRestaurar('${escapeHtml(p.id)}')">Deshacer</button>
   </div>`;
 }
 
 /**
- * "Este jueves CCU no viene."
+ * Sacar de UNA fecha algo que anuncia el cuadro semanal.
  *
- * NO toca el cuadro semanal, y esa es toda la diferencia: sacar a CCU del cuadro
- * diría que dejó de entregar los jueves y afectaría todas las semanas. Acá se
- * está diciendo algo de UNA fecha.
+ * NO toca el cuadro, y esa es toda la diferencia: sacar a CCU del cuadro diría
+ * que dejó de entregar los jueves y afectaría todas las semanas. Acá se está
+ * diciendo algo del jueves 20 y de ningún otro.
  */
 async function pedOmitir(fecha, proveedor) {
   showToast('⏳ Guardando...');
@@ -12484,7 +12487,7 @@ async function pedOmitir(fecha, proveedor) {
     });
     pedState.abiertos.add(fecha);
     await loadPedidos();
-    showToast(`${proveedor}: marcado como que no viene`);
+    showToast(`${proveedor}: eliminado de este día`);
   } catch (e) { showToast('Error: ' + e.message, 4000); }
 }
 
@@ -12494,7 +12497,7 @@ async function pedRestaurar(id) {
     const { data } = await api('/api/pedidos/omitir/' + encodeURIComponent(id), { method: 'DELETE' });
     if (data && data.fecha) pedState.abiertos.add(data.fecha);
     await loadPedidos();
-    showToast('Vuelve a aparecer');
+    showToast('Vuelve a aparecer en el día');
   } catch (e) { showToast('Error: ' + e.message, 4000); }
 }
 
@@ -12541,11 +12544,16 @@ async function crearPedido(btn) {
 }
 
 /**
- * Un previsto pasa a ser una fila real.
+ * Un previsto pasa a ser una fila real, y en el mismo acto se recibe.
  *
- * `modo` es uno de los tres de PED_MODOS y abre el modal ya en ese modo, o
- * null para dejarlo simplemente esperado (y poder editarle el detalle o el
- * costo antes de que llegue).
+ * `modo` es uno de los tres de PED_MODOS. No hay un cuarto camino que lo cree
+ * y lo deje esperando: existía ("＋ Esperarlo") y se sacó el 2026-08-19. Lo
+ * único que hacía era empezar a contarlo como pendiente —sumaba al "N sin
+ * recibir" y la campanita reclamaba por él— sin agregar nada a la pregunta que
+ * el día contesta, que es qué esperar hoy: eso el previsto ya lo dice. Su
+ * justificación escrita era poder editarle el detalle y el costo antes de que
+ * llegara, y esa pantalla nunca se construyó: `PUT /api/pedidos/:id` existe y
+ * el navegador no lo llama desde ningún lado.
  */
 async function materializarPrevisto(idSemanal, fecha, modo) {
   const s = (pedState.data.semanal || []).find(x => x.id === idSemanal);
@@ -12560,8 +12568,7 @@ async function materializarPrevisto(idSemanal, fecha, modo) {
       }),
     });
     await loadPedidos();
-    if (modo) openPedRecibir(data.id, modo);
-    else showToast('Agregado al día');
+    openPedRecibir(data.id, modo);
   } catch (e) { showToast('Error: ' + e.message, 4000); }
 }
 

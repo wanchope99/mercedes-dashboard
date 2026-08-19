@@ -2252,11 +2252,15 @@ app.put('/api/pedidos/:id', authMiddleware, async (req, res) => {
   catch (err) { res.status(400).json({ ok: false, error: err.message }); }
 });
 
-// Omitir un previsto de UN día: "este jueves CCU no viene".
+// Sacar de UN día algo que anuncia el cuadro semanal: "del jueves 20, CCU no".
 //
 // No toca el cuadro semanal. Sacar a CCU del cuadro diría que dejó de entregar
 // los jueves, que es otra afirmación y la que rompería las otras semanas. Lo que
 // se está diciendo es sobre una fecha, y por eso se escribe en la fecha.
+//
+// No se pide un motivo. Puede no hacer falta esta semana, puede no haber que
+// pedirlo, puede convenir esperar: la pantalla del día contesta una sola
+// pregunta —qué esperar hoy— y para eso alcanza con que no esté.
 //
 // Lo puede hacer el encargado: es quien está cuando el proveedor avisa que no
 // llega, y el flujo alternativo era que no quedara anotado en ningún lado.

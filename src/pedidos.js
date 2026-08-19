@@ -78,8 +78,14 @@ const DIAS_CUADRO = ['martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 const ESTADOS = ['esperado', 'recibido', 'cancelado'];
 const ESTADO_DEFAULT = 'esperado';
 
-// "Este jueves CCU no viene": una fila CANCELADA cuyo único trabajo es tapar el
+// "Sacar a CCU del jueves 20": una fila CANCELADA cuyo único trabajo es tapar el
 // previsto que el cuadro semanal genera para esa fecha.
+//
+// No se guarda POR QUÉ, y no es un olvido. Puede ser que no haga falta esta
+// semana, que no haya que pedirlo, que se prefiera esperar — ninguna de esas
+// cosas cambia nada en esta pantalla, cuya única pregunta es qué pedidos esperar
+// ese día. Un campo "motivo" sería uno más que llenar con el proveedor en la
+// puerta y que después nadie lee.
 //
 // No hay estructura nueva y es a propósito. Un previsto YA se esconde cuando
 // existe un pedido real de ese proveedor ese día — la omisión es ese mismo
@@ -638,7 +644,7 @@ async function marcarRecibido(id, { pago = 'no', monto = 0, medioPago = '', ref 
 }
 
 /**
- * "Este día ese proveedor no viene."
+ * Sacar a ese proveedor de ese día.
  *
  * Escribe la fila cancelada que tapa el previsto. Es idempotente por
  * (fecha, proveedor): tocar dos veces el botón no deja dos filas muertas en la
@@ -666,12 +672,12 @@ async function omitirPrevisto({ fecha, proveedor, nota = '', usuario = '' } = {}
     proveedor: nombre,
     estado: 'cancelado',
     origen: ORIGEN_OMITIDO,
-    notas: _txt(nota) || (usuario ? `No viene este día — lo marcó ${usuario}` : 'No viene este día'),
+    notas: _txt(nota) || (usuario ? `Eliminado de este día — lo marcó ${usuario}` : 'Eliminado de este día'),
   });
 }
 
 /**
- * Deshacer una omisión: el previsto vuelve a aparecer.
+ * Deshacer: el previsto vuelve a aparecer en ese día.
  *
  * Sólo borra filas que SON una omisión. Con el id de un pedido de verdad no
  * hace nada — este camino lo puede usar el encargado, y un botón que dice
