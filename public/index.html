@@ -514,7 +514,28 @@
     .ped-dia:not(.abierto) .ped-dia-body { display: none; }
     .ped-item { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center;
                 background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px; margin-bottom: 7px; }
-    .ped-item.recibido { opacity: 0.6; }
+    /* ── Esperando o llegó, que es LA pregunta de esta pantalla ───────────
+       Hasta el 21/08/2026 la única señal era opacity 0.6, y era demasiado
+       suave: con seis pedidos en pantalla había que leer cada uno para saber
+       cuál falta. Ahora son tres cosas a la vez —franja de color, fondo y una
+       etiqueta que lo dice con palabras— porque la opacidad sola se pierde con
+       el brillo bajo, que es como se mira un teléfono en el salón. */
+    .ped-item.esperando { border-left: 3px solid var(--orange); }
+    .ped-item.recibido { opacity: 0.55; border-left: 3px solid var(--green); background: transparent; }
+    .ped-item.recibido .ped-item-titulo { color: var(--text-muted); font-weight: 400; }
+    /* La etiqueta de estado, al lado del nombre. Dice en palabras lo que el
+       color insinúa: un color solo es una convención que hay que aprender. */
+    .ped-estado { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+                  padding: 2px 7px; border-radius: 5px; white-space: nowrap; }
+    .ped-estado.esperando { background: var(--orange-dim); color: var(--orange); }
+    .ped-estado.llego { background: var(--green-dim); color: var(--green); }
+    /* Los dos grupos adentro del día. El encabezado contesta la pregunta sin
+       tener que mirar ningún pedido: "falta que lleguen 2". */
+    .ped-grupo-tit { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+                     color: var(--text-muted); margin: 14px 0 8px; display: flex; align-items: center; gap: 8px; }
+    .ped-grupo-tit:first-child { margin-top: 4px; }
+    .ped-grupo-tit::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+    .ped-grupo-tit.falta { color: var(--orange); }
     /* Los previstos son la rutina del cuadro semanal, no filas guardadas.
        Borde punteado para que se vea de un vistazo que todavía no existen. */
     .ped-item.previsto { border-style: dashed; background: transparent; }
@@ -688,7 +709,12 @@
        #ped-sem-overlay NO sube: se abre desde el cuadro semanal, que está en la
        página y no en ningún modal. Subirlo sería copiar un número sin razón. */
     #ped-recibir-overlay, #ped-sem-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 320; align-items: center; justify-content: center; padding: 20px; }
-    #ped-recibir-overlay { z-index: 580; }
+    #ped-recibir-overlay, #ped-mover-overlay { z-index: 580; }
+    #ped-mover-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); align-items: center; justify-content: center; padding: 20px; }
+    #ped-mover-overlay.open { display: flex; }
+    #ped-mover-overlay .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; width: 460px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }
+    #ped-mover-overlay .modal-title { font-size: 17px; font-weight: 600; margin-bottom: 18px; }
+    #ped-mover-overlay input[type="date"] { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family: inherit; outline: none; width: 100%; color-scheme: dark; }
     #ped-recibir-overlay.open, #ped-sem-overlay.open { display: flex; }
     #ped-recibir-overlay .modal, #ped-sem-overlay .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; width: 520px; max-width: 95vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 24px 64px rgba(0,0,0,0.5); }
     #ped-recibir-overlay .modal-title, #ped-sem-overlay .modal-title { font-size: 17px; font-weight: 600; margin-bottom: 22px; }
@@ -3097,6 +3123,23 @@
         <button class="btn" id="f-sin-entrega" onclick="guardarCompra(false)">No lleva entrega</button>
         <button class="btn btn-accent" onclick="guardarCompra(true)">Guardar</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- "No vino, pasalo a mañana". Sale del modal del día, así que va encima:
+     mismo z-index que el de recibir. Ver el bloque de apilado en el CSS.   -->
+<div class="modal-overlay" id="ped-mover-overlay">
+  <div class="modal">
+    <div class="modal-title">¿Para cuándo?</div>
+    <div id="ped-mover-cabecera" style="background:var(--surface2);border-radius:10px;padding:12px 14px;margin-bottom:18px;font-size:13px;line-height:1.6"></div>
+    <div class="ped-atajos" id="ped-mover-atajos"></div>
+    <input type="date" id="ped-mover-fecha" onchange="pintarAtajosMover()">
+    <div id="ped-mover-aviso" style="font-size:11px;color:var(--text-muted);margin-top:10px"></div>
+    <div id="ped-mover-error" style="font-size:12px;color:var(--red);margin-top:8px"></div>
+    <div class="modal-actions" style="margin-top:20px">
+      <button class="btn" onclick="cerrarPedMover()">Cancelar</button>
+      <button class="btn btn-accent" onclick="confirmarPedMover()">Mover</button>
     </div>
   </div>
 </div>
@@ -12921,6 +12964,7 @@ const pedState = {
   // la vista y no se guarda en ningún lado: es "qué estoy mirando ahora".
   itemsAbiertos: new Set(),
   pegandoEn: null,        // a qué pedido va lo próximo que se pegue
+  moviendo: null,         // el pedido que se está pasando a otro día
   recibiendo: null,       // el pedido que está en el modal
   modo: null,             // cuál de los tres botones lo abrió: ver PED_MODOS
   altaPago: '',           // cómo se paga, en el alta suelta. '' = no sé todavía
@@ -13130,9 +13174,19 @@ function renderPedDiaModal() {
   document.getElementById('ped-dia-sub').innerHTML = chipsDelDia(d);
 
   const omitidos = d.omitidos || [];
+  // Lo que falta arriba y lo que ya llegó abajo, cada uno bajo su título. Es lo
+  // que contesta la pregunta del día sin leer pedido por pedido — y con los
+  // previstos contando como "falta", porque tampoco llegaron.
+  const faltan = d.pedidos.filter(p => p.estado !== 'recibido');
+  const llegaron = d.pedidos.filter(p => p.estado === 'recibido');
+  const nFalta = faltan.length + d.previstos.length;
+
   document.getElementById('ped-dia-cuerpo').innerHTML = [
-    ...d.pedidos.map(itemPedido),
+    nFalta ? `<div class="ped-grupo-tit falta">Falta que lleguen · ${nFalta}</div>` : '',
+    ...faltan.map(itemPedido),
     ...d.previstos.map(p => itemPrevisto(p, d.fecha)),
+    llegaron.length ? `<div class="ped-grupo-tit">Ya llegaron · ${llegaron.length}</div>` : '',
+    ...llegaron.map(itemPedido),
     !d.pedidos.length && !d.previstos.length && !omitidos.length
       ? '<div class="ped-vacio">Nada esperado este día.</div>' : '',
     d.paraPedir.length
@@ -13208,9 +13262,12 @@ function itemPedido(p) {
     ? (pedEsAdmin() ? `<button onclick="borrarPedido('${id}')">🗑️</button>` : '')
     : accionesRecibir(p);
 
-  return `<div class="ped-item${recibido ? ' recibido' : ''}">
+  return `<div class="ped-item ${recibido ? 'recibido' : 'esperando'}">
     <div>
-      <div class="ped-item-titulo">${escapeHtml(p.proveedor)}</div>
+      <div class="ped-item-titulo">
+        <span class="ped-estado ${recibido ? 'llego' : 'esperando'}">${recibido ? '✓ llegó' : 'esperando'}</span>
+        ${escapeHtml(p.proveedor)}
+      </div>
       <div class="ped-item-meta">${meta}</div>
     </div>
     <div class="ped-acciones">${acciones}</div>
@@ -13240,7 +13297,12 @@ const PED_BOTONES = {
 
 function accionesRecibir(p) {
   const id = escapeHtml(p.id);
-  const borrar = pedEsAdmin() ? `<button onclick="borrarPedido('${id}')">🗑️</button>` : '';
+  // Mover de día es lo más común que le pasa a un pedido después de cargarlo
+  // ("no vino, viene mañana"), así que está siempre a la vista mientras no
+  // haya llegado. Un pedido recibido no se mueve: llegó tal día y eso ya es un
+  // hecho, con su fila en el libro.
+  const mover = `<button onclick="abrirPedMover('${id}')" title="No vino: pasarlo a otro día">📅 Otro día</button>`;
+  const borrar = mover + (pedEsAdmin() ? `<button onclick="borrarPedido('${id}')">🗑️</button>` : '');
   const modoPpal = PP_A_MODO[p.pagoPrevisto];
 
   // Sin dato de pago —un pedido viejo, o uno anotado sin saberlo todavía— no
@@ -13260,6 +13322,109 @@ function accionesRecibir(p) {
     <div class="ped-acc-otras" id="ped-otras-${id}">${otros.map(m =>
       `<button class="${PED_BOTONES[m].clase}" onclick="openPedRecibir('${id}','${m}')">${PED_BOTONES[m].txt}</button>`
     ).join('')}</div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// "No vino, pasalo a mañana"
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Lo más común que le pasa a un pedido después de cargarlo. Hasta hoy la única
+// salida era borrarlo y volver a cargarlo, con lo que se perdían sus renglones
+// y lo que ya se hubiera tildado.
+//
+// No se pregunta POR QUÉ se movió — decisión del dueño, y la misma razón que
+// las omisiones del cuadro: con el proveedor avisando por teléfono, un campo
+// más para llenar es uno que nadie llena y que después nadie lee.
+
+function abrirPedMover(id) {
+  const p = pedBuscar(id);
+  if (!p) return;
+  pedState.moviendo = p;
+  document.getElementById('ped-mover-error').textContent = '';
+  document.getElementById('ped-mover-cabecera').innerHTML =
+    `<b>${escapeHtml(p.proveedor)}</b>${p.detalle ? ' · ' + escapeHtml(p.detalle) : ''}<br>`
+    + `<span style="color:var(--text-muted)">Estaba para el ${new Date(p.fecha + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}</span>`;
+
+  // Si la compra se paga en la puerta, su cuenta vence el día de la entrega y
+  // se mueve con ella. Se dice ANTES de confirmar: es una escritura en el libro
+  // y no puede ser una sorpresa.
+  document.getElementById('ped-mover-aviso').innerHTML = p.pagoPrevisto === 'al-recibir'
+    ? '→ Como se paga al recibir, <b>su cuenta en Movimientos también pasa a vencer ese día</b>.'
+    : '';
+
+  // Mañana primero: es el caso que se usa. Después los días de entrega que
+  // siguen — sin domingo ni lunes, que no entrega nadie (ver SIN_ENTREGA).
+  const hoy = new Date();
+  const atajos = [];
+  for (let n = 1; atajos.length < 4 && n < 14; n++) {
+    const d = new Date(hoy); d.setDate(hoy.getDate() + n);
+    if (SIN_ENTREGA.includes(d.getDay())) continue;
+    const iso = d.toISOString().split('T')[0];
+    if (iso === p.fecha) continue;                    // ya está ahí
+    const et = n === 1 ? 'Mañana'
+      : DOW_CORTO[d.getDay()].charAt(0).toUpperCase() + DOW_CORTO[d.getDay()].slice(1);
+    atajos.push('<button type="button" class="btn" data-iso="' + iso + '" onclick="setMover(\'' + iso + '\')">' + et + '</button>');
+  }
+  document.getElementById('ped-mover-atajos').innerHTML = atajos.join('');
+  document.getElementById('ped-mover-fecha').value = (atajos[0] || '').match(/data-iso="([^"]+)"/) ? RegExp.$1 : p.fecha;
+  pintarAtajosMover();
+  document.getElementById('ped-mover-overlay').classList.add('open');
+}
+
+function cerrarPedMover() {
+  pedState.moviendo = null;
+  document.getElementById('ped-mover-overlay').classList.remove('open');
+}
+
+function setMover(iso) {
+  document.getElementById('ped-mover-fecha').value = iso;
+  pintarAtajosMover();
+}
+
+function pintarAtajosMover() {
+  const v = document.getElementById('ped-mover-fecha').value;
+  document.querySelectorAll('#ped-mover-atajos .btn').forEach(b => {
+    b.classList.toggle('activo', b.dataset.iso === v);
+  });
+}
+
+async function confirmarPedMover() {
+  const p = pedState.moviendo;
+  if (!p) return;
+  const fecha = document.getElementById('ped-mover-fecha').value;
+  const err = document.getElementById('ped-mover-error');
+  if (!fecha) { err.textContent = 'Poné el día.'; return; }
+  if (fecha === p.fecha) { err.textContent = 'Ya estaba para ese día.'; return; }
+
+  cerrarPedMover();
+  showToast('⏳ Moviendo…');
+  try {
+    const r = await api('/api/pedidos/' + encodeURIComponent(p.id) + '/mover', {
+      method: 'POST', body: JSON.stringify({ fecha }),
+    });
+    // El día que se está mirando pasa a ser el nuevo: si no, quedaría abierto un
+    // día donde el pedido ya no está y parecería que se borró.
+    pedState.diaAbierto = fecha;
+    await loadPedidos();
+    const cuando = new Date(fecha + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
+    const v = r.vencimiento;
+    showResultadoModal({
+      ok: true,
+      titulo: 'Movido',
+      detalle: `<b>${escapeHtml(p.proveedor)}</b> pasa al <b>${cuando}</b>.`
+        + (v && v.ok
+            ? `<br>🧾 Su cuenta de ${fmt(v.monto)} en Movimientos ahora vence ese día.`
+            : v && !v.ok
+              ? `<br><span style="color:var(--orange)">⚠ El pedido se movió, pero su cuenta en Movimientos quedó con la fecha vieja (${escapeHtml(v.error)}). Corregila desde Pagos.</span>`
+              : ''),
+    });
+  } catch (e) {
+    showResultadoModal({
+      ok: false,
+      titulo: 'No se pudo mover',
+      detalle: `${escapeHtml(e.message)}<br><span style="font-size:11px">El pedido quedó donde estaba.</span>`,
+    });
+  }
 }
 
 function toggleOtrasFormas(id, ev) {
@@ -13482,7 +13647,10 @@ function itemPrevisto(s, fecha) {
 
   return `<div class="ped-item previsto">
     <div>
-      <div class="ped-item-titulo">${escapeHtml(s.proveedor)}</div>
+      <div class="ped-item-titulo">
+        <span class="ped-estado esperando">previsto</span>
+        ${escapeHtml(s.proveedor)}
+      </div>
       <div class="ped-item-meta">${meta}</div>
     </div>
     <div class="ped-acciones">

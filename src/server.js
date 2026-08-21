@@ -2604,6 +2604,87 @@ app.put('/api/pedidos/:id', authMiddleware, async (req, res) => {
   catch (err) { res.status(400).json({ ok: false, error: err.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// "No vino, pasalo a mañana"
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// El caso que lo pidió: estás esperando a Thames, no llegó, y llega mañana. Es
+// lo más común que le pasa a un pedido después de cargarlo, y hasta hoy la
+// única forma era borrarlo y volver a cargarlo — con lo cual se perdían sus
+// renglones y lo que ya se hubiera tildado.
+//
+// NO SE GUARDA POR QUÉ se movió. Misma razón que las omisiones del cuadro
+// semanal: con el proveedor avisando por teléfono, un campo más para llenar es
+// uno que nadie llena y que después nadie lee. El día contesta qué esperar, y
+// para eso alcanza con la fecha nueva.
+//
+// ─── Y el vencimiento se mueve con él ──────────────────────────────────────
+//
+// Si el pedido es de los que se pagan en la puerta, su fila en Movimientos
+// quedó "A pagar" venciendo el día de la entrega. Correr la entrega sin correr
+// esa fila deja una cuenta figurando VENCIDA por mercadería que todavía no
+// llegó — y la sección Pagos empieza a reclamar algo que no se debe.
+//
+// Decisión del dueño (21/08/2026): se mueven las dos y se informa. Para quien
+// lo usa es una sola cosa — "esto llega el 22 y se paga el 22".
+//
+// Tres candados sobre qué fila se toca, porque esto escribe en el libro desde
+// un botón que dice "cambiar fecha":
+//
+//   1. Sólo la fila cuyo ID Compra ES el id de este pedido. No se busca por
+//      proveedor ni por monto: acá no se adivina nada.
+//   2. Sólo si sigue en "A pagar". Una ya pagada no se toca — la plata salió
+//      un día concreto y esa fecha es un hecho.
+//   3. Sólo la columna E (Vencimiento). Ni el estado, ni el monto, ni el mes:
+//      el gasto se devengó cuando se compró y eso no cambia porque la entrega
+//      se corra (ver la regla de la columna A vs B en CLAUDE.md).
+//
+// Si mover el vencimiento falla, el pedido SE MUEVE IGUAL y se dice que la
+// cuenta quedó con la fecha vieja. Lo que importa es dónde esperar la
+// mercadería; la fila del libro se puede corregir a mano desde Pagos.
+app.post('/api/pedidos/:id/mover', authMiddleware, async (req, res) => {
+  try {
+    const pedido = await pedidos.getPedido(req.params.id);
+    if (!pedido) return res.status(404).json({ ok: false, error: 'No se encontró ese pedido' });
+    if (pedido.estado === 'recibido') {
+      return res.status(400).json({ ok: false, error: 'Ese pedido ya figura recibido: no se puede mover de día.' });
+    }
+    const fecha = pedidos.normalizarFecha(req.body && req.body.fecha);
+    if (!fecha) return res.status(400).json({ ok: false, error: 'Falta la fecha nueva.' });
+    if (fecha === pedido.fecha) {
+      return res.status(400).json({ ok: false, error: 'Ya estaba para ese día.' });
+    }
+    const fechaVieja = pedido.fecha;
+
+    // El pedido primero: es lo que se pidió y lo que tiene que pasar sí o sí.
+    const data = await pedidos.actualizarPedido(pedido.id, { fecha });
+
+    // Y ahora su cuenta, si tiene una y sigue abierta.
+    let vencimiento = null;
+    try {
+      const movs = await getMovimientos();
+      const propia = movs.find(m =>
+        (m.cuotaId || '') === pedido.id && m.tipo === 'Gasto' && !m.pagado);
+      if (propia) {
+        const nueva = aFechaPlanilla(fecha);
+        const sheets = google.sheets({ version: 'v4', auth: getAuth() });
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SPREADSHEET_ID,
+          range: `Movimientos!E${propia.rowIndex}`,
+          valueInputOption: 'USER_ENTERED',
+          requestBody: { values: [[nueva]] },
+        });
+        clearCache();
+        vencimiento = { ok: true, fila: propia.rowIndex, monto: propia.salidaARS || 0, nueva };
+      }
+    } catch (e) {
+      vencimiento = { ok: false, error: e.message };
+    }
+
+    res.json({ ok: true, data, fechaVieja, vencimiento });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
 // Sacar de UN día algo que anuncia el cuadro semanal: "del jueves 20, CCU no".
 //
 // No toca el cuadro semanal. Sacar a CCU del cuadro diría que dejó de entregar

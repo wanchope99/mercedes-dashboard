@@ -278,6 +278,26 @@ It had to go: a day with four orders of twelve products each is fifty lines push
 
 **The receive button comes pre-chosen.** `pagoPrevisto` maps to one of `MODOS_RECIBIR` (`PP_A_MODO`), and that one renders as the single primary button; the other two live behind "otra forma". They must stay reachable — the supplier turns up without the remito, or charges cash for what was going to be a transfer, and whoever receives has to be able to say what actually happened. **A pedido with no `pagoPrevisto` still shows all three**: nobody said anything, so choosing for them would be inventing an answer.
 
+### Waiting or arrived, and moving a delivery to another day (2026-08-21)
+
+**Three signals say whether a delivery is still coming, not one.** Until the same day the only mark was `opacity: 0.6` and the owner called it: too soft to tell apart at a glance. Now the day's modal splits into **"Falta que lleguen · N"** and **"Ya llegaron · N"**, each row carries a coloured left edge (orange / green) and a word-label (`ESPERANDO` / `✓ LLEGÓ`). Opacity alone disappears at low screen brightness, which is how a phone gets read in the salón; and a colour on its own is a convention someone has to learn. The previstos count as "falta" — they have not arrived either.
+
+**A pedido can be moved to another day, and that is the most common thing that happens to one after it is loaded** ("Thames didn't come, it's coming tomorrow"). Until then the only way was deleting and re-loading it, which lost its items and everything already ticked. `POST /api/pedidos/:id/mover`.
+
+**No reason is recorded**, same rule as the weekly grid's omissions: with the supplier on the phone, one more field to fill is one nobody fills and nobody reads afterwards.
+
+**The vencimiento moves with the delivery**, decided by the owner. A pedido that is paid at the door has a `A pagar` row in `Movimientos` due on the delivery date; moving the delivery without moving that row leaves an account showing as **overdue for goods that never arrived**, and Pagos starts chasing a debt that is not owed. For whoever uses it, it is one thing — "this arrives on the 22nd and gets paid on the 22nd".
+
+Three locks on which row is touched, because this writes to the ledger from a button labelled "change date":
+
+1. **Only the row whose `ID Compra` IS this pedido's id.** No supplier or amount matching — nothing is guessed here.
+2. **Only while it is still `A pagar`.** A paid row is never touched: the money left on a specific day and that date is a fact.
+3. **Only column E.** Not the state, not the amount, not the `Mes` — the expense accrued when it was bought and that does not change because the delivery slipped (see the column A vs B rule).
+
+**A failure moving the vencimiento never blocks the move.** The pedido moves and the response says the account kept the old date. What matters is where to expect the goods; the ledger row can be fixed by hand from Pagos.
+
+**A received pedido cannot be moved** — it arrived on a given day, and it has a ledger row saying so.
+
 ### Pedidos por día: the one screen where the encargado closes a payment
 
 `src/pedidos.js` replaces the "PEDIDOS X DIA" Google Doc: what arrives each day, whether it has to be paid and how much. Two auto-created sheets in `SPREADSHEET_ID` — `Pedidos` (one row per expected delivery on a date) and `Pedidos Semanal` (the fixed weekly routine: "Thursdays Barracas, Coca and Bendito deliver").
