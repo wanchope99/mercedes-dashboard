@@ -29,7 +29,13 @@
 //   Hoja "Pedidos" — un pedido esperado para una fecha concreta:
 //     A ID | B Fecha | C Proveedor | D Detalle | E CostoEstimado | F MedioPrevisto |
 //     G Estado | H RecibidoPor | I RecibidoEl | J Pago | K MontoPagado |
-//     L MedioPagoReal | M RefMovimiento | N Origen | O Notas | P Actualizado
+//     L MedioPagoReal | M RefMovimiento | N Origen | O Notas | P Actualizado |
+//     Q PagoPrevisto | R Vence
+//
+// Q y R (20/08/2026) son la INTENCION de pago, decidida al comprar. J/K/L son el
+// HECHO, escrito al recibir. No se derivan una de la otra y no se pisan: un
+// pedido puede nacer "se paga al recibir" y terminar "a pagar" porque el
+// proveedor no trajo el remito, y las dos cosas tienen que quedar escritas.
 //
 //   Hoja "Pedidos Semanal" — el cuadro de referencia por día de semana:
 //     A ID | B Dia | C Orden | D Tipo | E Proveedor | F Nota | G MedioPrevisto |
@@ -56,7 +62,9 @@ const TZ = 'America/Argentina/Buenos_Aires';
 
 const HEADER = ['ID', 'Fecha', 'Proveedor', 'Detalle', 'CostoEstimado', 'MedioPrevisto',
                 'Estado', 'RecibidoPor', 'RecibidoEl', 'Pago', 'MontoPagado', 'MedioPagoReal',
-                'RefMovimiento', 'Origen', 'Notas', 'Actualizado'];
+                'RefMovimiento', 'Origen', 'Notas', 'Actualizado',
+                'PagoPrevisto', 'Vence'];
+const ULTIMA_COL = 'R';
 const HEADER_SEMANAL = ['ID', 'Dia', 'Orden', 'Tipo', 'Proveedor', 'Nota', 'MedioPrevisto',
                         'Activo', 'Actualizado'];
 
@@ -105,6 +113,30 @@ const esOmision = p => p.estado === 'cancelado' && p.origen === ORIGEN_OMITIDO;
 // confunde con uno que nadie tocó.
 const PAGOS = ['no', 'pagado', 'a pagar'];
 const PAGO_DEFAULT = 'no';
+
+// Como se VA a pagar, decidido al cargar la compra. Es la contracara de PAGOS:
+// aquel dice que paso, este dice que se planeo. Son los mismos tres casos que
+// los tres botones de recibir, movidos al momento en que los sabe quien compra
+// en vez del momento en que los adivina quien recibe.
+//
+//   'pagado'     ya salio la plata (transferencia, MP, debito)
+//   'al-recibir' hay que pagarlo en la puerta        → el unico que pide accion
+//   'a-pagar'    queda a cuenta, con vencimiento
+//
+// El default es VACIO y no un valor. Un pedido cargado antes de que esto
+// existiera, o un previsto del cuadro semanal, no dijeron nada sobre la plata:
+// inventarles una respuesta es la misma falla que ya esta documentada para
+// 'sinTocar' vs 'ok' en el cierre de cocina. Vacio se muestra como nada.
+const PAGOS_PREVISTOS = ['pagado', 'al-recibir', 'a-pagar'];
+const PAGO_PREVISTO_DEFAULT = '';
+
+// Ojo con el vocabulario, porque se cruzan dos cosas. El que recibe PAGA — el
+// que cobra es el proveedor. Y "a pagar" en la pantalla del cocinero significa
+// lo que pagas en la puerta, mientras que 'a-pagar' aca significa exactamente
+// lo contrario: queda a cuenta y NO se paga ahi. Por eso lo que se cuenta para
+// mostrar se llama "enPuerta" y no "aPagar": dos nombres parecidos para estados
+// opuestos es como se rompe esto dentro de tres meses.
+const sePagaEnPuerta = p => p.pagoPrevisto === 'al-recibir' && p.pago === 'no';
 
 // "Entrega El Jumillano, pagarle en efectivo" y "Pedir a Acequia para el jueves"
 // son las dos clases de línea del doc y no significan lo mismo: la primera es
@@ -188,6 +220,7 @@ function _deLista(valor, lista, porDefecto) {
 
 function normalizarEstado(v) { return _deLista(v, ESTADOS, ESTADO_DEFAULT); }
 function normalizarPago(v) { return _deLista(v, PAGOS, PAGO_DEFAULT); }
+function normalizarPagoPrevisto(v) { return _deLista(v, PAGOS_PREVISTOS, PAGO_PREVISTO_DEFAULT); }
 function normalizarTipo(v) { return _deLista(v, TIPOS, TIPO_DEFAULT); }
 
 // El día se acepta con o sin tilde ("miercoles" tipeado a mano en la planilla
@@ -238,11 +271,13 @@ function _sheets() {
 }
 
 async function _ensureHoja(api, titulo, header, ultimaCol) {
+  let creada = false;
   try {
     await api.spreadsheets.batchUpdate({
       spreadsheetId: SPREADSHEET_ID,
       requestBody: { requests: [{ addSheet: { properties: { title: titulo } } }] },
     });
+    creada = true;
     await api.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
       range: `${titulo}!A1:${ultimaCol}1`,
@@ -252,15 +287,50 @@ async function _ensureHoja(api, titulo, header, ultimaCol) {
   } catch (e) {
     if (!String(e.message || '').toLowerCase().includes('already exists')) throw e;
   }
+  if (!creada) await _ensureEncabezado(api, titulo, header, ultimaCol);
+}
+
+/**
+ * La hoja ya existe pero le faltan columnas.
+ *
+ * `_ensureHoja` solo escribe el encabezado cuando CREA la hoja, asi que al
+ * agregarle columnas al modelo la hoja de produccion se queda con el encabezado
+ * viejo: las celdas nuevas se leen y se escriben igual, pero la planilla queda
+ * ilegible por su cuenta — una columna de datos sin titulo.
+ *
+ * Solo se escribe la FILA 1 y solo si es mas corta que el encabezado esperado.
+ * Ninguna fila de datos se toca. Se puede correr todas las veces.
+ *
+ * Estas hojas son de la app (a diferencia de las de Pablo en cierre-cocina.js,
+ * donde hay que ensanchar la grilla antes de escribir): nacen con 26 columnas,
+ * asi que escribir hasta R nunca se pasa del ancho.
+ */
+async function _ensureEncabezado(api, titulo, header, ultimaCol) {
+  try {
+    const res = await api.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID, range: `${titulo}!A1:${ultimaCol}1`,
+    });
+    const fila = (res.data.values && res.data.values[0]) || [];
+    if (fila.length >= header.length) return;
+    await api.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${titulo}!A1:${ultimaCol}1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [header] },
+    });
+  } catch (e) {
+    // Que el encabezado no se pueda arreglar no puede tumbar la pantalla: los
+    // datos se leen igual por posicion. Queda el titulo viejo, nada mas.
+  }
 }
 
 async function _leerPedidos(api) {
   let rows;
   try {
-    const res = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${HOJA}!A:P` });
+    const res = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${HOJA}!A:${ULTIMA_COL}` });
     rows = res.data.values || [];
   } catch (e) {
-    await _ensureHoja(api, HOJA, HEADER, 'P');
+    await _ensureHoja(api, HOJA, HEADER, ULTIMA_COL);
     return [];
   }
   const out = [];
@@ -285,6 +355,8 @@ async function _leerPedidos(api) {
       origen: _txt(r[13]) || 'manual',
       notas: _txt(r[14]),
       actualizado: _txt(r[15]),
+      pagoPrevisto: normalizarPagoPrevisto(r[16]),
+      vence: normalizarFecha(r[17]),
       rowIndex: i + 1,
     });
   }
@@ -345,7 +417,8 @@ async function _loadSemanal() {
 function _aFila(p) {
   return [p.id, p.fecha, p.proveedor, p.detalle, p.costoEstimado || '', p.medioPrevisto,
           p.estado, p.recibidoPor, p.recibidoEl, p.pago, p.montoPagado || '', p.medioPagoReal,
-          p.refMovimiento, p.origen, p.notas, p.actualizado];
+          p.refMovimiento, p.origen, p.notas, p.actualizado,
+          p.pagoPrevisto || '', p.vence || ''];
 }
 
 function _aFilaSemanal(s) {
@@ -467,6 +540,13 @@ function armarDias(pedidos, semanal, { hoy, dias = DIAS_ADELANTE } = {}) {
       omitidos: omitidos.map(_publico),
       abiertos: delDia.filter(estaAbierto).length,
       totalEstimado: delDia.reduce((s, p) => s + (p.montoPagado || p.costoEstimado || 0), 0),
+      // Lo que hay que pagar EN LA PUERTA ese dia. Es lo unico del dia que pide
+      // una accion de quien recibe, y es lo que se muestra con el dia plegado:
+      // sin esto habria que abrir cada dia para saber si hace falta plata.
+      // Ver sePagaEnPuerta — no se llama "aPagar" porque 'a-pagar' significa
+      // justamente lo contrario.
+      cantEnPuerta: delDia.filter(sePagaEnPuerta).length,
+      totalEnPuerta: delDia.filter(sePagaEnPuerta).reduce((s, p) => s + (p.costoEstimado || 0), 0),
     };
   };
 
@@ -510,6 +590,21 @@ async function getPedido(id) {
   return items.find(p => p.id === _txt(id)) || null;
 }
 
+/**
+ * El id de un pedido.
+ *
+ * Va a la columna H de Movimientos (ID Compra) cuando el pedido tiene una fila
+ * en el libro, y esa columna es la clave de idempotencia: tiene que ser unico y
+ * estable. El prefijo 'ped' esta para reconocerlo de un vistazo en la planilla
+ * y, sobre todo, para que _esDeOtroPedido en server.js pueda distinguir una
+ * fila de otro pedido de una cargada a mano o por el bot.
+ *
+ * Se exporta porque "Nueva compra" lo necesita ANTES de escribir el libro: la
+ * fila tiene que nacer con el id del pedido adentro, o el vinculo entre los dos
+ * vuelve a depender de adivinar cual fila era.
+ */
+const nuevoId = () => `ped${Date.now()}${Math.floor(Math.random() * 100)}`;
+
 async function crearPedido(datos = {}) {
   if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
   const proveedor = _txt(datos.proveedor);
@@ -517,13 +612,12 @@ async function crearPedido(datos = {}) {
   const fecha = normalizarFecha(datos.fecha) || hoyAR();
 
   const api = _sheets();
-  await _ensureHoja(api, HOJA, HEADER, 'P');
+  await _ensureHoja(api, HOJA, HEADER, ULTIMA_COL);
 
   const item = {
-    // El id va a la columna H de Movimientos como ID de compra cuando el pedido
-    // se paga, y ésa es la clave de idempotencia del libro: tiene que ser único
-    // y estable. Se le pone prefijo para reconocerlo de un vistazo en la hoja.
-    id: `ped${Date.now()}${Math.floor(Math.random() * 100)}`,
+    // El id puede venir de afuera: "Nueva compra" lo acuña antes de escribir la
+    // fila del libro, para poder ponerlo en la columna H. Ver nuevoId().
+    id: _txt(datos.id) || nuevoId(),
     fecha,
     proveedor,
     detalle: _txt(datos.detalle).slice(0, DETALLE_MAX),
@@ -539,11 +633,14 @@ async function crearPedido(datos = {}) {
     origen: _txt(datos.origen) || 'manual',
     notas: _txt(datos.notas).slice(0, NOTAS_MAX),
     actualizado: new Date().toISOString(),
+    // Como se VA a pagar. Ver PAGOS_PREVISTOS: el default es vacio a proposito.
+    pagoPrevisto: normalizarPagoPrevisto(datos.pagoPrevisto),
+    vence: normalizarFecha(datos.vence),
   };
 
   await api.spreadsheets.values.append({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${HOJA}!A:P`,
+    range: `${HOJA}!A:${ULTIMA_COL}`,
     valueInputOption: 'RAW',
     requestBody: { values: [_aFila(item)] },
   });
@@ -582,6 +679,11 @@ async function actualizarPedido(id, cambios = {}) {
   if (tiene('detalle')) nuevo.detalle = _txt(cambios.detalle).slice(0, DETALLE_MAX);
   if (tiene('costoEstimado')) nuevo.costoEstimado = _numero(cambios.costoEstimado);
   if (tiene('medioPrevisto')) nuevo.medioPrevisto = _txt(cambios.medioPrevisto);
+  // La intencion de pago SI se puede corregir (a diferencia de J/K/L, que son
+  // el hecho y solo los escribe marcarRecibido): decir "esto en realidad ya
+  // estaba pago" antes de que llegue no toca ninguna fila del libro.
+  if (tiene('pagoPrevisto')) nuevo.pagoPrevisto = normalizarPagoPrevisto(cambios.pagoPrevisto);
+  if (tiene('vence')) nuevo.vence = normalizarFecha(cambios.vence);
   if (tiene('notas')) nuevo.notas = _txt(cambios.notas).slice(0, NOTAS_MAX);
   if (tiene('estado')) {
     const e = normalizarEstado(cambios.estado);
@@ -598,7 +700,7 @@ async function actualizarPedido(id, cambios = {}) {
 
   await api.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${HOJA}!A${actual.rowIndex}:P${actual.rowIndex}`,
+    range: `${HOJA}!A${actual.rowIndex}:${ULTIMA_COL}${actual.rowIndex}`,
     valueInputOption: 'RAW',
     requestBody: { values: [_aFila(nuevo)] },
   });
@@ -635,7 +737,7 @@ async function marcarRecibido(id, { pago = 'no', monto = 0, medioPago = '', ref 
 
   await api.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${HOJA}!A${actual.rowIndex}:P${actual.rowIndex}`,
+    range: `${HOJA}!A${actual.rowIndex}:${ULTIMA_COL}${actual.rowIndex}`,
     valueInputOption: 'RAW',
     requestBody: { values: [_aFila(nuevo)] },
   });
@@ -848,7 +950,7 @@ module.exports = {
   listSemanal, crearSemanal, actualizarSemanal, borrarSemanal,
   // Puras, exportadas para poder ejercitarlas sin tocar Google.
   armarDias, estaAbierto, pagoSinDefinir, esOmision, diaSemanaDe, etiquetaDia, normalizarFecha, normalizarDia,
-  normalizarEstado, normalizarPago, normalizarTipo, hoyAR,
-  clearCache,
-  DIAS, DIAS_CUADRO, ESTADOS, PAGOS, TIPOS, HOJA, HOJA_SEMANAL, DIAS_ADELANTE, ORIGEN_OMITIDO,
+  normalizarEstado, normalizarPago, normalizarTipo, normalizarPagoPrevisto, sePagaEnPuerta, hoyAR,
+  nuevoId, clearCache,
+  DIAS, DIAS_CUADRO, ESTADOS, PAGOS, PAGOS_PREVISTOS, TIPOS, HOJA, HOJA_SEMANAL, DIAS_ADELANTE, ORIGEN_OMITIDO,
 };

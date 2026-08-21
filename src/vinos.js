@@ -1,7 +1,7 @@
-// ─── Gestión de Vinos / Bebidas con alcohol ─────────────────────────────────────
+// ─── Gestión de Bebidas ─────────────────────────────────────────────────────────
 // Cruza el INVENTARIO de Fudo (stock, costo, precio por producto) con las VENTAS
 // recientes para responder: cuánto stock tengo, cuánta plata hay inmovilizada,
-// a qué velocidad se vende cada vino, cuántos días de cobertura quedan, y qué
+// a qué velocidad se vende cada bebida, cuántos días de cobertura quedan, y qué
 // conviene reponer o frenar.
 //
 // El stock, costo y precio salen directo de Fudo (Charly los carga ahí). No hay
@@ -24,12 +24,43 @@ function esAlcohol(categoria) {
          n.includes('vermú');
 }
 
+// ─── Las que no llevan alcohol y también hay que reponer (20/08/2026) ──────────
+//
+// Gaseosas, aguas y los sifones de soda. Hoy son ocho productos de la categoría
+// "Sin Alcohol" de Fudo, todos con stock, costo y precio cargados — o sea que
+// tienen exactamente los mismos datos que un vino y responden las mismas
+// preguntas: cuánto queda, a qué velocidad sale, cuándo se va a acabar.
+//
+// Quedaban afuera porque esta pantalla nació como "gestión de vinos" y el filtro
+// era el alcohol. Pero quedarse sin Coca un sábado es el mismo problema que
+// quedarse sin Malbec, y era justamente lo único de la barra que la pantalla no
+// avisaba. La categoría se sigue mostrando en cada fila, así que en la lista se
+// distinguen igual, y el switch "Solo vinos" sigue estando para achicarla.
+//
+// Se listan también los nombres sueltos (gaseosa, agua, soda, jugo) por si algún
+// día "Sin Alcohol" se parte en categorías propias: el criterio es lo que la
+// bebida ES, no cómo se llama hoy la categoría en Fudo.
+function esSinAlcohol(categoria) {
+  const n = (categoria || '').toLowerCase();
+  return n.includes('sin alcohol') || n.includes('gaseosa') || n.includes('agua') ||
+         n.includes('soda') || n.includes('jugo') || n.includes('refresco');
+}
+
+// Lo que entra en esta pantalla. NO alcanza con "que sea una bebida": la
+// categoría `Bebidas` de Fudo son los descorches y las copas sueltas, que no
+// tienen stock ni costo porque se sirven de una botella que ya está contada.
+// Meterlas acá serían siete filas con todo en "—" arriba de las que sí importan.
+function esBebidaDeStock(categoria) {
+  return esAlcohol(categoria) || esSinAlcohol(categoria);
+}
+
 // ¿Es específicamente vino? (para el foco principal)
 function esVino(categoria) {
   return (categoria || '').toLowerCase().includes('vino');
 }
 
-// Análisis de inventario + rotación de bebidas con alcohol.
+// Análisis de inventario + rotación de las bebidas que se reponen por unidad
+// (con y sin alcohol).
 //   { desde, hasta }  → ventana para calcular la velocidad de venta (default 28 días).
 // Devuelve:
 //   { ventanaDias, generado, totales, items: [...], porCategoria: [...] }
@@ -37,7 +68,7 @@ async function analizarVinos({ desde, hasta, soloVino = false } = {}) {
   // 1) Inventario actual desde Fudo
   const productos = await fudo.getProductosConStock();
   const candidatos = productos.filter(p =>
-    p.active && esAlcohol(p.categoria) && (!soloVino || esVino(p.categoria)));
+    p.active && esBebidaDeStock(p.categoria) && (!soloVino || esVino(p.categoria)));
 
   // 2) Ventana de ventas para velocidad de venta
   const hoy = new Date();
@@ -50,7 +81,10 @@ async function analizarVinos({ desde, hasta, soloVino = false } = {}) {
   const vendidoPorId = {};
   const vendidoPorNombre = {};
   for (const v of ventas) {
-    if (!esAlcohol(v.categoria)) continue;
+    // El MISMO criterio que el inventario, a propósito: si acá quedara el filtro
+    // viejo, las gaseosas aparecerían con stock pero con cero ventas, o sea sin
+    // rotación y sin días de cobertura — el dato que las hace útiles.
+    if (!esBebidaDeStock(v.categoria)) continue;
     if (v.productoId != null) vendidoPorId[v.productoId] = (vendidoPorId[v.productoId] || 0) + v.unidades;
     vendidoPorNombre[norm(v.nombre)] = (vendidoPorNombre[norm(v.nombre)] || 0) + v.unidades;
   }
@@ -145,4 +179,4 @@ async function analizarVinos({ desde, hasta, soloVino = false } = {}) {
 function isoDia(d) { return d.toISOString().slice(0, 10); }
 function norm(s) { return (s || '').toString().normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' '); }
 
-module.exports = { analizarVinos, esAlcohol, esVino };
+module.exports = { analizarVinos, esAlcohol, esSinAlcohol, esBebidaDeStock, esVino };

@@ -65,6 +65,18 @@ The accounts, and which are operational:
 
 The two arqueo cajas are `CAJA_EFECTIVO` / `CAJA_MP` in `server.js`, overridable via env vars of the same name. Bucketing a movement into the open register's session (`gastosSesion`) matches these **exactly** — a substring match on `"mercado pago"` would wrongly pull Pablo's account into the nightly count.
 
+### A cambio between cajas is two rows, and the app writes both (2026-08-20)
+
+`POST /api/cambios` (adminOnly, button on the Cajas screen) is the only write path for moving money from one caja to another. It appends **two** rows to `Movimientos`: the salida from the origin caja and the entrada into the destination one, same date, same `Mes`, same description. One row would leave one of the two balances wrong — the sheet's `Saldo Calculado` is a per-caja `SUMIFS`, so nothing compensates for what isn't written. Both rows carry `Tipo = Otros` **and** `Categoría = Cambio`, which is what `filtrarOperativos()` keys on: a cambio is the same money in another pocket, not an income or an expense. Some older rows were loaded by hand as `Tipo = Gasto`, and those *do* invent an expense in the month.
+
+**The valid cajas are read from the `Cajas` sheet, never from a list in code.** The endpoint resolves both names against `getCajas()` and rejects anything that isn't there, which is stricter than `MEDIOS_CANONICOS` and follows a rename or a new caja on its own. The currency comes from the same place (column C), so what the form asks for depends on the sheet, not on hardcoded knowledge of which caja is in dollars.
+
+**Both amounts are facts; the exchange rate is derived.** For a cross-currency cambio the form asks how much leaves and how much arrives, and the TC is the quotient — a cambio has a rate because of what was exchanged, not because someone chose a number. It is written to column **Q of the dollar row only**: on a peso-only row Q means nothing and the reader ignores it (see the valuation block in `sheets.js`). Between two cajas of the same currency the two amounts must be identical, and a different one is rejected rather than accepted — accepting it would make money appear or disappear that nobody moved. The pair shares a `CAMBIO-<ts>` id in column H so the two rows read as one operation.
+
+**A cambio out of an arqueo caja with the register open adjusts the close.** If `Efectivo Local` or `Mercado Pago Tincho` is involved while `estadoCaja.abierta`, the movement is pushed into `gastosSesion` — an **entrada goes in negative**, since the expected close is `inicial + Fudo − sesión`. Without this, taking cash out of the drawer at 8pm shows up at close as a faltante nobody lost, and the close writes a "delta efectivo (faltante)" row against money that is sitting in another caja with its own row.
+
+**`Mercado Pago Pablo` is a payment option in the purchase forms since 2026-08-20.** It follows from the 2026-08-08 decision that the account stays a daily working account: Pablo pays bar expenses out of it, so the compra has to be loadable that way instead of being a row to correct in the sheet afterwards. It was added to "Registrar nueva compra" and "Pagar registro pendiente" only — **the invoice circuit (`MEDIOS_PAGO` / `MEDIOS_LIBRO` in `proveedores-categorias.js`) deliberately still does not offer it**, since that flow asks whoever photographed the invoice, and the encargado has no visibility into that account. A free-text "Mercado Pago" in a supplier's data still maps to the operating account: choosing Pablo's is a decision, not something to infer from an ambiguous string.
+
 ### Finanzas: the recovery capital sits in one account
 
 `src/finanzas.js` models where the money set aside each month for investment recovery (`roi.js`) actually goes. From 2026-07-24 the strategy was a single destination: 100% into `Mercado Pago Pablo`, a remunerated account at `tnaMercadoPago` (17.5% TNA), seeded with ARS 15M moved over from Galicia. It replaced a two-bucket UVA+CER ladder; movements recorded under the old `uva`/`cer` buckets are still read and shown, never migrated or dropped.
@@ -211,6 +223,36 @@ One consequence worth knowing before touching this: `phonePrio` is `?? 99`, not 
 The "Anotar" button opens a bottom sheet that POSTs to the same `/api/mantenimiento` as the section, asking only for text and urgency — the sector is filled in later from the section, because having to pick one now is exactly what stops anything being logged mid-service. The sheet stays open if the save fails; closing it would leave the impression the item was recorded.
 
 `MQ_PHONE`'s change listener moves off `inicio` when the viewport grows, otherwise the active panel would be one the desktop CSS hides — a blank screen.
+
+### A purchase and a delivery are one circuit, decided at the desk (2026-08-21)
+
+Loading a purchase and noting the delivery used to be two unrelated acts. Now **`POST /api/pagos` does both**: it writes the ledger row and, when the purchase arrives in a delivery, creates the `Pedidos` row. The decision that moved is *when the payment is settled* — at the desk, by whoever buys, instead of at the door, by whoever receives.
+
+**The three answers are the same three buttons the cook already presses.** `pagoPrevisto` (`pagado` | `al-recibir` | `a-pagar`, column Q of `Pedidos`) mirrors `MODOS_RECIBIR` one-for-one. Nothing about the receiving flow changed; what changed is that the answer now exists *before* the supplier is at the door, so the cook confirms rather than guesses.
+
+**`pagoPrevisto` is the intention, `pago` is the fact, and they are never derived from each other.** A delivery can be born `al-recibir` and end up `a pagar` because the supplier came without the remito — both are true and both stay written. The default is **empty**, not a value: an order loaded before this existed, or a previsto from the weekly grid, said nothing about money, and inventing an answer for them is the same failure this repo already documents for `sinTocar` vs `ok` in the kitchen close. Empty renders as nothing.
+
+**The id is minted BEFORE the ledger row, and that is the whole mechanism.** `pedidos.nuevoId()` produces the `ped…` id, it goes into column H (`ID Compra`), and `planificarAsiento` then finds that row by its first clue — the one the code calls "not a clue: the answer". No date window, no exact amount, no description matching. The short-circuit sits at the top of `planificarAsiento` and covers **all three modes**, which the older clue inside `_elegirCandidata` did not: a `al-recibir` order received with *pago aparte* searched the paid rows, missed its own, fell through to `crear-pagado`, and the idempotency check then wrote nothing — leaving the order "paid" with its ledger row still open.
+
+**Order is ledger first, `Pedidos` second, and a failed order is reported, never hidden.** If `crearPedido` throws, the purchase is already registered; the response says so and says where to load it by hand. Undoing the ledger row would be worse (money unrecorded), and staying quiet worse still. The orphan `ped…` in column H is invisible to other orders' matching (`_esDeOtroPedido` excludes it) but is an ordinary payable row.
+
+**Which categories carry a delivery lives in the browser, in `data-entrega` on the `<option>`.** It only decides *which question to show* — Alquiler and a VEP have no door to receive them at, so they get neither the delivery step nor the "se paga al recibir" option. What lands in the sheet is still decided server-side. `al-recibir` requires a delivery date because that date **is** the row's vencimiento; without it the request is rejected rather than given a made-up due date.
+
+**Installments deliberately have no delivery step.** Tying one order to one of N child rows is a separate design question (which instalment is the delivery?) and is not invented here. That branch of `POST /api/pagos` is untouched.
+
+**The wording is `PAGAR`, never "cobrar", and the fields are `enPuerta`, never `aPagar`.** Whoever receives *pays*; the supplier is the one collecting. And `a-pagar` in the model means the opposite of what "a pagar" means on the cook's screen — it is the one that is **not** paid at the door — so the chip reads "no se paga acá" and the counters are `cantEnPuerta` / `totalEnPuerta`. Two near-identical names for opposite states is how this breaks in three months.
+
+### One door to the ledger, and what that fixed (2026-08-21)
+
+Single-payment purchases from "Nueva compra" now go through `registrarGastoEnLibro` — the same door as the invoice bot and the Pedidos receive — instead of building a row inline and appending it. Three things came with it, and the second was a live bug:
+
+1. **The medio is validated** against `MEDIOS_CANONICOS` instead of being written as it arrives.
+2. **A gasto loaded with the register open is pushed into `gastosSesion`.** `POST /api/pagos` was the only write path that did not do this, and the encargado can reach it (the route is deliberately not `adminOnly`, and Pagos is one of Charly's four home buttons). Loading a cash purchase mid-service invented a faltante at that night's close.
+3. **Column H gets populated** — `ped…` when there is a delivery, `cmp…` otherwise — which is what makes the link to the order possible. Note this is **not** idempotency against a double submit: the id is minted per request. What it buys is the populated column and one write path.
+
+**`construirFilaGasto` now accepts an empty medio, but only on `A pagar`.** The `Saldo Calculado` of the `Cajas` sheet is a `SUMIFS` over column L, so a medio written before the money moves subtracts from a caja that still holds it. The instalment branch already did this right and said so; the single-payment branch did not. A non-empty medio must still be an exact caja name, and `Pagado` still requires one — a paid expense that does not say which caja it left is money no balance subtracts.
+
+**`normalizarCategoriaGasto` validates against `CATEGORIAS_COLUMNA_J` (13), not `CATEGORIAS_GASTO` (9).** One list was answering two questions. `CATEGORIAS_GASTO` is what the *bot* offers a person over Telegram, narrowed to what appears on supplier invoices — it is unchanged, and adding to it would put four more buttons in a chat for no reason. But the sheet's validation accepts more, and the purchase modal offers those more: **Alquiler, Personal, Legal / Escribano and Fiscales** returned `''` and were silently downgraded to `Otros`. Harmless while only the bot came through that door (a bot never sends a rent payment); a silent hole in the P&L the moment the purchase form did.
 
 ### Pedidos por día: the one screen where the encargado closes a payment
 

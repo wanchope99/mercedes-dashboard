@@ -551,6 +551,27 @@
     .ped-chip.apagar { background: var(--orange-dim); color: var(--orange); border-color: rgba(224,138,92,0.4); }
     .ped-chip.atrasado { background: var(--red-dim); color: var(--red); border-color: var(--red); }
     .ped-chip.sinpago { background: var(--orange-dim); color: var(--orange); border-color: rgba(224,138,92,0.4); }
+    /* Lo que hay que PAGAR en la puerta. Es el unico chip relleno y el unico en
+       negrita, porque es el unico que pide una accion de quien recibe: los
+       demas informan, este manda a buscar la plata. Ojo con el vocabulario —
+       dice PAGAR y no COBRAR: el que cobra es el proveedor. */
+    .ped-chip.puerta { background: var(--orange); color: #17171f; border-color: var(--orange); font-weight: 800; letter-spacing: 0.2px; }
+
+    /* Como se paga, en el modal de Nueva compra. Tres opciones y no una cascada
+       de dos casillas: son los mismos tres casos que los tres botones de
+       recibir, y verlos juntos es lo que hace que se reconozcan como la misma
+       decision tomada antes. */
+    .pp-grupo { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pp-btn { flex: 1 1 140px; padding: 10px 12px; font-size: 12px; font-weight: 600; font-family: inherit;
+              background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted);
+              border-radius: 8px; cursor: pointer; text-align: left; line-height: 1.3; }
+    .pp-btn.activo { background: var(--accent); border-color: var(--accent); color: #f0e6d3; }
+    #f-previsto-wrap .pp-grupo { flex-direction: column; }
+    #f-previsto-wrap .pp-btn { flex: none; }
+    .pp-btn small { display: block; font-weight: 400; opacity: 0.75; font-size: 10px; margin-top: 2px; }
+    .ped-atajos { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+    .ped-atajos .btn { padding: 6px 12px; font-size: 12px; }
+    .ped-atajos .btn.activo { background: var(--accent); border-color: var(--accent); color: #f0e6d3; }
 
     /* ── El cuadro semanal ──────────────────────────────────────────────── */
     /* Cuántas columnas lo dice renderPedidosSemana() por --ped-cols: son cinco
@@ -1574,6 +1595,25 @@
         <input type="text" id="ped-costo" inputmode="numeric" placeholder="Costo aprox." />
         <select id="ped-medio"></select>
         <button class="btn btn-acento" onclick="crearPedido(this)">+ Agregar</button>
+      </div>
+      <!-- Las mismas tres opciones que "Nueva compra", para que un pedido
+           cargado por acá tampoco aparezca en blanco en el listado. La
+           diferencia es que esto NO escribe nada en Movimientos: un pedido
+           esperado no es un gasto, la mercadería todavía no llegó. Lo que se
+           guarda es la intención, y el asiento lo hace recibir. -->
+      <div class="pp-grupo" style="margin-top:10px">
+        <button type="button" class="pp-btn activo" id="pa-vacio" onclick="setPedAltaPago('')">
+          🤷 No sé todavía<small>se decide al recibir</small></button>
+        <button type="button" class="pp-btn" id="pa-pagado" onclick="setPedAltaPago('pagado')">
+          ✅ Ya está pago<small>sólo hay que recibirlo</small></button>
+        <button type="button" class="pp-btn" id="pa-al-recibir" onclick="setPedAltaPago('al-recibir')">
+          💰 Se paga al recibir<small>en la puerta, en efectivo</small></button>
+        <button type="button" class="pp-btn" id="pa-a-pagar" onclick="setPedAltaPago('a-pagar')">
+          📒 Queda a pagar<small>con vencimiento</small></button>
+      </div>
+      <div id="ped-vence-wrap" style="display:none;margin-top:10px">
+        <label style="font-size:11px;color:var(--text-muted)">Vence</label>
+        <input type="date" id="ped-vence" />
       </div>
       <div id="ped-alta-msg" style="font-size:12px;margin-top:10px;min-height:16px"></div>
     </div>
@@ -2661,6 +2701,45 @@
   </div>
 </div>
 
+<!-- Modal cambio entre cajas -->
+<!-- Un cambio no es un gasto ni un ingreso: es la misma plata en otro bolsillo.
+     Por eso el formulario no pregunta categoría ni proveedor — pregunta de qué
+     caja sale, a cuál entra y cuánto. Las dos filas las arma el servidor. -->
+<div id="cambio-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:560;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:460px;width:100%;padding:26px;max-height:90vh;overflow-y:auto">
+    <h3 style="margin-bottom:4px">↔ Cambio entre cajas</h3>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px">
+      Plata que pasa de una caja a otra. Se escriben dos filas en Movimientos (la salida y la entrada)
+      y no cuenta como ingreso ni como gasto del mes.
+    </p>
+    <div class="arqueo-field"><label>Fecha</label><input type="date" id="cb-fecha" /></div>
+    <div class="arqueo-field">
+      <label>Sale de</label>
+      <select id="cb-origen" style="width:100%" onchange="onCambioChange()"></select>
+    </div>
+    <div class="arqueo-field">
+      <label id="cb-monto-origen-label">Monto que sale</label>
+      <input type="number" id="cb-monto-origen" min="0" step="0.01" oninput="onCambioChange()" />
+    </div>
+    <div class="arqueo-field">
+      <label>Entra en</label>
+      <select id="cb-destino" style="width:100%" onchange="onCambioChange()"></select>
+    </div>
+    <div class="arqueo-field" id="cb-monto-destino-wrap" style="display:none">
+      <label id="cb-monto-destino-label">Monto que entra</label>
+      <input type="number" id="cb-monto-destino" min="0" step="0.01" oninput="onCambioChange()" />
+    </div>
+    <div id="cb-tc-hint" style="font-size:12px;color:var(--accent);margin-bottom:12px;line-height:1.6"></div>
+    <div id="cb-nota-caja" style="font-size:12px;color:#e0c95c;margin-bottom:12px;display:none;line-height:1.6"></div>
+    <div class="arqueo-field"><label>Nota (opcional)</label><input type="text" id="cb-nota" maxlength="120" placeholder="Ej: retiro para pagar carne" /></div>
+    <div id="cb-error" style="color:var(--red);font-size:13px;margin-bottom:10px;text-align:center"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeCambioModal()">Cancelar</button>
+      <button class="btn btn-accent" id="cb-guardar" onclick="saveCambio()">✓ Registrar cambio</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ CAJAS TAB ═══ -->
 <div id="tab-cajas" class="tab-panel">
   <main style="padding-top:24px">
@@ -2679,11 +2758,17 @@
           TC: $<span id="tc-display">1.425</span> por USD ·
           <button class="btn" style="padding:4px 10px;font-size:11px" onclick="editTC()">Cambiar TC</button>
         </span>
+        <button class="btn btn-accent" id="btn-nuevo-cambio" style="float:right;font-size:12px;padding:6px 12px;display:none"
+                onclick="openCambioModal()">↔ Registrar cambio</button>
       </div>
       <div class="cajas-grid" id="cajas-grid">
         <div class="loading"><div class="spinner"></div></div>
       </div>
     </div>
+
+    <!-- Últimos cambios entre cajas. Es la confirmación de que lo que se acaba
+         de cargar quedó escrito, y lo que evita cargar dos veces el mismo. -->
+    <div id="cajas-cambios"></div>
   </main>
 </div>
 
@@ -2799,7 +2884,8 @@
 <!-- Modal nuevo pago -->
 <div id="modal-overlay">
   <div id="modal">
-    <h3>Registrar nueva compra</h3>
+    <h3 id="modal-titulo">Registrar nueva compra</h3>
+    <div id="modal-paso1">
     <div class="form-grid">
       <div class="form-group full">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-size:13px">
@@ -2819,14 +2905,18 @@
 
       <div class="form-group">
         <label>Categoría</label>
-        <select id="f-categoria">
-          <option value="Mercaderia">Mercadería</option>
+        <!-- data-entrega marca las categorias que LLEGAN en una entrega: son las
+             que despues preguntan "¿cuando llega?" y las unicas que ofrecen
+             "se paga al recibir". Un alquiler o un VEP de ARCA no tienen puerta
+             donde recibirlos. -->
+        <select id="f-categoria" onchange="onCategoriaChange()">
+          <option value="Mercaderia" data-entrega="1">Mercadería</option>
           <option value="Alquiler">Alquiler</option>
-          <option value="Cocina">Cocina</option>
-          <option value="Mobiliario">Mobiliario</option>
-          <option value="Sala">Sala</option>
-          <option value="Frios">Fríos</option>
-          <option value="Insumos">Insumos</option>
+          <option value="Cocina" data-entrega="1">Cocina</option>
+          <option value="Mobiliario" data-entrega="1">Mobiliario</option>
+          <option value="Sala" data-entrega="1">Sala</option>
+          <option value="Frios" data-entrega="1">Fríos</option>
+          <option value="Insumos" data-entrega="1">Insumos</option>
           <option value="Personal">Personal</option>
           <option value="Operativos">Operativos</option>
           <option value="Legal / Escribano">Legal / Escribano</option>
@@ -2835,26 +2925,42 @@
           <option value="Otros">Otros</option>
         </select>
       </div>
-      <div class="form-group">
-        <label>Medio de pago</label>
+      <div class="form-group" id="f-medio-wrap">
+        <label id="f-medio-label">Medio de pago</label>
         <!-- "Efectivo" a secas salió el 18/08/2026: no dice de qué caja sale la
              plata, y las tres son distintas. Los nombres van EXACTOS como la
-             columna A de la hoja Cajas. Ver src/medios-pago.js. -->
+             columna A de la hoja Cajas. Ver src/medios-pago.js.
+             "Mercado Pago Pablo" está desde el 20/08/2026: por decisión del dueño
+             (08/08/2026) esa cuenta sigue siendo operativa y de ahí se pagan
+             gastos del bar, así que tiene que poder elegirse al cargar la compra
+             en vez de quedar como una fila a corregir después en la planilla. -->
         <select id="f-medio">
-          <option value="Efectivo Local">Efectivo Local (cajón del bar)</option>
+          <option value="Efectivo Local">Efectivo Local</option>
           <option value="Efectivo Pablo">Efectivo Pablo</option>
           <option value="Efectivo Tincho">Efectivo Tincho</option>
           <option value="Galicia">Galicia (transferencia)</option>
           <option value="Mercado Pago Tincho">Mercado Pago Tincho</option>
+          <option value="Mercado Pago Pablo">Mercado Pago Pablo</option>
           <option value="Echeq">Echeq</option>
         </select>
       </div>
 
-      <div class="form-group full">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-size:13px">
-          <input type="checkbox" id="f-pagado" checked onchange="onPagadoChange()" style="accent-color:var(--accent)">
-          ✅ Pagado
-        </label>
+      <!-- ¿Como se paga? Los mismos tres casos que los tres botones que aprieta
+           el cocinero al recibir, decididos aca — al comprar, por quien sabe —
+           en vez de en la puerta por quien menos sabe. "Se paga al recibir"
+           solo aparece si la categoria lleva entrega: sin entrega no hay puerta
+           donde pagar, ni fecha para el vencimiento de la fila. -->
+      <div class="form-group full" id="f-previsto-wrap">
+        <label>¿Cómo se paga?</label>
+        <div class="pp-grupo">
+          <button type="button" class="pp-btn activo" id="pp-pagado" onclick="setPagoPrevisto('pagado')">
+            ✅ Ya está pago<small>ya salió la plata</small></button>
+          <button type="button" class="pp-btn" id="pp-al-recibir" onclick="setPagoPrevisto('al-recibir')">
+            💰 Se paga al recibir<small>en la puerta, en efectivo</small></button>
+          <button type="button" class="pp-btn" id="pp-a-pagar" onclick="setPagoPrevisto('a-pagar')">
+            📒 Queda a pagar<small>con vencimiento</small></button>
+        </div>
+        <div id="f-previsto-hint" style="font-size:11px;color:var(--text-muted);margin-top:6px"></div>
       </div>
       <div class="form-group full" id="f-venc-wrap" style="display:none">
         <label>Vencimiento</label>
@@ -2883,7 +2989,28 @@
     <div id="modal-status"></div>
     <div class="modal-actions">
       <button class="btn" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-accent" onclick="saveNewPago()">Guardar en planilla</button>
+      <button class="btn btn-accent" id="f-btn-seguir" onclick="saveNewPago()">Guardar en planilla</button>
+    </div>
+    </div>
+
+    <!-- Paso 2: ¿cuándo llega? Es lo que convierte la compra en un pedido.
+         Un solo POST al final de los dos pasos, y no uno por paso: el
+         vencimiento de "se paga al recibir" ES la fecha de entrega, así que la
+         fila del libro no se puede escribir antes de saberla. -->
+    <div id="modal-paso2" style="display:none">
+      <p id="f-entrega-sub" style="font-size:12px;color:var(--text-muted);margin-bottom:16px"></p>
+      <div class="form-grid">
+        <div class="form-group full">
+          <div class="ped-atajos" id="f-entrega-atajos"></div>
+          <input type="date" id="f-entrega" onchange="pintarAtajosEntrega()">
+        </div>
+      </div>
+      <div id="modal-status2"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="volverAPaso1()">← Volver</button>
+        <button class="btn" id="f-sin-entrega" onclick="guardarCompra(false)">No lleva entrega</button>
+        <button class="btn btn-accent" onclick="guardarCompra(true)">Guardar</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2922,6 +3049,7 @@
         <option value="Efectivo Tincho">Efectivo Tincho</option>
         <option value="Efectivo Pablo">Efectivo Pablo</option>
         <option value="Mercado Pago Tincho">Mercado Pago Tincho</option>
+        <option value="Mercado Pago Pablo">Mercado Pago Pablo</option>
         <option value="Galicia">Galicia</option>
         <option value="Echeq">Echeq</option>
       </select>
@@ -5200,7 +5328,13 @@ async function loadCajas() {
         </div>`;
     }).join('');
 
-    if (esAdmin) { loadCajasHuerfanos(); loadTCPendientes(); }
+    // Registrar un cambio mueve dos cajas a la vez, incluidas las de los socios:
+    // es una operación de dueño, igual que el listado de cambios (adminOnly).
+    const btnCambio = document.getElementById('btn-nuevo-cambio');
+    if (btnCambio) btnCambio.style.display = esAdmin ? '' : 'none';
+
+    if (esAdmin) { loadCajasHuerfanos(); loadTCPendientes(); loadCambiosRecientes(); }
+    else document.getElementById('cajas-cambios').innerHTML = '';
 
   } catch(err) {
     document.getElementById('cajas-grid').innerHTML = `<div style="color:var(--red)">Error: ${err.message}</div>`;
@@ -5240,6 +5374,199 @@ async function loadCajasHuerfanos() {
       <div style="font-size:11px;color:var(--text-muted);margin-top:10px">
         Cajas válidas: ${data.cajas.map(escapeHtml).join(' · ')}
       </div>
+    </div>`;
+  } catch (e) {
+    cont.innerHTML = '';
+  }
+}
+
+
+// ─── Cambios entre cajas ──────────────────────────────────────────────────────
+//
+// Mover plata de una caja a otra se cargaba a mano en la planilla: dos filas, la
+// salida y la entrada, buscando la última fila entre más de mil. Acá se carga
+// una sola vez y el servidor escribe las dos (POST /api/cambios).
+//
+// El caso principal es pesos a pesos entre dos cuentas. Cuando las dos cajas
+// están en monedas distintas aparece el segundo importe: los DOS son datos de la
+// operación (salieron tantos pesos, entraron tantos dólares) y el tipo de cambio
+// es el cociente, no algo que haya que elegir. Por eso se muestra calculado y no
+// se pide.
+const cambioState = { cajas: [], cajaAbierta: false };
+
+function monedaCaja(nombre) {
+  const c = cambioState.cajas.find(x => x.caja === nombre);
+  return (c && (c.moneda || 'ARS').toUpperCase() === 'USD') ? 'USD' : 'ARS';
+}
+
+async function openCambioModal() {
+  const err = document.getElementById('cb-error');
+  err.textContent = '';
+  document.getElementById('cb-fecha').value = new Date().toISOString().split('T')[0];
+  document.getElementById('cb-monto-origen').value = '';
+  document.getElementById('cb-monto-destino').value = '';
+  document.getElementById('cb-nota').value = '';
+  document.getElementById('cambio-modal-overlay').style.display = 'flex';
+
+  try {
+    const { data } = await api('/api/cajas');
+    // Los nombres salen de la hoja, no de una lista escrita en el front: el
+    // Saldo Calculado matchea por texto exacto y una caja nueva o renombrada
+    // tiene que aparecer sola.
+    cambioState.cajas = data.filter(c => (c.caja || '').trim());
+    const orden = ['Efectivo Local', 'Mercado Pago Tincho', 'Galicia', 'Mercado Pago Pablo', 'Efectivo Pablo', 'Efectivo Tincho'];
+    cambioState.cajas.sort((a, b) => {
+      const ia = orden.indexOf(a.caja), ib = orden.indexOf(b.caja);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+    const opciones = cambioState.cajas.map(c =>
+      `<option value="${escAttr2(c.caja)}">${escapeHtml(c.caja)}${(c.moneda || 'ARS').toUpperCase() === 'USD' ? ' (USD)' : ''}</option>`).join('');
+    const selO = document.getElementById('cb-origen');
+    const selD = document.getElementById('cb-destino');
+    selO.innerHTML = opciones;
+    selD.innerHTML = opciones;
+    if (cambioState.cajas.length > 1) selD.selectedIndex = 1;
+  } catch (e) {
+    err.textContent = 'No se pudieron cargar las cajas: ' + e.message;
+  }
+
+  // Si la caja está abierta hay que avisarlo: un retiro del cajón en pleno turno
+  // mueve el esperado del cierre.
+  try {
+    const { data } = await api('/api/arqueo/estado');
+    cambioState.cajaAbierta = !!(data && data.abierta);
+  } catch (e) { cambioState.cajaAbierta = false; }
+
+  onCambioChange();
+}
+
+function closeCambioModal() { document.getElementById('cambio-modal-overlay').style.display = 'none'; }
+document.getElementById('cambio-modal-overlay').addEventListener('click', function(e) { if (e.target === this) closeCambioModal(); });
+
+function onCambioChange() {
+  const origen = document.getElementById('cb-origen').value;
+  const destino = document.getElementById('cb-destino').value;
+  const mOrigen = monedaCaja(origen);
+  const mDestino = monedaCaja(destino);
+  const cruza = origen && destino && mOrigen !== mDestino;
+
+  document.getElementById('cb-monto-origen-label').textContent = `Monto que sale (${mOrigen})`;
+  document.getElementById('cb-monto-destino-label').textContent = `Monto que entra (${mDestino})`;
+  document.getElementById('cb-monto-destino-wrap').style.display = cruza ? '' : 'none';
+
+  const montoO = parseFloat(document.getElementById('cb-monto-origen').value) || 0;
+  const montoD = parseFloat(document.getElementById('cb-monto-destino').value) || 0;
+  const hint = document.getElementById('cb-tc-hint');
+  if (origen && destino && origen === destino) {
+    hint.style.color = 'var(--red)';
+    hint.textContent = 'El origen y el destino son la misma caja.';
+  } else if (cruza && montoO > 0 && montoD > 0) {
+    const tc = mOrigen === 'ARS' ? montoO / montoD : montoD / montoO;
+    hint.style.color = 'var(--accent)';
+    hint.textContent = `Tipo de cambio de la operación: $${(Math.round(tc * 100) / 100).toLocaleString('es-AR')} por USD. Se guarda en la fila en dólares.`;
+  } else if (cruza) {
+    hint.style.color = 'var(--text-muted)';
+    hint.textContent = `Cambio de ${mOrigen} a ${mDestino}: cargá los dos importes y el tipo de cambio sale solo.`;
+  } else if (montoO > 0) {
+    hint.style.color = 'var(--text-muted)';
+    hint.textContent = `Entra lo mismo que sale en ${escapeHtml(destino)}.`;
+  } else {
+    hint.textContent = '';
+  }
+
+  // Aviso de arqueo: sólo importa si la caja está abierta y el cambio toca una
+  // de las dos que se arquean. Sin este ajuste, sacar plata del cajón durante el
+  // turno aparecería al cerrar como un faltante que nadie perdió.
+  const ARQUEADAS = ['Efectivo Local', 'Mercado Pago Tincho'];
+  const nota = document.getElementById('cb-nota-caja');
+  const tocaArqueada = cambioState.cajaAbierta && (ARQUEADAS.includes(origen) || ARQUEADAS.includes(destino));
+  nota.style.display = tocaArqueada ? '' : 'none';
+  if (tocaArqueada) {
+    nota.textContent = '🔓 La caja está abierta: este cambio se va a tener en cuenta en el esperado del cierre.';
+  }
+}
+
+async function saveCambio() {
+  const errEl = document.getElementById('cb-error');
+  errEl.textContent = '';
+  const fechaISO = document.getElementById('cb-fecha').value;
+  const origen = document.getElementById('cb-origen').value;
+  const destino = document.getElementById('cb-destino').value;
+  const montoOrigen = parseFloat(document.getElementById('cb-monto-origen').value) || 0;
+  const montoDestinoInput = parseFloat(document.getElementById('cb-monto-destino').value) || 0;
+  const cruza = monedaCaja(origen) !== monedaCaja(destino);
+
+  if (!fechaISO) { errEl.textContent = 'Elegí la fecha.'; return; }
+  if (!origen || !destino) { errEl.textContent = 'Elegí las dos cajas.'; return; }
+  if (origen === destino) { errEl.textContent = 'El origen y el destino son la misma caja.'; return; }
+  if (!montoOrigen) { errEl.textContent = 'Cargá el monto que sale.'; return; }
+  if (cruza && !montoDestinoInput) { errEl.textContent = 'Cargá también el monto que entra.'; return; }
+
+  const [y, m, d] = fechaISO.split('-');
+  const cuerpo = {
+    fecha: `${d}/${m}/${y}`,
+    mes: MESES_NOMBRES_PAGO[parseInt(m, 10) - 1],
+    origen, destino,
+    montoOrigen,
+    montoDestino: cruza ? montoDestinoInput : montoOrigen,
+    nota: document.getElementById('cb-nota').value.trim(),
+  };
+
+  closeCambioModal();
+  showToast('⏳ Escribiendo en la planilla...');
+  try {
+    const r = await api('/api/cambios', { method: 'POST', body: JSON.stringify(cuerpo) });
+    showResultadoModal({
+      ok: true,
+      titulo: 'Cambio registrado',
+      detalle: `${escapeHtml(r.message)}<br>` +
+        (r.registradoEnSesion ? '🔓 La caja está abierta: se tuvo en cuenta para el esperado del cierre.<br>' : '') +
+        (r.aviso ? `<span style="color:var(--orange)">${escapeHtml(r.aviso)}</span><br>` : '') +
+        `<span style="font-size:11px">Dos filas en Movimientos (${r.filas.join(' y ')}) ✓</span>`,
+    });
+    loadCajas();
+  } catch (err) {
+    showResultadoModal({
+      ok: false,
+      titulo: 'No se pudo registrar',
+      detalle: `${escapeHtml(err.message)}<br><span style="font-size:11px">No se escribió nada. Volvé a intentarlo.</span>`,
+    });
+  }
+}
+
+// Los últimos cambios cargados. Existe para poder ver que lo que se acaba de
+// registrar quedó escrito, y para no cargar dos veces el mismo movimiento.
+async function loadCambiosRecientes() {
+  const cont = document.getElementById('cajas-cambios');
+  if (!cont) return;
+  try {
+    const { data } = await api('/api/cambios');
+    // Sólo cambios propiamente dichos: `getMovimientosCambio` trae también los
+    // fondeos (Tipo=Otros), que son otra cosa — rendimientos, ajustes de arqueo.
+    const cambios = data.filter(c => c.esCambio).slice(-16).reverse();
+    if (!cambios.length) { cont.innerHTML = ''; return; }
+    const monto = c => c.entradaARS || c.salidaARS
+      ? fmt(c.entradaARS || c.salidaARS)
+      : `USD ${(c.entradaUSD || c.salidaUSD).toLocaleString('es-AR')}`;
+    // La fecha viene ISO desde la API (la del libro está escrita de mil formas).
+    const fechaCorta = f => String(f || '').split('-').reverse().join('/');
+    const filas = cambios.map(c => `<tr>
+      <td style="font-size:12px;color:var(--text-muted);white-space:nowrap">${escapeHtml(fechaCorta(c.fecha))}</td>
+      <td>${c.entradaARS || c.entradaUSD ? '<span style="color:var(--green)">entra</span>' : '<span style="color:var(--red)">sale</span>'}</td>
+      <td><b>${escapeHtml(c.medioPago)}</b></td>
+      <td class="td-right">${monto(c)}</td>
+      <td style="font-size:12px;color:var(--text-muted)">${escapeHtml(c.descripcion || '')}</td>
+    </tr>`).join('');
+    cont.innerHTML = `<div class="card">
+      <div class="card-title">Últimos cambios entre cajas
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">
+          · dos filas por cambio: la que sale y la que entra</span>
+      </div>
+      <div class="table-wrap"><table class="pagos-table" style="width:100%">
+        <thead><tr><th style="text-align:left">Fecha</th><th style="text-align:left"></th>
+        <th style="text-align:left">Caja</th><th class="td-right">Monto</th>
+        <th style="text-align:left">Detalle</th></tr></thead>
+        <tbody>${filas}</tbody></table></div>
     </div>`;
   } catch (e) {
     cont.innerHTML = '';
@@ -7403,6 +7730,51 @@ async function cerrarAvisoInforme(marcarLeido) {
 // misma computadora no se pisen.
 const RELEASE_LOG = [
   {
+    version: '2026-08-21-compra-y-pedido',
+    fecha: '21 de agosto de 2026',
+    titulo: 'La compra y el pedido son un solo circuito',
+    // La mitad de esto es la pantalla de Charly, así que le llega. Ver `paraTodos`.
+    paraTodos: true,
+    porque: 'Cargar una compra y anotar el pedido eran dos cosas separadas que no se conocían. '
+      + 'Ahora <b>al registrar la compra se dice cómo se paga y qué día llega</b>, y el pedido '
+      + 'aparece solo en Operación con esa información puesta. Quien recibe ya no tiene que '
+      + 'adivinar si hay que pagarle al proveedor en la puerta: la pantalla se lo dice.',
+    items: [
+      {
+        icono: '💳',
+        titulo: 'Al cargar la compra se elige cómo se paga',
+        desc: 'Tres opciones en vez de la casilla "Pagado": <b>ya está pago</b> (transferencia, Mercado Pago), '
+            + '<b>se paga al recibir</b> (en la puerta, en efectivo) o <b>queda a pagar</b> con su vencimiento. '
+            + 'Son las mismas tres que se elegían al recibir el pedido — lo que cambia es que ahora las decide '
+            + 'quien hace la compra, que es el que sabe.',
+        donde: 'Caja › Pagos › + Nueva compra',
+      },
+      {
+        icono: '📦',
+        titulo: 'Y después, qué día llega',
+        desc: 'Si la compra es de algo que llega en una entrega (mercadería, insumos, cocina, sala, fríos, '
+            + 'mobiliario), al guardar pregunta el día y <b>anota el pedido solo</b>. Un alquiler o un VEP no '
+            + 'lo preguntan. Si algo ya lo tenés, "no lleva entrega" lo saltea.',
+        donde: 'Caja › Pagos › + Nueva compra',
+      },
+      {
+        icono: '💰',
+        titulo: 'Qué hay que pagar en la puerta se ve de un vistazo',
+        desc: 'Cada pedido dice si <b>hay que pagarlo</b> (con el monto, en naranja), si ya está pago o si no se '
+            + 'paga ahí. El renglón del día lo suma: "1 para pagar · $47.300", <b>sin abrir el día</b>, así se '
+            + 'sabe si hay que tener plata a mano antes de que toquen el timbre.',
+        donde: 'Operación › Pedidos',
+      },
+      {
+        icono: '🧾',
+        titulo: 'Un gasto cargado con la caja abierta ya no aparece como faltante',
+        desc: 'Cargar una compra ya pagada en efectivo durante el servicio hacía que esa noche el cierre marcara '
+            + 'una diferencia que no existía. Ahora se descuenta del esperado, igual que los gastos rápidos.',
+        donde: 'Caja › Pagos',
+      },
+    ],
+  },
+  {
     version: '2026-08-15-pedidos',
     fecha: '15 de agosto de 2026',
     titulo: 'Los pedidos del día ya no viven en un Word',
@@ -8172,7 +8544,6 @@ async function openModal() {
   document.getElementById('f-mes-wrap').style.display = 'none';
   document.getElementById('f-proveedor').value = '';
   document.getElementById('f-prov-hint').textContent = '';
-  document.getElementById('f-pagado').checked = true;
   document.getElementById('f-venc-wrap').style.display = 'none';
   document.getElementById('f-vencimiento').value = '';
   document.getElementById('f-venc-hint').textContent = '';
@@ -8181,9 +8552,128 @@ async function openModal() {
   document.getElementById('f-cuotas-wrap').style.display = 'none';
   document.getElementById('f-descripcion').value = '';
   document.getElementById('modal-status').style.display = 'none';
+  document.getElementById('f-entrega').value = '';
   state.vencManual = false;
+  state.pagoPrevisto = 'pagado';
+  volverAPaso1();
+  onCategoriaChange();
   document.getElementById('modal-overlay').classList.add('open');
   ensureSugerencias();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cómo se paga, y si llega en una entrega
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Los tres valores son los mismos tres botones que aprieta el cocinero al
+// recibir, decididos acá. Ver PAGOS_PREVISTOS en src/pedidos.js y MODOS_RECIBIR
+// en src/server.js — el que manda es el server: acá sólo se elige y se muestra.
+const PP_TEXTOS = {
+  'pagado':     'La fila queda <b>Pagado</b> y sale de la caja que elijas.',
+  'al-recibir': 'La fila queda <b>A pagar</b> y vence el día de la entrega. En la puerta se paga siempre en <b>' + 'Efectivo Local' + '</b>, así que no se pregunta con qué.',
+  'a-pagar':    'La fila queda <b>A pagar</b> y la persigue la sección Pagos hasta el vencimiento.',
+};
+
+// ¿Esta compra llega en una entrega? Lo dice la categoría — ver data-entrega en
+// el <select>. Un alquiler o un VEP no tienen puerta donde recibirlos.
+function categoriaLlevaEntrega() {
+  const sel = document.getElementById('f-categoria');
+  const opt = sel.options[sel.selectedIndex];
+  return !!(opt && opt.dataset.entrega === '1');
+}
+
+function setPagoPrevisto(v) {
+  // Sin entrega no hay puerta: "se paga al recibir" no se puede elegir.
+  if (v === 'al-recibir' && !categoriaLlevaEntrega()) v = 'a-pagar';
+  state.pagoPrevisto = v;
+  for (const k of ['pagado', 'al-recibir', 'a-pagar']) {
+    const b = document.getElementById('pp-' + k);
+    if (b) b.classList.toggle('activo', k === v);
+  }
+  document.getElementById('f-previsto-hint').innerHTML = PP_TEXTOS[v] || '';
+  // El medio se pregunta salvo en la puerta, donde es siempre el mismo. En
+  // "queda a pagar" se sigue preguntando —es con qué se va a pagar cuando
+  // venza— aunque el server no lo escriba en la columna L todavía.
+  document.getElementById('f-medio-wrap').style.display = v === 'al-recibir' ? 'none' : '';
+  document.getElementById('f-medio-label').textContent = v === 'pagado' ? 'Medio de pago' : 'Con qué se va a pagar';
+  const conCuotas = document.getElementById('f-concuotas').checked;
+  document.getElementById('f-venc-wrap').style.display = (conCuotas || v === 'a-pagar') ? '' : 'none';
+  document.getElementById('f-btn-seguir').textContent =
+    (!conCuotas && categoriaLlevaEntrega()) ? 'Siguiente: ¿cuándo llega? →' : 'Guardar en planilla';
+  state.vencManual = false;
+  recalcVencimiento();
+}
+
+function onCategoriaChange() {
+  // Si la categoría dejó de llevar entrega, "se paga al recibir" deja de ser
+  // elegible y hay que sacarlo, no dejarlo marcado e inválido.
+  const puede = categoriaLlevaEntrega();
+  document.getElementById('pp-al-recibir').style.display = puede ? '' : 'none';
+  setPagoPrevisto(puede ? (state.pagoPrevisto || 'pagado') : (state.pagoPrevisto === 'al-recibir' ? 'a-pagar' : state.pagoPrevisto));
+}
+
+// ─── El paso 2 ──────────────────────────────────────────────────────────────
+
+function volverAPaso1() {
+  document.getElementById('modal-paso1').style.display = '';
+  document.getElementById('modal-paso2').style.display = 'none';
+  document.getElementById('modal-titulo').textContent = 'Registrar nueva compra';
+}
+
+const DOW_CORTO = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+// Domingo y lunes: los días que el cuadro semanal no ofrece porque no entrega
+// nadie (DIAS_CUADRO en src/pedidos.js es martes→sábado). Ver irAPaso2.
+const SIN_ENTREGA = [0, 1];
+
+function irAPaso2() {
+  const hoy = new Date();
+  const prov = document.getElementById('f-proveedor').value.trim();
+  document.getElementById('modal-paso1').style.display = 'none';
+  document.getElementById('modal-paso2').style.display = '';
+  document.getElementById('modal-titulo').textContent = '¿Cuándo llega?';
+  document.getElementById('f-entrega-sub').innerHTML =
+    'La compra de <b>' + escapeHtml(prov) + '</b> ya está lista para registrarse. '
+    + 'Decí qué día llega y aparece en Operación › Pedidos'
+    + (state.pagoPrevisto === 'al-recibir' ? ', marcada para <b>pagar en la puerta</b>.' : '.');
+  // "No lleva entrega" no se ofrece cuando se paga al recibir: sin entrega no
+  // hay día en que salga la plata, y la fila quedaría sin vencimiento.
+  document.getElementById('f-sin-entrega').style.display =
+    state.pagoPrevisto === 'al-recibir' ? 'none' : '';
+  if (!document.getElementById('f-entrega').value) {
+    document.getElementById('f-entrega').value = hoy.toISOString().split('T')[0];
+  }
+  // Cuatro atajos, salteando los días en que NO entrega nadie. El bar abre de
+  // martes a sábado, así que ofrecer "Domingo" y "Lunes" es ofrecer un día en
+  // que no hay quien reciba — y era lo que pasaba un viernes.
+  //
+  // Es sólo qué se ofrece con un toque: el campo de fecha sigue aceptando
+  // cualquier día, porque un pedido suelto SÍ puede caer un lunes (alguien
+  // manda algo fuera de la rutina). Por eso esta lista puede desincronizarse de
+  // DIAS_CUADRO en el server sin que se escriba nada mal: lo peor que pasa es
+  // que sobre o falte un atajo.
+  const atajos = [];
+  for (let n = 0; atajos.length < 4 && n < 14; n++) {
+    const d = new Date(hoy); d.setDate(hoy.getDate() + n);
+    if (SIN_ENTREGA.includes(d.getDay())) continue;
+    const iso = d.toISOString().split('T')[0];
+    const et = n === 0 ? 'Hoy' : n === 1 ? 'Mañana'
+      : DOW_CORTO[d.getDay()].charAt(0).toUpperCase() + DOW_CORTO[d.getDay()].slice(1);
+    atajos.push('<button type="button" class="btn" data-iso="' + iso + '" onclick="setEntrega(\'' + iso + '\')">' + et + '</button>');
+  }
+  document.getElementById('f-entrega-atajos').innerHTML = atajos.join('');
+  pintarAtajosEntrega();
+}
+
+function setEntrega(iso) {
+  document.getElementById('f-entrega').value = iso;
+  pintarAtajosEntrega();
+}
+
+function pintarAtajosEntrega() {
+  const v = document.getElementById('f-entrega').value;
+  document.querySelectorAll('#f-entrega-atajos .btn').forEach(b => {
+    b.classList.toggle('activo', b.dataset.iso === v);
+  });
 }
 
 // Sugerencias de proveedor: Movimientos + hoja Proveedores (se cachean por sesión)
@@ -8219,8 +8709,10 @@ function mapMedioOption(texto) {
   const t = (texto || '').toLowerCase();
   const candidatos = [
     { kw: 'echeq', val: 'Echeq' },
-    // Sólo la cuenta operativa: Mercado Pago Pablo es la del ahorro y no es una
-    // opción de estos selects, así que mapear a ella dejaría el select en blanco.
+    // Un "Mercado Pago" en los datos del proveedor se sugiere como la cuenta
+    // operativa, que es con la que se le paga a proveedores. Desde el 20/08/2026
+    // "Mercado Pago Pablo" TAMBIÉN se puede elegir en el select — pero elegirla
+    // es una decisión, no algo que se deduzca de un texto ambiguo.
     { kw: 'mercado', val: 'Mercado Pago Tincho' },
     { kw: 'galicia', val: 'Galicia' },
     // Un "efectivo" suelto en los datos del proveedor no dice de qué caja sale,
@@ -8250,7 +8742,11 @@ function onProveedorInput() {
   const hint = document.getElementById('f-prov-hint');
   if (!s) { hint.textContent = ''; return; }
   const partes = [];
-  if (s.categoria) { setSelectValue(document.getElementById('f-categoria'), s.categoria); partes.push(s.categoria); }
+  if (s.categoria) {
+    setSelectValue(document.getElementById('f-categoria'), s.categoria);
+    onCategoriaChange();   // cambiar el select por código no dispara su onchange
+    partes.push(s.categoria);
+  }
   const medio = mapMedioOption(s.medioPago);
   if (medio) { document.getElementById('f-medio').value = medio; partes.push(medio); }
   const plazo = getPlazoDias(s.nombre);
@@ -8271,19 +8767,19 @@ function onHoyChange() {
   recalcVencimiento();
 }
 
-function onPagadoChange() {
-  const pagado = document.getElementById('f-pagado').checked;
-  document.getElementById('f-venc-wrap').style.display = (pagado && !document.getElementById('f-concuotas').checked) ? 'none' : '';
-  state.vencManual = false;
-  recalcVencimiento();
-}
-
 function onConCuotasChange() {
   const cc = document.getElementById('f-concuotas').checked;
   document.getElementById('f-cuotas-wrap').style.display = cc ? '' : 'none';
-  // Las cuotas siempre necesitan el vencimiento de la primera
-  document.getElementById('f-venc-wrap').style.display = (cc || !document.getElementById('f-pagado').checked) ? '' : 'none';
+  // Una compra en cuotas ya es "A pagar" por definición y no ofrece entrega:
+  // vincular un pedido a una de N filas hijas es otra pregunta (¿a cuál cuota
+  // corresponde la entrega?) y no se inventa acá. Así que la elección de cómo
+  // se paga no se muestra, y el vencimiento —el de la primera cuota— siempre.
+  document.getElementById('f-previsto-wrap').style.display = cc ? 'none' : '';
+  document.getElementById('f-medio-wrap').style.display = cc ? '' : (state.pagoPrevisto === 'al-recibir' ? 'none' : '');
+  document.getElementById('f-venc-wrap').style.display = (cc || state.pagoPrevisto === 'a-pagar') ? '' : 'none';
   document.querySelector('#f-venc-wrap label').textContent = cc ? 'Vencimiento (1ª cuota)' : 'Vencimiento';
+  document.getElementById('f-btn-seguir').textContent =
+    (!cc && categoriaLlevaEntrega()) ? 'Siguiente: ¿cuándo llega? →' : 'Guardar en planilla';
   recalcVencimiento();
 }
 
@@ -8303,52 +8799,98 @@ function recalcVencimiento() {
   hint.textContent = `Auto: fecha del gasto + ${plazo} días (hoja Proveedores). Editable.`;
 }
 
-async function saveNewPago() {
+// Lo que el formulario dice, en un solo lugar. Lo leen las validaciones, el
+// paso 2 y el guardado: tres copias de esto es como se desincronizan.
+function datosDeCompra() {
   const esHoy = document.getElementById('f-hoy').checked;
   const hoyDate = new Date();
-  const fecha = esHoy ? hoyDate.toISOString().split('T')[0] : document.getElementById('f-fecha').value;
-  const mes = esHoy ? MESES_NOMBRES_PAGO[hoyDate.getMonth()] : document.getElementById('f-mes').value;
-  const proveedor = document.getElementById('f-proveedor').value.trim();
-  const categoria = document.getElementById('f-categoria').value;
-  const medioPago = document.getElementById('f-medio').value;
-  const salidaARS = parseFloat(document.getElementById('f-monto').value) || 0;
-  const pagado = document.getElementById('f-pagado').checked;
   const conCuotas = document.getElementById('f-concuotas').checked;
-  const cuotas = conCuotas ? (parseInt(document.getElementById('f-cuotas').value) || 1) : 1;
-  const vencRaw = document.getElementById('f-vencimiento').value;
-  const descripcion = document.getElementById('f-descripcion').value.trim();
+  return {
+    fecha: esHoy ? hoyDate.toISOString().split('T')[0] : document.getElementById('f-fecha').value,
+    mes: esHoy ? MESES_NOMBRES_PAGO[hoyDate.getMonth()] : document.getElementById('f-mes').value,
+    proveedor: document.getElementById('f-proveedor').value.trim(),
+    categoria: document.getElementById('f-categoria').value,
+    medioPago: document.getElementById('f-medio').value,
+    salidaARS: parseFloat(document.getElementById('f-monto').value) || 0,
+    conCuotas,
+    cuotas: conCuotas ? (parseInt(document.getElementById('f-cuotas').value) || 1) : 1,
+    vencRaw: document.getElementById('f-vencimiento').value,
+    descripcion: document.getElementById('f-descripcion').value.trim(),
+    // Con cuotas la elección no se muestra y la compra es "A pagar" y punto.
+    previsto: conCuotas ? 'a-pagar' : (state.pagoPrevisto || 'pagado'),
+  };
+}
+
+// Paso 1 → decide si hay que preguntar cuándo llega. NO guarda: el guardado es
+// uno solo, al final, porque el vencimiento de "se paga al recibir" es la fecha
+// de la entrega y la fila del libro no se puede escribir sin ella.
+function saveNewPago() {
+  const d = datosDeCompra();
 
   // Validaciones: el modal queda abierto para corregir
-  if (!fecha || !proveedor) { alert('Fecha y Proveedor son obligatorios.'); return; }
-  if (cuotas > 1 && !vencRaw) { alert('Para compras en cuotas indicá el vencimiento de la primera cuota.'); return; }
-  if (cuotas > 1 && !salidaARS) { alert('Para compras en cuotas indicá el monto TOTAL de la compra.'); return; }
+  if (!d.fecha || !d.proveedor) { alert('Fecha y Proveedor son obligatorios.'); return; }
+  if (d.cuotas > 1 && !d.vencRaw) { alert('Para compras en cuotas indicá el vencimiento de la primera cuota.'); return; }
+  if (d.cuotas > 1 && !d.salidaARS) { alert('Para compras en cuotas indicá el monto TOTAL de la compra.'); return; }
+  // El monto dejó de ser opcional: la fila del libro se escribe por la misma
+  // puerta que el resto y ésa rechaza un gasto de cero. Mejor decirlo acá que
+  // hacer viajar algo que va a rebotar.
+  if (!d.salidaARS) { alert('Poné el monto de la compra.'); return; }
+  if (d.previsto === 'pagado' && !d.conCuotas && !d.medioPago) {
+    alert('Un gasto ya pagado tiene que decir de qué caja salió.'); return;
+  }
+
+  if (!d.conCuotas && categoriaLlevaEntrega()) { irAPaso2(); return; }
+  guardarCompra(false);
+}
+
+// El guardado, con o sin entrega. Un solo POST: el server escribe la fila del
+// libro y, si hay entrega, crea el pedido con el mismo id adentro.
+async function guardarCompra(conEntrega) {
+  const d = datosDeCompra();
+  const entregaISO = conEntrega ? document.getElementById('f-entrega').value : '';
+  if (conEntrega && !entregaISO) { alert('Poné el día en que llega.'); return; }
 
   // Comportamiento estándar: cerrar el modal ya, avisar con modal al terminar
   closeModal();
   showToast('⏳ Guardando en planilla...');
 
-  const fmtDate = iso => { if (!iso) return ''; const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; };
-  const estado = pagado && cuotas === 1 ? 'Pagado' : 'A pagar';
+  const fmtDate = iso => { if (!iso) return ''; const [y, m, d2] = iso.split('-'); return `${d2}/${m}/${y}`; };
+  // `estado` viaja para el fallback del server; el que manda es pagoPrevisto.
+  const estado = d.previsto === 'pagado' && d.cuotas === 1 ? 'Pagado' : 'A pagar';
   try {
-    await api('/api/pagos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-      fecha: fmtDate(fecha), mes, proveedor, categoria, medioPago, salidaARS,
-      vencimiento: fmtDate(vencRaw), descripcion, cuotas, estado,
+    const r = await api('/api/pagos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      fecha: fmtDate(d.fecha), mes: d.mes, proveedor: d.proveedor, categoria: d.categoria,
+      medioPago: d.medioPago, salidaARS: d.salidaARS,
+      vencimiento: fmtDate(d.vencRaw), descripcion: d.descripcion, cuotas: d.cuotas, estado,
+      pagoPrevisto: d.previsto,
+      entrega: entregaISO ? { fecha: entregaISO } : null,
     }) });
+
+    const linea2 = d.cuotas > 1
+      ? `Compra en ${d.cuotas} cuotas (madre + ${d.cuotas} filas creadas)`
+      : d.previsto === 'pagado' ? `Pagado · ${escapeHtml(d.medioPago)}`
+      : d.previsto === 'al-recibir' ? 'A pagar · se paga al recibir'
+      : `A pagar${d.vencRaw ? ` · vence ${fmtDate(d.vencRaw)}` : ''}`;
+    // Lo que pasó con el pedido se cuenta igual que el asiento de Pedidos: qué
+    // se hizo, no qué se iba a hacer.
+    const linea3 = r.aviso
+      ? `<br><span style="color:var(--orange)">⚠ ${escapeHtml(r.aviso)}</span>`
+      : r.pedido
+        ? `<br>📦 Se anotó el pedido para el <b>${new Date(r.pedido.fecha + 'T12:00:00').toLocaleDateString('es-AR')}</b>`
+          + (d.previsto === 'al-recibir' ? ' — aparece marcado <b>PAGAR</b> en Operación › Pedidos.' : '.')
+        : '';
     showResultadoModal({
       ok: true,
       titulo: 'Compra registrada',
-      detalle: `<b>${escapeHtml(proveedor)}</b> · ${fmt(salidaARS)}<br>` +
-        (cuotas > 1
-          ? `Compra en ${cuotas} cuotas (madre + ${cuotas} filas creadas)`
-          : `Estado: ${estado}${estado === 'A pagar' && vencRaw ? ` · vence ${fmtDate(vencRaw)}` : ''}`) +
-        `<br><span style="font-size:11px">Escrito en la hoja Movimientos ✓</span>`,
+      detalle: `<b>${escapeHtml(d.proveedor)}</b> · ${fmt(d.salidaARS)}<br>` + linea2 + linea3
+        + `<br><span style="font-size:11px">Escrito en la hoja Movimientos ✓${r.registradoEnSesion ? ' · descontado del arqueo en curso ✓' : ''}</span>`,
     });
     if (state.rol === 'admin') loadPagos();
   } catch (err) {
     showResultadoModal({
       ok: false,
       titulo: 'No se pudo guardar',
-      detalle: `${escapeHtml(err.message)}<br><span style="font-size:11px">El pago de <b>${escapeHtml(proveedor)}</b> NO quedó registrado. Volvé a intentarlo.</span>`,
+      detalle: `${escapeHtml(err.message)}<br><span style="font-size:11px">La compra de <b>${escapeHtml(d.proveedor)}</b> NO quedó registrada. Volvé a intentarlo.</span>`,
     });
   }
 }
@@ -9074,7 +9616,7 @@ function openVinosModal(tipo) {
     titulo = '💰 Plata inmovilizada en bebidas';
     filtrados = items.filter(i => (i.valorCosto || 0) > 0).sort((a,b) => (b.valorCosto||0)-(a.valorCosto||0));
     cols = ['stock','costo','inmovilizado','peso'];
-    totalLinea = 'Total inmovilizado: <b>'+fmt(t.plataInmovilizada)+'</b> en '+t.stockTotal+' botellas. Es la plata que tenés "parada" en stock al costo de compra.';
+    totalLinea = 'Total inmovilizado: <b>'+fmt(t.plataInmovilizada)+'</b> en '+t.stockTotal+' unidades. Es la plata que tenés "parada" en stock al costo de compra.';
   } else if (tipo === 'valor') {
     titulo = '🏷️ Valor del stock a precio de venta';
     filtrados = items.filter(i => (i.valorVenta || 0) > 0).sort((a,b) => (b.valorVenta||0)-(a.valorVenta||0));
@@ -9145,7 +9687,7 @@ async function loadVinos() {
   const t = data.totales;
   const ck = 'cursor:pointer';
   if (kpis) kpis.innerHTML = !esAdmin ? '' :
-    '<div class="kpi-card blue" style="'+ck+'" onclick="openVinosModal(\'inmovilizado\')" title="Ver detalle"><div class="kpi-label">Plata inmovilizada ›</div><div class="kpi-value">'+fmt(t.plataInmovilizada)+'</div><div class="kpi-sub">'+t.stockTotal+' botellas · '+t.items+' etiquetas</div></div>'
+    '<div class="kpi-card blue" style="'+ck+'" onclick="openVinosModal(\'inmovilizado\')" title="Ver detalle"><div class="kpi-label">Plata inmovilizada ›</div><div class="kpi-value">'+fmt(t.plataInmovilizada)+'</div><div class="kpi-sub">'+t.stockTotal+' unidades · '+t.items+' productos</div></div>'
     + '<div class="kpi-card green" style="'+ck+'" onclick="openVinosModal(\'valor\')" title="Ver detalle"><div class="kpi-label">Valor a precio de venta ›</div><div class="kpi-value">'+fmt(t.valorVentaStock)+'</div><div class="kpi-sub">margen potencial '+fmt(t.margenPotencial)+'</div></div>'
     + '<div class="kpi-card '+(t.enQuiebre>0?'red':'green')+'" style="'+ck+'" onclick="openVinosModal(\'quiebre\')" title="Ver detalle"><div class="kpi-label">En quiebre ›</div><div class="kpi-value">'+t.enQuiebre+'</div><div class="kpi-sub">sin stock o bajo mínimo</div></div>'
     + '<div class="kpi-card orange" style="'+ck+'" onclick="openVinosModal(\'agotarse\')" title="Ver detalle"><div class="kpi-label">Por agotarse ›</div><div class="kpi-value">'+t.porAgotarse+'</div><div class="kpi-sub">≤ 7 días · '+t.sobrestock+' con sobrestock</div></div>';
@@ -9164,7 +9706,7 @@ async function loadVinos() {
     + '<th style="text-align:left">Alerta</th></tr>';
 
   const nCols = esAdmin ? 10 : 6;
-  if (!data.items.length) { body.innerHTML = '<tr><td colspan="'+nCols+'" style="color:var(--text-muted);padding:14px">No se encontraron bebidas con alcohol con stock en Fudo.</td></tr>'; return; }
+  if (!data.items.length) { body.innerHTML = '<tr><td colspan="'+nCols+'" style="color:var(--text-muted);padding:14px">No se encontraron bebidas con stock en Fudo.</td></tr>'; return; }
 
   const badge = a => {
     const m = {
@@ -12243,6 +12785,7 @@ const pedState = {
   abiertos: new Set(),
   recibiendo: null,       // el pedido que está en el modal
   modo: null,             // cuál de los tres botones lo abrió: ver PED_MODOS
+  altaPago: '',           // cómo se paga, en el alta suelta. '' = no sé todavía
   plan: null,             // qué dijo el server que va a hacer: ver pedCargarPlan
   editandoSem: null,
   arrastrando: null,
@@ -12381,6 +12924,15 @@ function diaPedidos(d) {
   const chips = [
     d.atrasado ? '<span class="ped-chip atrasado">sin recibir</span>' : '',
     d.esHoy ? '<span class="ped-chip">hoy</span>' : '',
+    // Lo que hay que llevar en efectivo ese día. Va acá y no sólo adentro de
+    // cada pedido porque los días vienen PLEGADOS: sin esto habría que abrir
+    // uno por uno para saber si hay que tener plata a mano. Y va TERCERO
+    // —después de "atrasado" y "hoy", antes de los contadores— porque en el
+    // teléfono este renglón envuelve en varias líneas y lo que pide una acción
+    // no puede quedar debajo de "3 pedidos · 3 sin recibir".
+    d.cantEnPuerta
+      ? `<span class="ped-chip puerta">💰 ${d.cantEnPuerta} para pagar${d.totalEnPuerta ? ' · ' + fmt(d.totalEnPuerta) : ''}</span>`
+      : '',
     d.pedidos.length ? `<span>${d.pedidos.length} pedido${d.pedidos.length !== 1 ? 's' : ''}</span>` : '',
     d.previstos.length ? `<span>${d.previstos.length} previsto${d.previstos.length !== 1 ? 's' : ''}</span>` : '',
     d.abiertos ? `<span>${d.abiertos} sin recibir</span>` : '',
@@ -12424,16 +12976,47 @@ function togglePedDia(fecha) {
   if (el) el.classList.toggle('abierto');
 }
 
+/**
+ * Lo que quien recibe necesita saber de un vistazo: si tiene que pagarlo.
+ *
+ * Sale de `pagoPrevisto`, que se decide al cargar la compra. Sólo se muestra
+ * mientras el pedido no llegó: después manda lo que pasó de verdad (p.pago).
+ * Un pedido viejo, o un previsto del cuadro semanal, no dijeron nada sobre la
+ * plata y no muestran nada — inventarles una respuesta sería peor que el hueco.
+ *
+ * Ojo con el vocabulario: dice PAGAR, no cobrar. El que cobra es el proveedor.
+ * Y el de 'a-pagar' arranca con "no se paga acá" a propósito: es la única forma
+ * de que un chip que dice pagar y otro que dice a pagar no se lean como lo
+ * mismo con el proveedor en la puerta.
+ */
+function chipPagoPrevisto(p) {
+  if (p.pago !== 'no') return '';
+  if (p.pagoPrevisto === 'al-recibir') {
+    return `<span class="ped-chip puerta">💰 PAGAR${p.costoEstimado ? ' ' + fmt(p.costoEstimado) : ''}</span>`;
+  }
+  if (p.pagoPrevisto === 'pagado') return '<span class="ped-chip pagado">✓ ya está pago</span>';
+  if (p.pagoPrevisto === 'a-pagar') {
+    const v = p.vence ? ' · vence ' + new Date(p.vence + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'numeric' }) : '';
+    return `<span class="ped-chip">no se paga acá${v}</span>`;
+  }
+  return '';
+}
+
 function itemPedido(p) {
   const id = escapeHtml(p.id);
   const recibido = p.estado === 'recibido';
 
   const meta = [
     p.detalle ? `<span>${escapeHtml(p.detalle)}</span>` : '',
+    chipPagoPrevisto(p),
     p.pago === 'pagado' ? `<span class="ped-chip pagado">pagado ${fmt(p.montoPagado)}${p.medioPagoReal ? ' · ' + escapeHtml(p.medioPagoReal) : ''}</span>`
       : p.pago === 'a pagar' ? '<span class="ped-chip apagar">quedó a pagar</span>'
-      : p.costoEstimado ? `<span>~${fmt(p.costoEstimado)}</span>` : '',
-    p.medioPrevisto && p.pago === 'no' ? `<span class="ped-chip">${escapeHtml(p.medioPrevisto)}</span>` : '',
+      : p.costoEstimado && p.pagoPrevisto !== 'al-recibir'
+        ? `<span>${p.pagoPrevisto ? '' : '~'}${fmt(p.costoEstimado)}</span>` : '',
+    // El medio previsto no se repite cuando se paga en la puerta: el chip ya
+    // dice que es efectivo del local, y es siempre el mismo.
+    p.medioPrevisto && p.pago === 'no' && p.pagoPrevisto !== 'al-recibir'
+      ? `<span class="ped-chip">${escapeHtml(p.medioPrevisto)}</span>` : '',
     recibido && p.recibidoPor ? `<span>✓ recibió ${escapeHtml(p.recibidoPor)}</span>` : '',
     // Fila vieja: llegó, pero nunca se registró el pago en Movimientos. Ya no
     // traba el día (ver estaAbierto en src/pedidos.js) — el aviso lo da la
@@ -12541,6 +13124,20 @@ function pedMensaje(html) {
   document.getElementById('ped-alta-msg').innerHTML = html;
 }
 
+// A diferencia de "Nueva compra", acá hay un cuarto estado y es el default:
+// "no sé todavía". Un pedido anotado a las apuradas —"mañana llega algo de
+// Mercado Libre"— muchas veces se carga sin saber cómo se paga, y obligar a
+// elegir haría que se elija cualquiera. Vacío se muestra como nada, que es lo
+// honesto, y sigue habiendo tres botones al recibir.
+function setPedAltaPago(v) {
+  pedState.altaPago = v;
+  for (const k of ['vacio', 'pagado', 'al-recibir', 'a-pagar']) {
+    const b = document.getElementById('pa-' + (k === 'vacio' ? 'vacio' : k));
+    if (b) b.classList.toggle('activo', (k === 'vacio' ? '' : k) === v);
+  }
+  document.getElementById('ped-vence-wrap').style.display = v === 'a-pagar' ? '' : 'none';
+}
+
 async function crearPedido(btn) {
   const prov = document.getElementById('ped-proveedor');
   const proveedor = prov.value.trim();
@@ -12558,11 +13155,16 @@ async function crearPedido(btn) {
         detalle: document.getElementById('ped-detalle').value,
         costoEstimado: pedNumero(document.getElementById('ped-costo').value),
         medioPrevisto: document.getElementById('ped-medio').value,
+        pagoPrevisto: pedState.altaPago || '',
+        vence: pedState.altaPago === 'a-pagar' ? document.getElementById('ped-vence').value : '',
       }),
     });
     // La fecha NO se limpia: lo normal es cargar dos o tres pedidos del mismo
     // día seguidos. Sí se limpia lo que cambia entre uno y otro.
     prov.value = ''; document.getElementById('ped-detalle').value = ''; document.getElementById('ped-costo').value = '';
+    // La forma de pago NO se limpia, igual que la fecha: si llegan tres cosas
+    // el jueves y las tres se pagan en la puerta, volver a elegirlo tres veces
+    // es la fricción que hace que la pantalla no se use.
     pedMensaje('<span style="color:var(--green)">✓ Anotado.</span>');
     pedState.msgTimer = setTimeout(() => { document.getElementById('ped-alta-msg').innerHTML = ''; }, 2500);
     prov.focus();

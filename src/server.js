@@ -1008,7 +1008,7 @@ function mesDeCualquierFecha(fecha) {
 // pase de P pisa Q/R/S/T, que están ocupadas) y se puede ejercitar sin escribir.
 function construirFilaGasto({
   facturaId, fecha, proveedor, categoria, monto, descripcion,
-  medioPago, estado, vencimiento,
+  medioPago, estado, vencimiento, mes: mesPedido,
 } = {}) {
   const montoNum = Number(monto);
   if (!Number.isFinite(montoNum) || montoNum <= 0) {
@@ -1017,18 +1017,50 @@ function construirFilaGasto({
   if (!proveedor) return { ok: false, motivo: 'proveedor', error: 'Falta el proveedor.' };
   if (!facturaId) return { ok: false, motivo: 'id', error: 'Falta el identificador de la factura.' };
 
+  const estadoRow = estado === 'A pagar' ? 'A pagar' : 'Pagado';
+
+  // ─── El medio, y por qué una fila "A pagar" no lleva ninguno ───────────────
+  //
+  // El Saldo Calculado de la hoja Cajas es un SUMIFS por texto exacto contra la
+  // columna L. Escribir ahí el medio ANTES de pagar resta de esa caja una plata
+  // que todavía está: la fila dice "A pagar" y el saldo ya la descontó.
+  //
+  // El camino de cuotas de POST /api/pagos ya lo hacía bien y lo dejó escrito
+  // ("Medio de pago vacío hasta que se pague"); el de pago único no, y ésta es
+  // la puerta por la que ahora pasan los dos. Cuando se paga de verdad,
+  // marcarFilaPagada completa L junto con el estado.
+  //
+  // Vacío es válido SÓLO en "A pagar". Cualquier valor no vacío sigue teniendo
+  // que ser el nombre exacto de una caja: un medio inventado es plata que
+  // ninguna caja resta nunca, para siempre y sin ningún error a la vista.
   const medio = normalizarMedio(medioPago);
-  if (!medio || !MEDIOS_CANONICOS.includes(medio)) {
+  if (medio && !MEDIOS_CANONICOS.includes(medio)) {
     return {
       ok: false, motivo: 'medio',
-      error: `"${medioPago || '(vacío)'}" no es una caja del sistema. El gasto NO se escribió: `
+      error: `"${medioPago}" no es una caja del sistema. El gasto NO se escribió: `
         + `si se registrara así, ninguna caja lo restaría del saldo. Cajas válidas: ${MEDIOS_CANONICOS.join(', ')}.`,
     };
   }
+  if (!medio && estadoRow !== 'A pagar') {
+    return {
+      ok: false, motivo: 'medio',
+      error: 'Falta el medio de pago. Un gasto ya pagado tiene que decir de qué caja salió, '
+        + `o ninguna lo resta del saldo. Cajas válidas: ${MEDIOS_CANONICOS.join(', ')}.`,
+    };
+  }
+  // Lo que va en L. Se fuerza vacío en "A pagar" aunque venga un medio: ahí es
+  // una intención, no un hecho, y su lugar es el pedido (medioPrevisto) o el
+  // texto de la descripción, como ya hacen las cuotas.
+  const medioRow = estadoRow === 'A pagar' ? '' : medio;
 
   const fechaRow = aFechaPlanilla(fecha) || aFechaPlanilla(new Date().toISOString());
-  const mes = mesDeCualquierFecha(fecha) || mesDeCualquierFecha(new Date().toISOString());
-  const estadoRow = estado === 'A pagar' ? 'A pagar' : 'Pagado';
+  // El mes puede venir dicho a mano: es a qué mes PERTENECE el gasto, que no
+  // siempre es el de la fecha (ver la columna A vs B en CLAUDE.md). Si no
+  // viene, sale de la fecha, y si tampoco, de hoy — la columna B nunca queda
+  // vacía, que es como quedaba antes cuando alguien destildaba "es de hoy" y
+  // no escribía el mes.
+  const mes = (mesPedido || '').toString().trim()
+    || mesDeCualquierFecha(fecha) || mesDeCualquierFecha(new Date().toISOString());
   const categoriaRow = cats.normalizarCategoriaGasto(categoria) || 'Otros';
 
   const row = [
@@ -1043,18 +1075,20 @@ function construirFilaGasto({
     proveedor,                             // I Proveedor
     categoriaRow,                          // J Categoría
     descripcion || `Factura ${proveedor}`, // K Descripción
-    medio,                                 // L Medio de pago
+    medioRow,                              // L Medio de pago (vacío si "A pagar")
     '', '',                                // M/N Entradas
     montoNum,                              // O Salida ARS
     '',                                    // P Salida USD
   ];
-  return { ok: true, row, medio, montoNum, estadoRow, categoria: categoriaRow, fechaRow, mes };
+  // `medio` es el que se ELIGIÓ (lo usa el bot para decir "sale de X" en su
+  // mensaje); `medioRow` es el que se ESCRIBIÓ. Sólo difieren en "A pagar".
+  return { ok: true, row, medio, medioRow, montoNum, estadoRow, categoria: categoriaRow, fechaRow, mes };
 }
 
 async function registrarGastoEnLibro(datos = {}) {
   const armado = construirFilaGasto(datos);
   if (!armado.ok) return armado;
-  const { row, medio, montoNum, estadoRow, categoria, fechaRow, mes } = armado;
+  const { row, medio, medioRow, montoNum, estadoRow, categoria, fechaRow, mes } = armado;
   const { facturaId, proveedor, descripcion, usuario } = datos;
 
   // Idempotencia: si ya hay una fila con este id de factura, no se escribe otra.
@@ -1102,7 +1136,7 @@ async function registrarGastoEnLibro(datos = {}) {
     }
   }
 
-  return { ok: true, monto: montoNum, medio, categoria: categoria || 'Otros', estado: estadoRow, fecha: fechaRow, mes, registradoEnSesion };
+  return { ok: true, monto: montoNum, medio, medioRow, categoria: categoria || 'Otros', estado: estadoRow, fecha: fechaRow, mes, registradoEnSesion };
 }
 
 // GET /api/arqueo/fudo-hoy — ventas del día de servicio en curso según Fudo,
@@ -1363,6 +1397,193 @@ app.get('/api/cambios', authMiddleware, adminOnly, async (req, res) => {
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// ─── POST /api/cambios — mover plata de una caja a otra ──────────────────────
+//
+// Un cambio son SIEMPRE dos filas en Movimientos: la salida de la caja origen y
+// la entrada en la caja destino, con el mismo día, el mismo importe (o los dos
+// importes de la operación, si cruza monedas) y la misma descripción. Una sola
+// fila dejaría una de las dos cajas con el saldo mal, porque el Saldo Calculado
+// de la hoja Cajas es un SUMIFS por caja: nadie compensa lo que no se escribe.
+//
+// Hasta el 20/08/2026 esto se cargaba a mano en la planilla, buscando la última
+// fila y tipeando las dos. El caso principal es pesos a pesos entre dos cuentas
+// (un retiro del cajón a Efectivo Pablo, una transferencia de Galicia a Mercado
+// Pago Pablo); el otro es el cambio de divisas, donde los dos importes están en
+// monedas distintas y el tipo de cambio es el cociente entre ellos.
+//
+// TRES COSAS QUE LA PANTALLA NO PUEDE DECIDIR Y ESTE ENDPOINT SÍ:
+//
+//  1. El medio de pago se resuelve contra la hoja `Cajas` LEÍDA, no contra una
+//     lista escrita acá. Es el mismo texto que la fórmula matchea, así que si
+//     una caja se renombra o se agrega, esto la sigue sola — y un nombre que no
+//     existe se rechaza en vez de escribirse como plata invisible.
+//  2. `Tipo = Otros` y `Categoría = Cambio` son las dos marcas que sacan estas
+//     filas del resultado del negocio (`filtrarOperativos`). Un cambio no es un
+//     ingreso ni un gasto: es la misma plata en otro bolsillo. Con `Tipo=Gasto`
+//     —como quedaron algunas filas viejas— el mes cierra con un gasto inventado.
+//  3. El TC va en la columna Q y SÓLO en la fila que tiene importe en dólares.
+//     En una fila sólo en pesos, Q no significa nada (ver sheets.js): sería un
+//     número colgado que la lectura ignora.
+app.post('/api/cambios', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { fecha, mes, origen, destino, nota } = req.body || {};
+    const montoOrigen = Number(req.body?.montoOrigen);
+    const montoDestinoRaw = req.body?.montoDestino;
+
+    if (!fecha) return res.status(400).json({ ok: false, error: 'Falta la fecha' });
+    if (!origen || !destino) return res.status(400).json({ ok: false, error: 'Elegí la caja de origen y la de destino' });
+    if (!Number.isFinite(montoOrigen) || montoOrigen <= 0) {
+      return res.status(400).json({ ok: false, error: 'El monto que sale tiene que ser mayor que cero' });
+    }
+
+    // Las cajas salen de la hoja, con su nombre y su moneda exactos.
+    const cajas = await getCajas();
+    const buscar = n => cajas.find(c => (c.caja || '').trim().toLowerCase() === (n || '').trim().toLowerCase());
+    const cOrigen = buscar(origen);
+    const cDestino = buscar(destino);
+    const nombres = cajas.map(c => c.caja).join(' · ');
+    if (!cOrigen) return res.status(400).json({ ok: false, error: `"${origen}" no es ninguna caja de la hoja Cajas. Son: ${nombres}` });
+    if (!cDestino) return res.status(400).json({ ok: false, error: `"${destino}" no es ninguna caja de la hoja Cajas. Son: ${nombres}` });
+    if (cOrigen.caja === cDestino.caja) {
+      return res.status(400).json({ ok: false, error: 'El origen y el destino son la misma caja' });
+    }
+
+    const monedaOrigen = (cOrigen.moneda || 'ARS').toUpperCase() === 'USD' ? 'USD' : 'ARS';
+    const monedaDestino = (cDestino.moneda || 'ARS').toUpperCase() === 'USD' ? 'USD' : 'ARS';
+    const cruzaMonedas = monedaOrigen !== monedaDestino;
+
+    // Entre cajas de la misma moneda no hay dos importes: es el mismo. Si viene
+    // uno distinto es un error de carga, y aceptarlo haría aparecer o desaparecer
+    // plata que nadie movió.
+    let montoDestino;
+    if (cruzaMonedas) {
+      montoDestino = Number(montoDestinoRaw);
+      if (!Number.isFinite(montoDestino) || montoDestino <= 0) {
+        return res.status(400).json({ ok: false, error: `El cambio va de ${monedaOrigen} a ${monedaDestino}: indicá también cuánto entra en ${cDestino.caja}` });
+      }
+    } else {
+      montoDestino = (montoDestinoRaw == null || montoDestinoRaw === '') ? montoOrigen : Number(montoDestinoRaw);
+      if (Math.round(montoDestino * 100) !== Math.round(montoOrigen * 100)) {
+        return res.status(400).json({ ok: false, error: `Las dos cajas están en ${monedaOrigen}: tiene que entrar lo mismo que sale` });
+      }
+    }
+
+    // TC de la operación: pesos por dólar. Es el cociente entre los dos importes,
+    // no un valor que se elija — a cuánto se hizo REALMENTE este cambio.
+    const tc = cruzaMonedas
+      ? (monedaOrigen === 'ARS' ? montoOrigen / montoDestino : montoDestino / montoOrigen)
+      : null;
+
+    const mesRow = mes || mesDeFecha(fecha);
+    const descBase = `${cOrigen.caja} → ${cDestino.caja}`;
+    const notaTxt = (nota || '').toString().trim();
+    const desc = notaTxt ? `${descBase} — ${notaTxt}` : descBase;
+    // Las dos filas comparten un id en la columna H para que se lean como UNA
+    // operación y no como dos cargas sueltas del mismo día por el mismo importe.
+    const cambioId = `CAMBIO-${Date.now()}`;
+
+    // A:Fecha B:Mes C:Tipo D:Estado E:Vencimiento F:Cuotas G:Extraordinario
+    // H:ID I:Proveedor J:Categoría K:Descripción L:Medio de pago
+    // M:Entrada ARS N:Entrada USD O:Salida ARS P:Salida USD
+    const filaSalida = [
+      fecha, mesRow, 'Otros', 'Pagado', '', '', '', cambioId, 'Cambio', 'Cambio', desc, cOrigen.caja,
+      '', '', monedaOrigen === 'ARS' ? montoOrigen : '', monedaOrigen === 'USD' ? montoOrigen : '',
+    ];
+    const filaEntrada = [
+      fecha, mesRow, 'Otros', 'Pagado', '', '', '', cambioId, 'Cambio', 'Cambio', desc, cDestino.caja,
+      monedaDestino === 'ARS' ? montoDestino : '', monedaDestino === 'USD' ? montoDestino : '', '', '',
+    ];
+
+    const auth = getAuth();
+    const sheets = google.sheets({ version: 'v4', auth });
+    const resp = await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID, range: 'Movimientos!A:P',
+      valueInputOption: 'USER_ENTERED', requestBody: { values: [filaSalida, filaEntrada] },
+    });
+
+    // Las filas escritas, para poder completar la columna Q y para decir en
+    // pantalla qué se escribió. El rango vuelve como "Movimientos!A1248:P1249".
+    const rango = resp.data?.updates?.updatedRange || '';
+    const filas = (rango.match(/[A-Z]+(\d+)/g) || []).map(x => parseInt(x.replace(/[A-Z]+/, ''), 10));
+    const filaSalidaIdx = filas[0] || null;
+    const filaEntradaIdx = filas[1] || (filaSalidaIdx ? filaSalidaIdx + 1 : null);
+
+    // El TC va sólo en la fila en dólares (la otra está en pesos y ahí Q no
+    // valúa nada). Que no se pueda escribir no invalida el cambio: las dos filas
+    // ya están, y el aviso dice qué quedó sin cargar.
+    let avisoTC = null;
+    if (tc && filaSalidaIdx && filaEntradaIdx) {
+      const filaUSD = monedaOrigen === 'USD' ? filaSalidaIdx : filaEntradaIdx;
+      try {
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SPREADSHEET_ID,
+          range: `Movimientos!Q${filaUSD}`,
+          valueInputOption: 'USER_ENTERED',
+          requestBody: { values: [[Math.round(tc * 100) / 100]] },
+        });
+      } catch (e) {
+        avisoTC = `El cambio quedó registrado, pero no se pudo escribir el tipo de cambio en la fila ${filaUSD}: ${e.message}`;
+      }
+    }
+    clearCache();
+
+    // ─── El arqueo en curso ──────────────────────────────────────────────────
+    //
+    // Si la caja está abierta y el cambio toca una de las dos cajas que se
+    // arquean, el esperado del cierre tiene que moverse con él. Sin esto, sacar
+    // plata del cajón a las 8 de la noche aparece como un FALTANTE al cerrar, y
+    // el cierre escribe una fila de "delta efectivo (faltante)" por plata que
+    // nadie perdió: está en la otra caja, con su propia fila.
+    //
+    // Entra en `gastosSesion` porque esa lista es lo que movió la caja durante el
+    // turno, no sólo gastos. Una ENTRADA se anota en NEGATIVO: el esperado es
+    // `inicial + Fudo − sesión`, así que un negativo suma, que es lo correcto.
+    const bucketDe = nombre => {
+      const low = (nombre || '').toLowerCase();
+      return low === CAJA_EFECTIVO.toLowerCase() ? 'efectivo'
+        : low === CAJA_MP.toLowerCase() ? 'mp' : null;
+    };
+    let registradoEnSesion = false;
+    if (estadoCaja.abierta) {
+      const tocan = [];
+      if (monedaOrigen === 'ARS') {
+        const b = bucketDe(cOrigen.caja);
+        if (b) tocan.push({ bucket: b, monto: montoOrigen, descripcion: `Cambio: salida a ${cDestino.caja}` });
+      }
+      if (monedaDestino === 'ARS') {
+        const b = bucketDe(cDestino.caja);
+        if (b) tocan.push({ bucket: b, monto: -montoDestino, descripcion: `Cambio: entrada desde ${cOrigen.caja}` });
+      }
+      if (tocan.length) {
+        estadoCaja.gastosSesion = estadoCaja.gastosSesion || [];
+        for (const t of tocan) {
+          estadoCaja.gastosSesion.push({ ...t, ts: new Date().toISOString(), usuario: req.user.nombre });
+        }
+        registradoEnSesion = true;
+        guardarEstadoCaja(estadoCaja);
+      }
+    }
+
+    const fmtMonto = (v, mon) => mon === 'USD'
+      ? `USD ${v.toLocaleString('es-AR')}`
+      : `$${Math.round(v).toLocaleString('es-AR')}`;
+    const tcRedondeado = tc ? Math.round(tc * 100) / 100 : null;
+    res.json({
+      ok: true,
+      filas: [filaSalidaIdx, filaEntradaIdx].filter(Boolean),
+      tc: tcRedondeado,
+      registradoEnSesion,
+      aviso: avisoTC,
+      message: cruzaMonedas
+        ? `${fmtMonto(montoOrigen, monedaOrigen)} de ${cOrigen.caja} → ${fmtMonto(montoDestino, monedaDestino)} en ${cDestino.caja} (TC $${tcRedondeado.toLocaleString('es-AR')})`
+        : `${fmtMonto(montoOrigen, monedaOrigen)} de ${cOrigen.caja} → ${cDestino.caja}`,
+    });
+  } catch (err) {
+    console.error('Error POST /api/cambios:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.get('/api/movimientos', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { tipo, categoria, estado } = req.query;
@@ -1476,8 +1697,41 @@ function mesDeFecha(fechaStr) {
 // tambien la lectura, para que la app no muestre un 'Efectivo' que ya no ofrece.
 const { MEDIOS_CANONICOS, normalizarMedio } = require('./medios-pago');
 
-// Creación de compras/pagos: accesible también para el encargado (botón "Nueva compra"),
-// a diferencia del listado (GET) y el marcado de pagado, que permanecen solo admin.
+// ═══════════════════════════════════════════════════════════════════════════
+// "Nueva compra" — donde empieza el circuito
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Accesible también para el encargado, a diferencia del listado (GET) y del
+// marcado de pagado, que siguen siendo sólo admin.
+//
+// Desde el 20/08/2026 esta ruta hace DOS cosas, y ése es el cambio de fondo:
+// registra el movimiento de plata y, si la compra llega en una entrega, crea el
+// pedido. La decisión de cómo se paga se toma acá —al comprar, por quien sabe—
+// en vez de en la puerta, por el cocinero, que es quien menos sabe.
+//
+// `pagoPrevisto` son los mismos tres casos que los tres botones de recibir:
+//
+//   'pagado'     ya salió la plata     → fila Pagado, medio en L
+//   'al-recibir' se paga en la puerta  → fila A pagar, vence el día de la entrega
+//   'a-pagar'    queda a cuenta        → fila A pagar con su vencimiento
+//
+// EL ID SE ACUÑA ANTES DE ESCRIBIR EL LIBRO, y es lo que ata las dos mitades:
+// va a la columna H (ID Compra), así que `planificarAsiento` encuentra esa fila
+// por su primera pista —la que es la respuesta y no una pista— sin ventana de
+// fechas, sin monto exacto y sin comparar descripciones. Al revés (escribir
+// primero y buscar después) es exactamente la heurística que este circuito
+// viene a dejar sin trabajo.
+//
+// Orden: LIBRO PRIMERO, hoja Pedidos después. Si falla el pedido, la compra
+// quedó registrada y se dice; al revés habría un pedido prometiendo una fila
+// que no existe.
+//
+// Una sola cuota pasa por `registrarGastoEnLibro` —la misma puerta que el bot de
+// facturas y que el "recibido" de Pedidos— y eso trae tres cosas que esta ruta
+// no tenía: valida que el medio sea una caja de verdad, puebla la columna H, y
+// anota el gasto en la sesión del arqueo abierto. Lo último era un bug con
+// consecuencia real: cargar acá una compra ya pagada en Efectivo Local durante
+// el servicio le inventaba un faltante a quien cerraba la caja esa noche.
 app.post('/api/pagos', authMiddleware, async (req, res) => {
   try {
     const { fecha, mes, proveedor, categoria, salidaARS, vencimiento, descripcion, cuotas, estado } = req.body;
@@ -1514,17 +1768,91 @@ app.post('/api/pagos', authMiddleware, async (req, res) => {
         // al marcarla Pagado se completa el medio. El mes NO se toca al pagar.
         values.push([venc, mesCompra, 'Gasto', 'A pagar', venc, `${i}/${nCuotas}`, '', cuotaId, proveedor, categoria||'', `${descBase} — Cuota ${i}/${nCuotas}${medioPago ? ' ('+medioPago+')' : ''}`, '', '', '', monto, '']);
       }
-    } else {
-      // Pagado: sin vencimiento (ya salió de caja) · A pagar: con vencimiento
-      values = [[fecha, mes||'', 'Gasto', estadoRow, estadoRow === 'Pagado' ? '' : (vencimiento||''), '', '', '', proveedor, categoria||'', descripcion||'', medioPago||'', '', '', salidaARS||'', '']];
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SPREADSHEET_ID, range: 'Movimientos!A:P',
+        valueInputOption: 'USER_ENTERED', requestBody: { values },
+      });
+      clearCache();
+      return res.json({ ok: true, message: `Compra en ${nCuotas} cuotas registrada (${values.length} filas)` });
     }
 
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID, range: 'Movimientos!A:P',
-      valueInputOption: 'USER_ENTERED', requestBody: { values },
+    // ─── Pago único ──────────────────────────────────────────────────────────
+
+    // Cómo se va a pagar. Si no viene (nada más que el modal llama a esta ruta,
+    // pero el fallback es una línea), se deduce del `estado` de siempre.
+    const previsto = pedidos.PAGOS_PREVISTOS.includes(req.body.pagoPrevisto)
+      ? req.body.pagoPrevisto
+      : (estadoRow === 'Pagado' ? 'pagado' : 'a-pagar');
+
+    const entregaFecha = pedidos.normalizarFecha(req.body.entrega && req.body.entrega.fecha);
+
+    // "Se paga al recibir" sin entrega no significa nada: no hay puerta donde
+    // pagar, y sobre todo no hay fecha para el vencimiento de la fila.
+    if (previsto === 'al-recibir' && !entregaFecha) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Para "se paga al recibir" hace falta la fecha de entrega: es el día en que sale la plata.',
+      });
+    }
+
+    const estadoLibro = previsto === 'pagado' ? 'Pagado' : 'A pagar';
+    // El vencimiento de "se paga al recibir" ES el día de la entrega.
+    const vencLibro = previsto === 'al-recibir' ? entregaFecha : (vencimiento || '');
+
+    // Si hay entrega, el id es el del pedido y la fila del libro nace con él
+    // adentro. Si no, uno propio: la columna H se puebla igual, que es lo que
+    // deja rastro de qué cargó esta fila. `_esDeOtroPedido` sólo excluye los que
+    // empiezan con "ped", así que una compra suelta sigue siendo candidata para
+    // el pedido de esa entrega — que es justo lo correcto.
+    const idCompra = entregaFecha
+      ? pedidos.nuevoId()
+      : `cmp${Date.now()}${Math.floor(Math.random() * 100)}`;
+
+    const r = await registrarGastoEnLibro({
+      facturaId: idCompra,
+      fecha, mes, proveedor, categoria,
+      monto: salidaARS,
+      descripcion,
+      medioPago,
+      estado: estadoLibro,
+      vencimiento: vencLibro,
+      usuario: req.user.nombre,
     });
-    clearCache();
-    res.json({ ok: true, message: nCuotas > 1 ? `Compra en ${nCuotas} cuotas registrada (${values.length} filas)` : 'Compra registrada correctamente' });
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.error });
+
+    // ─── Y ahora el pedido ───────────────────────────────────────────────────
+    //
+    // Si esto falla, la compra YA está registrada. No se deshace ni se esconde:
+    // se dice, y se dice dónde cargarlo a mano. Deshacer la fila del libro sería
+    // peor —quedaría plata sin registrar— y quedarse callado, peor todavía.
+    let pedido = null, aviso = '';
+    if (entregaFecha) {
+      try {
+        pedido = await pedidos.crearPedido({
+          id: idCompra,
+          fecha: entregaFecha,
+          proveedor,
+          detalle: descripcion || '',
+          costoEstimado: Number(salidaARS) || 0,
+          // En la puerta se paga siempre en efectivo del local; es la única
+          // caja que existe ahí. En los otros dos casos, el medio elegido.
+          medioPrevisto: previsto === 'al-recibir' ? CAJA_EFECTIVO : (medioPago || ''),
+          pagoPrevisto: previsto,
+          vence: previsto === 'a-pagar' ? vencLibro : '',
+          origen: 'compra',
+        });
+      } catch (e) {
+        aviso = `La compra quedó registrada en Movimientos, pero el pedido NO se pudo crear (${e.message}). `
+          + 'Cargalo a mano desde Operación › Pedidos.';
+      }
+    }
+
+    res.json({
+      ok: true,
+      message: r.yaExistia ? 'Esa compra ya estaba registrada' : 'Compra registrada correctamente',
+      pedido, aviso,
+      registradoEnSesion: r.registradoEnSesion,
+    });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
@@ -2254,9 +2582,20 @@ app.get('/api/pedidos', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// El alta suelta: "mañana llega algo de Mercado Libre". No escribe NADA en
+// Movimientos — un pedido esperado no es un gasto — pero desde el 20/08/2026
+// acepta `pagoPrevisto` y `vence`, para que un pedido cargado por acá tampoco
+// aparezca en blanco en el listado del que lo va a recibir.
+//
+// El `id` se descarta a propósito: lo acuña crearPedido. Sólo "Nueva compra" lo
+// provee, porque necesita ponerlo en la columna H antes de escribir el libro, y
+// eso pasa por dentro y no por esta ruta. Aceptarlo acá dejaría crear dos filas
+// con el mismo id, y getPedido resuelve por el primero que encuentra.
 app.post('/api/pedidos', authMiddleware, async (req, res) => {
-  try { res.json({ ok: true, data: await pedidos.crearPedido(req.body) }); }
-  catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+  try {
+    const { id, ...datos } = req.body || {};
+    res.json({ ok: true, data: await pedidos.crearPedido(datos) });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
 });
 
 app.put('/api/pedidos/:id', authMiddleware, async (req, res) => {
@@ -2453,6 +2792,33 @@ async function planificarAsiento({ pedido, modo, monto = 0 }) {
   });
 
   const pistas = { monto, fechaRef, pedidoId: pedido.id, detalle: pedido.detalle || '' };
+
+  // ─── El atajo: este pedido YA sabe cuál es su fila ────────────────────────
+  //
+  // Desde el 20/08/2026 un pedido puede nacer de "Nueva compra", y en ese caso
+  // la fila del libro se escribió con el id del pedido en la columna H. No hay
+  // nada que adivinar: ésa es la fila, esté pagada o no, y sin importar cuántos
+  // días haya entre la compra y la entrega.
+  //
+  // Vale la pena que esté acá arriba y no adentro de _elegirCandidata, que es
+  // donde vivía la misma pista: ahí sólo alcanzaba a las filas "A pagar" y sólo
+  // en los modos que las buscan. El agujero que tapa es concreto — un pedido
+  // "se paga al recibir" (fila A pagar con su id) recibido con el botón de
+  // "pago aparte" buscaba entre las Pagadas, no encontraba la suya, caía en
+  // crear-pagado, y la idempotencia de registrarGastoEnLibro no escribía nada:
+  // el pedido quedaba pagado con la fila del libro abierta.
+  //
+  // Qué hacer con ella sí depende del modo, y son dos casos:
+  //   - ya está Pagada, o el modo dice que queda a cuenta → sólo se vincula.
+  //   - está A pagar y la plata salió (efectivo en la puerta, o pago aparte por
+  //     transferencia) → se cierra.
+  const propia = delProveedor.find(m => (m.cuotaId || '') === pedido.id);
+  if (propia) {
+    const otras = aPagar.filter(m => m.rowIndex !== propia.rowIndex).length;
+    return (propia.pagado || modo === 'cuenta')
+      ? { accion: 'vincular-fila', fila: resumen(propia), otrasPendientes: otras }
+      : { accion: 'cerrar-fila', fila: resumen(propia), otrasPendientes: otras };
+  }
 
   if (modo === 'efectivo') {
     const f = _elegirCandidata(aPagar, pistas);

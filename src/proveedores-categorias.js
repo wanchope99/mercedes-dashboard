@@ -153,10 +153,45 @@ const CATEGORIAS_GASTO = [
 ];
 const CATEGORIAS_GASTO_SET = new Set(CATEGORIAS_GASTO);
 
+// ─── Lo que ACEPTA la columna J, que es mas que lo que el bot pregunta ───────
+//
+// Una sola lista estaba contestando dos preguntas distintas, y por eso se
+// perdian cuatro categorias. CATEGORIAS_GASTO es lo que el bot le OFRECE a una
+// persona por Telegram cuando no sabe en que cae una factura: acotado a las que
+// aparecen en facturas de proveedor, porque son botones en un chat. Pero la
+// validacion de la hoja acepta mas, y el modal de "Nueva compra" ofrece esas
+// mas — Alquiler, Personal, Legal / Escribano y Fiscales existen ahi.
+//
+// Hasta el 20/08/2026 normalizarCategoriaGasto validaba contra la lista corta,
+// asi que esas cuatro devolvian '' y construirFilaGasto las convertia en
+// 'Otros'. Mientras el unico camino que pasaba por aca era el del bot no se
+// notaba (el bot nunca manda un alquiler). Al pasar "Nueva compra" por la misma
+// puerta, se notaria: cuatro categorias del balance degradadas en silencio.
+//
+// El orden importa: es el mismo del <select> del modal, para poder compararlos
+// de un vistazo cuando alguna de las dos cambie.
+const CATEGORIAS_COLUMNA_J = [
+  'Mercaderia',
+  'Alquiler',
+  'Cocina',
+  'Mobiliario',
+  'Sala',
+  'Frios',
+  'Insumos',
+  'Personal',
+  'Operativos',
+  'Legal / Escribano',
+  'Servicios',
+  'Fiscales',
+  'Otros',
+];
+
 function normalizarCategoriaGasto(cat) {
   const c = (cat || '').toString().trim();
   if (!c) return '';
-  const exacta = CATEGORIAS_GASTO.find(x => x.toLowerCase() === c.toLowerCase());
+  // Contra la lista ANCHA: lo que se valida aca es "¿esto puede ir en la
+  // columna J?", no "¿esto es algo que el bot sabe preguntar?".
+  const exacta = CATEGORIAS_COLUMNA_J.find(x => x.toLowerCase() === c.toLowerCase());
   if (exacta) return exacta;
   const n = norm(c);
   if (n.includes('mercader')) return 'Mercaderia';
@@ -431,6 +466,6 @@ module.exports = {
   inferirPorKeywords, construirIndiceInferencia, sugerirCategoria,
   resolverItem, norm, nombreCanonico, normalizarProveedor,
   // Para el gasto que se escribe en el LIBRO (Movimientos), no en Compras.
-  MEDIOS_LIBRO, CATEGORIAS_GASTO, CATEGORIAS_GASTO_SET,
+  MEDIOS_LIBRO, CATEGORIAS_GASTO, CATEGORIAS_GASTO_SET, CATEGORIAS_COLUMNA_J,
   normalizarCategoriaGasto, esMedioDeLibro, opcionesDeMedioGuardado, normalizarParaLibro,
 };
