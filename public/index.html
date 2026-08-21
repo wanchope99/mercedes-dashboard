@@ -668,8 +668,27 @@
     .ped-col-vacia { color: var(--text-muted); font-size: 11px; font-style: italic; padding: 4px 2px; }
 
     /* Los dos modales de esta pantalla. En el resto de la app cada overlay trae
-       sus propias reglas por id — no existe un .modal-overlay genérico. */
+       sus propias reglas por id — no existe un .modal-overlay genérico.
+
+       ─── EL ORDEN DE APILADO DE PEDIDOS, que es lo que se olvida ───────────
+
+       Desde el 21/08/2026 el día se abre en un modal, y el de recibir se abre
+       DESDE ADENTRO de ése. O sea que hay dos capas y el orden importa:
+
+         570  #ped-dia-overlay      el día
+         580  #ped-recibir-overlay  sale del día → va ENCIMA
+         900  #resultado-modal      el informe de lo que se hizo
+        9999  #toast
+
+       Los dos compartían la regla y el z-index 320, que alcanzaba cuando el día
+       se desplegaba en la lista y no había nada arriba. Con el modal del día,
+       "Recibido y pagado" quedaba DEBAJO y había que cerrar el día para poder
+       seguir — o sea que el flujo se cortaba justo en el paso que importa.
+
+       #ped-sem-overlay NO sube: se abre desde el cuadro semanal, que está en la
+       página y no en ningún modal. Subirlo sería copiar un número sin razón. */
     #ped-recibir-overlay, #ped-sem-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 320; align-items: center; justify-content: center; padding: 20px; }
+    #ped-recibir-overlay { z-index: 580; }
     #ped-recibir-overlay.open, #ped-sem-overlay.open { display: flex; }
     #ped-recibir-overlay .modal, #ped-sem-overlay .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; width: 520px; max-width: 95vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 24px 64px rgba(0,0,0,0.5); }
     #ped-recibir-overlay .modal-title, #ped-sem-overlay .modal-title { font-size: 17px; font-weight: 600; margin-bottom: 22px; }
