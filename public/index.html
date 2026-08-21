@@ -12171,23 +12171,50 @@ document.addEventListener('DOMContentLoaded', () => {
 //
 // `tab` puede ser un grupo ('dashboard') o un submenú ('arqueo'): switchTab
 // resuelve los dos. `accion` abre algo sin cambiar de pantalla.
+// ─── La home del teléfono ───────────────────────────────────────────────────
+//
+// Lo que de verdad se hace todos los días, en botones grandes. Dos clases de
+// entrada, y la franja naranja es lo que las separa:
+//
+//   · `tab`    — una sección que se abre. Vas a MIRAR algo.
+//   · `accion` — algo que se carga sin salir de acá. Vas a ESCRIBIR algo.
+//
+// Con seis botones esa distinción pasa a importar: sin ella son seis cuadrados
+// iguales donde hay que leer el subtítulo de cada uno.
+//
+// Seis y no más: son tres filas de dos, que a 116px de alto entran sin scroll
+// en un teléfono chico. El séptimo obliga a scrollear una pantalla cuyo sentido
+// es que todo esté a la vista, y ahí conviene repensar cuál sacar.
 const HOME_TELEFONO = {
+  // Nueva compra y Pedidos entraron el 21/08/2026, pedidos por el dueño. Van en
+  // la fila de arriba —la que se alcanza con el pulgar— porque son las dos
+  // mitades del mismo circuito: por un botón se carga la compra y por el otro
+  // se ve la entrega que generó.
   admin: [
-    { tab: 'dashboard',  icono: '📊', titulo: 'Dashboard', sub: 'los números del mes' },
-    { accion: 'anotar',  icono: '🔧', titulo: 'Anotar',    sub: 'algo para arreglar', acento: true },
-    { tab: 'servicios',  icono: '🍽️', titulo: 'Servicios', sub: 'cómo vienen las noches' },
-    { tab: 'vinos',      icono: '🥂', titulo: 'Bebidas',   sub: 'stock y cobertura' },
+    { tab: 'dashboard',  icono: '📊', titulo: 'Dashboard',    sub: 'los números del mes' },
+    { accion: 'compra',  icono: '🛒', titulo: 'Nueva compra', sub: 'cargar un gasto', acento: true },
+    { tab: 'pedidos',    icono: '📦', titulo: 'Pedidos',      sub: 'qué llega y qué se paga' },
+    { accion: 'anotar',  icono: '🔧', titulo: 'Anotar',       sub: 'algo para arreglar', acento: true },
+    { tab: 'servicios',  icono: '🍽️', titulo: 'Servicios',    sub: 'cómo vienen las noches' },
+    { tab: 'vinos',      icono: '🥂', titulo: 'Bebidas',      sub: 'stock y cobertura' },
   ],
   // El encargado abre la app para dos cosas: arquear la caja y cargar algo.
   // Por eso Arqueo va primero y en su lugar no hay Dashboard, que no ve.
   // Pedidos entró en lugar de Bebidas (15/08/2026): es lo que abre todos los
   // días para saber qué esperar y qué pagar en la puerta; a Bebidas llega por
   // Operación cuando la necesita, que es cada varios días.
+  //
+  // Su cuarto botón decía "Pagos · cargar una compra" y abría la SECCIÓN, donde
+  // por su rol lo único visible es el botón "+ Nueva compra" (ver el bloque que
+  // oculta filtros, KPIs y listado). O sea que era un toque de más para llegar
+  // al mismo formulario, en una pantalla que para él está vacía. Ahora abre el
+  // formulario directo y el botón dice lo que hace. Sigue con cuatro: sumarle
+  // los del dueño sería llenarle la home de cosas que no usa.
   encargado: [
-    { tab: 'arqueo',     icono: '🗃️', titulo: 'Arqueo',    sub: 'abrir y cerrar la caja' },
-    { accion: 'anotar',  icono: '🔧', titulo: 'Anotar',    sub: 'algo para arreglar', acento: true },
-    { tab: 'pedidos',    icono: '📦', titulo: 'Pedidos',   sub: 'qué llega y qué se paga' },
-    { tab: 'pagos',      icono: '💳', titulo: 'Pagos',     sub: 'cargar una compra' },
+    { tab: 'arqueo',     icono: '🗃️', titulo: 'Arqueo',       sub: 'abrir y cerrar la caja' },
+    { accion: 'anotar',  icono: '🔧', titulo: 'Anotar',       sub: 'algo para arreglar', acento: true },
+    { tab: 'pedidos',    icono: '📦', titulo: 'Pedidos',      sub: 'qué llega y qué se paga' },
+    { accion: 'compra',  icono: '🛒', titulo: 'Nueva compra', sub: 'cargar un gasto', acento: true },
   ],
 };
 
@@ -12201,8 +12228,12 @@ function renderInicio() {
     `${saludo}, ${escapeHtml(state.nombre || '')}<span>${escapeHtml(fecha)}</span>`;
 
   const items = HOME_TELEFONO[getRol() === 'admin' ? 'admin' : 'encargado'] || [];
+  // Las acciones NO cambian de sección: se abren encima y al terminar seguís
+  // donde estabas. Es lo que hace que sean un atajo y no un desvío — entrás,
+  // cargás, y la home sigue ahí.
+  const ACCIONES = { anotar: 'abrirAnotarSheet()', compra: 'openModal()' };
   document.getElementById('inicio-grid').innerHTML = items.map(b => {
-    const accion = b.accion === 'anotar' ? 'abrirAnotarSheet()' : `switchTab('${b.tab}')`;
+    const accion = ACCIONES[b.accion] || `switchTab('${b.tab}')`;
     return `<button class="inicio-btn${b.acento ? ' acento' : ''}" onclick="${accion}">
       <span class="inicio-ico">${b.icono}</span>
       <span class="inicio-titulo">${escapeHtml(b.titulo)}</span>

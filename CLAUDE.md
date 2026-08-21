@@ -214,6 +214,14 @@ That rule was exercised on 2026-08-15: adding Pedidos would have made `operacion
 
 ### The phone opens on a curated home screen, the desktop does not
 
+**Since 2026-08-21 the home holds two kinds of entry, and the orange top edge is what tells them apart**: a `tab` opens a section (you go to *look* at something), an `accion` opens something on top without leaving (you go to *write* something). With six buttons that distinction starts to matter — without it they are six identical squares and you have to read each subtitle. `ACCIONES` in `renderInicio` maps the name to its call; `openModal()` deliberately does **not** switch to Pagos first, because what makes it a shortcut is that you come back to where you were.
+
+**Six is the ceiling.** Three rows of two at 116px fit without scrolling on a small phone. A seventh forces scrolling on a screen whose whole point is that everything is visible at once — that is the signal to rethink which one leaves, not to add.
+
+The owner's home got **Nueva compra** and **Pedidos** on that date, in the top row (the one the thumb reaches) because they are the two halves of one circuit: one button loads the purchase, the other shows the delivery it created.
+
+**The encargado's fourth button became Nueva compra instead of Pagos.** It used to open the *section*, where his role sees nothing but the "+ Nueva compra" button — a wasted tap into a screen that is empty for him. He stays at four: adding the owner's two would fill his home with things he does not use.
+
 On a phone (≤640px) both roles land on `tab-inicio`: four big buttons for what actually gets done daily, plus the bottom bar. On desktop that screen does not exist — the top bar already shows all four sections at once, so a screen that leads to four of them would be a step backwards. The `soloPhone` flag on a `TAB_GROUPS` entry is what keeps `inicio` out of the top bar while `gruposVisibles(true)` puts it in the bottom one; that flag is the only place the two bars differ.
 
 The four buttons come from `HOME_TELEFONO`, a hand-written per-role list, **deliberately not derived from `TAB_GROUPS`**. The whole point is that they are few and the right ones, which is a judgment call, not something computable from the menu. A button's `tab` may name a group or a submenu (`arqueo`, `vinos`) — `switchTab` resolves both — or carry an `accion` that opens something without navigating.
