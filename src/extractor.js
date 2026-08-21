@@ -250,6 +250,76 @@ async function extraerItems({ base64, mime = 'image/jpeg', factura = {} }) {
   return { items: aplanar(lineas, factura), rawText: raw };
 }
 
+// ─── El remito de un pedido, que NO es una factura ──────────────────────────
+//
+// Alguien saca un recorte de pantalla del remito o del pedido que le mandó el
+// proveedor y lo pega en la app. Lo único que hace falta de ahí es QUÉ Y CUÁNTO
+// va a llegar, para poder tildarlo cuando llegue.
+//
+// Es un extractor aparte de `extraerItems` y no una variante suya, por tres
+// razones que empujan todas para el mismo lado:
+//
+//  1. **Un remito muchas veces no tiene precios**, y el prompt de facturas pide
+//     precio unitario, IVA, descuentos e impuestos internos. Pedir campos que no
+//     están en la imagen es pedirle al modelo que invente o que devuelva nulls.
+//  2. **La persona está esperando.** Pega y mira. La salida de facturas son
+//     ~114 tokens por renglón; ésta son ~25, así que una lista de quince
+//     productos vuelve en un cuarto del tiempo.
+//  3. **No se categoriza nada.** La categoría del gasto ya la eligió quien cargó
+//     la compra, y las categorías por ingrediente son para la hoja `Compras`,
+//     que este camino no toca.
+//
+// LA IMAGEN NO SE GUARDA. Se lee y se descarta: lo que queda son los items como
+// datos. Decisión del dueño (21/08/2026) y es la que hace que esto funcione en
+// un teléfono — una lista se adapta a cualquier pantalla, una foto de un remito
+// hay que abrirla, agrandarla y moverla con dos dedos.
+function buildPromptRemito() {
+  return `Sos un asistente que lee remitos y listas de pedido de un bar-restaurante en Argentina.
+Analizá la imagen y extraé QUÉ PRODUCTOS van a llegar y en qué cantidad.
+
+Devolvé un ARRAY JSON, sin texto adicional:
+
+[
+  { "producto": "Nombre del producto", "cantidad": 10, "unidad": "Kg" }
+]
+
+Reglas:
+- "producto": el nombre tal como figura, sin códigos internos ni números de artículo.
+  Si el nombre trae la presentación (ej. "Coca Cola 2.25L"), dejala en el nombre.
+- "cantidad": el número de bultos/unidades que se entregan. Si no se lee, poné 1.
+- "unidad": Kg, Unidad, Caja, Bandeja, Litro, Atado, Bolsa, Maple, Cajón, Pack...
+  Si no está claro, poné "Unidad".
+- NO incluyas precios, IVA, descuentos ni totales aunque estén en la imagen: acá
+  no se usan y alargan la respuesta.
+- NO incluyas renglones que no sean productos (subtotales, "TOTAL", observaciones,
+  datos del transportista, condiciones de pago).
+- Si la imagen no es un remito ni una lista de productos, devolvé [].
+- Si un renglón no se lee con seguridad, incluilo igual con lo que puedas leer:
+  es preferible un renglón para corregir a mano que un producto que falta. Para
+  esos, y SÓLO para esos, agregá "dudoso": true.`;
+}
+
+// Devuelve { items: [{producto, cantidad, unidad, dudoso}], rawText }.
+//
+// Tolerante a propósito con lo que devuelve el modelo: un renglón sin nombre se
+// descarta, pero uno sin cantidad vale 1 y uno sin unidad vale "Unidad". Un
+// remito medio borroso tiene que dar una lista para corregir, no un error.
+async function extraerItemsRemito({ base64, mime = 'image/jpeg' }) {
+  const { parsed, raw } = await pedirAlModelo({
+    base64, mime, prompt: buildPromptRemito(), maxTokens: 2000,
+  });
+  const lineas = Array.isArray(parsed) ? parsed : (Array.isArray(parsed && parsed.items) ? parsed.items : []);
+  const items = lineas
+    .map(l => ({
+      producto: String((l && l.producto) || '').trim().slice(0, 200),
+      cantidad: Number(l && l.cantidad) > 0 ? Number(l.cantidad) : 1,
+      unidad: String((l && l.unidad) || 'Unidad').trim().slice(0, 40) || 'Unidad',
+      dudoso: !!(l && l.dudoso),
+    }))
+    .filter(i => i.producto);
+  return { items, rawText: raw };
+}
+
 // Devuelve { items: [...], rawText }. Lanza si la API falla.
 //
 // El camino de UNA sola llamada. Queda para compatibilidad y para poder volver
@@ -314,4 +384,6 @@ module.exports = {
   extraerDeImagen, buildPrompt, MODEL,
   // Las dos mitades, para pedirlas en paralelo.
   extraerCabecera, extraerItems, buildPromptCabecera, buildPromptItems, aplanar,
+  // El remito de un pedido: qué y cuánto llega, sin precios. Ver su comentario.
+  extraerItemsRemito, buildPromptRemito,
 };

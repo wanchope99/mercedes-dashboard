@@ -41,6 +41,21 @@
 //     A ID | B Dia | C Orden | D Tipo | E Proveedor | F Nota | G MedioPrevisto |
 //     H Activo | I Actualizado
 //
+//   Hoja "Pedidos Items" (21/08/2026) — qué trae un pedido, renglón por renglón:
+//     A ID | B PedidoID | C Producto | D Cantidad | E Unidad | F Estado |
+//     G Nota | H Origen | I Actualizado
+//
+// LOS ITEMS SON DATOS, NUNCA UNA IMAGEN. Se pega un recorte del remito, Claude
+// Vision lo lee, y lo que queda son estos renglones — la imagen se descarta y no
+// se guarda en ningún lado. Decisión del dueño (21/08/2026), y es lo que hace
+// que esto sirva en un teléfono: una lista se adapta a cualquier pantalla, una
+// foto de un remito hay que abrirla, agrandarla y moverla con dos dedos.
+//
+// Existen para UNA cosa: tildar lo que llegó contra lo que se pidió, con el
+// proveedor todavía en la puerta. Por eso el estado de un item es de tres
+// valores y no un sí/no — "todavía no lo miré" y "lo miré y no vino" son
+// distintos, y confundirlos es firmar que faltaba algo que nadie contó.
+//
 // `RefMovimiento` es informativo y NUNCA se usa para volver a buscar la fila:
 // las filas de Movimientos se mueven cuando alguien edita la planilla a mano
 // (ver la sección `Cajas` del CLAUDE.md). Lo que un pedido está o no pagado lo
@@ -67,6 +82,23 @@ const HEADER = ['ID', 'Fecha', 'Proveedor', 'Detalle', 'CostoEstimado', 'MedioPr
 const ULTIMA_COL = 'R';
 const HEADER_SEMANAL = ['ID', 'Dia', 'Orden', 'Tipo', 'Proveedor', 'Nota', 'MedioPrevisto',
                         'Activo', 'Actualizado'];
+const HOJA_ITEMS = process.env.PEDIDOS_ITEMS_SHEET || 'Pedidos Items';
+const HEADER_ITEMS = ['ID', 'PedidoID', 'Producto', 'Cantidad', 'Unidad', 'Estado',
+                      'Nota', 'Origen', 'Actualizado'];
+const ULTIMA_COL_ITEMS = 'I';
+const CACHE_ITEMS = 'pedidos_items';
+
+// Qué pasó con este renglón cuando llegó la entrega.
+//
+// Tres valores y no un sí/no: 'pendiente' es "todavía no lo miré" y 'falta' es
+// "lo miré y no vino". Confundirlos sería firmar que faltaba algo que nadie
+// contó — el mismo motivo por el que el cierre de cocina arranca en 'sinTocar'
+// y no en 'ok'.
+const ESTADOS_ITEM = ['pendiente', 'ok', 'falta'];
+const ESTADO_ITEM_DEFAULT = 'pendiente';
+
+const PRODUCTO_MAX = 200;
+const UNIDAD_MAX = 40;
 
 // La semana entera. Lunes primero: el índice dentro del array es el día de la
 // semana ISO menos uno, así que este array NO se toca — es lo que traduce una
@@ -221,6 +253,7 @@ function _deLista(valor, lista, porDefecto) {
 function normalizarEstado(v) { return _deLista(v, ESTADOS, ESTADO_DEFAULT); }
 function normalizarPago(v) { return _deLista(v, PAGOS, PAGO_DEFAULT); }
 function normalizarPagoPrevisto(v) { return _deLista(v, PAGOS_PREVISTOS, PAGO_PREVISTO_DEFAULT); }
+function normalizarEstadoItem(v) { return _deLista(v, ESTADOS_ITEM, ESTADO_ITEM_DEFAULT); }
 function normalizarTipo(v) { return _deLista(v, TIPOS, TIPO_DEFAULT); }
 
 // El día se acepta con o sin tilde ("miercoles" tipeado a mano en la planilla
@@ -396,6 +429,161 @@ async function _leerSemanal(api) {
   return out.sort((a, b) => DIAS.indexOf(a.dia) - DIAS.indexOf(b.dia) || a.orden - b.orden);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Los items de un pedido
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function _leerItems(api) {
+  let rows;
+  try {
+    const res = await api.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID, range: `${HOJA_ITEMS}!A:${ULTIMA_COL_ITEMS}`,
+    });
+    rows = res.data.values || [];
+  } catch (e) {
+    await _ensureHoja(api, HOJA_ITEMS, HEADER_ITEMS, ULTIMA_COL_ITEMS);
+    return [];
+  }
+  const out = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r || !_txt(r[0]) || !_txt(r[1])) continue;   // sin id o sin pedido no se puede ubicar
+    out.push({
+      id: _txt(r[0]),
+      pedidoId: _txt(r[1]),
+      producto: _txt(r[2]),
+      cantidad: _numero(r[3]) || 1,
+      unidad: _txt(r[4]) || 'Unidad',
+      estado: normalizarEstadoItem(r[5]),
+      nota: _txt(r[6]),
+      origen: _txt(r[7]) || 'manual',
+      actualizado: _txt(r[8]),
+      rowIndex: i + 1,
+    });
+  }
+  return out;
+}
+
+async function _loadItems() {
+  const cached = cache.get(CACHE_ITEMS);
+  if (cached) return cached;
+  if (!SPREADSHEET_ID) return [];
+  const items = await _leerItems(_sheets());
+  cache.set(CACHE_ITEMS, items);
+  return items;
+}
+
+function _aFilaItem(it) {
+  return [it.id, it.pedidoId, it.producto, it.cantidad, it.unidad,
+          it.estado, it.nota, it.origen, it.actualizado];
+}
+
+/** Los items de un pedido, en el orden en que se cargaron. */
+async function itemsDe(pedidoId) {
+  const id = _txt(pedidoId);
+  if (!id) return [];
+  return (await _loadItems()).filter(i => i.pedidoId === id).map(_publico);
+}
+
+/**
+ * Agrega renglones a un pedido. Devuelve los creados.
+ *
+ * Se escriben TODOS de una sola llamada: pegar un remito de quince productos no
+ * puede ser quince `append` seguidos contra Sheets.
+ *
+ * NO reemplaza lo que ya había. Pegar un segundo remito suma renglones, no pisa
+ * los primeros: un pedido puede llegar en dos remitos, y borrar lo anterior
+ * porque llegó algo nuevo es destruir lo que alguien ya tildó.
+ */
+async function agregarItems(pedidoId, items = [], { origen = 'manual' } = {}) {
+  if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
+  const pid = _txt(pedidoId);
+  if (!pid) throw new Error('Falta el pedido');
+  const limpios = (Array.isArray(items) ? items : [])
+    .map(x => ({
+      producto: _txt(x && x.producto).slice(0, PRODUCTO_MAX),
+      cantidad: _numero(x && x.cantidad) || 1,
+      unidad: (_txt(x && x.unidad) || 'Unidad').slice(0, UNIDAD_MAX),
+      nota: _txt(x && x.nota).slice(0, NOTAS_MAX),
+    }))
+    .filter(x => x.producto);
+  if (!limpios.length) return [];
+
+  const api = _sheets();
+  await _ensureHoja(api, HOJA_ITEMS, HEADER_ITEMS, ULTIMA_COL_ITEMS);
+  const ahora = new Date().toISOString();
+  const nuevos = limpios.map((x, n) => ({
+    id: `it${Date.now()}${n}${Math.floor(Math.random() * 100)}`,
+    pedidoId: pid,
+    ...x,
+    estado: ESTADO_ITEM_DEFAULT,
+    origen: _txt(origen) || 'manual',
+    actualizado: ahora,
+  }));
+  await api.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${HOJA_ITEMS}!A:${ULTIMA_COL_ITEMS}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: nuevos.map(_aFilaItem) },
+  });
+  cache.del(CACHE_ITEMS);
+  return nuevos.map(_publico);
+}
+
+/**
+ * Tildar renglones. `cambios` es [{ id, estado?, nota? }].
+ *
+ * Por lote y no de a uno: tildar doce productos con el proveedor esperando no
+ * puede ser doce viajes al servidor. Se escribe con un `batchUpdate` sobre las
+ * filas que cambian, celda por celda — el resto de la fila no se toca.
+ *
+ * Se relee la hoja antes de escribir: las filas se mueven si alguien edita la
+ * planilla a mano, así que el rowIndex que tenía el navegador es una pista, no
+ * una identidad. Un item que ya no existe se informa y se saltea, y los demás
+ * se guardan igual — perder el tilde de once porque uno se borró sería peor.
+ */
+async function marcarItems(cambios = []) {
+  if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
+  const lista = (Array.isArray(cambios) ? cambios : []).filter(c => c && _txt(c.id));
+  if (!lista.length) return { guardados: 0, faltantes: [] };
+
+  const api = _sheets();
+  const actuales = await _leerItems(api);      // fresco, sin caché
+  const porId = new Map(actuales.map(i => [i.id, i]));
+  const ahora = new Date().toISOString();
+  const data = [], faltantes = [];
+
+  for (const c of lista) {
+    const it = porId.get(_txt(c.id));
+    if (!it) { faltantes.push(_txt(c.id)); continue; }
+    const fila = it.rowIndex;
+    if (Object.prototype.hasOwnProperty.call(c, 'estado')) {
+      data.push({ range: `${HOJA_ITEMS}!F${fila}`, values: [[normalizarEstadoItem(c.estado)]] });
+    }
+    if (Object.prototype.hasOwnProperty.call(c, 'nota')) {
+      data.push({ range: `${HOJA_ITEMS}!G${fila}`, values: [[_txt(c.nota).slice(0, NOTAS_MAX)]] });
+    }
+    data.push({ range: `${HOJA_ITEMS}!I${fila}`, values: [[ahora]] });
+  }
+  if (data.length) {
+    await api.spreadsheets.values.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { valueInputOption: 'RAW', data },
+    });
+    cache.del(CACHE_ITEMS);
+  }
+  return { guardados: lista.length - faltantes.length, faltantes };
+}
+
+/** Un renglón cargado mal se borra. La fila desaparece de la hoja. */
+async function borrarItem(id) {
+  const it = (await _loadItems()).find(x => x.id === _txt(id));
+  if (!it) throw new Error('No se encontró ese renglón');
+  await _borrarFila(HOJA_ITEMS, it.rowIndex);
+  cache.del(CACHE_ITEMS);
+  return { id: it.id, pedidoId: it.pedidoId };
+}
+
 async function _loadPedidos() {
   const cached = cache.get(CACHE_PEDIDOS);
   if (cached) return cached;
@@ -560,18 +748,52 @@ function armarDias(pedidos, semanal, { hoy, dias = DIAS_ADELANTE } = {}) {
 // API pública
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Le cuelga a cada pedido sus renglones, y el resumen de cómo viene el chequeo.
+ *
+ * Van adentro del pedido y no en una lista aparte porque la pantalla los usa
+ * siempre juntos: el modal de un día muestra cada pedido con lo que trae. Una
+ * llamada por pedido para pedirle los items sería una por renglón de la lista.
+ *
+ * `itemsResumen` existe para el renglón plegado: "12 productos · 3 sin tildar"
+ * se tiene que poder mostrar sin recorrer la lista en el navegador, y sobre todo
+ * sin abrir el pedido.
+ */
+function _conItems(pedidos, items) {
+  const porPedido = new Map();
+  for (const it of items) {
+    if (!porPedido.has(it.pedidoId)) porPedido.set(it.pedidoId, []);
+    porPedido.get(it.pedidoId).push(it);
+  }
+  return pedidos.map(p => {
+    const propios = porPedido.get(p.id) || [];
+    if (!propios.length) return p;
+    return {
+      ...p,
+      items: propios.map(_publico),
+      itemsResumen: {
+        total: propios.length,
+        ok: propios.filter(i => i.estado === 'ok').length,
+        falta: propios.filter(i => i.estado === 'falta').length,
+        pendientes: propios.filter(i => i.estado === 'pendiente').length,
+      },
+    };
+  });
+}
+
 async function listPedidos({ dias = DIAS_ADELANTE } = {}) {
-  const [pedidos, semanal] = await Promise.all([_loadPedidos(), _loadSemanal()]);
+  const [pedidos, semanal, items] = await Promise.all([_loadPedidos(), _loadSemanal(), _loadItems()]);
   const hoy = hoyAR();
+  const conItems = _conItems(pedidos, items);
   return {
     hoy,
-    dias: armarDias(pedidos, semanal, { hoy, dias }),
+    dias: armarDias(conItems, semanal, { hoy, dias }),
     // Las filas que llegaron y nunca dijeron qué pasó con la plata. Van aparte
     // de `dias` a propósito: no traban ningún día (ver estaAbierto) pero
     // alguien tiene que enterarse de que existen. Sólo las de días PASADOS —
     // un pedido recibido hace un rato todavía no es un olvido, es el rato que
     // tarda alguien en cargar el monto.
-    sinPago: pedidos
+    sinPago: conItems
       .filter(p => pagoSinDefinir(p) && p.fecha && p.fecha < hoy)
       .sort((a, b) => a.fecha.localeCompare(b.fecha))
       .map(_publico),
@@ -942,15 +1164,18 @@ async function _borrarFila(titulo, rowIndex) {
   });
 }
 
-function clearCache() { cache.del(CACHE_PEDIDOS); cache.del(CACHE_SEMANAL); }
+function clearCache() { cache.del(CACHE_PEDIDOS); cache.del(CACHE_SEMANAL); cache.del(CACHE_ITEMS); }
 
 module.exports = {
   listPedidos, getPedido, crearPedido, actualizarPedido, marcarRecibido, borrarPedido,
   omitirPrevisto, restaurarOmitido,
   listSemanal, crearSemanal, actualizarSemanal, borrarSemanal,
+  // Los renglones de un pedido: qué y cuánto llega, para tildarlo en la puerta.
+  itemsDe, agregarItems, marcarItems, borrarItem,
   // Puras, exportadas para poder ejercitarlas sin tocar Google.
   armarDias, estaAbierto, pagoSinDefinir, esOmision, diaSemanaDe, etiquetaDia, normalizarFecha, normalizarDia,
-  normalizarEstado, normalizarPago, normalizarTipo, normalizarPagoPrevisto, sePagaEnPuerta, hoyAR,
+  normalizarEstado, normalizarPago, normalizarTipo, normalizarPagoPrevisto, normalizarEstadoItem, sePagaEnPuerta, hoyAR,
   nuevoId, clearCache,
-  DIAS, DIAS_CUADRO, ESTADOS, PAGOS, PAGOS_PREVISTOS, TIPOS, HOJA, HOJA_SEMANAL, DIAS_ADELANTE, ORIGEN_OMITIDO,
+  DIAS, DIAS_CUADRO, ESTADOS, PAGOS, PAGOS_PREVISTOS, ESTADOS_ITEM, TIPOS,
+  HOJA, HOJA_SEMANAL, HOJA_ITEMS, DIAS_ADELANTE, ORIGEN_OMITIDO,
 };

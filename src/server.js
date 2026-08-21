@@ -18,6 +18,7 @@ const prov = require('./proveedores');
 const costos = require('./costos');
 const costosProveedores = require('./costos-proveedores');
 const cats = require('./proveedores-categorias');
+const extractor = require('./extractor');
 const consumo = require('./consumo');
 const cierres = require('./cierres');
 const plan = require('./plan');
@@ -3009,6 +3010,115 @@ app.get('/api/pedidos/:id/plan', authMiddleware, async (req, res) => {
     res.json({ ok: true, data: plan });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
+// ═══════════════════════════════════════════════════════════════════════════
+// Los renglones de un pedido
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Qué y cuánto trae la entrega, para poder tildarlo con el proveedor en la
+// puerta. Los carga una persona a mano, o salen de pegar un recorte del remito
+// (ver POST /api/pedidos/:id/items/imagen).
+//
+// Todos son `authMiddleware` sin `adminOnly`: quien recibe es el cocinero o el
+// encargado, y son ellos los que tildan. Es la misma razón por la que recibir un
+// pedido tampoco es adminOnly desde el 15/08.
+
+app.get('/api/pedidos/:id/items', authMiddleware, async (req, res) => {
+  try { res.json({ ok: true, data: await pedidos.itemsDe(req.params.id) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post('/api/pedidos/:id/items', authMiddleware, async (req, res) => {
+  try {
+    const pedido = await pedidos.getPedido(req.params.id);
+    if (!pedido) return res.status(404).json({ ok: false, error: 'No se encontró ese pedido' });
+    const lista = Array.isArray(req.body && req.body.items) ? req.body.items : [req.body];
+    const data = await pedidos.agregarItems(pedido.id, lista, { origen: 'manual' });
+    res.json({ ok: true, data });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+// Tildar por lote: [{ id, estado?, nota? }].
+//
+// Path plano y no /api/pedidos/:id/items: colisionaria con PUT /api/pedidos/:id,
+// declarado mas arriba, y Express resolveria :id = 'items'. Ademas dice la
+// verdad — un lote puede tocar renglones de mas de un pedido.
+app.put('/api/pedidos-items', authMiddleware, async (req, res) => {
+  try {
+    const cambios = Array.isArray(req.body && req.body.cambios) ? req.body.cambios : [];
+    res.json({ ok: true, data: await pedidos.marcarItems(cambios) });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.delete('/api/pedidos-items/:itemId', authMiddleware, async (req, res) => {
+  try { res.json({ ok: true, data: await pedidos.borrarItem(req.params.itemId) }); }
+  catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+// ─── Pegar el remito ────────────────────────────────────────────────────────
+//
+// Ctrl+V de un recorte de pantalla del remito o de la lista que mandó el
+// proveedor. Claude Vision lee QUÉ Y CUÁNTO va a llegar y eso se guarda como
+// renglones. Escribir esa lista a mano —nombre, cantidad, presentación, tamaño,
+// por quince productos— es exactamente el trabajo que nadie hace, y por eso
+// hasta hoy el pedido tenía una línea de texto libre y nada más.
+//
+// LA IMAGEN NO SE GUARDA EN NINGÚN LADO. Entra por el body, se lee, y se
+// descarta cuando termina el request. Es una decisión del dueño (21/08/2026) y
+// tiene dos consecuencias buenas: no hay que resolver dónde viven los archivos
+// —la app no guarda ni uno hoy— y lo que queda es una lista, que en un teléfono
+// se lee bien; una foto de un remito hay que abrirla, agrandarla y arrastrarla.
+//
+// Devuelve los renglones YA GUARDADOS, no una propuesta para confirmar. El
+// modelo se equivoca en un renglón de vez en cuando y la pantalla deja
+// corregirlo o borrarlo ahí mismo, que es más rápido que una pantalla de
+// confirmación para quince productos que casi siempre están bien.
+const IMAGEN_MAX_BYTES = 6 * 1024 * 1024;   // el límite de la API de Anthropic
+
+app.post('/api/pedidos/:id/items/imagen', authMiddleware, async (req, res) => {
+  try {
+    const pedido = await pedidos.getPedido(req.params.id);
+    if (!pedido) return res.status(404).json({ ok: false, error: 'No se encontró ese pedido' });
+
+    const { imageBase64, mime } = req.body || {};
+    if (!imageBase64) return res.status(400).json({ ok: false, error: 'No llegó ninguna imagen.' });
+    // El largo del base64 es ~4/3 del binario. Se mide acá y no después para no
+    // mandarle a la API algo que va a rechazar.
+    if (imageBase64.length * 0.75 > IMAGEN_MAX_BYTES) {
+      return res.status(400).json({
+        ok: false,
+        error: 'La imagen es muy grande (más de 6 MB). Probá con un recorte más chico.',
+      });
+    }
+    const mimeOk = ['image/jpeg', 'image/png', 'image/webp'].includes(mime) ? mime : 'image/jpeg';
+
+    let leidos;
+    try {
+      const r = await extractor.extraerItemsRemito({ base64: imageBase64, mime: mimeOk });
+      leidos = r.items;
+    } catch (e) {
+      // Que el modelo falle o no esté la API key no puede tumbar la pantalla: el
+      // pedido sigue existiendo y los renglones se pueden cargar a mano.
+      return res.status(502).json({
+        ok: false,
+        error: `No se pudo leer la imagen (${e.message}). Podés cargar los productos a mano.`,
+      });
+    }
+    if (!leidos.length) {
+      return res.status(422).json({
+        ok: false,
+        error: 'No se reconoció ningún producto en esa imagen. Si es un remito, probá con un recorte más nítido.',
+      });
+    }
+
+    const data = await pedidos.agregarItems(pedido.id, leidos, { origen: 'remito' });
+    res.json({
+      ok: true, data,
+      // Cuántos leyó dudando: la pantalla los marca para que alguien los mire.
+      dudosos: leidos.filter(i => i.dudoso).length,
+    });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // ─── El cuadro semanal ──────────────────────────────────────────────────────
 // La rutina fija ("los jueves entrega Barracas"). No crea filas de pedido: se
 // muestra dentro de cada día como previsto. Ver el encabezado de pedidos.js.

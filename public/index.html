@@ -557,6 +557,73 @@
        dice PAGAR y no COBRAR: el que cobra es el proveedor. */
     .ped-chip.puerta { background: var(--orange); color: #17171f; border-color: var(--orange); font-weight: 800; letter-spacing: 0.2px; }
 
+    /* ── El día como renglón, y el modal que lo abre ───────────────────────
+       Desde el 21/08/2026 el día no se despliega en la lista: se abre. La lista
+       queda como índice —un renglón por día, legible de un vistazo— y todo lo
+       que se hace con un día pasa adentro del modal. */
+    .ped-dia-fila { display: flex; align-items: center; gap: 14px; padding: 14px 16px; cursor: pointer;
+                    background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; }
+    .ped-dia-fila:hover { border-color: var(--accent); }
+    .ped-dia-fila.hoy { border-left: 3px solid var(--orange); }
+    .ped-dia-fila.atrasado { border-left: 3px solid var(--red); }
+    .ped-dia-fila .flecha { color: var(--text-muted); font-size: 13px; margin-left: auto; }
+
+    /* El modal de un día. Alto acotado con el cuerpo scrolleando adentro: un día
+       con seis pedidos y sus renglones no puede empujar los botones fuera de la
+       pantalla de un teléfono. */
+    .ped-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+                 width: 100%; max-width: 760px; max-height: 90vh; display: flex; flex-direction: column; }
+    .ped-modal-head { padding: 20px 24px 14px; border-bottom: 1px solid var(--border); }
+    .ped-modal-body { padding: 8px 24px 20px; overflow-y: auto; }
+    .ped-modal-foot { padding: 14px 24px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
+
+    /* ── Los renglones de un pedido ────────────────────────────────────────
+       Qué y cuánto trae, para tildarlo con el proveedor en la puerta. */
+    .ped-items { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px; }
+    .ped-it { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid rgba(46,46,62,0.4); }
+    .ped-it:last-child { border-bottom: none; }
+    .ped-it-nom { flex: 1; min-width: 0; font-size: 13px; }
+    .ped-it-cant { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+    .ped-it.ok .ped-it-nom { color: var(--text-muted); text-decoration: line-through; }
+    .ped-it.falta .ped-it-nom { color: var(--red); }
+    /* Los dos botones de tildar. Grandes a propósito: esto se toca con una mano,
+       de noche, con el proveedor esperando. */
+    .ped-it-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); cursor: pointer;
+                  border-radius: 7px; padding: 5px 10px; font-size: 13px; font-family: inherit; line-height: 1; }
+    .ped-it-btn.activo-ok { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+    .ped-it-btn.activo-falta { background: var(--red-dim); border-color: var(--red); color: var(--red); }
+    .ped-it-dudoso { font-size: 10px; color: var(--orange); }
+    .ped-pegar { border: 1px dashed var(--border); border-radius: 10px; padding: 14px; text-align: center;
+                 font-size: 12px; color: var(--text-muted); margin-top: 10px; }
+    .ped-pegar.activo { border-color: var(--accent); background: var(--surface2); }
+
+    /* El botón que corresponde según lo que se dijo al comprar. Los otros dos
+       quedan atrás de "otra forma": siguen existiendo, pero no compiten. */
+    .ped-acc-ppal { font-weight: 700 !important; padding: 9px 16px !important; }
+    .ped-acc-otras { display: none; gap: 6px; flex-wrap: wrap; }
+    .ped-acc-otras.abierto { display: flex; }
+
+    @media (max-width: 640px) {
+      /* El modal ocupa la pantalla: a 390px, 16px de margen a cada lado son 32
+         de los 390 que hay para leer nombres de productos. */
+      #ped-dia-overlay { padding: 0; }
+      .ped-modal { max-width: none; max-height: 100vh; border-radius: 0; border: none; }
+      .ped-modal-head, .ped-modal-body, .ped-modal-foot { padding-left: 14px; padding-right: 14px; }
+
+      /* El botón que corresponde ocupa el ancho entero y los otros dos van
+         abajo, juntos. Antes el 🗑️ se quedaba solo en un renglón propio. */
+      .ped-acciones { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center; }
+      .ped-acc-ppal { grid-column: 1 / -1; text-align: center; }
+      .ped-acc-otras { grid-column: 1 / -1; }
+
+      /* El renglón de un producto: el nombre se queda con lo que sobra y los
+         botones no se estiran. Sin esto "Agua sin gas 500ml" salía en dos
+         líneas al lado de tres botones con aire de sobra. */
+      .ped-it { gap: 6px; }
+      .ped-it-btn { padding: 5px 8px; }
+      .ped-it-cant { font-size: 11px; }
+    }
+
     /* Como se paga, en el modal de Nueva compra. Tres opciones y no una cascada
        de dos casillas: son los mismos tres casos que los tres botones de
        recibir, y verlos juntos es lo que hace que se reconozcan como la misma
@@ -3011,6 +3078,28 @@
         <button class="btn" id="f-sin-entrega" onclick="guardarCompra(false)">No lleva entrega</button>
         <button class="btn btn-accent" onclick="guardarCompra(true)">Guardar</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL DE UN DÍA DE PEDIDOS ══════════════════════════════════════════
+     Desde el 21/08/2026 el día se ABRE en vez de desplegarse. Todo lo que se
+     hace con un día pasa acá adentro: ver qué llega, tildar los renglones de
+     cada entrega, pegar un remito y recibir. Ver renderPedDiaModal.        -->
+<div id="ped-dia-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:570;align-items:center;justify-content:center;padding:16px">
+  <div class="ped-modal">
+    <div class="ped-modal-head">
+      <div style="display:flex;align-items:flex-start;gap:12px">
+        <div style="flex:1;min-width:0">
+          <h3 id="ped-dia-titulo" style="margin:0 0 6px">Día</h3>
+          <div id="ped-dia-sub" class="ped-dia-sub"></div>
+        </div>
+        <button class="btn-close" onclick="cerrarPedDia()">×</button>
+      </div>
+    </div>
+    <div class="ped-modal-body" id="ped-dia-cuerpo"></div>
+    <div class="ped-modal-foot">
+      <button class="btn" onclick="cerrarPedDia()">Cerrar</button>
     </div>
   </div>
 </div>
@@ -7771,6 +7860,31 @@ const RELEASE_LOG = [
         desc: 'Cargar una compra ya pagada en efectivo durante el servicio hacía que esa noche el cierre marcara '
             + 'una diferencia que no existía. Ahora se descuenta del esperado, igual que los gastos rápidos.',
         donde: 'Caja › Pagos',
+      },
+      {
+        icono: '📅',
+        titulo: 'El día se abre en una ventana, ya no se despliega',
+        desc: 'La lista de días quedó como índice: un renglón por día con lo que hay que saber. Tocarlo abre el '
+            + 'día completo, y ahí adentro está todo — qué llega, qué trae cada entrega y los botones para recibir. '
+            + 'Con las listas de productos adentro, el desplegable ya no entraba en la pantalla.',
+        donde: 'Operación › Pedidos',
+      },
+      {
+        icono: '👆',
+        titulo: 'El botón de recibir ya viene elegido',
+        desc: 'Si al comprar dijiste cómo se paga, al recibir aparece <b>un solo botón</b>: el que corresponde. '
+            + 'Los otros dos siguen estando atrás de <b>otra forma</b>, porque la realidad cambia — el proveedor '
+            + 'viene sin remito, o cobra algo que iba a ser transferencia.',
+        donde: 'Operación › Pedidos',
+      },
+      {
+        icono: '📋',
+        titulo: 'Pegá el remito y los productos se cargan solos',
+        desc: 'Sacá un recorte de pantalla del remito o de la lista que te mandó el proveedor, abrí el pedido y '
+            + 'hacé <b>Ctrl+V</b>: se leen los productos con su cantidad y quedan como una lista para ir tildando '
+            + 'cuando llega. Desde el teléfono, el botón <b>Pegar remito</b> deja sacar la foto. '
+            + '<b>La imagen no se guarda</b> — se lee y queda la lista, que es lo que se puede leer en un teléfono.',
+        donde: 'Operación › Pedidos',
       },
     ],
   },
@@ -12780,9 +12894,14 @@ function mesesDesde(iso) {
 
 const pedState = {
   data: null,
-  // Qué días quedaron abiertos. Se recuerda entre recargas de la pantalla: si
-  // no, marcar algo recibido cerraría el día que estabas mirando.
-  abiertos: new Set(),
+  // Qué día está abierto en el modal, o null. Sobrevive a las recargas de la
+  // pantalla a propósito: tildar un producto recarga los datos, y si esto se
+  // perdiera el modal se cerraría solo en cada tilde.
+  diaAbierto: null,
+  // Qué pedidos tienen los renglones desplegados adentro del modal. Es local a
+  // la vista y no se guarda en ningún lado: es "qué estoy mirando ahora".
+  itemsAbiertos: new Set(),
+  pegandoEn: null,        // a qué pedido va lo próximo que se pegue
   recibiendo: null,       // el pedido que está en el modal
   modo: null,             // cuál de los tres botones lo abrió: ver PED_MODOS
   altaPago: '',           // cómo se paga, en el alta suelta. '' = no sé todavía
@@ -12860,14 +12979,11 @@ async function loadPedidos(btn) {
   try {
     const { data } = await api('/api/pedidos');
     pedState.data = data;
-    // La primera vez, hoy abierto y el resto cerrado: es el día que se mira.
-    // Los atrasados también, porque son justamente lo que hay que resolver.
-    if (!pedState.abiertos.size) {
-      data.dias.filter(d => d.esHoy || d.atrasado).forEach(d => pedState.abiertos.add(d.fecha));
-    }
     poblarPedidosSelects();
     renderPedidosDias();
     renderPedidosSemana();
+    // Si hay un día abierto, se redibuja con lo nuevo en vez de cerrarse.
+    refrescarPedDia();
   } catch (e) {
     document.getElementById('ped-dias').innerHTML =
       '<div class="prop-error">No se pudo cargar: ' + escapeHtml(e.message) + '</div>';
@@ -12917,11 +13033,10 @@ function renderPedidosDias() {
   cont.innerHTML = visibles.map(diaPedidos).join('');
 }
 
-function diaPedidos(d) {
-  const abierto = pedState.abiertos.has(d.fecha);
-  const clases = ['ped-dia', abierto ? 'abierto' : '', d.esHoy ? 'hoy' : '', d.atrasado ? 'atrasado' : ''].filter(Boolean).join(' ');
-
-  const chips = [
+// Los chips del renglón. Salen aparte porque los usan los dos: la lista de
+// afuera y el encabezado del modal, que tienen que decir lo mismo.
+function chipsDelDia(d) {
+  return [
     d.atrasado ? '<span class="ped-chip atrasado">sin recibir</span>' : '',
     d.esHoy ? '<span class="ped-chip">hoy</span>' : '',
     // Lo que hay que llevar en efectivo ese día. Va acá y no sólo adentro de
@@ -12940,9 +13055,63 @@ function diaPedidos(d) {
     // un día sin nada, cuando es justamente un día con algo que hacer.
     d.paraPedir.length ? `<span>${d.paraPedir.length} para pedir</span>` : '',
   ].filter(Boolean).join('');
+}
+
+/**
+ * Un día en la lista: un renglón que se abre.
+ *
+ * Hasta el 21/08/2026 el día se desplegaba acá mismo (acordeón) y todo pasaba
+ * en la lista. Con los renglones de cada entrega adentro eso ya no entra: un
+ * día con cuatro pedidos de doce productos son cincuenta líneas empujando los
+ * días siguientes fuera de la pantalla. Ahora la lista es un índice —un renglón
+ * por día, legible de un vistazo— y el día se abre.
+ */
+function diaPedidos(d) {
+  const clases = ['ped-dia-fila', d.esHoy ? 'hoy' : '', d.atrasado ? 'atrasado' : ''].filter(Boolean).join(' ');
+  return `<div class="${clases}" onclick="abrirPedDia('${d.fecha}')">
+    <div style="flex:1;min-width:0">
+      <div class="ped-dia-titulo">${escapeHtml(d.label)}</div>
+      <div class="ped-dia-sub">${chipsDelDia(d)}</div>
+    </div>
+    <div class="ped-dia-monto">${d.totalEstimado ? fmt(d.totalEstimado) : ''}</div>
+    <span class="flecha">›</span>
+  </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// El modal de un día
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Todo lo que se hace con un día pasa acá: ver qué llega, tildar los renglones
+// de cada entrega, pegar un remito y recibir. Es la única superficie, así que
+// no hay que decidir qué va en la lista y qué en el detalle.
+
+function abrirPedDia(fecha) {
+  pedState.diaAbierto = fecha;
+  renderPedDiaModal();
+  document.getElementById('ped-dia-overlay').style.display = 'flex';
+}
+
+function cerrarPedDia() {
+  pedState.diaAbierto = null;
+  // Un Ctrl+V con el modal cerrado no tiene dónde ir.
+  pedState.pegandoEn = null;
+  document.getElementById('ped-dia-overlay').style.display = 'none';
+}
+
+function pedDiaActual() {
+  if (!pedState.diaAbierto) return null;
+  return (pedState.data.dias || []).find(d => d.fecha === pedState.diaAbierto) || null;
+}
+
+function renderPedDiaModal() {
+  const d = pedDiaActual();
+  if (!d) { cerrarPedDia(); return; }
+  document.getElementById('ped-dia-titulo').textContent = d.label;
+  document.getElementById('ped-dia-sub').innerHTML = chipsDelDia(d);
 
   const omitidos = d.omitidos || [];
-  const cuerpo = [
+  document.getElementById('ped-dia-cuerpo').innerHTML = [
     ...d.pedidos.map(itemPedido),
     ...d.previstos.map(p => itemPrevisto(p, d.fecha)),
     !d.pedidos.length && !d.previstos.length && !omitidos.length
@@ -12955,25 +13124,13 @@ function diaPedidos(d) {
       : '',
     ...omitidos.map(itemOmitido),
   ].filter(Boolean).join('');
-
-  return `<div class="${clases}" id="ped-dia-${d.fecha}">
-    <div class="ped-dia-head" onclick="togglePedDia('${d.fecha}')">
-      <span class="ped-flecha">▶</span>
-      <div>
-        <div class="ped-dia-titulo">${escapeHtml(d.label)}</div>
-        <div class="ped-dia-sub">${chips}</div>
-      </div>
-      <div class="ped-dia-monto">${d.totalEstimado ? fmt(d.totalEstimado) : ''}</div>
-    </div>
-    <div class="ped-dia-body">${cuerpo}</div>
-  </div>`;
 }
 
-function togglePedDia(fecha) {
-  if (pedState.abiertos.has(fecha)) pedState.abiertos.delete(fecha);
-  else pedState.abiertos.add(fecha);
-  const el = document.getElementById('ped-dia-' + fecha);
-  if (el) el.classList.toggle('abierto');
+// Después de cualquier cambio, si el modal está abierto se redibuja con los
+// datos frescos en vez de cerrarse. Cerrarlo obligaría a volver a entrar al día
+// para tildar el segundo producto.
+function refrescarPedDia() {
+  if (pedState.diaAbierto) renderPedDiaModal();
 }
 
 /**
@@ -13030,12 +13187,7 @@ function itemPedido(p) {
   // corrige donde vive, en Movimientos.
   const acciones = p.pago !== 'no'
     ? (pedEsAdmin() ? `<button onclick="borrarPedido('${id}')">🗑️</button>` : '')
-    : [
-        `<button class="plata" onclick="openPedRecibir('${id}','efectivo')">💵 Recibido y pagado</button>`,
-        `<button class="cuenta" onclick="openPedRecibir('${id}','cuenta')">📒 Recibido, pago a cuenta</button>`,
-        `<button class="ok" onclick="openPedRecibir('${id}','aparte')">🔁 Recibido, pago aparte</button>`,
-        pedEsAdmin() ? `<button onclick="borrarPedido('${id}')">🗑️</button>` : '',
-      ].filter(Boolean).join('');
+    : accionesRecibir(p);
 
   return `<div class="ped-item${recibido ? ' recibido' : ''}">
     <div>
@@ -13043,7 +13195,260 @@ function itemPedido(p) {
       <div class="ped-item-meta">${meta}</div>
     </div>
     <div class="ped-acciones">${acciones}</div>
+    <div style="grid-column:1/-1">${bloqueItems(p)}</div>
   </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// El botón que ya viene elegido
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Lo que se dijo al comprar decide qué botón corresponde. Los otros dos siguen
+// existiendo detrás de "otra forma" — la realidad cambia (el proveedor viene sin
+// remito, o cobra algo que iba a ser transferencia) y quien recibe tiene que
+// poder decir lo que pasó de verdad.
+//
+// Es el mismo mapeo que PAGOS_PREVISTOS ↔ MODOS_RECIBIR, y lo único que hace es
+// ordenar los tres botones que ya existían. El server sigue decidiendo todo:
+// acá no se elige contra qué fila va nada.
+const PP_A_MODO = { 'al-recibir': 'efectivo', 'a-pagar': 'cuenta', 'pagado': 'aparte' };
+
+const PED_BOTONES = {
+  efectivo: { clase: 'plata',  txt: '💵 Recibido y pagado',      corto: '💵 Llegó y lo pagué' },
+  cuenta:   { clase: 'cuenta', txt: '📒 Recibido, pago a cuenta', corto: '📒 Llegó, queda a pagar' },
+  aparte:   { clase: 'ok',     txt: '🔁 Recibido, pago aparte',   corto: '🔁 Llegó (ya estaba pago)' },
+};
+
+function accionesRecibir(p) {
+  const id = escapeHtml(p.id);
+  const borrar = pedEsAdmin() ? `<button onclick="borrarPedido('${id}')">🗑️</button>` : '';
+  const modoPpal = PP_A_MODO[p.pagoPrevisto];
+
+  // Sin dato de pago —un pedido viejo, o uno anotado sin saberlo todavía— no
+  // hay ninguno que corresponda, así que se ofrecen los tres como siempre.
+  // Inventarle uno sería elegir por alguien que no dijo nada.
+  if (!modoPpal) {
+    return ['efectivo', 'cuenta', 'aparte'].map(m =>
+      `<button class="${PED_BOTONES[m].clase}" onclick="openPedRecibir('${id}','${m}')">${PED_BOTONES[m].txt}</button>`
+    ).join('') + borrar;
+  }
+
+  const otros = ['efectivo', 'cuenta', 'aparte'].filter(m => m !== modoPpal);
+  const b = PED_BOTONES[modoPpal];
+  return `<button class="${b.clase} ped-acc-ppal" onclick="openPedRecibir('${id}','${modoPpal}')">${b.corto}</button>
+    <button onclick="toggleOtrasFormas('${id}', event)" title="Se pagó de otra forma">otra forma ▾</button>
+    ${borrar}
+    <div class="ped-acc-otras" id="ped-otras-${id}">${otros.map(m =>
+      `<button class="${PED_BOTONES[m].clase}" onclick="openPedRecibir('${id}','${m}')">${PED_BOTONES[m].txt}</button>`
+    ).join('')}</div>`;
+}
+
+function toggleOtrasFormas(id, ev) {
+  if (ev) ev.stopPropagation();
+  const el = document.getElementById('ped-otras-' + id);
+  if (el) el.classList.toggle('abierto');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Los renglones: qué trae y qué llegó
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Existen para tildar contra la entrega con el proveedor en la puerta. Vienen
+// de pegar un recorte del remito (Claude Vision los lee) o de cargarlos a mano.
+//
+// Arrancan PLEGADOS y muestran el resumen. Un día con cuatro pedidos de doce
+// productos son cincuenta renglones, y lo que se mira al abrir un día es qué
+// llega, no el detalle de cada cosa.
+
+function bloqueItems(p) {
+  const id = escapeHtml(p.id);
+  const its = p.items || [];
+  const r = p.itemsResumen;
+  const abierto = pedState.itemsAbiertos.has(p.id);
+
+  // Con el chequeo empezado importa lo que falta, no el total: "2 sin tildar"
+  // es lo que hay que hacer todavía. El total se ve al abrir la lista.
+  const empezado = r && (r.ok || r.falta);
+  const resumen = !r ? 'Sin lista de productos'
+    : !empezado ? `${r.total} producto${r.total !== 1 ? 's' : ''}`
+    : `<span style="color:var(--green)">${r.ok} ok</span>`
+      + (r.falta ? ` · <span style="color:var(--red)">${r.falta} falta${r.falta !== 1 ? 'n' : ''}</span>` : '')
+      + (r.pendientes ? ` · ${r.pendientes} sin tildar` : '')
+      + (!r.pendientes ? ` · <span style="color:var(--green)">completo</span>` : '');
+
+  const cabecera = `<div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+    <button class="ped-it-btn" onclick="toggleItems('${id}')" style="font-size:11px">
+      ${abierto ? '▾' : '▸'} ${resumen}</button>
+    ${p.pago === 'no' ? `<button class="ped-it-btn" onclick="pedirRemito('${id}')" style="font-size:11px"
+        title="Pegá un recorte del remito y se cargan solos">📋 Pegar remito</button>` : ''}
+  </div>`;
+
+  if (!abierto) return cabecera;
+
+  const filas = its.length
+    ? its.map(it => filaItem(it, p.pago === 'no')).join('')
+    : '<div style="font-size:12px;color:var(--text-muted);padding:8px 0">Todavía no hay productos cargados. '
+      + 'Pegá un recorte del remito con “Pegar remito”, o cargalos a mano.</div>';
+
+  return cabecera + `<div class="ped-items" id="ped-items-${id}">${filas}
+    ${p.pago === 'no' ? `<div class="ped-pegar" id="ped-pegar-${id}">
+        Con la ventana abierta, <b>Ctrl+V</b> pega un recorte del remito y los productos se cargan solos.
+      </div>` : ''}</div>`;
+}
+
+function filaItem(it, editable) {
+  const id = escapeHtml(it.id);
+  const clase = ['ped-it', it.estado === 'ok' ? 'ok' : '', it.estado === 'falta' ? 'falta' : ''].filter(Boolean).join(' ');
+  const botones = editable
+    ? `<button class="ped-it-btn ${it.estado === 'ok' ? 'activo-ok' : ''}" title="Llegó"
+        onclick="tildarItem('${id}','${it.estado === 'ok' ? 'pendiente' : 'ok'}')">✓</button>
+      <button class="ped-it-btn ${it.estado === 'falta' ? 'activo-falta' : ''}" title="No llegó"
+        onclick="tildarItem('${id}','${it.estado === 'falta' ? 'pendiente' : 'falta'}')">✕</button>
+      ${pedEsAdmin() ? `<button class="ped-it-btn" title="Sacar este renglón"
+        onclick="borrarItemPedido('${id}')">🗑️</button>` : ''}`
+    : '';
+  return `<div class="${clase}">
+    <span class="ped-it-nom">${escapeHtml(it.producto)}${it.nota ? ` <span class="ped-it-dudoso">· ${escapeHtml(it.nota)}</span>` : ''}</span>
+    <span class="ped-it-cant">${it.cantidad} ${escapeHtml(it.unidad)}</span>
+    ${botones}
+  </div>`;
+}
+
+function toggleItems(pedidoId) {
+  if (pedState.itemsAbiertos.has(pedidoId)) pedState.itemsAbiertos.delete(pedidoId);
+  else pedState.itemsAbiertos.add(pedidoId);
+  refrescarPedDia();
+}
+
+/**
+ * Tildar un renglón.
+ *
+ * Se pinta ANTES de que conteste el servidor y se recarga después. Esto se toca
+ * con el proveedor esperando: doce productos con medio segundo de espera cada
+ * uno son seis segundos mirando una pantalla que no responde. Si falla, se
+ * recarga y el tilde vuelve atrás solo — el estado real siempre es el de la
+ * planilla, no el que quedó pintado.
+ */
+async function tildarItem(itemId, estado) {
+  const p = (pedState.data.dias || []).flatMap(d => d.pedidos).find(x => (x.items || []).some(i => i.id === itemId));
+  const it = p && (p.items || []).find(i => i.id === itemId);
+  if (it) { it.estado = estado; recalcularResumen(p); refrescarPedDia(); }
+  try {
+    await api('/api/pedidos-items', { method: 'PUT', body: JSON.stringify({ cambios: [{ id: itemId, estado }] }) });
+  } catch (e) {
+    showToast('No se pudo guardar: ' + e.message, 4000);
+  }
+  await loadPedidos();
+}
+
+// El resumen se recalcula en el navegador para que el pintado optimista lo
+// incluya. La versión que manda es la que devuelve el server en la recarga.
+function recalcularResumen(p) {
+  const its = p.items || [];
+  p.itemsResumen = {
+    total: its.length,
+    ok: its.filter(i => i.estado === 'ok').length,
+    falta: its.filter(i => i.estado === 'falta').length,
+    pendientes: its.filter(i => i.estado === 'pendiente').length,
+  };
+}
+
+async function borrarItemPedido(itemId) {
+  try {
+    await api('/api/pedidos-items/' + encodeURIComponent(itemId), { method: 'DELETE' });
+    await loadPedidos();
+  } catch (e) { showToast('Error: ' + e.message, 4000); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Pegar el remito
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Ctrl+V de un recorte de pantalla. La imagen va al servidor, Claude Vision lee
+// qué y cuánto llega, y eso queda como renglones. LA IMAGEN NO SE GUARDA: lo
+// que queda son los datos. Escribir esa lista a mano —nombre, cantidad,
+// presentación, por quince productos— es el trabajo que nadie hace, y por eso
+// hasta hoy un pedido tenía una línea de texto libre y nada más.
+//
+// El pegado se escucha en el documento entero y no en un campo: no hay dónde
+// hacer foco para pegar una imagen, y pedirle a alguien que haga click en un
+// recuadro antes de Ctrl+V es un paso que se olvida siempre.
+
+// A qué pedido va lo que se pegue. Lo pone "Pegar remito" y lo limpia el cierre
+// del modal: sin esto, un Ctrl+V accidental no sabría dónde poner nada.
+function pedirRemito(pedidoId) {
+  pedState.pegandoEn = pedidoId;
+  pedState.itemsAbiertos.add(pedidoId);
+  refrescarPedDia();
+  const caja = document.getElementById('ped-pegar-' + pedidoId);
+  if (caja) {
+    caja.classList.add('activo');
+    caja.innerHTML = '<b>Listo para pegar.</b> Copiá el remito con la herramienta de recorte '
+      + 'y hacé <b>Ctrl+V</b> acá.<br><span style="font-size:11px">O elegí una imagen: '
+      + '<input type="file" accept="image/*" onchange="archivoRemito(this)" style="font-size:11px">'
+      + '</span>';
+    caja.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+// En el teléfono no hay Ctrl+V: el input de archivo abre la cámara o la galería,
+// que es como se saca la foto de un remito estando en la barra.
+function archivoRemito(input) {
+  const f = input.files && input.files[0];
+  if (f) leerYSubirRemito(f);
+}
+
+document.addEventListener('paste', (ev) => {
+  if (!pedState.pegandoEn) return;
+  const items = (ev.clipboardData && ev.clipboardData.items) || [];
+  for (const it of items) {
+    if (it.type && it.type.startsWith('image/')) {
+      const f = it.getAsFile();
+      if (f) { ev.preventDefault(); leerYSubirRemito(f); return; }
+    }
+  }
+});
+
+function leerYSubirRemito(file) {
+  const pedidoId = pedState.pegandoEn;
+  if (!pedidoId) return;
+  const lector = new FileReader();
+  lector.onload = () => {
+    // dataURL: "data:image/png;base64,AAAA..." — al server va sólo la parte de
+    // datos, y el mime aparte.
+    const s = String(lector.result || '');
+    const coma = s.indexOf(',');
+    const mime = (s.match(/^data:([^;]+);/) || [])[1] || 'image/png';
+    subirRemito(pedidoId, s.slice(coma + 1), mime);
+  };
+  lector.onerror = () => showToast('No se pudo leer la imagen', 4000);
+  lector.readAsDataURL(file);
+}
+
+async function subirRemito(pedidoId, base64, mime) {
+  const caja = document.getElementById('ped-pegar-' + pedidoId);
+  if (caja) caja.innerHTML = '<div class="spinner" style="display:inline-block;vertical-align:middle"></div> '
+    + ' Leyendo el remito…';
+  try {
+    const r = await api('/api/pedidos/' + encodeURIComponent(pedidoId) + '/items/imagen', {
+      method: 'POST', body: JSON.stringify({ imageBase64: base64, mime }),
+    });
+    pedState.pegandoEn = null;
+    await loadPedidos();
+    const n = (r.data || []).length;
+    showToast(`✓ ${n} producto${n !== 1 ? 's' : ''} cargado${n !== 1 ? 's' : ''}`
+      + (r.dudosos ? ` · ${r.dudosos} para revisar` : ''), 4000);
+  } catch (e) {
+    // El error se muestra en la caja y NO se limpia `pegandoEn`: lo más probable
+    // es que quiera probar con otro recorte, y perder el destino obligaría a
+    // volver a tocar "Pegar remito".
+    if (caja) {
+      caja.innerHTML = `<span style="color:var(--red)">${escapeHtml(e.message)}</span><br>
+        <span style="font-size:11px">Probá con otro recorte, o cargá los productos a mano.</span>`;
+    } else {
+      showToast('Error: ' + e.message, 5000);
+    }
+  }
 }
 
 // Un previsto NO es una fila: es lo que ese día de la semana suele traer, según
@@ -13100,7 +13505,7 @@ async function pedOmitir(fecha, proveedor) {
     await api('/api/pedidos/omitir', {
       method: 'POST', body: JSON.stringify({ fecha, proveedor }),
     });
-    pedState.abiertos.add(fecha);
+    pedState.diaAbierto = fecha;
     await loadPedidos();
     showToast(`${proveedor}: eliminado de este día`);
   } catch (e) { showToast('Error: ' + e.message, 4000); }
@@ -13110,7 +13515,7 @@ async function pedRestaurar(id) {
   showToast('⏳ Guardando...');
   try {
     const { data } = await api('/api/pedidos/omitir/' + encodeURIComponent(id), { method: 'DELETE' });
-    if (data && data.fecha) pedState.abiertos.add(data.fecha);
+    if (data && data.fecha) pedState.diaAbierto = data.fecha;
     await loadPedidos();
     showToast('Vuelve a aparecer en el día');
   } catch (e) { showToast('Error: ' + e.message, 4000); }
@@ -13168,7 +13573,8 @@ async function crearPedido(btn) {
     pedMensaje('<span style="color:var(--green)">✓ Anotado.</span>');
     pedState.msgTimer = setTimeout(() => { document.getElementById('ped-alta-msg').innerHTML = ''; }, 2500);
     prov.focus();
-    pedState.abiertos.add(document.getElementById('ped-fecha').value);
+    // Cargar un pedido abre su día: es donde se ve lo que se acaba de anotar.
+    pedState.diaAbierto = document.getElementById('ped-fecha').value;
     await loadPedidos();
   } catch (e) {
     pedMensaje('<span style="color:var(--red)">' + escapeHtml(e.message) + '</span>');

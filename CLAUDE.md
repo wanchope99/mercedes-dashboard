@@ -254,6 +254,30 @@ Single-payment purchases from "Nueva compra" now go through `registrarGastoEnLib
 
 **`normalizarCategoriaGasto` validates against `CATEGORIAS_COLUMNA_J` (13), not `CATEGORIAS_GASTO` (9).** One list was answering two questions. `CATEGORIAS_GASTO` is what the *bot* offers a person over Telegram, narrowed to what appears on supplier invoices — it is unchanged, and adding to it would put four more buttons in a chat for no reason. But the sheet's validation accepts more, and the purchase modal offers those more: **Alquiler, Personal, Legal / Escribano and Fiscales** returned `''` and were silently downgraded to `Otros`. Harmless while only the bot came through that door (a bot never sends a rent payment); a silent hole in the P&L the moment the purchase form did.
 
+### The delivery's line items, and why the image is not kept (2026-08-21)
+
+A pedido can carry **items** — what is arriving, line by line — so the person at the door ticks against a list instead of remembering. They come from pasting a screenshot of the remito: Claude Vision reads it and **the image is discarded**. Sheet `Pedidos Items`, columns A–I, one row per line.
+
+**Not keeping the image is the decision the whole design rests on**, and it was the owner's: *"no se guarda la imagen, se parsea y se pone como datos, porque si no va a ser muy difícil ajustar a la UX de navegador + teléfono"*. Two consequences, both good. There is nothing to store — **this app has never stored a single file**; every Google scope is `spreadsheets` alone, the invoice bot's photos are read by Vision and dropped, and the kitchen close's "foto" is a metaphor for a data snapshot. And a list reflows on a phone, while a photo of a remito has to be opened, zoomed and dragged with two fingers.
+
+**`extraerItemsRemito` is a separate extractor, not a variant of `extraerItems`.** A remito often has no prices, and the invoice prompt asks for unit price, VAT, discounts and internal taxes — asking for fields that are not in the image is asking the model to invent or return nulls. It is also ~25 output tokens per line against ~114, and the person is *watching*: they paste and wait. And nothing is categorised, because the expense category was already chosen when the purchase was loaded.
+
+**An item's state has three values, not a tick.** `pendiente` is "I haven't looked yet" and `falta` is "I looked and it didn't come". Collapsing them would sign off that something was missing when nobody counted it — the same reason the kitchen close starts at `sinTocar` and not `ok`.
+
+**Pasting a second remito adds rows, it does not replace them.** One order can arrive in two deliveries, and wiping what is there because something new arrived destroys what someone already ticked.
+
+**Ticking is optimistic and batched.** The row repaints before the server answers, because twelve products at half a second each is six seconds staring at a screen that does not respond with the supplier waiting; a failure reloads and the tick reverts on its own. `marcarItems` writes every change in one `batchUpdate`, cell by cell, after re-reading the sheet — a `rowIndex` that travelled over the network is a hint, not an identity. An item that no longer exists is reported and skipped **while the rest still save**.
+
+**`PUT /api/pedidos-items` is a flat path on purpose.** `/api/pedidos/:id/items` would collide with `PUT /api/pedidos/:id`, declared earlier, and Express would resolve `:id = 'items'`. It also tells the truth: one batch can touch rows of more than one pedido.
+
+### The day opens instead of unfolding (2026-08-21)
+
+The day list is now an index — one row per day — and clicking it opens a modal holding everything: what is arriving, each delivery's items, and the receive buttons. The accordion is gone.
+
+It had to go: a day with four orders of twelve products each is fifty lines pushing the following days off the screen. And with one surface there is no decision about what belongs in the list and what in the detail.
+
+**The receive button comes pre-chosen.** `pagoPrevisto` maps to one of `MODOS_RECIBIR` (`PP_A_MODO`), and that one renders as the single primary button; the other two live behind "otra forma". They must stay reachable — the supplier turns up without the remito, or charges cash for what was going to be a transfer, and whoever receives has to be able to say what actually happened. **A pedido with no `pagoPrevisto` still shows all three**: nobody said anything, so choosing for them would be inventing an answer.
+
 ### Pedidos por día: the one screen where the encargado closes a payment
 
 `src/pedidos.js` replaces the "PEDIDOS X DIA" Google Doc: what arrives each day, whether it has to be paid and how much. Two auto-created sheets in `SPREADSHEET_ID` — `Pedidos` (one row per expected delivery on a date) and `Pedidos Semanal` (the fixed weekly routine: "Thursdays Barracas, Coca and Bendito deliver").
