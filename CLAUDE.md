@@ -194,7 +194,7 @@ Since 2026-08-12 the menu is **four top-level groups** (`TAB_GROUPS` in `public/
 | `negocio` | how are we doing | Dashboard · Balance · Servicios · Restaurant · Informe |
 | `caja` | today's money | Arqueo · Cajas · Pagos · Historial |
 | `operacion` | the bar running | Pedidos · Bebidas · Mantenimiento · Cierre · Nómina · Más |
-| `plan` | what's coming | Resumen · Calculadora · Inversiones · Finanzas · Proyección Mes |
+| `plan` | what's coming | Resumen · Calculadora · Proyección Mes · Más |
 
 Grouping by **the reader's question** rather than by data source is the whole point. Two concrete failures forced it: the top bar uses `overflow-x` with a *hidden* scrollbar, so with ten items the last sections silently scrolled off a narrow window; and the phone bar pinned three slots, so seven of ten lived inside a "Más" sheet. There were also two different things called "Servicios" — a top-level section and a report inside Reportes, with different default ranges. The per-night list is now **Servicios** and the historical analysis is **Restaurant**.
 
@@ -203,6 +203,10 @@ Grouping by **the reader's question** rather than by data source is the whole po
 And again on 2026-08-18: **Cierre came in and Costos moved into `⋯ Más`**, same rule, same shape of argument — Costos is an analysis screen opened now and then whose own Config. de costos *already lived in that drawer*, so joining them reunites a thing with its detail, while Cierre is opened every night and by the encargado too.
 
 Exercised again on 2026-08-17: **Nómina came in and Propinas moved into `⋯ Más`**, so the group stayed at six. Propinas is a weekly admin task whose own Historial already lived in that drawer, which made it the honest one to move; nothing about its panel or loader changed, only how it is reached (`abrirDesdeMas('propinas')`). Worth knowing before moving anything else out of `TAB_GROUPS`: the panel keeps working, but `switchTab` resolves subs by walking the groups, so a sub that is no longer listed falls through to `activarPanel` without marking the submenu. Every entry point has to go through `abrirDesdeMas` — `HOME_TELEFONO` was checked and does not reference Propinas.
+
+And on 2026-08-22 `plan` got its own **`⋯ Más`** (`tab-plan-mas`), with **Inversiones and Finanzas** moved into it — the same criterion, applied before the group was full rather than after. Inversiones is literally the detail of Resumen (they share `loadPlan()`), and Finanzas is the recovery-pot screen, opened now and then. What stays on the bar is the three that answer *what's coming*: the summary, the scenario calculator and the current month's projection. The group is at four, which is the room the fiscal-regime screen needs.
+
+**`abrirDesdeMas` gained a second parameter that day and it is not cosmetic.** It hardcoded `subtab-operacion-mas`, so with a second group owning a "Más" it would mark Operación's subtab while you were standing in Plan — a button lighting up in a bar that isn't on screen. It is now `abrirDesdeMas(tab, masId = 'operacion-mas')`; the default keeps Operación's four existing calls working untouched.
 
 That rule was exercised on 2026-08-15: adding Pedidos would have made `operacion` seven. The sixth slot is now a **`⋯ Más`** submenu (`tab-operacion-mas`) holding Config. de costos and Historial de propinas — both were the *tail of another sub*, not a topic of their own. Their panels and loaders were untouched, same as when `tab-proveedores` was archived; `abrirDesdeMas(tab)` activates the panel and leaves the "Más" subtab marked, since that is honestly where you are. The criterion for whatever comes next: **if a sub is the detail of another sub, it goes into Más.**
 

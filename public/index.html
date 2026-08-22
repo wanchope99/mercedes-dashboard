@@ -1842,6 +1842,20 @@
   </main>
 </div>
 
+<div id="tab-plan-mas" class="tab-panel">
+  <main>
+    <div class="card">
+      <div class="card-title"><span>Más de Plan</span></div>
+      <div class="mas-grid" style="margin-top:6px">
+        <button class="btn mas-item" onclick="abrirDesdeMas('inversiones', 'plan-mas')">
+          <span style="font-size:22px">🛠️</span><span>Inversiones</span></button>
+        <button class="btn mas-item" onclick="abrirDesdeMas('finanzas', 'plan-mas')">
+          <span style="font-size:22px">🏦</span><span>Finanzas</span></button>
+      </div>
+    </div>
+  </main>
+</div>
+
 <div id="tab-mantenimiento" class="tab-panel">
   <main>
     <div class="card">
@@ -3728,12 +3742,18 @@ const TAB_GROUPS = {
   ] },
 
   // ── Lo que viene ──────────────────────────────────────────────────────────
+  // Inversiones y Finanzas bajaron a "Más" el 22/08/2026, misma regla y mismo
+  // criterio que movió a Costos y a Propinas: si un sub es el detalle de otro
+  // sub, va a Más. Inversiones es literalmente el detalle de Resumen —comparten
+  // loader, `loadPlan()`— y Finanzas es el pozo de recupero, una pantalla de
+  // administración que se abre cada tanto y no algo que se mire seguido.
+  // Quedan arriba las tres que contestan "qué viene": el resumen, la
+  // calculadora de escenarios y la proyección del mes en curso.
   plan: { label: '🗓️ Plan', icono: '🗓️', corto: 'Plan', soloAdmin: true, phonePrio: 4, subs: [
     { id: 'plan',        label: '📋 Resumen' },
     { id: 'calculadora', label: '🧮 Calculadora' },
-    { id: 'inversiones', label: '🛠️ Inversiones' },
-    { id: 'finanzas',    label: '🏦 Finanzas' },
     { id: 'proymes',     label: '📅 Proyección Mes' },
+    { id: 'plan-mas',    label: '⋯ Más' },
   ] },
 };
 
@@ -3833,6 +3853,7 @@ function cargarPanel(tab) {
   if (tab === 'inicio') renderInicio();
   else if (tab === 'pedidos') loadPedidos();
   else if (tab === 'operacion-mas') { /* sólo botones, nada que cargar */ }
+  else if (tab === 'plan-mas') { /* sólo botones, nada que cargar */ }
   else if (tab === 'pagos') { if (state.rol === 'admin') loadPagos(); }
   else if (tab === 'cajas') loadCajas();
   else if (tab === 'arqueo') initArqueo();
@@ -3951,13 +3972,17 @@ function switchTab(tab, btn) {
 }
 
 // Abre un panel que ya NO está en la barra de submenús porque vive adentro de
-// "Más" (Config. de costos, Historial de propinas). El subtab "Más" queda
-// marcado: es dónde estás parado, y dejarlo sin marcar haría parecer que la
-// barra se desincronizó.
-function abrirDesdeMas(tab) {
+// "Más" (Config. de costos, Historial de propinas; Inversiones y Finanzas desde
+// el 22/08/2026). El subtab "Más" queda marcado: es dónde estás parado, y
+// dejarlo sin marcar haría parecer que la barra se desincronizó.
+//
+// `masId` existe desde que hay más de un grupo con "Más". Con el id fijo, abrir
+// algo de Plan marcaba el subtab de Operación — un botón encendiéndose en una
+// barra que no está en pantalla. El default deja intactas las llamadas viejas.
+function abrirDesdeMas(tab, masId = 'operacion-mas') {
   activarPanel(tab);
   document.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
-  const mas = document.getElementById('subtab-operacion-mas');
+  const mas = document.getElementById('subtab-' + masId);
   if (mas) mas.classList.add('active');
 }
 
