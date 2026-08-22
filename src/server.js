@@ -3858,6 +3858,10 @@ app.get('/api/fiscal/defaults', authMiddleware, adminOnly, async (req, res) => {
         parametros: regimenFiscal.PARAMETROS,
         pctPersonalDeducible: pctBlanco,
         mesesDisponibles: resumenes.map(r => r.mes),
+        // Sólo los CERRADOS: es lo que puede elegir el selector. Simular medio
+        // mes contra costos fijos de mes entero da un porcentaje que no
+        // significa nada, y ofrecerlo es invitar a leerlo mal.
+        mesesCerrados: ultimosMesesCerrados(resumenes, 999).map(r => r.mes),
         mesesSugeridos: ultimosMesesCerrados(resumenes, 3).map(r => r.mes),
         condiciones: fiscalProv.CONDICIONES,
         comprobantes: fiscalProv.COMPROBANTES,

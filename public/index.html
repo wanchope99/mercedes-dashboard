@@ -1924,6 +1924,11 @@
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px">
         <div class="form-group">
+          <label>Período</label>
+          <select id="fisc-mes" onchange="recalcFiscal()"
+                  title="Sólo meses cerrados: simular medio mes contra costos fijos de mes entero da un porcentaje que no significa nada."></select>
+        </div>
+        <div class="form-group">
           <label>Figura</label>
           <select id="fisc-figura" onchange="renderFiscal()">
             <option value="personaHumana">Persona humana</option>
@@ -1973,7 +1978,8 @@
     <!-- Dónde se pierde crédito -->
     <div class="card">
       <div class="card-title"><span>Dónde se pierde crédito fiscal</span>
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">montos anualizados</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
+              id="fisc-op-sub">montos anualizados</span>
       </div>
       <div class="table-wrap"><table id="fisc-oportunidades"></table></div>
     </div>
@@ -11040,9 +11046,14 @@ async function recalcCalc(sourceId) {
 // que se carga la angosta, y eso es lo que hace que valga la pena cargarlos.
 let _fiscData = null, _fiscCola = null, _fiscSiembra = null;
 
+// El mes con el que abre la pantalla. Es el último mes cerrado completo con el
+// bar operando a régimen, así que es el que mejor describe lo que viene; si
+// algún día deja de existir en la planilla se cae al último cerrado que haya.
+const FISCAL_MES_DEFAULT = 'Julio';
+
 async function loadFiscal() {
   const sub = document.getElementById('fisc-subtitulo');
-  if (sub) sub.textContent = 'recalculando meses ya cerrados…';
+  if (sub) sub.textContent = 'recalculando…';
   try {
     const { data } = await api('/api/fiscal/defaults');
     // Los defaults sólo precargan campos vacíos: si el usuario ya tocó algo, manda él.
@@ -11052,6 +11063,19 @@ async function loadFiscal() {
     };
     setIf('fisc-iibb', data.parametros.iibbPct);
     setIf('fisc-cuota', data.parametros.cuotaMonotributoMensual);
+
+    // El selector de período se arma UNA vez: rearmarlo en cada recálculo
+    // perdería el mes que la persona eligió.
+    const sel = document.getElementById('fisc-mes');
+    if (sel && !sel.options.length) {
+      const cerrados = data.mesesCerrados || data.mesesSugeridos || [];
+      sel.innerHTML =
+        '<option value="ultimos3">Últimos 3 meses cerrados</option>' +
+        cerrados.map(m => '<option value="' + escapeHtml(m) + '">' + escapeHtml(m) + '</option>').join('');
+      // Julio si está; si no, el último cerrado; si no hay ninguno, el promedio.
+      sel.value = cerrados.includes(FISCAL_MES_DEFAULT) ? FISCAL_MES_DEFAULT
+        : (cerrados.length ? cerrados[cerrados.length - 1] : 'ultimos3');
+    }
   } catch (e) { /* sin defaults se sigue con los del formulario */ }
   await recalcFiscal();
 }
@@ -11060,10 +11084,13 @@ async function recalcFiscal() {
   const num = id => { const el = document.getElementById(id); const n = Number(el && el.value); return Number.isFinite(n) ? n : 0; };
   const traslado = Math.max(0, Math.min(100, num('fisc-traslado'))) / 100;
   const sub = document.getElementById('fisc-subtitulo');
+  const mesSel = (document.getElementById('fisc-mes') || {}).value || '';
   try {
     const { data } = await api('/api/fiscal/simulacion', {
       method: 'POST',
       body: JSON.stringify({
+        // Sin `meses` el servidor toma los últimos 3 cerrados por su cuenta.
+        meses: (mesSel && mesSel !== 'ultimos3') ? [mesSel] : undefined,
         // Los tres escenarios siempre: el parcial es el único configurable.
         escenarios: [0, traslado, 1],
         parametros: { iibbPct: num('fisc-iibb'), cuotaMonotributoMensual: num('fisc-cuota') },
@@ -11071,9 +11098,10 @@ async function recalcFiscal() {
     });
     _fiscData = data;
     if (sub) {
-      sub.textContent = data.origen.mesesSimulados.length
-        ? 'sobre ' + data.origen.mesesSimulados.join(', ')
-        : 'no hay meses cerrados para simular';
+      const ms = data.origen.mesesSimulados;
+      sub.textContent = !ms.length ? 'no hay meses cerrados para simular'
+        : ms.length === 1 ? 'sobre ' + ms[0] + ', ya cerrado'
+        : 'promedio de ' + ms.join(', ');
     }
     renderFiscal();
   } catch (e) {
@@ -11092,6 +11120,13 @@ function renderFiscal() {
   const n = d.meses.length;
   const prom = sel => d.meses.reduce((s, m) => s + sel(m), 0) / n;
   const escDe = (m, i) => m.escenarios[i].declarado;
+  // Hay secciones que NO se pueden promediar —el desglose del credito, las
+  // bases de Ganancias, el ranking de proveedores— porque son listas, no
+  // numeros. Esas usan el mes MAS RECIENTE, no el primero, y la pantalla dice
+  // cual es cuando hay mas de uno. Antes tomaban meses[0], que con tres meses
+  // seleccionados mostraba el ranking del mes mas viejo sin avisar.
+  const ref = d.meses[d.meses.length - 1];
+  const sufijoRef = n > 1 ? ' (' + ref.mes + ')' : '';
 
   // ── El rango, sobre el escenario de carta congelada (el piso) ──────────────
   const pMin = prom(m => escDe(m, 0).pctSobreIngresos[figura].min);
@@ -11111,12 +11146,12 @@ function renderFiscal() {
     '<div class="tramo" style="left:' + esc(pMin) + '%;width:' + Math.max(1, esc(pMax) - esc(pMin)) + '%"></div>' +
     '<div class="marca" style="left:' + esc(pEsp) + '%"></div>';
 
-  const cob = d.meses[0].credito.cobertura;
+  const cob = ref.credito.cobertura;
   const sinResolver = d.meses.reduce((s, m) => s + m.credito.cobertura.incertidumbreARS, 0) / n;
   document.getElementById('fisc-rango-pie').innerHTML =
     'El ancho del rango son <strong>' + fmt(sinResolver) + ' por mes</strong> que todavía no se saben: ' +
     'gasto de proveedores sin relevar, donde no se sabe si dan factura A. ' +
-    'Está clasificado el <strong>' + pct(cob.pctClasificado) + '</strong> del gasto. ' +
+    'Está clasificado el <strong>' + pct(cob.pctClasificado) + '</strong> del gasto' + sufijoRef + '. ' +
     'Cada proveedor que cargues angosta esta barra.';
 
   const btn = document.getElementById('fisc-btn-relevar');
@@ -11138,7 +11173,7 @@ function renderFiscal() {
     'Subís la carta a medias. El resto lo absorbe el margen.',
     'La carta sube 21% y tu ingreso neto queda igual al de hoy. Lo paga el cliente.',
   ];
-  document.getElementById('fisc-escenarios').innerHTML = d.meses[0].escenarios.map((e, i) => {
+  document.getElementById('fisc-escenarios').innerHTML = ref.escenarios.map((e, i) => {
     const p = prom(m => escDe(m, i).pctSobreIngresos[figura].esperado);
     const resign = prom(m => escDe(m, i).ventas.netoResignado);
     const sube = prom(m => escDe(m, i).ventas.aumentoAlCliente);
@@ -11171,7 +11206,7 @@ function renderFiscal() {
     '<tbody>' + filas + '</tbody>';
 
   // ── Las tres bases de Ganancias ───────────────────────────────────────────
-  const bases = d.meses[0].escenarios[0].declarado.ganancias.bases;
+  const bases = ref.escenarios[0].declarado.ganancias.bases;
   const orden = [['soloDeclarado', 'Sólo lo declarado'], ['proporcional', 'Proporcional'], ['todoDeclarado', 'Declarando todo']];
   document.getElementById('fisc-bases').innerHTML =
     '<thead><tr><th>Base</th><th>Ingresos netos</th><th>Gastos deducibles</th><th>Utilidad</th></tr></thead><tbody>' +
@@ -11189,7 +11224,9 @@ function renderFiscal() {
     ' · El número de arriba usa la base proporcional. ' + bases.proporcional.motivo;
 
   // ── Oportunidades e incógnitas ────────────────────────────────────────────
-  const ops = d.meses[0].oportunidades || [];
+  const ops = ref.oportunidades || [];
+  const opSub = document.getElementById('fisc-op-sub');
+  if (opSub) opSub.textContent = 'montos anualizados' + (n > 1 ? ' · sobre ' + ref.mes : '');
   document.getElementById('fisc-oportunidades').innerHTML = ops.length
     ? '<thead><tr><th>Proveedor</th><th style="text-align:left">Qué pasa</th><th>Gasto/mes</th><th>Por año</th></tr></thead><tbody>' +
       ops.slice(0, 12).map(o => {
@@ -11206,8 +11243,8 @@ function renderFiscal() {
     : '<tbody><tr><td style="color:var(--text-muted)">Nada que reclamar: todo el gasto está relevado.</td></tr></tbody>';
 
   // ── Advertencias ──────────────────────────────────────────────────────────
-  const advs = d.meses[0].escenarios[0].declarado.advertencias || [];
-  const decl = d.meses[0].escenarios[0].declarado.declaracion;
+  const advs = ref.escenarios[0].declarado.advertencias || [];
+  const decl = ref.escenarios[0].declarado.declaracion;
   const fijas = [
     { texto: 'Las alícuotas de IIBB y las escalas de Ganancias son un punto de partida para poder correr el modelo, no una afirmación sobre la ley vigente. Confirmalas con tu contador.', impactoARS: 0 },
     { texto: 'Las retenciones que Galicia ya te hace están contabilizadas enteras como comisión. Parte puede ser retención de IVA o IIBB, que es pago a cuenta y no costo. Eso sólo lo dice la liquidación de Galicia.', impactoARS: 0 },
