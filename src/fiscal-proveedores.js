@@ -238,10 +238,17 @@ async function sembrarPadron({ aplicar = false } = {}) {
 // lo que decide si se resuelve el 80% del gasto en diez minutos o si se abandona
 // a la mitad. Cada fila trae cuánta plata de crédito fiscal está en juego, que es
 // la única razón para molestarse en cargarla.
-function armarCola({ movimientos = [], padron = {}, credito = null }) {
+// `sinCredito` son las categorías que no generan crédito por naturaleza. Su
+// gasto NO entra en la cola: preguntar la condición fiscal de "Sueldos" o de
+// "ARCA" es trabajo inventado, y como se ordena por plata caían primeras — el
+// sueldo es el gasto más grande del bar, así que lo primero que veía la persona
+// era la fila que nunca hay que completar.
+function armarCola({ movimientos = [], padron = {}, credito = null, parametros = {} } = {}) {
+  const sinCredito = new Set(parametros.categoriasSinCredito || fiscal.PARAMETROS.categoriasSinCredito);
   const porProv = {};
   for (const m of movimientos) {
     if (!m || m.tipo !== 'Gasto' || m.esCuota) continue;
+    if (sinCredito.has((m.categoria || '').trim())) continue;
     const nombre = (m.proveedor || '').trim();
     const monto = Number(m.salidaTotal) || 0;
     if (monto <= 0) continue;

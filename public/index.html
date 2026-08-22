@@ -1112,6 +1112,10 @@
     @media (max-width: 760px) {
       .fisc-prov { grid-template-columns: 1fr 1fr; }
       .fisc-prov .nom-cel { grid-column: 1 / -1; }
+      /* El botón ocupa el ancho entero: a dos columnas quedaba solo en su
+         renglón con la mitad vacía al lado. Mismo criterio que en Pedidos. */
+      .fisc-prov > div:last-child { grid-column: 1 / -1; }
+      .fisc-prov > div:last-child .btn { width: 100%; }
       #fisc-rango .num { font-size: 26px; }
     }
 
@@ -11173,9 +11177,13 @@ function renderFiscal() {
     '<thead><tr><th>Base</th><th>Ingresos netos</th><th>Gastos deducibles</th><th>Utilidad</th></tr></thead><tbody>' +
     orden.map(([k, lbl]) => {
       const b = bases[k];
+      // Una utilidad negativa se muestra en rojo y con signo. En la fila
+      // inválida es el argumento entero: no da "cero", da pérdida.
+      const col = b.utilidad < 0 ? 'var(--red)' : '';
       return '<tr class="' + (b.valida ? '' : 'fisc-base-invalida') + '">' +
         '<td>' + lbl + '</td><td>' + fmt(b.ingresos) + '</td>' +
-        '<td>' + fmt(b.gastos) + '</td><td>' + fmt(b.utilidad) + '</td></tr>';
+        '<td>' + fmt(b.gastos) + '</td>' +
+        '<td style="color:' + col + '">' + (b.utilidad < 0 ? '−' + fmt(-b.utilidad) : fmt(b.utilidad)) + '</td></tr>';
     }).join('') + '</tbody>';
   document.getElementById('fisc-bases-pie').textContent = bases.soloDeclarado.motivo +
     ' · El número de arriba usa la base proporcional. ' + bases.proporcional.motivo;
@@ -11183,7 +11191,7 @@ function renderFiscal() {
   // ── Oportunidades e incógnitas ────────────────────────────────────────────
   const ops = d.meses[0].oportunidades || [];
   document.getElementById('fisc-oportunidades').innerHTML = ops.length
-    ? '<thead><tr><th>Proveedor</th><th>Qué pasa</th><th>Gasto/mes</th><th>Por año</th></tr></thead><tbody>' +
+    ? '<thead><tr><th>Proveedor</th><th style="text-align:left">Qué pasa</th><th>Gasto/mes</th><th>Por año</th></tr></thead><tbody>' +
       ops.slice(0, 12).map(o => {
         const esPerdida = o.tipo === 'sin-factura-a';
         return '<tr><td>' + escapeHtml(o.proveedor || '') + '</td>' +
@@ -11251,9 +11259,13 @@ function renderColaPadron() {
     const id = 'fp' + i;
     return '<div class="fisc-prov" data-prov="' + escapeHtml(p.proveedor) + '">' +
       '<div class="nom-cel"><div class="nom">' + escapeHtml(p.proveedor) + '</div>' +
-        '<div class="plata">' + fmt(p.gasto) + ' · ' + pct(p.pctDelGasto) + ' del gasto' +
-        (p.creditoEnJuegoARS > 0 ? ' · <span style="color:var(--orange)">' + fmt(p.creditoEnJuegoARS) + ' en juego</span>' : '') +
-        '</div></div>' +
+        '<div class="plata">' + fmt(p.gasto) + ' · ' + pct(p.pctDelGasto) + ' del gasto</div>' +
+        // El "en juego" va en su propio renglón: metido en la misma línea partía
+        // en dos sólo en algunas filas y las dejaba de alturas distintas.
+        (p.creditoEnJuegoARS > 0
+          ? '<div class="plata" style="color:var(--orange)">' + fmt(p.creditoEnJuegoARS) + ' de crédito en juego</div>'
+          : '') +
+        '</div>' +
       '<div><select id="' + id + '-cond">' + opt(CONDS, p.condicion) + '</select></div>' +
       '<div><select id="' + id + '-comp">' + opt(COMPS, p.comprobante) + '</select></div>' +
       '<div><select id="' + id + '-alic">' +

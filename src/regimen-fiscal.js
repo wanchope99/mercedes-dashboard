@@ -535,22 +535,27 @@ function simularMes({ resumen, credito, escenarioPrecio = 0, parametros = {}, ba
   const pctDeclarado = ventaTotalHoy > 0 ? cobrado / ventaTotalHoy : 1;
   const netoTodo = netoDe(ventaTotalHoy * (1 + (alic / 100) * t), alic);
 
+  // La utilidad puede dar NEGATIVA y se devuelve negativa. El `max(0, …)` es una
+  // regla del impuesto —no existe Ganancias negativo— y vive en aplicarEscala,
+  // que devuelve 0 para base <= 0. Aplicarlo acá tapaba justo lo que esta tabla
+  // existe para mostrar: la base inválida no da "utilidad cero", da pérdida, y
+  // ver el número en rojo es el argumento entero.
   const basesDe = c => ({
     soloDeclarado: {
       ingresos: round2(neto), gastos: round2(deducibleDe(c)),
-      utilidad: round2(Math.max(0, neto - deducibleDe(c))),
+      utilidad: round2(neto - deducibleDe(c)),
       valida: false,
-      motivo: `Declara el ${round2(pctDeclarado * 100)}% de los ingresos contra el 100% de los costos. La utilidad sale artificialmente baja y Ganancias da mal. No es un escenario: es un error de método.`,
+      motivo: `Declara el ${round2(pctDeclarado * 100)}% de los ingresos contra el 100% de los costos. La utilidad sale artificialmente baja —muchas veces negativa— y Ganancias da mal. No es un escenario: es un error de método.`,
     },
     proporcional: {
       ingresos: round2(neto), gastos: round2(deducibleDe(c) * pctDeclarado),
-      utilidad: round2(Math.max(0, neto - deducibleDe(c) * pctDeclarado)),
+      utilidad: round2(neto - deducibleDe(c) * pctDeclarado),
       valida: true,
       motivo: 'Los gastos se prorratean al mismo porcentaje que los ingresos declarados. Es la lectura menos mentirosa de declarar sólo Galicia.',
     },
     todoDeclarado: {
       ingresos: round2(netoTodo), gastos: round2(deducibleDe(c)),
-      utilidad: round2(Math.max(0, netoTodo - deducibleDe(c))),
+      utilidad: round2(netoTodo - deducibleDe(c)),
       valida: true,
       motivo: 'El único internamente consistente: se declara todo lo que entra y se deduce todo lo que sale.',
     },
