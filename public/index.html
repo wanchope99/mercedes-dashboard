@@ -1062,6 +1062,59 @@
     .mas-item { display: flex; flex-direction: column; align-items: center; justify-content: center;
       gap: 6px; padding: 16px 6px; font-size: 12px; min-height: 78px; }
 
+    /* ── Régimen fiscal ──────────────────────────────────────────────────────
+       El número grande NO es un número: es un rango. La barra lo dibuja para que
+       el ancho se lea antes que los dígitos — un costo fiscal estimado con el
+       padrón a medio cargar tiene una incertidumbre que hay que ver, no leer en
+       una nota al pie. La barra se angosta sola a medida que se releva. */
+    #fisc-rango { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    #fisc-rango .num { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
+    #fisc-rango .hasta { font-size: 15px; color: var(--text-muted); }
+    .fisc-barra { position: relative; height: 10px; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; margin-top: 12px; overflow: hidden; }
+    .fisc-barra .tramo { position: absolute; top: 0; bottom: 0; background: var(--orange); opacity: 0.85; }
+    .fisc-barra .marca { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text); }
+    .fisc-esc { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+    .fisc-esc-card { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+    .fisc-esc-card.activo { border-color: var(--orange); }
+    .fisc-esc-card .tit { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+    .fisc-esc-card .val { font-size: 22px; font-weight: 700; margin-top: 6px; }
+    .fisc-esc-card .sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.5; }
+    /* La base inválida se muestra TACHADA en vez de esconderse: está justamente
+       para que se vea por qué no sirve declarar sólo una parte de las ventas y
+       deducir el 100% de los costos. */
+    .fisc-base-invalida td { text-decoration: line-through; color: var(--text-muted); }
+    .fisc-nota { font-size: 12px; color: var(--text-muted); line-height: 1.6; }
+    .fisc-adv { border-left: 3px solid var(--orange); background: var(--orange-dim); padding: 10px 14px;
+      border-radius: 0 8px 8px 0; margin-top: 8px; font-size: 12px; line-height: 1.6; }
+    .fisc-tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10px;
+      text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid var(--border); }
+    .fisc-tag.si { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+    .fisc-tag.no { background: var(--red-dim); border-color: var(--red); color: var(--red); }
+    .fisc-tag.dud { background: var(--surface2); color: var(--text-muted); }
+
+    /* El padrón se abre desde la propia pantalla Fiscal, nunca sobre otro modal,
+       así que 320 alcanza (ver el orden de apilado documentado en Pedidos). */
+    #fiscal-padron-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+      z-index: 320; align-items: center; justify-content: center; padding: 20px; }
+    #fiscal-padron-overlay.open { display: flex; }
+    #fiscal-padron-overlay .modal { background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 24px; width: 860px; max-width: 96vw; max-height: 90vh; overflow-y: auto; }
+    #fiscal-padron-overlay .modal-title { font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+    .fisc-prov { display: grid; grid-template-columns: 1.4fr 0.8fr 1fr 0.8fr 0.7fr auto; gap: 8px;
+      align-items: center; padding: 10px 0; border-bottom: 1px solid rgba(46,46,62,0.5); }
+    .fisc-prov select { background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+      padding: 7px 9px; border-radius: 8px; font-size: 12px; font-family: inherit; width: 100%; }
+    .fisc-prov input { background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+      padding: 7px 9px; border-radius: 8px; font-size: 12px; font-family: inherit; width: 100%; }
+    .fisc-prov .nom { font-weight: 500; font-size: 13px; }
+    .fisc-prov .plata { font-size: 11px; color: var(--text-muted); }
+    @media (max-width: 760px) {
+      .fisc-prov { grid-template-columns: 1fr 1fr; }
+      .fisc-prov .nom-cel { grid-column: 1 / -1; }
+      #fisc-rango .num { font-size: 26px; }
+    }
+
     /* ── Inicio (teléfono) ── */
     /* El panel entero está apagado por defecto y sólo lo enciende el @media de
        640px: en la computadora esta pantalla no existe. */
@@ -1840,6 +1893,112 @@
       </div>
     </div>
   </main>
+</div>
+
+<div id="tab-fiscal" class="tab-panel">
+  <main>
+    <!-- El número grande y su rango. Va primero porque es la pregunta. -->
+    <div class="card">
+      <div class="card-title"><span>Si fueras Responsable Inscripto</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
+              id="fisc-subtitulo">recalculando meses ya cerrados…</span>
+      </div>
+      <div id="fisc-rango"><span class="num" style="color:var(--text-muted)">—</span></div>
+      <div class="fisc-barra" id="fisc-barra"></div>
+      <div class="fisc-nota" style="margin-top:10px" id="fisc-rango-pie"></div>
+      <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-accent" onclick="abrirPadronFiscal()" id="fisc-btn-relevar">Relevar proveedores</button>
+        <button class="btn" onclick="recalcFiscal()">Recalcular</button>
+      </div>
+    </div>
+
+    <!-- Supuestos. Arriba y editables, nunca enterrados: las alícuotas y las
+         escalas las valida el contador, no este código. -->
+    <div class="card">
+      <div class="card-title"><span>Supuestos</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">confirmalos con tu contador — ninguno está fijo en el código</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px">
+        <div class="form-group">
+          <label>Figura</label>
+          <select id="fisc-figura" onchange="renderFiscal()">
+            <option value="personaHumana">Persona humana</option>
+            <option value="sociedad">SRL / SA</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>IIBB CABA (%)</label>
+          <input type="number" id="fisc-iibb" step="0.1" value="3" onchange="recalcFiscal()">
+        </div>
+        <div class="form-group">
+          <label>Cuota de monotributo hoy (ARS/mes)</label>
+          <input type="number" id="fisc-cuota" value="0" onchange="recalcFiscal()"
+                 title="La categoría Fiscales del libro no sirve de línea de base: dio $0 en julio y agosto, y las cargas sociales se cargan dentro de Personal.">
+        </div>
+        <div class="form-group">
+          <label>Traslado parcial al cliente (%)</label>
+          <input type="number" id="fisc-traslado" min="0" max="100" step="5" value="50" onchange="recalcFiscal()">
+        </div>
+      </div>
+      <div class="fisc-nota" style="margin-top:12px" id="fisc-origen"></div>
+    </div>
+
+    <!-- Los tres escenarios de precio -->
+    <div class="card">
+      <div class="card-title"><span>Qué pasa con la carta</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">el IVA lo paga tu margen o lo paga el cliente</span>
+      </div>
+      <div class="fisc-esc" id="fisc-escenarios"></div>
+    </div>
+
+    <!-- Mes a mes -->
+    <div class="card">
+      <div class="card-title"><span>Mes a mes</span></div>
+      <div class="table-wrap"><table id="fisc-meses"></table></div>
+    </div>
+
+    <!-- Las tres bases de Ganancias -->
+    <div class="card">
+      <div class="card-title"><span>Sobre qué se calcula Ganancias</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">la primera fila está tachada a propósito</span>
+      </div>
+      <div class="table-wrap"><table id="fisc-bases"></table></div>
+      <div class="fisc-nota" style="margin-top:10px" id="fisc-bases-pie"></div>
+    </div>
+
+    <!-- Dónde se pierde crédito -->
+    <div class="card">
+      <div class="card-title"><span>Dónde se pierde crédito fiscal</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">montos anualizados</span>
+      </div>
+      <div class="table-wrap"><table id="fisc-oportunidades"></table></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span>Lo que el cálculo no puede saber</span></div>
+      <div id="fisc-advertencias"></div>
+    </div>
+  </main>
+</div>
+
+<!-- Padrón fiscal: la cola ordenada por plata. Se abre desde la pantalla
+     Fiscal, nunca sobre otro modal. -->
+<div class="modal-overlay" id="fiscal-padron-overlay">
+  <div class="modal">
+    <div class="modal-title">Condición fiscal de los proveedores</div>
+    <div class="fisc-nota" id="fisc-padron-intro">
+      Ordenados por cuánto se les compró. Los primeros son los que mueven el número.
+    </div>
+    <div style="margin:14px 0;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" onclick="sembrarPadronFiscal(false)">Ver qué se puede completar solo</button>
+      <button class="btn" onclick="sembrarPadronFiscal(true)" id="fisc-btn-sembrar" style="display:none">Aplicar</button>
+    </div>
+    <div id="fisc-siembra" class="fisc-nota" style="margin-bottom:10px"></div>
+    <div id="fisc-cola"></div>
+    <div style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn" onclick="cerrarPadronFiscal()">Cerrar</button>
+    </div>
+  </div>
 </div>
 
 <div id="tab-plan-mas" class="tab-panel">
@@ -3749,8 +3908,13 @@ const TAB_GROUPS = {
   // administración que se abre cada tanto y no algo que se mire seguido.
   // Quedan arriba las tres que contestan "qué viene": el resumen, la
   // calculadora de escenarios y la proyección del mes en curso.
+  // Fiscal entró el 22/08/2026, en el lugar que dejaron Inversiones y Finanzas.
+  // Va segundo, apenas después del Resumen: la pregunta que contesta —cuánto de
+  // lo que entra se va a ir en impuestos al pasar a Responsable Inscripto— es la
+  // que más peso tiene sobre lo que viene.
   plan: { label: '🗓️ Plan', icono: '🗓️', corto: 'Plan', soloAdmin: true, phonePrio: 4, subs: [
     { id: 'plan',        label: '📋 Resumen' },
+    { id: 'fiscal',      label: '🧾 Fiscal' },
     { id: 'calculadora', label: '🧮 Calculadora' },
     { id: 'proymes',     label: '📅 Proyección Mes' },
     { id: 'plan-mas',    label: '⋯ Más' },
@@ -3854,6 +4018,7 @@ function cargarPanel(tab) {
   else if (tab === 'pedidos') loadPedidos();
   else if (tab === 'operacion-mas') { /* sólo botones, nada que cargar */ }
   else if (tab === 'plan-mas') { /* sólo botones, nada que cargar */ }
+  else if (tab === 'fiscal') loadFiscal();
   else if (tab === 'pagos') { if (state.rol === 'admin') loadPagos(); }
   else if (tab === 'cajas') loadCajas();
   else if (tab === 'arqueo') initArqueo();
@@ -10860,6 +11025,302 @@ async function recalcCalc(sourceId) {
     row('TOTAL COSTOS', data.totalCostos, data.pctTotalCostos, 'row-total'),
     row('RESULTADO NETO', data.resultadoNeto, data.pctResultadoNeto, 'row-resultado'),
   ].join('');
+}
+
+// ─── RÉGIMEN FISCAL ───────────────────────────────────────────────────────────
+//
+// La pantalla no muestra un número: muestra un RANGO. El crédito fiscal no se
+// puede leer del libro (Movimientos guarda el total con impuestos y nada más),
+// así que se estima, y la amplitud del rango es cuánta plata todavía no se sabe.
+// Esa amplitud es también la barra de progreso del relevamiento: cada proveedor
+// que se carga la angosta, y eso es lo que hace que valga la pena cargarlos.
+let _fiscData = null, _fiscCola = null, _fiscSiembra = null;
+
+async function loadFiscal() {
+  const sub = document.getElementById('fisc-subtitulo');
+  if (sub) sub.textContent = 'recalculando meses ya cerrados…';
+  try {
+    const { data } = await api('/api/fiscal/defaults');
+    // Los defaults sólo precargan campos vacíos: si el usuario ya tocó algo, manda él.
+    const setIf = (id, val) => {
+      const el = document.getElementById(id);
+      if (el && val != null && (el.value === '' || el.value == null)) el.value = val;
+    };
+    setIf('fisc-iibb', data.parametros.iibbPct);
+    setIf('fisc-cuota', data.parametros.cuotaMonotributoMensual);
+  } catch (e) { /* sin defaults se sigue con los del formulario */ }
+  await recalcFiscal();
+}
+
+async function recalcFiscal() {
+  const num = id => { const el = document.getElementById(id); const n = Number(el && el.value); return Number.isFinite(n) ? n : 0; };
+  const traslado = Math.max(0, Math.min(100, num('fisc-traslado'))) / 100;
+  const sub = document.getElementById('fisc-subtitulo');
+  try {
+    const { data } = await api('/api/fiscal/simulacion', {
+      method: 'POST',
+      body: JSON.stringify({
+        // Los tres escenarios siempre: el parcial es el único configurable.
+        escenarios: [0, traslado, 1],
+        parametros: { iibbPct: num('fisc-iibb'), cuotaMonotributoMensual: num('fisc-cuota') },
+      }),
+    });
+    _fiscData = data;
+    if (sub) {
+      sub.textContent = data.origen.mesesSimulados.length
+        ? 'sobre ' + data.origen.mesesSimulados.join(', ')
+        : 'no hay meses cerrados para simular';
+    }
+    renderFiscal();
+  } catch (e) {
+    if (sub) sub.textContent = 'no se pudo calcular';
+    showToast('Error régimen fiscal: ' + e.message);
+  }
+}
+
+function renderFiscal() {
+  const d = _fiscData;
+  if (!d || !d.meses || !d.meses.length) return;
+  const figura = (document.getElementById('fisc-figura') || {}).value || 'personaHumana';
+
+  // Se promedian los meses: un mes suelto puede ser atípico y la decisión que se
+  // toma con esto es anual.
+  const n = d.meses.length;
+  const prom = sel => d.meses.reduce((s, m) => s + sel(m), 0) / n;
+  const escDe = (m, i) => m.escenarios[i].declarado;
+
+  // ── El rango, sobre el escenario de carta congelada (el piso) ──────────────
+  const pMin = prom(m => escDe(m, 0).pctSobreIngresos[figura].min);
+  const pEsp = prom(m => escDe(m, 0).pctSobreIngresos[figura].esperado);
+  const pMax = prom(m => escDe(m, 0).pctSobreIngresos[figura].max);
+  const hoyPct = prom(m => escDe(m, 0).hoyMonotributo.pctSobreIngresos);
+
+  document.getElementById('fisc-rango').innerHTML =
+    '<span class="num" style="color:var(--orange)">' + pct(pMin) + '</span>' +
+    '<span class="hasta">a</span>' +
+    '<span class="num" style="color:var(--orange)">' + pct(pMax) + '</span>' +
+    '<span class="hasta">de lo que entra por caja · hoy pagás ' + pct(hoyPct) + '</span>';
+
+  // La barra dibuja el rango sobre una escala 0–25%, con una marca en el esperado.
+  const esc = v => Math.max(0, Math.min(100, (v / 25) * 100));
+  document.getElementById('fisc-barra').innerHTML =
+    '<div class="tramo" style="left:' + esc(pMin) + '%;width:' + Math.max(1, esc(pMax) - esc(pMin)) + '%"></div>' +
+    '<div class="marca" style="left:' + esc(pEsp) + '%"></div>';
+
+  const cob = d.meses[0].credito.cobertura;
+  const sinResolver = d.meses.reduce((s, m) => s + m.credito.cobertura.incertidumbreARS, 0) / n;
+  document.getElementById('fisc-rango-pie').innerHTML =
+    'El ancho del rango son <strong>' + fmt(sinResolver) + ' por mes</strong> que todavía no se saben: ' +
+    'gasto de proveedores sin relevar, donde no se sabe si dan factura A. ' +
+    'Está clasificado el <strong>' + pct(cob.pctClasificado) + '</strong> del gasto. ' +
+    'Cada proveedor que cargues angosta esta barra.';
+
+  const btn = document.getElementById('fisc-btn-relevar');
+  if (btn) btn.textContent = sinResolver > 0
+    ? 'Relevar proveedores — ' + fmt(sinResolver) + '/mes sin explicar'
+    : 'Ver proveedores';
+
+  document.getElementById('fisc-origen').innerHTML = [
+    'Sueldo deducible: ' + (d.origen.pctPersonalDeducible === 'nomina'
+      ? 'sale de la nómina (sólo la parte por recibo)' : 'sin nómina, se asume todo deducible'),
+    d.origen.proveedoresEnPadron + ' proveedores en el padrón',
+    d.origen.renglonesDeCompras + ' renglones de Compras para calibrar',
+  ].join(' · ');
+
+  // ── Los tres escenarios de precio ─────────────────────────────────────────
+  const etiquetas = ['Carta congelada', 'Traslado parcial', 'Traslado total'];
+  const detalles = [
+    'El precio de hoy pasa a ser precio final con IVA adentro. El IVA sale de tu margen.',
+    'Subís la carta a medias. El resto lo absorbe el margen.',
+    'La carta sube 21% y tu ingreso neto queda igual al de hoy. Lo paga el cliente.',
+  ];
+  document.getElementById('fisc-escenarios').innerHTML = d.meses[0].escenarios.map((e, i) => {
+    const p = prom(m => escDe(m, i).pctSobreIngresos[figura].esperado);
+    const resign = prom(m => escDe(m, i).ventas.netoResignado);
+    const sube = prom(m => escDe(m, i).ventas.aumentoAlCliente);
+    const tit = i === 1 ? etiquetas[1] + ' (' + Math.round(e.traslado * 100) + '%)' : etiquetas[i];
+    return '<div class="fisc-esc-card' + (i === 0 ? ' activo' : '') + '">' +
+      '<div class="tit">' + tit + '</div>' +
+      '<div class="val">' + pct(p) + '</div>' +
+      '<div class="sub">' + detalles[i] +
+      (resign > 0 ? '<br>Margen resignado: <strong>' + fmt(resign) + '</strong>/mes' : '') +
+      (sube > 0 ? '<br>El cliente paga <strong>' + fmt(sube) + '</strong>/mes más' : '') +
+      '</div></div>';
+  }).join('');
+
+  // ── Mes a mes, sobre el escenario de carta congelada ──────────────────────
+  const filas = d.meses.map(m => {
+    const e = m.escenarios[0].declarado;
+    return '<tr><td>' + m.mes + '</td>' +
+      '<td>' + fmt(e.ventas.cobradoHoy) + '</td>' +
+      '<td>' + fmt(e.iva.debito) + '</td>' +
+      '<td style="color:var(--green)">−' + fmt(e.iva.credito.esperado) + '</td>' +
+      '<td>' + fmt(e.iva.aPagar.esperado) + '</td>' +
+      '<td>' + fmt(e.iibb.sobreBaseDeclarada) + '</td>' +
+      '<td>' + fmt(e.ganancias[figura].esperado) + '</td>' +
+      '<td style="font-weight:600">' + fmt(e.totalFiscal[figura].esperado) + '</td>' +
+      '<td style="color:var(--orange);font-weight:600">' + pct(e.pctSobreIngresos[figura].esperado) + '</td></tr>';
+  }).join('');
+  document.getElementById('fisc-meses').innerHTML =
+    '<thead><tr><th>Mes</th><th>Ventas Galicia</th><th>Débito</th><th>Crédito</th>' +
+    '<th>IVA a pagar</th><th>IIBB</th><th>Ganancias</th><th>Total</th><th>% caja</th></tr></thead>' +
+    '<tbody>' + filas + '</tbody>';
+
+  // ── Las tres bases de Ganancias ───────────────────────────────────────────
+  const bases = d.meses[0].escenarios[0].declarado.ganancias.bases;
+  const orden = [['soloDeclarado', 'Sólo lo declarado'], ['proporcional', 'Proporcional'], ['todoDeclarado', 'Declarando todo']];
+  document.getElementById('fisc-bases').innerHTML =
+    '<thead><tr><th>Base</th><th>Ingresos netos</th><th>Gastos deducibles</th><th>Utilidad</th></tr></thead><tbody>' +
+    orden.map(([k, lbl]) => {
+      const b = bases[k];
+      return '<tr class="' + (b.valida ? '' : 'fisc-base-invalida') + '">' +
+        '<td>' + lbl + '</td><td>' + fmt(b.ingresos) + '</td>' +
+        '<td>' + fmt(b.gastos) + '</td><td>' + fmt(b.utilidad) + '</td></tr>';
+    }).join('') + '</tbody>';
+  document.getElementById('fisc-bases-pie').textContent = bases.soloDeclarado.motivo +
+    ' · El número de arriba usa la base proporcional. ' + bases.proporcional.motivo;
+
+  // ── Oportunidades e incógnitas ────────────────────────────────────────────
+  const ops = d.meses[0].oportunidades || [];
+  document.getElementById('fisc-oportunidades').innerHTML = ops.length
+    ? '<thead><tr><th>Proveedor</th><th>Qué pasa</th><th>Gasto/mes</th><th>Por año</th></tr></thead><tbody>' +
+      ops.slice(0, 12).map(o => {
+        const esPerdida = o.tipo === 'sin-factura-a';
+        return '<tr><td>' + escapeHtml(o.proveedor || '') + '</td>' +
+          '<td style="text-align:left">' +
+            '<span class="fisc-tag ' + (esPerdida ? 'no' : 'dud') + '">' +
+            (esPerdida ? 'no da factura A' : 'sin relevar') + '</span> ' +
+            '<span style="color:var(--text-muted);font-size:11px">' + escapeHtml(o.accion || '') + '</span></td>' +
+          '<td>' + fmt(o.gasto) + '</td>' +
+          '<td style="font-weight:600;color:' + (esPerdida ? 'var(--red)' : 'var(--text-muted)') + '">' +
+            fmt(o.perdidoAnualizado || o.enJuegoAnualizado || 0) + '</td></tr>';
+      }).join('') + '</tbody>'
+    : '<tbody><tr><td style="color:var(--text-muted)">Nada que reclamar: todo el gasto está relevado.</td></tr></tbody>';
+
+  // ── Advertencias ──────────────────────────────────────────────────────────
+  const advs = d.meses[0].escenarios[0].declarado.advertencias || [];
+  const decl = d.meses[0].escenarios[0].declarado.declaracion;
+  const fijas = [
+    { texto: 'Las alícuotas de IIBB y las escalas de Ganancias son un punto de partida para poder correr el modelo, no una afirmación sobre la ley vigente. Confirmalas con tu contador.', impactoARS: 0 },
+    { texto: 'Las retenciones que Galicia ya te hace están contabilizadas enteras como comisión. Parte puede ser retención de IVA o IIBB, que es pago a cuenta y no costo. Eso sólo lo dice la liquidación de Galicia.', impactoARS: 0 },
+    { texto: 'Estás declarando el ' + pct(decl.pctDeclarado) + ' de lo que vendés. La diferencia son ' +
+        fmt(decl.brechaAnualizadaARS) + ' por año que este cálculo deja afuera a propósito, por decisión tuya.', impactoARS: 0 },
+  ];
+  document.getElementById('fisc-advertencias').innerHTML =
+    advs.concat(fijas).map(a => '<div class="fisc-adv">' + escapeHtml(a.texto) +
+      (a.impactoARS ? ' <strong>' + fmt(a.impactoARS) + '/mes</strong>' : '') + '</div>').join('');
+}
+
+// ─── El padrón: cargar la condición fiscal de cada proveedor ─────────────────
+async function abrirPadronFiscal() {
+  document.getElementById('fiscal-padron-overlay').classList.add('open');
+  document.getElementById('fisc-cola').innerHTML = '<div class="fisc-nota">Cargando…</div>';
+  try {
+    const { data } = await api('/api/fiscal/padron');
+    _fiscCola = data;
+    renderColaPadron();
+  } catch (e) {
+    document.getElementById('fisc-cola').innerHTML = '<div class="fisc-nota">No se pudo cargar: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+function cerrarPadronFiscal() {
+  document.getElementById('fiscal-padron-overlay').classList.remove('open');
+  // Recalcular al cerrar: es lo que hace visible que el rango se angostó.
+  recalcFiscal();
+}
+
+function renderColaPadron() {
+  const d = _fiscCola;
+  if (!d) return;
+  const cola = d.cola.filter(p => !p.sinNombre);
+  const sinNombre = d.cola.find(p => p.sinNombre);
+
+  document.getElementById('fisc-padron-intro').innerHTML =
+    'Ordenados por cuánto se les compró en ' + d.meses.join(', ') + '. ' +
+    'Los primeros son los que mueven el número — con los primeros seis suele estar el 80% del gasto. ' +
+    (sinNombre ? '<br><strong>' + fmt(sinNombre.gasto) + '</strong> de gasto no tiene proveedor cargado en el libro: ' +
+      'esas filas nunca van a generar crédito fiscal.' : '');
+
+  const opt = (vals, sel) => vals.map(v =>
+    '<option value="' + v + '"' + (v === sel ? ' selected' : '') + '>' + v + '</option>').join('');
+  const CONDS = ['Desconocido', 'RI', 'Monotributo', 'Exento', 'Consumidor Final'];
+  const COMPS = ['Desconocido', 'A', 'B', 'C', 'Sin comprobante'];
+  const ALICS = ['', '21', '10.5', '0'];
+
+  document.getElementById('fisc-cola').innerHTML = cola.map((p, i) => {
+    const id = 'fp' + i;
+    return '<div class="fisc-prov" data-prov="' + escapeHtml(p.proveedor) + '">' +
+      '<div class="nom-cel"><div class="nom">' + escapeHtml(p.proveedor) + '</div>' +
+        '<div class="plata">' + fmt(p.gasto) + ' · ' + pct(p.pctDelGasto) + ' del gasto' +
+        (p.creditoEnJuegoARS > 0 ? ' · <span style="color:var(--orange)">' + fmt(p.creditoEnJuegoARS) + ' en juego</span>' : '') +
+        '</div></div>' +
+      '<div><select id="' + id + '-cond">' + opt(CONDS, p.condicion) + '</select></div>' +
+      '<div><select id="' + id + '-comp">' + opt(COMPS, p.comprobante) + '</select></div>' +
+      '<div><select id="' + id + '-alic">' +
+        ALICS.map(a => '<option value="' + a + '"' + (String(p.alicuotaIva || '') === a ? ' selected' : '') + '>' +
+          (a === '' ? 'alícuota' : a + '%') + '</option>').join('') + '</select></div>' +
+      '<div><input id="' + id + '-cuit" placeholder="CUIT" value="' + (p.cuit || '') + '" maxlength="13"></div>' +
+      '<div><button class="btn" onclick="guardarProveedorFiscal(\'' + id + '\', this)">Guardar</button></div>' +
+      '</div>';
+  }).join('') || '<div class="fisc-nota">No quedan proveedores por relevar.</div>';
+}
+
+async function guardarProveedorFiscal(id, btn) {
+  const fila = btn.closest('.fisc-prov');
+  const proveedor = fila.getAttribute('data-prov');
+  const val = suf => (document.getElementById(id + suf) || {}).value || '';
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    await api('/api/fiscal/padron', {
+      method: 'POST',
+      body: JSON.stringify({
+        proveedor,
+        condicion: val('-cond') || undefined,
+        comprobante: val('-comp') || undefined,
+        alicuotaIva: val('-alic') || undefined,
+        cuit: val('-cuit') || undefined,
+      }),
+    });
+    btn.textContent = '✓';
+    fila.style.opacity = '0.55';
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Guardar';
+    showToast('No se guardó: ' + e.message);
+  }
+}
+
+// Siembra desde lo que ya está en Compras. Dry-run primero SIEMPRE: escribe en
+// la planilla, así que se ve qué cambiaría antes de aplicarlo.
+async function sembrarPadronFiscal(aplicar) {
+  const cont = document.getElementById('fisc-siembra');
+  cont.textContent = aplicar ? 'Aplicando…' : 'Buscando…';
+  try {
+    const { data } = await api('/api/fiscal/padron/sembrar', {
+      method: 'POST', body: JSON.stringify({ aplicar: !!aplicar }),
+    });
+    _fiscSiembra = data;
+    const btn = document.getElementById('fisc-btn-sembrar');
+    if (aplicar) {
+      cont.innerHTML = 'Se completaron <strong>' + data.escritas + '</strong> proveedores desde las facturas ya cargadas.';
+      if (btn) btn.style.display = 'none';
+      await abrirPadronFiscal();
+      return;
+    }
+    if (!data.propuestos.length) {
+      cont.innerHTML = 'No hay nada que completar solo: las facturas cargadas no traen el dato fiscal. ' +
+        'Hay que cargarlos a mano, y por eso la lista está ordenada por plata.';
+      if (btn) btn.style.display = 'none';
+      return;
+    }
+    cont.innerHTML = 'Se pueden completar <strong>' + data.propuestos.length + '</strong> de ' +
+      data.proveedoresEnCompras + ' proveedores con facturas cargadas:<br>' +
+      data.propuestos.map(p => '· ' + escapeHtml(p.proveedor) + ' → ' +
+        escapeHtml(Object.entries(p.cambios).map(([k, v]) => k + ': ' + v).join(', ')) +
+        ' <span style="opacity:0.7">(' + escapeHtml(p.evidencia) + ')</span>').join('<br>');
+    if (btn) btn.style.display = '';
+  } catch (e) {
+    cont.textContent = 'No se pudo: ' + e.message;
+  }
 }
 
 // Desglose auditable de la proyeccion del mes: muestra lo REAL ya registrado +
