@@ -35,6 +35,8 @@ const nomina = require('./nomina');
 const cierreCocina = require('./cierre-cocina');
 const notificaciones = require('./notificaciones');
 const stockBebidas = require('./stock-bebidas');
+const regimenFiscal = require('./regimen-fiscal');
+const fiscalProv = require('./fiscal-proveedores');
 const { iniciarCron } = require('./cron');
 const { cargarEstadoCaja, guardarEstadoCaja } = require('./estado-caja');
 
@@ -3766,6 +3768,157 @@ app.get('/api/calculadora/defaults', authMiddleware, adminOnly, async (req, res)
     const base = require('./proyecciones').calcularBaselines(movimientos, new Date(), { nomina: nominaBase });
     res.json({ ok: true, data: base });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─── Régimen fiscal: simular meses cerrados como Responsable Inscripto ───────
+//
+// El cálculo entero vive en `regimen-fiscal.js` y es puro; acá sólo se leen las
+// fuentes y se le pasan. Mismo patrón que /api/calculadora.
+
+// Los últimos N meses CERRADOS. El mes en curso queda afuera: simular medio mes
+// contra costos fijos de mes entero da un costo fiscal que no significa nada.
+// La columna `Mes` es texto sin año (convención del repo), así que el orden sale
+// de cómo aparecen en la planilla, que es cronológico. `MESES_NOMBRES` ya está
+// declarada más arriba en este archivo.
+function ultimosMesesCerrados(resumenes, n = 3) {
+  const mesActual = MESES_NOMBRES[new Date().getMonth()];
+  return resumenes.filter(r => r.mes && r.mes !== mesActual).slice(-n);
+}
+
+// Qué porción del sueldo va por recibo. Sólo esa parte se puede deducir en
+// Ganancias; lo que se paga por fuera es costo real y no es gasto deducible.
+async function pctPersonalDeducible() {
+  try {
+    const emp = await nomina.getEmpleados();
+    const lista = (emp && emp.empleados) || emp || [];
+    let total = 0, blanco = 0;
+    for (const e of lista) {
+      total += Number(e.sueldoActualARS) || 0;
+      blanco += Number(e.enBlancoNetoARS) || 0;
+    }
+    return total > 0 ? blanco / total : null;
+  } catch (e) { return null; }   // sin nómina, el módulo usa su default
+}
+
+app.post('/api/fiscal/simulacion', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { meses: mesesPedidos, escenarios, parametros = {}, cantidadMeses = 3 } = req.body || {};
+    const [movimientos, resumenes, compras, padron, pctBlanco] = await Promise.all([
+      getMovimientos(),
+      getResumenMensual({}),
+      prov.getCompras().catch(() => []),   // Compras es analítica: si falla, se sigue sin calibrar
+      fiscalProv.leerPadron().catch(() => ({})),
+      pctPersonalDeducible(),
+    ]);
+
+    const elegidos = mesesPedidos && mesesPedidos.length
+      ? resumenes.filter(r => mesesPedidos.includes(r.mes))
+      : ultimosMesesCerrados(resumenes, cantidadMeses);
+
+    const movimientosPorMes = {};
+    for (const r of elegidos) movimientosPorMes[r.mes] = movimientos.filter(m => m.mes === r.mes);
+
+    const params = { ...parametros };
+    if (pctBlanco !== null && parametros.pctPersonalDeducible === undefined) {
+      params.pctPersonalDeducible = pctBlanco;
+    }
+
+    const data = regimenFiscal.simular({
+      meses: elegidos,
+      movimientosPorMes,
+      padron,
+      calibracion: regimenFiscal.calibrarDesdeCompras(compras),
+      escenarios: escenarios || [0, 0.5, 1],
+      parametros: params,
+    });
+
+    // De dónde salió cada supuesto que el usuario no eligió. Un número fiscal sin
+    // origen declarado es un número que nadie audita.
+    data.origen = {
+      pctPersonalDeducible: pctBlanco !== null ? 'nomina' : 'default',
+      proveedoresEnPadron: Object.keys(padron).length,
+      renglonesDeCompras: compras.length,
+      mesesSimulados: elegidos.map(r => r.mes),
+    };
+    res.json({ ok: true, data });
+  } catch (err) {
+    console.error('Error /api/fiscal/simulacion:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Los parámetros por defecto, para precargar la pantalla. Todos son editables:
+// las alícuotas y las escalas las valida el contador, no este código.
+app.get('/api/fiscal/defaults', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [resumenes, pctBlanco] = await Promise.all([getResumenMensual({}), pctPersonalDeducible()]);
+    res.json({
+      ok: true,
+      data: {
+        parametros: regimenFiscal.PARAMETROS,
+        pctPersonalDeducible: pctBlanco,
+        mesesDisponibles: resumenes.map(r => r.mes),
+        mesesSugeridos: ultimosMesesCerrados(resumenes, 3).map(r => r.mes),
+        condiciones: fiscalProv.CONDICIONES,
+        comprobantes: fiscalProv.COMPROBANTES,
+      },
+    });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ─── Padrón fiscal de proveedores ────────────────────────────────────────────
+// La cola viene ordenada por PLATA, no por nombre: con dieciséis proveedores
+// para relevar, el orden decide si se resuelve el 80% del gasto o se abandona.
+app.get('/api/fiscal/padron', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [movimientos, resumenes, compras, padron] = await Promise.all([
+      getMovimientos(), getResumenMensual({}),
+      prov.getCompras().catch(() => []),
+      fiscalProv.leerPadron().catch(() => ({})),
+    ]);
+    const elegidos = ultimosMesesCerrados(resumenes, Number(req.query.meses) || 3);
+    const nombres = new Set(elegidos.map(r => r.mes));
+    const movs = movimientos.filter(m => nombres.has(m.mes));
+    const credito = regimenFiscal.estimarCreditoFiscal({
+      movimientos: movs, padron,
+      calibracion: regimenFiscal.calibrarDesdeCompras(compras),
+    });
+    res.json({
+      ok: true,
+      data: {
+        cola: fiscalProv.armarCola({ movimientos: movs, padron, credito }),
+        padron,
+        cobertura: credito.cobertura,
+        meses: [...nombres],
+      },
+    });
+  } catch (err) {
+    console.error('Error /api/fiscal/padron:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/fiscal/padron', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { proveedor, cuit, condicion, comprobante, alicuotaIva } = req.body || {};
+    if (!proveedor) return res.status(400).json({ ok: false, error: 'Falta el proveedor' });
+    const r = await fiscalProv.setFiscalProveedor(proveedor, { cuit, condicion, comprobante, alicuotaIva });
+    clearCache();
+    res.json({ ok: true, data: r });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+// Siembra desde lo que ya existe. Dry-run por defecto: sin `aplicar: true` sólo
+// dice qué cambiaría. Nunca pisa una fila cargada a mano.
+app.post('/api/fiscal/padron/sembrar', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const r = await fiscalProv.sembrarPadron({ aplicar: req.body && req.body.aplicar === true });
+    if (r.aplicado) clearCache();
+    res.json({ ok: true, data: r });
+  } catch (err) {
+    console.error('Error /api/fiscal/padron/sembrar:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // ─── Punto de equilibrio diario (Servicios) ──────────────────────────────────
