@@ -2596,10 +2596,10 @@ app.post('/api/notificaciones/limpiar', authMiddleware, async (req, res) => {
 });
 
 // ─── Cierre de cocina — qué comprar y qué producir ──────────────────────────
-// `authMiddleware` sin `adminOnly` a propósito: el encargado entra, porque la
-// checklist de producción la lee toda la cocina. Lo que NO ve es Mercadería ni
-// Insumos, y eso no lo decide el navegador — `estadoActual` arma la respuesta
-// según el rol y esas dos solapas directamente no viajan. Ver src/cierre-cocina.js.
+// El GET va sin `adminOnly` a propósito: la cocina entra, porque la checklist de
+// producción la lee toda la cocina. Lo que recibe cada uno no lo decide el
+// navegador — `estadoActual` arma la respuesta según el rol: el encargado recibe
+// sólo `produ`, y la recibe con `puedeMarcar: false`. Ver src/cierre-cocina.js.
 app.get('/api/cierre-cocina', authMiddleware, async (req, res) => {
   try { res.json({ ok: true, data: await cierreCocina.estadoActual({ rol: req.user.rol }) }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
@@ -2608,7 +2608,12 @@ app.get('/api/cierre-cocina', authMiddleware, async (req, res) => {
 // Guardar la foto del servicio. Quién firma sale del token, nunca del body.
 // El 409 es el caso de "ya hay un cierre para esta noche": no se pisa solo,
 // hay que mandar `reemplazar` a propósito.
-app.post('/api/cierre-cocina', authMiddleware, async (req, res) => {
+//
+// `adminOnly` desde el 24/08/2026: marcar y comentar la planilla de Pablo es de
+// Pablo, Tincho y admin. La cocina lee la checklist y tilda su lista del día, que
+// son las tres rutas de más abajo y escriben en la hoja propia de la app.
+// `guardarCierre` repite la comprobación: ver el comentario que la abre.
+app.post('/api/cierre-cocina', authMiddleware, adminOnly, async (req, res) => {
   try {
     const data = await cierreCocina.guardarCierre(req.body, { usuario: req.user.nombre, rol: req.user.rol });
     res.json({ ok: true, data });

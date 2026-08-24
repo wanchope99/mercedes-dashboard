@@ -478,6 +478,55 @@
     button.cc-chip:not(.sel):hover { opacity: .95; border-color: currentColor !important; }
     .cc-chip.sel { outline: 2px solid currentColor; outline-offset: 1px; font-weight: 700; }
 
+    /* ─── Los dos modos de mirar la misma lista ──────────────────────────────
+       El toggle vive en la tira de solapas, a la derecha. Sólo aparece cuando
+       quien mira puede marcar: a la cocina no se le ofrece un botón que el
+       server le va a rechazar. */
+    .cc-vistas { display: flex; gap: 4px; margin-left: auto; }
+    .cc-vista { padding: 6px 12px; border-radius: 99px; font-size: 12px; font-weight: 600;
+                cursor: pointer; font-family: inherit; white-space: nowrap;
+                background: transparent; border: 1px solid var(--border); color: var(--text-muted); }
+    .cc-vista:hover { color: var(--text); }
+    .cc-vista.active { background: var(--surface2); border-color: var(--text-muted); color: var(--text); }
+
+    /* ─── Modo lectura ───────────────────────────────────────────────────────
+       La misma lista, para LEERLA y no para llenarla. La fila de checklist son
+       tres zonas, un input y cuatro botones: eso sirve para recorrer cuarenta
+       ítems marcando de noche, y es ruido puro cuando lo único que se quiere es
+       leer qué dejó dicho Pablo. Acá no hay nada que tocar, así que el renglón
+       es una línea, el estado es una palabra y lo que está en OK se apaga: lo
+       que reclama algo queda solo en la página.
+
+       Dos columnas en pantalla grande porque Insumos son cien ítems, y cien
+       renglones en una sola tira son mil píxeles de alto que hay que scrollear
+       para saber si falta algo abajo. Cada categoría es un bloque que no se
+       parte entre columnas: partirla haría que el título quedara en una y la
+       mitad de sus ítems en la otra. */
+    .cc-lectura { columns: 2; column-gap: 34px; }
+    .cc-lec-grupo { break-inside: avoid; -webkit-column-break-inside: avoid; margin: 0 0 20px; }
+    /* La cabecera reusa .cc-grupo (misma tipografía, misma flecha, mismo plegado)
+       y sólo le saca el margen de arriba: acá cada grupo ya es un bloque. */
+    .cc-lec-grupo .cc-grupo { margin-top: 0; }
+    .cc-lec-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px;
+                   align-items: baseline; padding: 7px 0 7px 11px;
+                   border-left: 3px solid transparent; border-top: 1px solid var(--border); }
+    /* La franja de color al costado, igual que en la fila de checklist: dice el
+       estado sin leer la palabra. Lo que está OK además se apaga. */
+    .cc-lec-item.hacer { border-left-color: var(--orange); }
+    .cc-lec-item.pedido { border-left-color: var(--blue); }
+    .cc-lec-item.dudoso { border-left-color: var(--text-muted); }
+    .cc-lec-item.ok { border-left-color: var(--green); opacity: .5; }
+    .cc-lec-nom { font-size: 14.5px; line-height: 1.45; }
+    .cc-lec-estado { font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+                     letter-spacing: .5px; white-space: nowrap; color: var(--text-muted); }
+    .cc-lec-estado.ok { color: var(--green); }
+    .cc-lec-estado.hacer { color: var(--orange); }
+    .cc-lec-estado.pedido { color: var(--blue); }
+    /* El comentario es la mitad del dato —"hacer" sin decir cuánto obliga a
+       preguntarle a Pablo— así que baja entero abajo, sin recortar. */
+    .cc-lec-nota { grid-column: 1 / -1; font-size: 12.5px; line-height: 1.5; color: var(--text-muted); }
+    @media (max-width: 900px) { .cc-lectura { columns: 1; } }
+
     /* ─── Producción del día ─────────────────────────────────────────────────
        La otra mitad de la feature: lo que la cocina mira a la mañana. Es una
        pantalla de otra naturaleza que la de cierre y por eso no reusa .cc-item —
@@ -1790,16 +1839,25 @@
      contabilidad del bar. Ver src/mantenimiento.js. -->
 <!-- ═══ CIERRE DE COCINA ══════════════════════════════════════════════════════
      Qué comprar y qué producir, que Pablo anota al cerrar cada servicio. Vive
-     en una planilla aparte. El encargado entra, pero sólo ve Producir y Seteo —
-     lo decide el server, no esta pantalla. Ver src/cierre-cocina.js.
+     en una planilla aparte. La cocina entra, pero sólo ve Producir — lo decide
+     el server, no esta pantalla. Ver src/cierre-cocina.js.
 
      DOS MODOS, porque son dos usos y dos personas:
 
        · Producción de hoy — lo que la cocina mira a la mañana. Sólo lo que hay
          que producir, y un toque para tildarlo. Es lo que ve por defecto quien
          no es admin: Eze y Juan entran acá.
-       · Cierre de cocina — la pantalla de marcar, que usa Pablo a la noche.
-         Es el default para admin.
+       · Cierre de cocina — la lista completa. Para Pablo es la pantalla de
+         marcar y es su default; para la cocina se llama "La checklist de
+         anoche" y es de lectura, que es literalmente lo que hacen con ella a
+         la mañana antes de empezar.
+
+     Y DENTRO DEL SEGUNDO, DOS VISTAS de la misma lista (👁 Lectura / ✍️
+     Checklist). Arranca en lectura para todos; el toggle a checklist existe
+     sólo para quien puede marcar, y quién puede marcar lo dice el server en
+     `puedeMarcar` de cada solapa — desde el 24/08/2026, Pablo, Tincho y admin.
+     La cocina lee la planilla de Pablo y tilda su propia lista del día; escribir
+     en la de él no es suyo. Ver el bloque CSS de .cc-lectura.
 
      El mismo tab y no un sexto ítem del menú: el grupo Operación ya está en seis
      subs, y la regla de este archivo dice que a los seis hay que repensar el
@@ -13399,6 +13457,12 @@ const ccState = {
   // Arranca en null y lo resuelve loadTabCierre según el rol, porque el rol
   // todavía no está cargado cuando se evalúa este objeto.
   modo: null,
+  // 'lectura' (la lista para leer) o 'checklist' (la de marcar). Arranca en
+  // lectura para TODOS, admin incluido: entrar a una pantalla donde cada fila
+  // tiene cuatro botones es entrar a una pantalla que se puede tocar de más, y
+  // la mayoría de las veces que se abre esto es para mirar. Pasar a marcar es
+  // un toque, y sólo lo tiene quien puede marcar.
+  vista: 'lectura',
   data: null, solapa: null, cambios: new Map(), guardando: false,
   // Qué categorías están plegadas, con clave solapa|grupo. Sobrevive a los
   // re-render (que son uno por marca) porque si no, plegar algo y marcar el
@@ -13448,6 +13512,26 @@ async function loadCierreCocina(btn) {
 }
 
 function ccElegirSolapa(id) { ccState.solapa = id; renderCierreCocina(); }
+
+// ─── Quién marca y quién lee ───────────────────────────────────────────────
+//
+// `puedeMarcar` lo manda el server por solapa y es de la PERSONA; `escribible`
+// es de la HOJA (si la app le escribe alguna celda). Son dos preguntas y hacen
+// falta las dos: Seteo no se marca porque la hoja es de consulta, y Producir no
+// la marca la cocina porque la planilla es de Pablo. Las dos terminan en la
+// misma pantalla de lectura, por motivos distintos.
+//
+// El estado de la vista es uno solo para toda la pantalla y no uno por solapa:
+// pasar de Insumos a Comprar mientras se está marcando tiene que seguir
+// marcando. Al caer en una solapa que no se marca se lee, y al volver a una que
+// sí, se vuelve a marcar — sin acordarse de nada.
+const ccPuedeMarcar = solapa => !!(solapa && solapa.puedeMarcar);
+const ccEnChecklist = solapa => ccPuedeMarcar(solapa) && ccState.vista === 'checklist';
+
+function ccVerVista(vista) {
+  ccState.vista = vista;
+  renderCierreCocina();
+}
 
 const ccClaveGrupo = (solapaId, grupo) => `${solapaId}|${grupo}`;
 
@@ -13608,6 +13692,17 @@ function renderCierreCocina() {
   const hoja = d.hojas[ccState.solapa];
   if (!solapa || !hoja) { cont.innerHTML = ''; return; }
 
+  // El toggle va al final de la tira de solapas y sólo existe para quien puede
+  // marcar. A la cocina no se le ofrece: un botón que el server rechaza es peor
+  // que no tener botón.
+  if (ccPuedeMarcar(solapa)) {
+    const v = ccState.vista;
+    nav.innerHTML += `<span class="cc-vistas">
+      <button class="cc-vista${v === 'lectura' ? ' active' : ''}" onclick="ccVerVista('lectura')">👁 Lectura</button>
+      <button class="cc-vista${v === 'checklist' ? ' active' : ''}" onclick="ccVerVista('checklist')">✍️ Checklist</button>
+    </span>`;
+  }
+
   if (hoja.error) {
     cont.innerHTML = `<div class="prop-error">No se pudo leer "${escapeHtml(solapa.hoja)}": ${escapeHtml(hoja.error)}</div>`;
     return;
@@ -13617,6 +13712,8 @@ function renderCierreCocina() {
   // Van arriba de todo: son cosas que alguien tiene que arreglar en la planilla.
   const mios = (d.avisos || []).filter(a => a.includes(solapa.hoja));
   const avisos = mios.length ? `<div class="cc-aviso">${mios.map(escapeHtml).join('<br>')}</div>` : '';
+
+  const enChecklist = ccEnChecklist(solapa);
 
   const r = hoja.resumen;
   const kpis = solapa.escribible
@@ -13631,18 +13728,16 @@ function renderCierreCocina() {
          ${r.total} cosas para setear. Esta lista es de consulta: no se tilda.
        </div>`;
 
-  // Agrupado por plato o categoría, respetando el orden de la planilla — que
-  // lleva la intención de quien la escribió.
-  const grupos = new Map();
-  for (const it of hoja.items) {
-    const k = it.grupo || '(sin ' + (solapa.etiquetaGrupo || 'grupo').toLowerCase() + ')';
-    if (!grupos.has(k)) grupos.set(k, []);
-    grupos.get(k).push(it);
-  }
-
+  const grupos = ccAgrupar(solapa, hoja.items);
   const sid = solapa.id;
   const arg = it => `'${sid}',${JSON.stringify(it.grupo)},${JSON.stringify(it.nombre)}`.replace(/"/g, '&quot;');
   const argGrupo = grupo => `'${sid}',${JSON.stringify(grupo)}`.replace(/"/g, '&quot;');
+
+  if (!enChecklist) {
+    cont.innerHTML = `<div id="cc-banner"></div>` + avisos + kpis + ccHtmlLectura(solapa, grupos);
+    ccRenderBanner();
+    return;
+  }
 
   cont.innerHTML = `<div id="cc-banner"></div>` + avisos + kpis + [...grupos.entries()].map(([grupo, items]) => {
     const plegado = ccState.plegados.has(ccClaveGrupo(sid, grupo));
@@ -13659,10 +13754,10 @@ function renderCierreCocina() {
           <span>${escapeHtml(grupo)}</span>
           <span class="cc-grupo-n">${items.length}${pendientes ? ` · ${pendientes} pendiente${pendientes !== 1 ? 's' : ''}` : ''}</span>
         </span>
-        ${solapa.escribible ? `<span class="cc-todos">
+        <span class="cc-todos">
           <button class="ok" onclick="ccMarcarGrupo(${argGrupo(grupo)},'ok')">OK a todos</button>
           <button class="hacer" onclick="ccMarcarGrupo(${argGrupo(grupo)},'hacer')">${escapeHtml(ccLabelEstado(sid, 'hacer'))} a todos</button>
-        </span>` : ''}
+        </span>
       </div>`;
 
     if (plegado) return cabecera;
@@ -13678,25 +13773,88 @@ function renderCierreCocina() {
         <span class="cc-nombre">${escapeHtml(it.nombre)}
           ${tocado && it.estado !== estado ? `<span class="cc-coment">antes: ${escapeHtml(ccLabelEstado(sid, it.estado))}</span>` : ''}
         </span>
-        ${solapa.escribible ? `
-          <input class="cc-input${falta ? ' falta' : ''}" type="text"
-                 placeholder="${falta ? '¿Qué hay que ver? (obligatorio)' : 'Comentario (opcional)'}"
-                 value="${escapeHtml(coment)}"
-                 oninput="ccComentar(${arg(it)}, this.value, this)">
-          <span class="cc-estados">
-            ${(solapa.estados || []).map(e => `
-              <button class="cc-chip ${escapeHtml(e)}${e === estado ? ' sel' : ''}" onclick="ccMarcar(${arg(it)},'${e}')">
-                ${escapeHtml(ccLabelEstado(sid, e))}
-              </button>`).join('')}
-          </span>
-        ` : `
-          <span class="cc-coment" style="margin:0">${escapeHtml(coment)}</span>
-          ${it.extra ? `<span class="cc-chip">${escapeHtml(it.extra)}</span>` : '<span></span>'}
-        `}
+        <input class="cc-input${falta ? ' falta' : ''}" type="text"
+               placeholder="${falta ? '¿Qué hay que ver? (obligatorio)' : 'Comentario (opcional)'}"
+               value="${escapeHtml(coment)}"
+               oninput="ccComentar(${arg(it)}, this.value, this)">
+        <span class="cc-estados">
+          ${(solapa.estados || []).map(e => `
+            <button class="cc-chip ${escapeHtml(e)}${e === estado ? ' sel' : ''}" onclick="ccMarcar(${arg(it)},'${e}')">
+              ${escapeHtml(ccLabelEstado(sid, e))}
+            </button>`).join('')}
+        </span>
       </div>`;
     }).join('');
   }).join('');
   ccRenderBanner();
+}
+
+// Agrupado por plato o categoría, respetando el orden de la planilla — que lleva
+// la intención de quien la escribió. Nunca se reordena ni se compacta.
+function ccAgrupar(solapa, items) {
+  const grupos = new Map();
+  for (const it of items || []) {
+    const k = it.grupo || '(sin ' + (solapa.etiquetaGrupo || 'grupo').toLowerCase() + ')';
+    if (!grupos.has(k)) grupos.set(k, []);
+    grupos.get(k).push(it);
+  }
+  return grupos;
+}
+
+// ─── La lista para leer ────────────────────────────────────────────────────
+//
+// Un renglón por ítem: qué es, en qué estado quedó y lo que dejó dicho quien lo
+// marcó. Sin input, sin botones y sin nada que se pueda tocar de más.
+//
+// Muestra los ítems que están OK en vez de esconderlos, apagados: esto es LA
+// CHECKLIST, y una checklist a la que le sacaron lo que está bien ya no sirve
+// para recorrer la heladera y confirmar. La lista corta de lo que falta hacer ya
+// existe y es otra pantalla — "Producción de hoy".
+//
+// Se dibuja con ccEstadoDe/ccComentDe y no con el ítem crudo: si admin marcó
+// cosas y todavía no guardó, la lectura tiene que mostrar lo que dijo. Un modo
+// que muestre la planilla vieja mientras hay marcas sin guardar sería una
+// segunda versión de la verdad.
+function ccHtmlLectura(solapa, grupos) {
+  const sid = solapa.id;
+  const argGrupo = grupo => `'${sid}',${JSON.stringify(grupo)}`.replace(/"/g, '&quot;');
+
+  return `<div class="cc-lectura">` + [...grupos.entries()].map(([grupo, items]) => {
+    const plegado = ccState.plegados.has(ccClaveGrupo(sid, grupo));
+    // En lectura, pendiente es lo que reclama algo: "hacer" y "ver". Lo que
+    // nadie marcó no cuenta como pendiente acá —en la de marcar sí, porque ahí
+    // la pregunta es qué falta recorrer.
+    const pendientes = solapa.escribible
+      ? items.filter(it => ['hacer', 'dudoso'].includes(ccEstadoDe(sid, it))).length
+      : 0;
+
+    const cabecera = `<div class="cc-grupo${plegado ? ' plegado' : ''}">
+        <span class="cc-grupo-tit" onclick="ccPlegar(${argGrupo(grupo)})">
+          <span class="cc-flecha">▼</span>
+          <span>${escapeHtml(grupo)}</span>
+          <span class="cc-grupo-n">${items.length}${pendientes ? ` · ${pendientes} pendiente${pendientes !== 1 ? 's' : ''}` : ''}</span>
+        </span>
+      </div>`;
+
+    const cuerpo = plegado ? '' : items.map(it => {
+      const estado = solapa.escribible ? ccEstadoDe(sid, it) : '';
+      const coment = ccComentDe(sid, it);
+      // A la derecha, lo que esa lista tenga para decir del ítem: el estado en
+      // las tres de marcar, la plaza en Seteo. "Sin marcar" no se escribe: es la
+      // ausencia de respuesta, y ponerle una palabra la haría parecer una.
+      const derecha = solapa.escribible
+        ? (estado && estado !== 'sinTocar'
+            ? `<span class="cc-lec-estado ${escapeHtml(estado)}">${escapeHtml(ccLabelEstado(sid, estado))}</span>` : '<span></span>')
+        : (it.extra ? `<span class="cc-lec-estado">${escapeHtml(it.extra)}</span>` : '<span></span>');
+      return `<div class="cc-lec-item ${escapeHtml(estado)}">
+        <span class="cc-lec-nom">${escapeHtml(it.nombre)}</span>
+        ${derecha}
+        ${coment ? `<span class="cc-lec-nota">${escapeHtml(coment)}</span>` : ''}
+      </div>`;
+    }).join('');
+
+    return `<section class="cc-lec-grupo">${cabecera}${cuerpo}</section>`;
+  }).join('') + `</div>`;
 }
 
 // ═══ LOS DOS MODOS DE LA PANTALLA DE CIERRE ═════════════════════════════════
@@ -13709,7 +13867,13 @@ function renderCierreCocina() {
 //
 // Por eso son dos modos y no una pantalla con opciones: no se trata de mostrar
 // menos de lo mismo, se trata de que son dos tareas distintas.
-function ccModoInicial() { return getRol() === 'admin' ? 'cierre' : 'produccion'; }
+// Quien no cierra nada no entra a un "Cierre de cocina": entra a leer lo que
+// Pablo dejó escrito anoche, que es literalmente lo que hace a la mañana. El
+// permiso lo decide el server (`puedeMarcar`); esto es sólo cómo se llama el
+// botón, y llamarlo por lo que la persona va a hacer ahí vale la línea.
+const ccEsAdmin = () => getRol() === 'admin';
+
+function ccModoInicial() { return ccEsAdmin() ? 'cierre' : 'produccion'; }
 
 function ccRenderModos() {
   const el = document.getElementById('cc-modos');
@@ -13721,7 +13885,9 @@ function ccRenderModos() {
   const sinGuardar = ccState.cambios.size;
   el.innerHTML = `
     <button class="cp-modo${m === 'produccion' ? ' active' : ''}" onclick="ccIrA('produccion')">👨‍🍳 Producción de hoy</button>
-    <button class="cp-modo${m === 'cierre' ? ' active' : ''}" onclick="ccIrA('cierre')">🌙 Cierre de cocina${sinGuardar ? ` · ${sinGuardar} sin guardar` : ''}</button>`;
+    <button class="cp-modo${m === 'cierre' ? ' active' : ''}" onclick="ccIrA('cierre')">${ccEsAdmin()
+      ? `🌙 Cierre de cocina${sinGuardar ? ` · ${sinGuardar} sin guardar` : ''}`
+      : '📖 La checklist de anoche'}</button>`;
   const p = document.getElementById('cc-modo-produccion');
   const c = document.getElementById('cc-modo-cierre');
   if (p) p.style.display = m === 'produccion' ? '' : 'none';

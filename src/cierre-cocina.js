@@ -119,7 +119,11 @@ const SOLAPAS = [
     label: '📋 Seteo',
     hoja: process.env.CC_HOJA_SETEO || 'Checklist seteo',
     forma: 'agrupada',
-    soloAdmin: false,
+    // Desde el 24/08/2026 la cocina ve UNA sola lista: Producir, que es la que
+    // Pablo deja escrita a la noche y ellos leen a la mañana. Seteo es
+    // referencia de qué va en cada plaza y volverá el día que se pida; hoy
+    // sumaba una solapa a una pantalla que tiene que abrirse en la lista del día.
+    soloAdmin: true,
     // De consulta: la app no le escribe una sola celda.
     escribible: false,
     cols: { grupo: 0, nombre: 1, extra: 2 },
@@ -332,9 +336,22 @@ async function leerSolapaCacheada(solapaId) {
 
 // ─── Lo que ve la pantalla ──────────────────────────────────────────────────
 //
-// Devuelve SÓLO las solapas que ese rol puede ver. El encargado no recibe
-// `comprar` ni `insumos`: no es que se le escondan en el browser, es que no
-// están en la respuesta. La regla de la casa es que el que decide es el server.
+// Devuelve SÓLO las solapas que ese rol puede ver. La cocina (rol encargado)
+// recibe únicamente `produ`: no es que las otras se le escondan en el browser,
+// es que no están en la respuesta. La regla de la casa es que el que decide es
+// el server.
+//
+// Y ADEMÁS dice quién puede MARCAR, que desde el 24/08/2026 no es lo mismo que
+// quién puede ver. Antes las dos cosas eran una sola —si la solapa te llegaba y
+// la hoja aceptaba escritura, podías marcarla— y eso le daba a Juan y a Ezequiel
+// la pantalla de cierre entera sobre la checklist de producción. Ellos leen lo
+// que dejó Pablo y tildan lo que van haciendo en la lista de la mañana; escribir
+// en la planilla de él es de Pablo, Tincho y admin.
+//
+// `escribible` sigue siendo una propiedad de LA HOJA (¿la app le escribe alguna
+// celda?) y `puedeMarcar` una de ESTA PERSONA sobre esa hoja. Separadas porque
+// contestan preguntas distintas: la pantalla de lectura se dibuja igual para las
+// dos hojas de consulta y para las tres de marcar cuando quien mira no marca.
 async function estadoActual({ rol } = {}) {
   if (!configurada()) {
     return {
@@ -364,6 +381,7 @@ async function estadoActual({ rol } = {}) {
     solapas: visibles.map(s => ({
       id: s.id, label: s.label, hoja: s.hoja, forma: s.forma,
       escribible: s.escribible,
+      puedeMarcar: esAdmin && s.escribible,
       etiquetaGrupo: s.etiquetaGrupo, etiquetaExtra: s.etiquetaExtra || null,
       estados: s.escribible ? (s.estados || ESTADOS) : [],
     })),
@@ -786,9 +804,18 @@ async function guardarCierre({ fechaServicio, cambios = [], nota = '', reemplaza
   if (!configurada()) throw new Error('Falta STOCKS_SHEET_ID');
   if (!usuario) throw new Error('Falta el usuario');
 
+  // Cerrar es de Pablo, Tincho y admin. La regla se repite en la ruta con
+  // adminOnly y vive TAMBIÉN acá a propósito: la pantalla decide qué botones
+  // dibuja, pero lo que puede escribir en la planilla de Pablo lo decide el
+  // lugar donde se escribe. Un modo lectura que se saltea tocando la API no
+  // sería un modo lectura.
+  if (rol !== 'admin') {
+    throw new Error('El cierre de cocina lo firman Pablo, Tincho o admin. '
+      + 'Lo que se hizo se tilda en la lista de producción del día.');
+  }
+
   const fecha = fechaServicio || fechaServicioActual();
-  const esAdmin = rol === 'admin';
-  const permitidas = SOLAPAS.filter(s => s.escribible && (esAdmin || !s.soloAdmin));
+  const permitidas = SOLAPAS.filter(s => s.escribible);
   const idsPermitidos = new Set(permitidas.map(s => s.id));
 
   for (const c of cambios) {
