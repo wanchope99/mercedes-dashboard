@@ -2541,11 +2541,14 @@ app.delete('/api/propinas/personas/:nombre', authMiddleware, adminOnly, async (r
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-// ─── Nómina — el costo laboral, de sólo lectura ─────────────────────────────
+// ─── Nómina — el costo laboral y la liquidación del mes ─────────────────────
 // Son sueldos de gente real: TODO acá es adminOnly, el encargado no entra. Y la
-// nómina por persona no sale de estas tres rutas — el resto del sistema (punto
-// de equilibrio, proyecciones, agentes) recibe sólo totales y dotación.
-// La planilla es de los dueños y este módulo no le escribe nada: ver src/nomina.js.
+// nómina por persona no sale de estas rutas — el resto del sistema (punto de
+// equilibrio, proyecciones, agentes) recibe sólo totales y dotación.
+//
+// De las cinco, UNA escribe: el POST de la liquidación, que guarda el mes en la
+// hoja AAAAMM de la planilla. Las hojas `Nómina` y `Costos laborales` no se
+// tocan nunca. Ver el punto 1 del encabezado de src/nomina.js.
 app.get('/api/nomina', authMiddleware, adminOnly, async (req, res) => {
   try { res.json({ ok: true, data: await nomina.getNomina({ mesId: req.query.mes }) }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
@@ -2564,6 +2567,41 @@ app.get('/api/nomina/proyeccion', authMiddleware, adminOnly, async (req, res) =>
     const meses = Math.min(Math.max(parseInt(req.query.meses) || 12, 1), 24);
     res.json({ ok: true, data: await nomina.getProyeccion({ meses }) });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// La liquidación de un mes: qué cobra cada uno y cómo se le paga. Sin `mes` es
+// el mes en curso, que es el que se está liquidando el 99% de las veces.
+app.get('/api/nomina/liquidacion', authMiddleware, adminOnly, async (req, res) => {
+  try { res.json({ ok: true, data: await nomina.getLiquidacion({ mesId: req.query.mes }) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Y guardarla. Quién guardó sale del token, nunca del body — es lo mismo que
+// hacen el cierre de cocina y los pedidos, y acá es lo único que después
+// contesta quién tocó un sueldo.
+//
+// El 403 de Google (la cuenta de servicio sin permiso de edición sobre la
+// planilla) se traduce a algo que se pueda leer desde la pantalla: es un
+// permiso que se da en Drive, y sin esta línea llega como "The caller does not
+// have permission", que no le dice a nadie qué hacer.
+app.post('/api/nomina/liquidacion', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const data = await nomina.guardarLiquidacion(
+      { mesId: req.body.mesId, cambios: req.body.cambios },
+      { usuario: req.user.nombre });
+    res.json({ ok: true, data });
+  } catch (err) {
+    const sinPermiso = /permission|forbidden|403/i.test(err.message);
+    res.status(sinPermiso ? 403 : 400).json({
+      ok: false,
+      error: sinPermiso
+        ? 'Google no deja escribir en la planilla de nómina: la cuenta de servicio de la app '
+          + 'la puede leer pero no editar. Se arregla compartiéndosela como Editora desde Drive. '
+          + 'No se escribió nada.'
+        : err.message,
+      ignorados: err.ignorados || undefined,
+    });
+  }
 });
 
 // ─── Notificaciones — la campanita ──────────────────────────────────────────

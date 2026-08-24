@@ -863,6 +863,43 @@
       .ped-dia-col { min-height: 0; }
     }
 
+    /* ─── Liquidación del mes ────────────────────────────────────────────────
+       Una tarjeta por persona y no una tabla. Son ocho números por trabajador y
+       cuatro se editan; una tabla de ocho columnas no entra en un teléfono, y
+       esto se llena el día 1 con el teléfono en la mano. Los que se escriben
+       están arriba, en la grilla; los que salen de una cuenta van abajo, en el
+       pie, para que se vea que no se tocan. */
+    .nl-nav { display: flex; align-items: center; gap: 10px; margin: 2px 0 16px; }
+    .nl-mes { font-size: 15px; font-weight: 700; min-width: 160px; text-align: center; }
+    .nl-tot { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+              gap: 14px; margin: 0 0 16px; }
+    .nl-tot .k { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); }
+    .nl-tot .v { font-size: 21px; font-weight: 700; margin-top: 3px; }
+    .nl-persona { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px;
+                  padding: 12px 14px; margin-bottom: 10px; }
+    .nl-cab { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 11px; }
+    .nl-nombre { font-size: 14px; font-weight: 600; }
+    .nl-socio { font-size: 11px; color: var(--text-muted); font-weight: 400; }
+    .nl-total { font-size: 18px; font-weight: 700; white-space: nowrap; }
+    .nl-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; }
+    .nl-campo { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .nl-campo.ancho { grid-column: 1 / -1; }
+    .nl-campo label { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); }
+    .nl-campo input { background: var(--surface); border: 1px solid var(--border); color: var(--text);
+                      border-radius: 7px; padding: 7px 9px; font-size: 13px; font-family: inherit; width: 100%; }
+    .nl-campo input:focus { outline: none; border-color: var(--accent); }
+    /* Lo que se tocó y todavía no se guardó, igual que en el cierre de cocina: la
+       diferencia entre "lo escribí" y "quedó guardado" no puede ser invisible. */
+    .nl-campo.tocado input { border-color: var(--orange); }
+    .nl-pie { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 11px; padding-top: 9px;
+              border-top: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
+    .nl-pie b { color: var(--text); font-size: 13px; }
+    .nl-dif { color: var(--orange); }
+    .nl-guardar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 11px 13px;
+                  border-radius: 9px; background: var(--orange-dim); border: 1px solid var(--orange);
+                  font-size: 13px; margin-bottom: 14px; }
+    .nl-nota { font-size: 12px; color: var(--text-muted); line-height: 1.7; margin-top: 12px; }
+
     .loading { display: flex; align-items: center; justify-content: center; height: 120px; color: var(--text-muted); font-size: 14px; gap: 12px; }
     .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -1934,7 +1971,23 @@
      Sólo admin. Ver src/nomina.js.                                           -->
 <div id="tab-nomina" class="tab-panel">
   <main>
+    <!-- Va PRIMERA: es la tarea del mes (qué le pago a cada uno y cómo), y la de
+         abajo es análisis (qué cuesta el personal). Lo que se hace va antes de lo
+         que se mira. -->
     <div class="card">
+      <div class="card-title"><span>Liquidación del mes</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· qué cobra cada uno y cómo se le paga</span>
+        <button class="btn btn-secondary" style="margin-left:auto" onclick="loadLiquidacion(this)">↻</button>
+      </div>
+      <div class="nl-nav">
+        <button class="btn" onclick="nomLiqIrA(-1)" title="Mes anterior">‹</button>
+        <span class="nl-mes" id="nl-mes">—</span>
+        <button class="btn" onclick="nomLiqIrA(1)" title="Mes siguiente">›</button>
+      </div>
+      <div id="nl-cuerpo"><div style="color:var(--text-muted);font-size:13px">Cargando...</div></div>
+    </div>
+
+    <div class="card" style="margin-top:24px">
       <div class="card-title"><span>Nómina</span>
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· se edita en la planilla, acá se lee</span>
         <button class="btn btn-secondary" style="margin-left:auto" onclick="loadNomina(this)">↻</button>
@@ -4116,10 +4169,13 @@ const TAB_GROUPS = {
   // las dos pantallas que se abren una vez cada tanto — son la cola de Costos y
   // de Propinas, no temas propios — así que se movieron adentro de Más. El
   // criterio para lo que venga: si un sub es el detalle de otro sub, va a Más.
+  // El orden es el del día, no el de cuándo entró cada pantalla: primero lo que
+  // llega (Pedidos, Bebidas), después lo que se cierra a la noche (Cierre), la
+  // administración (Nómina) y por último lo que se rompe (Mantenimiento), que es
+  // lo que se abre cuando pasa algo y no todos los días. Reordenado el 24/08/2026.
   operacion: { label: '🍽️ Operación', icono: '🍽️', corto: 'Operación', phonePrio: 3, subs: [
     { id: 'pedidos',        label: '📦 Pedidos' },
     { id: 'vinos',          label: '🥂 Bebidas' },
-    { id: 'mantenimiento',  label: '🔧 Mantenimiento' },
     // Cierre entró el 17/08/2026 y Costos bajó a "Más" por la misma regla que
     // movió a Propinas: el grupo ya estaba en seis. Costos es una pantalla de
     // análisis que se abre cada tanto y su propia Config. de costos YA vivía
@@ -4131,6 +4187,7 @@ const TAB_GROUPS = {
     // Propinas se junta ahí con su propio Historial, y es una tarea semanal de
     // administración, no algo que se abra durante el servicio.
     { id: 'nomina',         label: '👥 Nómina', soloAdmin: true },
+    { id: 'mantenimiento',  label: '🔧 Mantenimiento' },
     { id: 'operacion-mas',  label: '⋯ Más', soloAdmin: true },
   ] },
 
@@ -14215,6 +14272,9 @@ const nomState = { data: null, proyeccion: null };
 
 async function loadNomina(btn) {
   if (btn) btn.classList.add('spinning');
+  // La liquidación se carga sola al entrar al tab, salvo que haya cosas sin
+  // guardar: recargar ahí las borraría.
+  if (!nomLiq.cambios.size) loadLiquidacion();
   const cont = document.getElementById('nomina-cuerpo');
   try {
     const [{ data }, proy] = await Promise.all([
@@ -14293,6 +14353,260 @@ function renderNomina() {
        </div>`
     + (proy ? `<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-top:16px">Lo que viene</div>${proy}` : '');
 }
+
+// ═══ LIQUIDACIÓN DEL MES ════════════════════════════════════════════════════
+// Qué cobra cada uno este mes y cómo se le paga. Ver src/nomina.js.
+//
+// Es la única pantalla de la app que ESCRIBE en la planilla de nómina, y por eso
+// se parece al cierre de cocina y no a un formulario: los cambios se juntan en
+// memoria, se ven marcados, y recién se escriben todos juntos con Guardar.
+//
+// La cuenta se rehace en el navegador mientras se tipea —cambiar un feriado tiene
+// que mover el efectivo en el momento, no después de guardar— pero el número que
+// vale es el que devuelve el server: al guardar se recarga todo desde la planilla.
+const nomLiq = { mesId: null, data: null, cambios: new Map(), guardando: false };
+
+// AAAAMM ± n. El día 1 se usa a propósito: sumar meses sobre un 31 se va de mes.
+function nomLiqSuma(mesId, n) {
+  const a = Number(String(mesId).slice(0, 4)), m = Number(String(mesId).slice(4, 6));
+  const d = new Date(a, m - 1 + n, 1);
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+const nomLiqHoy = () => { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`; };
+
+// Lo que vale un campo AHORA: lo pendiente si se tocó, lo de la planilla si no.
+function nomLiqValor(e, campo) {
+  const c = nomLiq.cambios.get(e.nombre);
+  return c && c[campo] != null ? c[campo] : e[campo];
+}
+
+// La misma cuenta que hace el server, para poder mostrarla mientras se tipea.
+// Si las dos dejaran de coincidir, la que manda es la del server: después de
+// guardar, la pantalla se redibuja con lo que devolvió la planilla.
+function nomLiqCuenta(e) {
+  const sueldo = nomLiqValor(e, 'sueldoARS') || 0;
+  const feriados = nomLiqValor(e, 'feriados') || 0;
+  const feriado = (e.feriadoUnitarioARS || 0) * feriados;
+  const sac = nomLiqValor(e, 'sacARS') || 0;
+  const transf = (nomLiqValor(e, 'sueldoTransferenciaARS') || 0) + (nomLiqValor(e, 'aguinaldoTransferenciaARS') || 0);
+  const consumos = nomLiqValor(e, 'consumosARS') || 0;
+  const total = sueldo + feriado + sac;
+  return { sueldo, feriados, feriado, sac, transf, consumos, total, efectivo: total - transf - consumos };
+}
+
+async function loadLiquidacion(btn) {
+  if (btn) btn.classList.add('spinning');
+  if (!nomLiq.mesId) nomLiq.mesId = nomLiqHoy();
+  const cont = document.getElementById('nl-cuerpo');
+  try {
+    const { data } = await api('/api/nomina/liquidacion?mes=' + encodeURIComponent(nomLiq.mesId));
+    nomLiq.data = data;
+    renderLiquidacion();
+  } catch (e) {
+    cont.innerHTML = `<div class="prop-error">No se pudo cargar: ${escapeHtml(e.message)}</div>`;
+  } finally { if (btn) btn.classList.remove('spinning'); }
+}
+
+// Cambiar de mes con cosas sin guardar las perdería en silencio. Se pregunta.
+function nomLiqIrA(delta) {
+  if (nomLiq.cambios.size && !confirm(`Hay ${nomLiq.cambios.size} cambio(s) sin guardar en este mes. ¿Los descartás?`)) return;
+  nomLiq.cambios.clear();
+  nomLiq.mesId = nomLiqSuma(nomLiq.mesId || nomLiqHoy(), delta);
+  loadLiquidacion();
+}
+
+function renderLiquidacion() {
+  const d = nomLiq.data;
+  const cont = document.getElementById('nl-cuerpo');
+  if (!d || !cont) return;
+  document.getElementById('nl-mes').textContent = `${d.mes} ${d.anio}`;
+
+  const avisos = [
+    d.avisoHoja ? `<div class="cc-aviso">${escapeHtml(d.avisoHoja)}</div>` : '',
+    (d.incompletos || []).length
+      ? `<div class="prop-error">Falta cargar en la planilla: ${d.incompletos.map(i =>
+          `<b>${escapeHtml(i.nombre)}</b> (${escapeHtml(i.leFalta.join(' y '))})`).join(' · ')}. `
+        + `Hasta que estén, no se les puede liquidar el mes.</div>` : '',
+    (d.filasSueltas || []).length
+      ? `<div class="cc-aviso">En la hoja del mes hay ${d.filasSueltas.length} fila(s) que no están en la nómina: `
+        + `${d.filasSueltas.map(f => escapeHtml(f.nombre)).join(', ')}. Su plata está escrita ahí y no entra en estos totales.</div>` : '',
+  ].filter(Boolean).join('');
+
+  if (!d.porEmpleado.length) {
+    cont.innerHTML = avisos + '<div class="mant-vacio">Nadie estaba trabajando en este mes.</div>';
+    return;
+  }
+
+  cont.innerHTML = avisos
+    + '<div id="nl-banner"></div>'
+    + '<div class="nl-tot" id="nl-totales"></div>'
+    + d.porEmpleado.map(nomLiqPersona).join('')
+    + `<div class="nl-nota">
+         Se escribe en la hoja <b>${escapeHtml(d.hoja)}</b> de la planilla de nómina, la misma que venías
+         llenando a mano. El sueldo, los feriados, el aguinaldo, lo que va por transferencia y los
+         consumos se escriben; el resto son cuentas y salen solas.
+         ${d.esMesDeSAC ? '<br><b>Es mes de aguinaldo:</b> el SAC viene calculado (medio sueldo del mes por los días del semestre) y se puede pisar.' : ''}
+       </div>`;
+  nomLiqRepintarTodo();
+}
+
+function nomLiqPersona(e, i) {
+  const d = nomLiq.data;
+  const campo = (clave, etiqueta, valor, extra = '') => `
+    <div class="nl-campo" id="nl-c-${i}-${clave}">
+      <label>${etiqueta}</label>
+      <input type="text" inputmode="decimal" value="${escapeHtml(String(valor))}"
+             oninput="nomLiqEditar(${i},'${clave}',this.value)" ${extra}>
+    </div>`;
+
+  // El socio no cobra feriado ni aguinaldo: su fila en Costos laborales no tiene
+  // parte registrada, así que el importe de un feriado le da 0. Ofrecer el campo
+  // sería ofrecer algo que no hace nada.
+  const cobraFeriado = (e.feriadoUnitarioARS || 0) > 0;
+  // El aguinaldo aparece en junio y diciembre, y también fuera de esos meses si
+  // la planilla ya tiene un importe escrito: esconderlo lo volvería ineditable.
+  const muestraSAC = d.esMesDeSAC || (e.sacARS || 0) > 0 || (e.aguinaldoTransferenciaARS || 0) > 0;
+
+  return `<div class="nl-persona">
+    <div class="nl-cab">
+      <span class="nl-nombre">${escapeHtml(e.nombre)}
+        ${e.esSocio ? '<span class="nl-socio">· socio</span>' : ''}
+        ${!e.enPlanilla ? '<span class="nl-socio">· todavía no está en la hoja del mes</span>' : ''}
+      </span>
+      <span class="nl-total" id="nl-total-${i}"></span>
+    </div>
+    <div class="nl-campos">
+      ${campo('sueldoARS', 'Sueldo', Math.round(e.sueldoARS))}
+      ${cobraFeriado ? campo('feriados', 'Feriados', e.feriados == null ? '' : e.feriados) : ''}
+      ${muestraSAC ? campo('sacARS', 'Aguinaldo', Math.round(e.sacARS)) : ''}
+      ${campo('sueldoTransferenciaARS', 'Transferencia', Math.round(e.sueldoTransferenciaARS))}
+      ${muestraSAC ? campo('aguinaldoTransferenciaARS', 'Transf. aguinaldo', Math.round(e.aguinaldoTransferenciaARS)) : ''}
+      ${campo('consumosARS', 'Consumos', Math.round(e.consumosARS))}
+      <div class="nl-campo ancho" id="nl-c-${i}-consumosNota">
+        <label>Qué consumió (opcional)</label>
+        <input type="text" maxlength="200" value="${escapeHtml(e.consumosNota || '')}"
+               placeholder="1 Coca + 1 copa Imperial" oninput="nomLiqEditar(${i},'consumosNota',this.value)">
+      </div>
+    </div>
+    <div class="nl-pie" id="nl-pie-${i}"></div>
+  </div>`;
+}
+
+// Escribir NO redibuja la lista: perdería el foco en cada tecla. Se repintan sólo
+// los números que dependen de lo que se tipeó.
+function nomLiqEditar(i, clave, valor) {
+  const e = nomLiq.data.porEmpleado[i];
+  if (!e) return;
+  const original = e[clave];
+  const limpio = clave === 'consumosNota' ? valor
+    : clave === 'feriados' ? Math.max(0, Math.round(pedNumero(valor)))
+    : pedNumero(valor);
+
+  const previo = nomLiq.cambios.get(e.nombre) || {};
+  // Volver al valor original saca el campo de los cambios, y si no queda ninguno,
+  // saca a la persona entera: guardar algo que no cambia nada es escribir de más.
+  const igual = clave === 'consumosNota'
+    ? String(limpio) === String(original || '')
+    : Math.abs(limpio - (original || 0)) < 0.005;
+  if (igual) delete previo[clave]; else previo[clave] = limpio;
+  if (Object.keys(previo).length) nomLiq.cambios.set(e.nombre, previo);
+  else nomLiq.cambios.delete(e.nombre);
+
+  const cont = document.getElementById(`nl-c-${i}-${clave}`);
+  if (cont) cont.classList.toggle('tocado', !igual);
+  nomLiqRepintar(i);
+  nomLiqRepintarTotales();
+  nomLiqBanner();
+}
+
+function nomLiqRepintar(i) {
+  const e = nomLiq.data.porEmpleado[i];
+  const c = nomLiqCuenta(e);
+  const tot = document.getElementById(`nl-total-${i}`);
+  if (tot) tot.textContent = fmt(c.total);
+  const pie = document.getElementById(`nl-pie-${i}`);
+  if (!pie) return;
+  pie.innerHTML = [
+    c.feriado ? `${c.feriados} feriado${c.feriados === 1 ? '' : 's'}: <b>${fmt(c.feriado)}</b>` : '',
+    c.sac ? `Aguinaldo: <b>${fmt(c.sac)}</b>` : '',
+    `Transferencia: <b>${fmt(c.transf)}</b>`,
+    c.consumos ? `Consumos: <b>−${fmt(c.consumos)}</b>` : '',
+    `Efectivo: <b>${fmt(c.efectivo)}</b>`,
+    // Lo que la hoja dice y esta cuenta no. En las filas viejas son los consumos
+    // que estaban tipeados adentro de la fórmula del efectivo.
+    Math.abs(e.difEfectivoARS) > 0.5 && !nomLiq.cambios.has(e.nombre)
+      ? `<span class="nl-dif">La hoja tiene ${fmt(Math.abs(e.difEfectivoARS))} ${e.difEfectivoARS > 0 ? 'menos' : 'más'} de efectivo que esta cuenta. Guardá para emparejarlo.</span>` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function nomLiqRepintarTotales() {
+  const el = document.getElementById('nl-totales');
+  if (!el) return;
+  const cuentas = nomLiq.data.porEmpleado.map(nomLiqCuenta);
+  const suma = k => cuentas.reduce((s, c) => s + (c[k] || 0), 0);
+  el.innerHTML = [
+    ['Personas', nomLiq.data.porEmpleado.length],
+    ['A pagar', fmt(suma('total'))],
+    ['Por transferencia', fmt(suma('transf'))],
+    ['En efectivo', fmt(suma('efectivo'))],
+  ].map(([k, v]) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+}
+
+function nomLiqRepintarTodo() {
+  nomLiq.data.porEmpleado.forEach((_, i) => nomLiqRepintar(i));
+  nomLiqRepintarTotales();
+  nomLiqBanner();
+}
+
+function nomLiqBanner() {
+  const el = document.getElementById('nl-banner');
+  if (!el) return;
+  const n = nomLiq.cambios.size;
+  el.innerHTML = !n ? '' : `<div class="nl-guardar">
+      <span><b>${n}</b> ${n === 1 ? 'persona con cambios sin guardar' : 'personas con cambios sin guardar'}</span>
+      <button class="btn" onclick="nomLiqGuardar(this)"${nomLiq.guardando ? ' disabled' : ''}>Guardar en la planilla</button>
+      <button class="nota-btn" onclick="nomLiqDescartar()">Descartar</button>
+    </div>`;
+}
+
+function nomLiqDescartar() {
+  if (!nomLiq.cambios.size) return;
+  nomLiq.cambios.clear();
+  renderLiquidacion();
+}
+
+async function nomLiqGuardar(btn) {
+  if (!nomLiq.cambios.size || nomLiq.guardando) return;
+  nomLiq.guardando = true;
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+  const cambios = [...nomLiq.cambios.entries()].map(([nombre, campos]) => ({ nombre, ...campos }));
+  try {
+    const { data } = await api('/api/nomina/liquidacion', {
+      method: 'POST', body: JSON.stringify({ mesId: nomLiq.mesId, cambios }),
+    });
+    nomLiq.cambios.clear();
+    await loadLiquidacion();
+    const avisos = (data.escritas || []).filter(x => x.avisoFeriado);
+    if (avisos.length) {
+      showResultadoModal({ ok: true, titulo: 'Guardado, con un aviso',
+        detalle: avisos.map(a => `<b>${escapeHtml(a.nombre)}</b>: ${escapeHtml(a.avisoFeriado)}.`).join('<br>') });
+    } else {
+      showToast(`Guardado en la planilla: ${data.escritas.length} ${data.escritas.length === 1 ? 'persona' : 'personas'}`);
+    }
+  } catch (e) {
+    showToast('No se guardó: ' + e.message, 6000);
+  } finally {
+    nomLiq.guardando = false;
+    if (btn) { btn.disabled = false; btn.textContent = 'Guardar en la planilla'; }
+    nomLiqBanner();
+  }
+}
+
+// Perder la liquidación de seis personas por un reload sería peor que llenarla en
+// el Excel. Mismo guard que el cierre de cocina.
+window.addEventListener('beforeunload', (e) => {
+  if (nomLiq.cambios.size) { e.preventDefault(); e.returnValue = ''; }
+});
 
 // Meses completos desde una fecha ISO hasta hoy. Sirve para la antigüedad, que es
 // lo que define cuántos días de vacaciones corresponden.

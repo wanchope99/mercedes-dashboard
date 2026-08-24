@@ -12,10 +12,21 @@
 //
 // ─── Tres cosas que hay que saber antes de tocar esto ───────────────────────
 //
-// 1. ES DE SÓLO LECTURA. La planilla es de los dueños y se sigue editando ahí.
-//    Este archivo no crea hojas, no hace append y no actualiza una celda. Si
-//    algún día la app tiene que escribir, es una decisión de producto que hay
-//    que tomar aparte — no un detalle de implementación.
+// 1. CASI TODO ES DE SÓLO LECTURA, Y LA EXCEPCIÓN ES UNA SOLA.
+//
+//    `Nómina` y `Costos laborales` no se tocan nunca: son de los dueños, se
+//    siguen editando ahí, y de ahí sale el costo laboral de toda la app.
+//
+//    Las hojas mensuales `AAAAMM` SÍ se escriben, desde el 24/08/2026. Es la
+//    decisión de producto que este comentario decía que había que tomar aparte,
+//    y se tomó: la liquidación del mes se arma desde la app en vez de a mano en
+//    el Excel. La planilla sigue siendo la única verdad — la app escribe ahí,
+//    no en una copia — y por eso no hay dos lugares con el sueldo del mes.
+//
+//    La escritura pide otro permiso de Google (`spreadsheets` en vez de
+//    `spreadsheets.readonly`) y que la cuenta de servicio sea EDITORA de esa
+//    planilla. Si es sólo lectora, leer sigue andando y guardar falla con el
+//    403 de Google: es un permiso que se da en Drive, no en el código.
 //
 // 2. VIVE EN SU PROPIA PLANILLA Y NO HAY FALLBACK. `PROVEEDORES_SHEET_ID` cae a
 //    `SPREADSHEET_ID` cuando no está definida; acá NO, a propósito: son sueldos
@@ -72,16 +83,38 @@
 // neto" en 0 no hay parte registrada, así que no hay cargas ni provisiones y su
 // sueldo pasa entero al costo del mes. Confirmado por el dueño el 17/8/2026.
 //
-// Hojas mensuales `AAAAMM` — el registro de lo que se pagó ese mes:
+// Hojas mensuales `AAAAMM` — la liquidación de ese mes:
 //   A Trabajador · B Sueldo · C Feriado · D Sueldo Total · E Aguinaldo Total
 //   F TOTAL sueldo+SAC · G Sueldo Transferencia · H Aguinaldo Transferencia
 //   I Total transferencia · J Consumos Mes · K Efectivo
-//   feriado = sueldo / 25 por cada feriado trabajado
-//   SAC     = (sueldo total / 2) × (días trabajados en el semestre / 180)
 //
-// Las hojas mensuales se leen, no se escriben, y su formato NO es estable: la
-// primera (202605) tiene otras columnas que las demás. Cuando una hoja no
-// matchea el layout conocido se devuelve `null` en vez de adivinar.
+// Leído de las FÓRMULAS de la planilla el 24/08/2026, que es lo que hay que
+// emular. Cuatro columnas son cuentas de la misma fila —D=B+C, F=D+E, I=G+H,
+// K=D+E−G−H— y el resto se tipea a mano. De esas, dos tienen regla y la
+// planilla no la usa:
+//
+//   · C Feriado = ('Costos laborales'!B+C)/25 por cada feriado trabajado. La
+//     base es el neto COMPLETO de esa persona (remunerativo + no remunerativo),
+//     no el sueldo de la hoja Nómina — ver importeFeriado. La cantidad de
+//     feriados no está en ningún lado: viene multiplicada adentro de la fórmula
+//     (junio son dos feriados y se ve como un /25 con el importe al doble).
+//   · E Aguinaldo Total, en junio y diciembre. Los cuatro importes de 202606
+//     coinciden al peso con lo que ya devuelve `sacDelMes`.
+//   · G Sueldo Transferencia se tipea, pero es exactamente `Nómina!D` (el "en
+//     blanco neto"). H Aguinaldo Transferencia no tiene regla que se pueda
+//     derivar de nada de la planilla: es un importe que alguien decide.
+//
+// Y UNA QUE ESTÁ ROTA: J "Consumos Mes" es texto libre ("1 Coca: $2800 + 1 copa
+// Imperial: $4800") y NINGUNA fórmula la usa. Los descuentos por consumo están
+// tipeados a mano adentro de la fórmula de K ("=D5+E5-G5-H5-2800-4800"), así que
+// corregir la nota no cambia el efectivo y nadie se entera. Por eso la app
+// guarda el monto en una columna propia y lo mete en la fórmula de K: el número
+// que se ve es el número que se resta.
+//
+// EL LAYOUT NO ES ESTABLE: la primera hoja (202605) tiene otras columnas —
+// prorratea por días trabajados porque fue un mes partido. Cuando el encabezado
+// no es el conocido se devuelve `null` en vez de adivinar, y esa hoja se lee
+// solamente con los ojos.
 
 const { google } = require('googleapis');
 const NodeCache = require('node-cache');
@@ -106,6 +139,28 @@ const MESES_SAC = [6, 12];
 
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
                'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+// ─── La hoja mensual ────────────────────────────────────────────────────────
+// El encabezado exacto de las hojas AAAAMM que la app entiende. Se compara
+// entero: es lo que separa una hoja con este layout de 202605, que tiene otro.
+const HEADER_MENSUAL = [
+  'Trabajador/a', 'Sueldo', 'Feriado', 'Sueldo Total', 'Aguinaldo Total',
+  'TOTAL sueldo + SAC', 'Sueldo Transferencia', 'Aguinaldo Transferencia',
+  'Total transferencia', 'Consumos Mes', 'Efectivo',
+];
+const COL_MES = {
+  nombre: 0, sueldo: 1, feriado: 2, sueldoTotal: 3, aguinaldo: 4, total: 5,
+  sueldoTransf: 6, aguinaldoTransf: 7, totalTransf: 8, consumos: 9, efectivo: 10,
+};
+
+// Lo que la app agrega al final, sin pisar una sola columna de las de arriba.
+//
+// `Feriados` es la cantidad, que en la planilla no existe: está multiplicada
+// adentro de la fórmula del importe, así que cambiarla obliga a editar una
+// fórmula. `Consumos ARS` es el monto que J nunca fue. `Actualizado` dice quién
+// guardó y cuándo, que es lo único que después contesta "¿esto lo tocó alguien
+// o quedó de la vez pasada?".
+const COLS_APP_MES = { feriados: 'Feriados', consumos: 'Consumos ARS', actualizado: 'Actualizado' };
 
 // ─── Puras: fechas y claves de mes ──────────────────────────────────────────
 const dosDigitos = n => String(n).padStart(2, '0');
@@ -171,6 +226,25 @@ function parseImporte(valor) {
 }
 
 const norm = s => (s || '').toString().trim().toLowerCase();
+
+// Un cero ESCRITO no es lo mismo que una celda vacía, y en esta planilla la
+// diferencia es plata: en junio la transferencia de dos personas dice 0 a
+// propósito, y leer ese 0 como "no hay dato" haría que el default les invente
+// una transferencia que nadie hizo. `parseImporte` devuelve 0 para las dos
+// cosas, así que la ausencia se contesta antes de llamarlo.
+const importeONull = v => (v == null || v === '' ? null : parseImporte(v));
+const enteroONull = v => {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n) : null;
+};
+
+// 0 → A, 25 → Z, 26 → AA.
+function colLetra(i) {
+  let s = '', n = i;
+  while (n >= 0) { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; }
+  return s;
+}
 
 // ─── Puras: parseo de las hojas ─────────────────────────────────────────────
 
@@ -513,15 +587,189 @@ function resumenCostoLaboral({ empleados, costos } = {}) {
   };
 }
 
+// ─── La hoja mensual: leerla ────────────────────────────────────────────────
+//
+// Devuelve `null` si el encabezado no es el conocido. No es un error: es una
+// hoja con otro layout (202605) y adivinar de qué columna sale el efectivo de
+// alguien es exactamente lo que no hay que hacer con sueldos.
+function parsearMesPlanilla(filas) {
+  const cab = (filas || [])[0] || [];
+  if (!HEADER_MENSUAL.every((h, i) => norm(cab[i]) === norm(h))) return null;
+
+  const colDe = nombre => cab.findIndex(c => norm(c) === norm(nombre));
+  const cols = {
+    feriados: colDe(COLS_APP_MES.feriados),
+    consumos: colDe(COLS_APP_MES.consumos),
+    actualizado: colDe(COLS_APP_MES.actualizado),
+  };
+
+  const out = [];
+  for (let i = 1; i < filas.length; i++) {
+    const f = filas[i] || [];
+    const nombre = (f[COL_MES.nombre] || '').toString().trim();
+    if (!nombre || /^total$/i.test(nombre)) continue;
+
+    // J es texto libre en la planilla vieja y un número cuando alguien escribió
+    // pesos ahí. Las dos lecturas se respetan: el texto queda como nota y el
+    // número, como monto — pero sólo si la app todavía no tiene su columna.
+    const jc = f[COL_MES.consumos];
+    const consumosDeJ = typeof jc === 'number' ? jc : 0;
+    const notaDeJ = typeof jc === 'number' ? '' : (jc == null ? '' : String(jc).trim());
+
+    out.push({
+      nombre,
+      rowIndex: i + 1,
+      sueldoARS: importeONull(f[COL_MES.sueldo]),
+      feriadoARS: importeONull(f[COL_MES.feriado]),
+      aguinaldoARS: importeONull(f[COL_MES.aguinaldo]),
+      sueldoTransferenciaARS: importeONull(f[COL_MES.sueldoTransf]),
+      aguinaldoTransferenciaARS: importeONull(f[COL_MES.aguinaldoTransf]),
+      efectivoPlanillaARS: importeONull(f[COL_MES.efectivo]),
+      consumosNota: notaDeJ,
+      feriados: cols.feriados >= 0 ? enteroONull(f[cols.feriados]) : null,
+      consumosARS: cols.consumos >= 0 ? importeONull(f[cols.consumos]) : (consumosDeJ || null),
+      actualizado: cols.actualizado >= 0 ? String(f[cols.actualizado] || '').trim() : '',
+    });
+  }
+  return { cols, filas: out };
+}
+
+// ─── La liquidación de un mes ───────────────────────────────────────────────
+//
+// Qué cobra cada uno este mes y cómo se le paga. Es `calcularMes` mirado desde
+// el otro lado: aquél contesta cuánto le CUESTA al bar (cargas y provisiones
+// incluidas), éste contesta cuánto se PAGA y de qué forma — que es la pregunta
+// del día 1 de cada mes, con la plata sobre la mesa.
+//
+// LA PLANILLA MANDA SOBRE LA REGLA, celda por celda. Cada valor sale de la hoja
+// del mes si está escrito ahí, y de la regla si no. No es una preferencia de
+// estilo: es cómo esta planilla viene funcionando —hay importes pisados a mano
+// que son la verdad de hoy— y romperlo haría que abrir la app cambie sueldos.
+//
+// Y "está escrito" incluye un CERO escrito. En junio a dos personas no se les
+// transfirió nada y su celda dice 0; si el cero se tratara como vacío, el default
+// ("en blanco neto") les inventaría una transferencia de $613.477 que nadie hizo.
+// De ahí que el parser distinga null de 0 y esto pregunte por `!= null`.
+function liquidacionDelMes({ empleados, costos, mesId, planilla = null } = {}) {
+  if (!esMesIdValido(mesId)) throw new Error(`Mes inválido: ${mesId} (se espera AAAAMM)`);
+  const { anio, mes } = parseMesId(mesId);
+  const finDeMes = new Date(anio, mes, 0);
+
+  const porCosto = new Map((costos || []).map(c => [norm(c.nombre), c]));
+  const porFila = new Map(((planilla && planilla.filas) || []).map(f => [norm(f.nombre), f]));
+
+  const porEmpleado = (empleados || [])
+    .filter(e => e.completo && vigenteEn(e, finDeMes))
+    .map(e => {
+      const fila = porFila.get(norm(e.nombre)) || null;
+      const costo = porCosto.get(norm(e.nombre)) || null;
+      // Lo que vale UN feriado para esta persona. Es la unidad con la que se
+      // multiplica y también con la que se deduce la cantidad de un importe viejo.
+      const feriadoUnitarioARS = importeFeriado(e, 1, { costo });
+
+      const sueldoARS = fila && fila.sueldoARS != null ? fila.sueldoARS : (e.sueldoActualARS || 0);
+
+      // Cuántos feriados se trabajaron. Manda la columna de la app; si todavía no
+      // existe se deduce del importe que ya tiene la planilla, y si no divide
+      // entero se deja en null: el importe se respeta igual y la cantidad queda
+      // dicha como desconocida en vez de redondeada a un número inventado.
+      let feriados = fila ? fila.feriados : null;
+      let feriadoARS;
+      if (feriados != null) {
+        feriadoARS = feriadoUnitarioARS * feriados;
+      } else if (fila && fila.feriadoARS) {
+        feriadoARS = fila.feriadoARS;
+        if (feriadoUnitarioARS > 0) {
+          const n = fila.feriadoARS / feriadoUnitarioARS;
+          if (Math.abs(n - Math.round(n)) < 0.01) feriados = Math.round(n);
+        }
+      } else {
+        feriados = 0;
+        feriadoARS = 0;
+      }
+
+      const sueldoTotalARS = sueldoARS + feriadoARS;
+      // El SAC calculado usa el sueldo total de ESTE mes, que es como lo hace la
+      // planilla: en junio los cuatro importes dan al peso.
+      const sacARS = fila && fila.aguinaldoARS != null
+        ? fila.aguinaldoARS
+        : (e.esSocio ? 0 : sacDelMes(e, mesId, { sueldoTotalARS }));
+      const totalARS = sueldoTotalARS + sacARS;
+
+      // Lo que va por banco. El default es el "en blanco neto" de la hoja Nómina,
+      // que es de dónde salen los importes tipeados en la planilla.
+      const sueldoTransferenciaARS = fila && fila.sueldoTransferenciaARS != null
+        ? fila.sueldoTransferenciaARS
+        : (e.enBlancoNetoARS || 0);
+      // El aguinaldo por banco no tiene regla derivable: default 0 y se escribe.
+      const aguinaldoTransferenciaARS = fila && fila.aguinaldoTransferenciaARS != null
+        ? fila.aguinaldoTransferenciaARS : 0;
+      const transferenciaARS = sueldoTransferenciaARS + aguinaldoTransferenciaARS;
+
+      const consumosARS = fila && fila.consumosARS != null ? fila.consumosARS : 0;
+      const efectivoARS = totalARS - transferenciaARS - consumosARS;
+
+      return {
+        id: e.id, nombre: e.nombre, esSocio: e.esSocio,
+        sueldoARS,
+        feriados, feriadoUnitarioARS, feriadoARS,
+        sueldoTotalARS,
+        sacARS,
+        totalARS,
+        sueldoTransferenciaARS, aguinaldoTransferenciaARS, transferenciaARS,
+        consumosARS, consumosNota: (fila && fila.consumosNota) || '',
+        efectivoARS,
+        enPlanilla: Boolean(fila),
+        actualizado: (fila && fila.actualizado) || '',
+        // Cuánto se despega el efectivo de la app del que dice la hoja. En las
+        // filas viejas da los consumos que estaban tipeados adentro de la fórmula
+        // de K y que ninguna columna mostraba. No se corrige solo: se muestra.
+        difEfectivoARS: fila && fila.efectivoPlanillaARS != null
+          ? efectivoARS - fila.efectivoPlanillaARS : 0,
+      };
+    });
+
+  const suma = campo => porEmpleado.reduce((s, e) => s + (e[campo] || 0), 0);
+  // Filas que están en la hoja del mes y no en la nómina: alguien que se fue (la
+  // planilla borra la fila al dar de baja) o un nombre mal escrito. Se nombran,
+  // porque su plata está en la hoja y no en ningún total de acá.
+  const enNomina = new Set((empleados || []).map(e => norm(e.nombre)));
+  const sueltas = ((planilla && planilla.filas) || [])
+    .filter(f => !enNomina.has(norm(f.nombre)))
+    .map(f => ({ nombre: f.nombre, rowIndex: f.rowIndex }));
+
+  return {
+    mesId, anio, mes: MESES[mes - 1],
+    esMesDeSAC: MESES_SAC.includes(mes),
+    hayPlanilla: Boolean(planilla),
+    porEmpleado,
+    totales: {
+      dotacion: porEmpleado.length,
+      sueldosARS: suma('sueldoARS'),
+      feriadosARS: suma('feriadoARS'),
+      sacARS: suma('sacARS'),
+      totalARS: suma('totalARS'),
+      transferenciaARS: suma('transferenciaARS'),
+      consumosARS: suma('consumosARS'),
+      efectivoARS: suma('efectivoARS'),
+    },
+    incompletos: (empleados || []).filter(e => !e.completo).map(e => ({ nombre: e.nombre, leFalta: e.leFalta })),
+    filasSueltas: sueltas,
+  };
+}
+
 // ─── I/O ────────────────────────────────────────────────────────────────────
-function _sheets() {
+// El permiso más chico que alcance: leer pide `readonly` y sólo el guardado de
+// la liquidación pide escritura. Son sueldos de gente real — que la mayor parte
+// del módulo no pueda escribir aunque quiera es una red, no una formalidad.
+function _sheets({ escritura = false } = {}) {
   const credentials = process.env.GOOGLE_CREDENTIALS_JSON
     ? JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON)
     : require('../../credentials.json');
-  return google.sheets({
-    version: 'v4',
-    auth: new google.auth.GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'] }),
-  });
+  const scopes = [escritura
+    ? 'https://www.googleapis.com/auth/spreadsheets'
+    : 'https://www.googleapis.com/auth/spreadsheets.readonly'];
+  return google.sheets({ version: 'v4', auth: new google.auth.GoogleAuth({ credentials, scopes }) });
 }
 
 const configurada = () => Boolean(SHEET_ID);
@@ -529,8 +777,14 @@ const configurada = () => Boolean(SHEET_ID);
 // UNFORMATTED_VALUE a propósito: las fechas llegan como serial y los importes
 // como número, sin el "$" ni los separadores de miles del formato.
 async function _leer(hoja, rango = 'A1:N100') {
+  return _leerCon(_sheets(), hoja, rango);
+}
+
+// El guardado relee con SU cliente: pedir dos veces las credenciales para leer y
+// escribir en la misma operación es una llamada de más a Google por guardado.
+async function _leerCon(api, hoja, rango = 'A1:N100') {
   if (!configurada()) throw new Error('Falta NOMINA_SHEET_ID');
-  const r = await _sheets().spreadsheets.values.get({
+  const r = await api.spreadsheets.values.get({
     spreadsheetId: SHEET_ID, range: `${hoja}!${rango}`, valueRenderOption: 'UNFORMATTED_VALUE',
   });
   return r.data.values || [];
@@ -586,6 +840,212 @@ async function getNominaParaBaselines() {
     cache.set('baselines', null, 60);
     return null;
   }
+}
+
+// ─── La liquidación del mes: leer ───────────────────────────────────────────
+//
+// La hoja del mes NO se cachea. Todo lo demás acá vive cinco minutos en memoria
+// porque cambia una vez por mes; esto es justamente lo que se está editando, y
+// una liquidación que se guarda y vuelve mostrando lo de antes es peor que una
+// llamada de más a Google.
+async function getLiquidacion({ mesId } = {}) {
+  const id = esMesIdValido(mesId) ? mesId : mesIdDe(new Date());
+  const [empleados, costos] = await Promise.all([getEmpleados(), getCostos()]);
+  let planilla = null, avisoHoja = '';
+  try {
+    planilla = parsearMesPlanilla(await _leer(id, 'A1:Z200'));
+    if (!planilla) {
+      avisoHoja = `La hoja ${id} existe pero tiene otro formato de columnas, así que no se lee `
+        + `ni se escribe: lo de abajo está calculado desde la nómina. (La primera hoja, 202605, `
+        + `es así: prorratea por días trabajados porque fue un mes partido.)`;
+    }
+  } catch (e) {
+    // Que la hoja del mes todavía no exista es lo normal el día 1: se calcula
+    // todo desde la nómina y se crea al guardar.
+    if (!/Unable to parse range|not found/i.test(e.message)) throw e;
+  }
+  const liq = liquidacionDelMes({ empleados, costos, mesId: id, planilla });
+  return { ...liq, hoja: id, avisoHoja, puedeEscribir: true };
+}
+
+// ─── La liquidación del mes: guardar ────────────────────────────────────────
+//
+// LA ÚNICA ESCRITURA DE ESTE MÓDULO. Lee lo que dice de esto el punto 1 del
+// encabezado antes de tocarla.
+//
+// Tres decisiones que explican la forma del código:
+//
+// 1. SE ESCRIBE CELDA POR CELDA, no la fila entera. Un `values.update` sobre
+//    A:N borraría cualquier columna intermedia que alguien haya agregado y que
+//    nosotros no conocemos. Van todas en UN batchUpdate: es una sola llamada.
+//
+// 2. LAS CUENTAS DE LA MISMA FILA SE ESCRIBEN COMO FÓRMULA (D=B+C, F=D+E, I=G+H,
+//    K=D+E−G−H−consumos). La planilla las tiene así y tiene que seguir viva
+//    cuando alguien la abra en el Excel: si la app escribiera valores, editar el
+//    sueldo ahí dejaría el total mintiendo. Son referencias a la MISMA fila, así
+//    que ninguna puede terminar apuntando al renglón de otra persona.
+//
+//    El feriado (C) es la excepción y va como VALOR. Su fórmula mira a la hoja
+//    'Costos laborales' por número de fila, y ese número sale de buscar a la
+//    persona por nombre: si la búsqueda falla, la fórmula calcularía el feriado
+//    de alguien con el sueldo de otro, en silencio. Un valor no puede hacer eso,
+//    y la cantidad queda escrita en su columna para que la cuenta se pueda rehacer.
+//
+// 3. NO SE TOCA UNA FILA QUE NO SE PIDIÓ. Sólo se escriben las personas que
+//    vienen en `cambios`; el resto de la hoja queda exactamente como estaba.
+async function guardarLiquidacion({ mesId, cambios = [] } = {}, { usuario } = {}) {
+  if (!configurada()) throw new Error('Falta NOMINA_SHEET_ID');
+  if (!usuario) throw new Error('Falta el usuario');
+  if (!esMesIdValido(mesId)) throw new Error(`Mes inválido: ${mesId} (se espera AAAAMM)`);
+  if (!Array.isArray(cambios) || !cambios.length) throw new Error('No hay nada para guardar');
+
+  const api = _sheets({ escritura: true });
+  const [empleados, costos] = await Promise.all([getEmpleados(), getCostos()]);
+
+  // La hoja del mes puede no existir todavía: el día 1 no existe ninguna. Se crea
+  // con su encabezado y nada más — es la continuación de lo que se hacía a mano.
+  await _asegurarHojaMensual(api, mesId);
+
+  // Relectura fresca contra la que se resuelve todo: en qué fila está cada
+  // persona y qué columnas propias ya existen. Nunca se confía en un rowIndex
+  // que haya viajado al navegador.
+  const filas = await _leerCon(api, mesId, 'A1:Z200');
+  const planilla = parsearMesPlanilla(filas);
+  if (!planilla) {
+    throw new Error(`La hoja ${mesId} tiene otro formato de columnas y no se puede escribir sin `
+      + `romperla. Revisala en la planilla: el encabezado tiene que ser el de los meses nuevos.`);
+  }
+
+  const cols = _resolverColumnasMes(filas, planilla.cols);
+  const filasCostos = await _leer(HOJA_COSTOS, 'A1:A100');
+  const rowCostoDe = nombre => {
+    const i = (filasCostos || []).findIndex(f => norm((f || [])[0]) === norm(nombre));
+    return i >= 0 ? i + 1 : null;
+  };
+
+  const liq = liquidacionDelMes({ empleados, costos, mesId, planilla });
+  const porNombre = new Map(liq.porEmpleado.map(e => [norm(e.nombre), e]));
+  const porFila = new Map(planilla.filas.map(f => [norm(f.nombre), f]));
+
+  // Dónde va cada persona nueva. Se apila abajo de la última fila escrita, y el
+  // contador es local: dos altas en el mismo guardado no pueden caer en la misma.
+  let proxima = planilla.filas.reduce((m, f) => Math.max(m, f.rowIndex), 1) + 1;
+
+  const data = [];
+  const escritas = [];
+  const ignorados = [];
+  const ahora = new Date().toISOString();
+
+  for (const c of cambios) {
+    const nombre = (c && c.nombre || '').toString().trim();
+    const base = porNombre.get(norm(nombre));
+    if (!base) { ignorados.push({ nombre, motivo: 'no está en la nómina de este mes' }); continue; }
+
+    // El cambio se aplica ARRIBA de lo que ya vale: mandar sólo el campo que se
+    // tocó no puede borrar los otros cuatro.
+    const num = (v, x) => (v == null || v === '' ? x : parseImporte(v));
+    const sueldoARS = num(c.sueldoARS, base.sueldoARS);
+    const feriados = c.feriados == null || c.feriados === '' ? (base.feriados || 0) : Math.max(0, enteroONull(c.feriados) || 0);
+    const feriadoARS = (base.feriadoUnitarioARS || 0) * feriados;
+    const sacARS = num(c.sacARS, base.sacARS);
+    const sueldoTransferenciaARS = num(c.sueldoTransferenciaARS, base.sueldoTransferenciaARS);
+    const aguinaldoTransferenciaARS = num(c.aguinaldoTransferenciaARS, base.aguinaldoTransferenciaARS);
+    const consumosARS = num(c.consumosARS, base.consumosARS);
+    const consumosNota = c.consumosNota == null ? base.consumosNota : String(c.consumosNota).slice(0, 500);
+
+    const fila = porFila.get(norm(nombre));
+    const r = fila ? fila.rowIndex : proxima++;
+    const cel = (col, valor) => data.push({ range: `${mesId}!${colLetra(col)}${r}`, values: [[valor]] });
+
+    const rc = rowCostoDe(nombre);
+    cel(COL_MES.nombre, base.nombre);
+    cel(COL_MES.sueldo, sueldoARS);
+    cel(COL_MES.feriado, feriadoARS);
+    cel(COL_MES.sueldoTotal, `=B${r}+C${r}`);
+    cel(COL_MES.aguinaldo, sacARS);
+    cel(COL_MES.total, `=D${r}+E${r}`);
+    cel(COL_MES.sueldoTransf, sueldoTransferenciaARS);
+    cel(COL_MES.aguinaldoTransf, aguinaldoTransferenciaARS);
+    cel(COL_MES.totalTransf, `=G${r}+H${r}`);
+    cel(COL_MES.consumos, consumosNota);
+    // Acá está el arreglo del bug de la planilla: el efectivo resta la columna
+    // del monto de consumos en vez de un número tipeado adentro de la fórmula.
+    cel(COL_MES.efectivo, `=D${r}+E${r}-G${r}-H${r}-${colLetra(cols.consumos)}${r}`);
+    cel(cols.feriados, feriados);
+    cel(cols.consumos, consumosARS);
+    cel(cols.actualizado, `${usuario} · ${ahora}`);
+
+    escritas.push({
+      nombre: base.nombre, fila: r, esNueva: !fila,
+      sueldoARS, feriados, feriadoARS, sacARS,
+      totalARS: sueldoARS + feriadoARS + sacARS,
+      transferenciaARS: sueldoTransferenciaARS + aguinaldoTransferenciaARS,
+      consumosARS,
+      efectivoARS: sueldoARS + feriadoARS + sacARS - sueldoTransferenciaARS - aguinaldoTransferenciaARS - consumosARS,
+      // Sin fila en 'Costos laborales' el feriado no tiene de dónde salir más que
+      // del sueldo de la hoja Nómina. Se dice: es la diferencia de $246 que
+      // menciona importeFeriado, y en alguien recién cargado puede ser mayor.
+      avisoFeriado: !rc && feriados > 0 ? 'no tiene fila en Costos laborales: el feriado salió del sueldo de la nómina' : '',
+    });
+  }
+
+  if (!data.length) {
+    const e = new Error('Ninguna de las personas que mandaste está en la nómina de este mes. No se escribió nada.');
+    e.ignorados = ignorados;
+    throw e;
+  }
+
+  // Los encabezados de las columnas propias, si se acaban de reclamar.
+  for (const [clave, col] of Object.entries(cols)) {
+    if (planilla.cols[clave] === col) continue;
+    data.push({ range: `${mesId}!${colLetra(col)}1`, values: [[COLS_APP_MES[clave]]] });
+  }
+
+  await api.spreadsheets.values.batchUpdate({
+    spreadsheetId: SHEET_ID,
+    requestBody: { valueInputOption: 'USER_ENTERED', data },
+  });
+  clearCache();
+  return { mesId, escritas, ignorados, celdas: data.length };
+}
+
+// Qué columna usa cada cosa de la app, y cuáles hay que crear. Si ya existen por
+// nombre se reusan; si no, se reclama la primera columna que no tiene NADA en
+// ninguna fila. Reclamar sólo a partir de ahí es lo único que garantiza que no le
+// pisemos una columna a nadie.
+function _resolverColumnasMes(filas, yaExisten) {
+  let libre = 0;
+  for (const f of (filas || [])) {
+    for (let i = 0; i < (f || []).length; i++) {
+      if (f[i] !== '' && f[i] != null) libre = Math.max(libre, i + 1);
+    }
+  }
+  libre = Math.max(libre, HEADER_MENSUAL.length);
+  const out = {};
+  for (const clave of ['feriados', 'consumos', 'actualizado']) {
+    out[clave] = yaExisten[clave] >= 0 ? yaExisten[clave] : libre++;
+  }
+  return out;
+}
+
+// Crea la hoja del mes con su encabezado si todavía no existe. Es lo único
+// estructural que la app hace en esta planilla, y solamente AGREGA: no mueve, no
+// borra y no toca ninguna hoja que ya esté.
+async function _asegurarHojaMensual(api, mesId) {
+  const meta = await api.spreadsheets.get({ spreadsheetId: SHEET_ID, fields: 'sheets.properties.title' });
+  const existe = (meta.data.sheets || []).some(h => h.properties.title === mesId);
+  if (existe) return false;
+  await api.spreadsheets.batchUpdate({
+    spreadsheetId: SHEET_ID,
+    requestBody: { requests: [{ addSheet: { properties: { title: mesId } } }] },
+  });
+  await api.spreadsheets.values.update({
+    spreadsheetId: SHEET_ID,
+    range: `${mesId}!A1`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [HEADER_MENSUAL] },
+  });
+  return true;
 }
 
 async function getNomina({ mesId } = {}) {
@@ -656,8 +1116,12 @@ module.exports = {
   // I/O
   getEmpleados, getCostos, getNomina, getProyeccion, getNominaParaBaselines,
   bloqueParaAgentes, clearCache, configurada,
+  // I/O — la liquidación del mes, la única que escribe
+  getLiquidacion, guardarLiquidacion,
   // Puras — se pueden ejercitar sin red
   parsearEmpleados, parsearCostos, costoDeEmpleado, calcularMes, calcularRango,
+  parsearMesPlanilla, liquidacionDelMes, colLetra, importeONull, enteroONull,
+  HEADER_MENSUAL, COL_MES, COLS_APP_MES,
   resumenCostoLaboral, importeFeriado, sacDelMes, diasEnElSemestre,
   dotacionEn, vigenteEn, cambiosDeDotacion,
   mesIdDe, parseMesId, mesIdSuma, nombreMesDe, esMesIdValido, parseFecha, parseImporte,
