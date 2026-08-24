@@ -460,7 +460,72 @@
     .cc-item.tocado { background: rgba(80,37,31,.18); }
     button.cc-chip { cursor: pointer; font-family: inherit; }
     button.cc-chip:hover { filter: brightness(1.25); }
-    .cc-chip.sel { outline: 2px solid currentColor; outline-offset: 1px; }
+    /* ─── En qué estado está, de un vistazo ───────────────────────────────────
+       Los cuatro botones pintados con su color competían entre sí: cada fila era
+       un semáforo de cuatro luces prendidas y había que buscar cuál tenía el
+       contorno para saber en cuál estaba. Ahora el que NO está elegido se apaga
+       —sin relleno, gris, medio transparente— y el único con color es el estado
+       real del ítem. La fila pasa a leerse por color y no por contorno.
+       Al pasar el mouse (o mantener el dedo) el apagado sube: sigue estando claro
+       que es un botón y no una etiqueta. */
+    button.cc-chip:not(.sel) {
+      background: transparent !important;
+      border-color: var(--border) !important;
+      color: var(--text-muted) !important;
+      opacity: .45;
+      font-weight: 500;
+    }
+    button.cc-chip:not(.sel):hover { opacity: .95; border-color: currentColor !important; }
+    .cc-chip.sel { outline: 2px solid currentColor; outline-offset: 1px; font-weight: 700; }
+
+    /* ─── Producción del día ─────────────────────────────────────────────────
+       La otra mitad de la feature: lo que la cocina mira a la mañana. Es una
+       pantalla de otra naturaleza que la de cierre y por eso no reusa .cc-item —
+       acá no hay estados que elegir ni comentario que escribir, hay una lista y
+       un dedo. Todo el renglón es el área de toque: apuntarle a un checkbox de
+       18px con las manos ocupadas es lo que hace que nadie tilde nada. */
+    .cp-modos { display: flex; gap: 6px; margin: 0 0 14px; }
+    .cp-modo { flex: 1; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; font-weight: 700;
+               cursor: pointer; font-family: inherit; text-align: center;
+               background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); }
+    .cp-modo.active { background: var(--accent); border-color: var(--accent); color: var(--text); }
+    .cp-cab { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+              flex-wrap: wrap; margin-bottom: 4px; }
+    .cp-firma { font-size: 12px; color: var(--text-muted); }
+    .cp-progreso { font-size: 13px; font-weight: 700; }
+    .cp-barra { height: 6px; border-radius: 99px; background: var(--surface2); overflow: hidden; margin: 8px 0 18px; }
+    .cp-barra span { display: block; height: 100%; background: var(--green); transition: width .2s; }
+    .cp-grupo { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted);
+                margin: 18px 0 6px; font-weight: 700; }
+    .cp-item { display: flex; align-items: flex-start; gap: 12px; width: 100%; text-align: left;
+               padding: 13px 14px; margin-bottom: 7px; border-radius: 10px; cursor: pointer;
+               background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+               font-family: inherit; font-size: 15px; line-height: 1.35; }
+    .cp-item:hover { border-color: var(--text-muted); }
+    .cp-caja { flex-shrink: 0; width: 24px; height: 24px; border-radius: 7px; margin-top: -1px;
+               border: 2px solid var(--text-muted); display: flex; align-items: center;
+               justify-content: center; font-size: 15px; font-weight: 700; }
+    /* Hecho: tachado, apagado y en verde. Tres señales, porque el teléfono se
+       mira con el brillo bajo y en la cocina — con una sola no alcanza. */
+    .cp-item.hecho { opacity: .5; }
+    .cp-item.hecho .cp-caja { background: var(--green); border-color: var(--green); color: #0d0d12; }
+    .cp-item.hecho .cp-nombre { text-decoration: line-through; }
+    .cp-nombre { font-weight: 600; }
+    .cp-nota { display: block; font-size: 12.5px; color: var(--text-muted); margin-top: 3px; font-weight: 400; }
+    .cp-ver { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 99px; font-size: 10px;
+              font-weight: 700; vertical-align: middle;
+              background: var(--orange-dim); border: 1px solid var(--orange); color: var(--orange); }
+    .cp-extra-tag { display: inline-block; margin-left: 8px; font-size: 10px; color: var(--text-muted); font-weight: 400; }
+    .cp-agregar { width: 100%; padding: 13px; border-radius: 10px; cursor: pointer; font-family: inherit;
+                  font-size: 14px; font-weight: 600; margin-top: 18px;
+                  background: transparent; border: 1px dashed var(--border); color: var(--text-muted); }
+    .cp-agregar:hover { border-color: var(--accent); color: var(--accent); }
+    .cp-form { margin-top: 14px; padding: 14px; border-radius: 10px;
+               background: var(--surface2); border: 1px solid var(--accent); }
+    .cp-form input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+                     border-radius: 8px; padding: 10px 12px; font-size: 16px; font-family: inherit;
+                     margin-bottom: 9px; }
+    .cp-vacio { padding: 28px 16px; text-align: center; color: var(--text-muted); font-size: 14px; line-height: 1.7; }
     /* Un renglón, y que se quede en uno: son comentarios de pocas palabras
        ("quedan 2", "falta ají"), no un campo de notas. `min-width: 0` es lo que
        evita que un texto largo estire la columna y vuelva a romper la fila. */
@@ -1713,12 +1778,34 @@
      contabilidad del bar. Ver src/mantenimiento.js. -->
 <!-- ═══ CIERRE DE COCINA ══════════════════════════════════════════════════════
      Qué comprar y qué producir, que Pablo anota al cerrar cada servicio. Vive
-     en una planilla aparte y por ahora esto la LEE: el marcado llega después.
-     El encargado entra, pero sólo ve Producir y Seteo — lo decide el server,
-     no esta pantalla. Ver src/cierre-cocina.js.                              -->
+     en una planilla aparte. El encargado entra, pero sólo ve Producir y Seteo —
+     lo decide el server, no esta pantalla. Ver src/cierre-cocina.js.
+
+     DOS MODOS, porque son dos usos y dos personas:
+
+       · Producción de hoy — lo que la cocina mira a la mañana. Sólo lo que hay
+         que producir, y un toque para tildarlo. Es lo que ve por defecto quien
+         no es admin: Eze y Juan entran acá.
+       · Cierre de cocina — la pantalla de marcar, que usa Pablo a la noche.
+         Es el default para admin.
+
+     El mismo tab y no un sexto ítem del menú: el grupo Operación ya está en seis
+     subs, y la regla de este archivo dice que a los seis hay que repensar el
+     agrupamiento, no agregar un séptimo. Y son literalmente las dos mitades de
+     la misma lista.                                                          -->
 <div id="tab-cierre" class="tab-panel">
   <main>
-    <div class="card">
+    <div id="cc-modos" class="cp-modos"></div>
+
+    <div id="cc-modo-produccion" class="card" style="display:none">
+      <div class="card-title"><span>Producción de hoy</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· lo que dejó dicho el último cierre</span>
+        <button class="btn btn-secondary" style="margin-left:auto" onclick="loadProduccion(this)">↻</button>
+      </div>
+      <div id="cp-cuerpo"><div style="color:var(--text-muted);font-size:13px">Cargando...</div></div>
+    </div>
+
+    <div id="cc-modo-cierre" class="card" style="display:none">
       <div class="card-title"><span>Cierre de cocina</span>
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· se edita en la planilla, acá se lee</span>
         <button class="btn btn-secondary" style="margin-left:auto" onclick="loadCierreCocina(this)">↻</button>
@@ -2276,10 +2363,22 @@
         </span>
       </div>
       <div id="vinos-kpis" class="kpi-grid" style="margin-bottom:14px"></div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        <span class="filter-label">Proveedor</span>
+        <select id="vinos-filtro-proveedor" onchange="loadVinos()" style="padding:6px 10px;font-size:12px">
+          <option value="">Todos</option>
+        </select>
+        <span class="filter-label">Categoría</span>
+        <select id="vinos-filtro-categoria" onchange="loadVinos()" style="padding:6px 10px;font-size:12px">
+          <option value="">Todas</option>
+        </select>
+        <button class="btn" id="vinos-limpiar-filtros" style="display:none;font-size:12px;padding:5px 12px" onclick="limpiarFiltrosVinos()">Limpiar filtros</button>
+      </div>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.6">
         <b>Días cobertura</b> = cuánto dura el stock al ritmo de venta de las últimas 4 semanas.
         🔴 quiebre (sin stock o bajo mínimo) · 🟠 se agota pronto (≤7 días) · ⚪ sin ventas · 🔵 sobrestock (>60 días, plata parada).
       </div>
+      <div id="vinos-aviso-copa" style="display:none;font-size:12px;color:var(--text-muted);line-height:1.6;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:10px 12px;margin-bottom:12px"></div>
       <div class="table-wrap">
         <table class="prov-resumen-table" style="width:100%;font-size:13px">
           <thead id="vinos-head"></thead>
@@ -2932,16 +3031,19 @@
     </div>
     <div class="arqueo-field">
       <label>🏦 Galicia</label>
-      <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Total Bruto — monto antes de descuentos impositivos</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Total Bruto — monto antes de costos e impuestos</div>
       <div id="ci-galicia-hint" style="font-size:11px;color:var(--text-muted);margin-bottom:6px"></div>
-      <input type="number" id="ci-galicia" placeholder="0" min="0" title="Ingresá el total bruto acreditado en Galicia antes de impuestos" />
+      <input type="number" id="ci-galicia" placeholder="0" min="0" oninput="actualizarNetoGalicia()" title="Total bruto acreditado en Galicia, antes de costos e impuestos" />
       <div style="margin-top:10px;padding:12px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
-        <label onclick="openAyudaNetoGalicia()" title="Cómo se carga este campo"
-               style="font-size:12px;color:var(--orange);display:inline-block;margin-bottom:6px;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">
-          Total Neto Acreditado ⓘ
+        <label onclick="openAyudaDeduccionesGalicia()" title="Cómo se cargan estos dos campos"
+               style="font-size:12px;color:var(--orange);display:inline-block;margin-bottom:10px;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">
+          Lo que descuenta Nave ⓘ
         </label>
-        <input type="number" id="ci-galicia-neto" placeholder="0" min="0" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:6px;font-size:16px;font-family:inherit;outline:none;" />
-        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Copialo tal cual del resumen de Nave. La comisión (Bruto − Neto) se registra sola como Gasto · Financieros.</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Total costos</div>
+        <input type="number" id="ci-galicia-costos" placeholder="0" min="0" oninput="actualizarNetoGalicia()" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:6px;font-size:16px;font-family:inherit;outline:none;" />
+        <div style="font-size:11px;color:var(--text-muted);margin:10px 0 4px">Impuestos asociados</div>
+        <input type="number" id="ci-galicia-impuestos" placeholder="0" min="0" oninput="actualizarNetoGalicia()" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:6px;font-size:16px;font-family:inherit;outline:none;" />
+        <div id="ci-galicia-neto-calc" style="font-size:12px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);color:var(--text-muted)"></div>
       </div>
     </div>
     <div id="cierre-error" style="color:var(--red);font-size:13px;margin-bottom:12px;text-align:center"></div>
@@ -4064,7 +4166,7 @@ function cargarPanel(tab) {
   else if (tab === 'propinas') loadPropinas();
   else if (tab === 'propinas-historial') loadPropinasHistorial();
   else if (tab === 'nomina') loadNomina();
-  else if (tab === 'cierre') loadCierreCocina();
+  else if (tab === 'cierre') loadTabCierre();
   else if (tab === 'inversiones') loadPlan();
   else if (tab === 'plan') loadPlan();
 }
@@ -4314,7 +4416,8 @@ function gastosSesionPorCaja(est) {
 
 async function openCierreModal() {
   document.getElementById('cierre-modal-overlay').classList.add('open');
-  ['ci-efectivo', 'ci-mp', 'ci-galicia', 'ci-galicia-neto'].forEach(id => document.getElementById(id).value = '');
+  ['ci-efectivo', 'ci-mp', 'ci-galicia', 'ci-galicia-costos', 'ci-galicia-impuestos'].forEach(id => document.getElementById(id).value = '');
+  actualizarNetoGalicia();
   ['ci-efectivo-hint', 'ci-mp-hint', 'ci-galicia-hint'].forEach(id => document.getElementById(id).innerHTML = '');
   document.getElementById('cierre-error').textContent = '';
   state.fudoCierre = null; state.arqueoEstado = null;
@@ -4355,6 +4458,7 @@ async function openCierreModal() {
     document.getElementById('ci-galicia-hint').innerHTML =
       `Según Fudo: <b style="color:var(--text)">${fmt(f.galicia)}</b> — precargado, verificá contra Nave`;
     document.getElementById('ci-galicia').value = f.galicia || '';
+    actualizarNetoGalicia();
   } catch (e) {
     res.innerHTML = `<div style="color:var(--red);font-size:12px">No se pudo consultar Fudo (${e.message}). Podés cerrar igual; no habrá verificación.</div>`;
   }
@@ -4364,31 +4468,57 @@ function closeCierreModal() {
   document.getElementById('cierre-modal-overlay').classList.remove('open');
 }
 
-// ─── Ayuda del campo "Total Neto Acreditado" ──────────────────────────────────
-// El Bruto viene precargado de Fudo; el Neto se carga a mano. La comisión NO se
-// tipea: sale de Bruto − Neto. Entonces un dedazo en el neto se convierte 1:1 en
-// un gasto Financieros. El 28/07/2026 se cargó neto = 1 contra un bruto de
-// $1.285.500 y quedó una comisión de $1.285.499 — el servicio entero
-// contabilizado como comisión. La app NO estima ni sugiere el neto a propósito:
-// el único número válido es el del resumen de Nave. Esto explica de dónde sacarlo.
-function openAyudaNetoGalicia() {
-  openDetalleModal('🏦 Total Neto Acreditado', `
+// ─── Galicia: el neto dejó de ser un campo y pasó a ser el resultado ──────────
+// Antes se cargaba el "Total Neto Acreditado" y la app sacaba la comisión como
+// Bruto − Neto, todo a Financieros. Eso mezclaba dos cosas distintas: lo que cobra
+// el adquirente (costo financiero) y lo que retiene el fisco (carga fiscal). Ahora
+// se cargan los dos por separado y el neto se muestra calculado, para que el
+// encargado lo compare contra lo que Nave dice que se acredita: si no coincide,
+// alguno de los dos números está mal y se ve ANTES de cerrar.
+function actualizarNetoGalicia() {
+  const el = document.getElementById('ci-galicia-neto-calc');
+  if (!el) return;
+  const n = id => parseFloat(document.getElementById(id).value) || 0;
+  const bruto = n('ci-galicia'), costos = n('ci-galicia-costos'), imp = n('ci-galicia-impuestos');
+  if (!bruto && !costos && !imp) { el.innerHTML = 'Cargá los dos campos del resumen de Nave.'; return; }
+  const neto = bruto - costos - imp;
+  const mal = neto < 0 || (bruto > 0 && (costos + imp) > bruto * 0.5);
+  el.innerHTML = `Neto acreditado: <b style="color:${mal ? 'var(--red)' : 'var(--text)'}">${fmt(neto)}</b>`
+    + `<span style="color:var(--text-muted)"> · ${fmt(bruto)} − ${fmt(costos)} − ${fmt(imp)}</span>`
+    + (mal ? '<div style="color:var(--red);margin-top:4px">⚠️ Eso no puede ser: revisá los montos contra Nave. Así no se van a registrar.</div>'
+           : '<div style="color:var(--text-muted);margin-top:4px">Tiene que coincidir con lo que Nave deposita.</div>');
+}
+
+// ─── Ayuda de los dos campos que descuenta Nave ───────────────────────────────
+// Ninguno de los dos se estima: se copian del resumen. Un dedazo acá se convierte
+// 1:1 en un gasto. El 28/07/2026, cuando el campo era el neto, se cargó 1 contra un
+// bruto de $1.285.500 y quedó una comisión de $1.285.499 — el servicio entero
+// contabilizado como comisión. Esto explica de dónde sale cada número y adónde va.
+function openAyudaDeduccionesGalicia() {
+  openDetalleModal('🏦 Lo que descuenta Nave', `
     <div style="font-size:14px;line-height:1.7">
-      <p style="margin-bottom:12px">Este número <b>se copia del resumen de Nave</b>, no se estima ni se calcula a ojo.</p>
+      <p style="margin-bottom:12px">Los dos números <b>se copian del resumen de Nave</b>, no se estiman ni se calculan a ojo.</p>
       <div style="background:rgba(224,92,92,0.10);border:1px solid var(--red);border-radius:8px;padding:12px 14px;margin-bottom:12px">
         <b>No pongas un número al azar, ni un redondeo, ni lo dejes en cualquier valor.</b>
-        La app le resta el neto al bruto y lo que da lo registra como comisión del posnet.
-        Un neto mal cargado se convierte en un gasto falso por ese mismo monto.
+        Cada uno se registra como un gasto por ese monto exacto. Un número mal cargado
+        es un gasto falso en el balance del mes.
       </div>
+      <p style="margin-bottom:8px"><b>Qué va en cada campo:</b></p>
+      <ul style="margin:0 0 12px 20px;padding:0">
+        <li style="margin-bottom:6px"><b>Total costos</b> — lo que cobra Nave por cobrar (comisión del posnet, arancel).
+          Se registra como <b>Gasto · Financieros</b>.</li>
+        <li style="margin-bottom:6px"><b>Impuestos asociados</b> — retenciones e impuestos sobre esos cobros.
+          Se registran como <b>Gasto · Fiscales</b>.</li>
+      </ul>
       <p style="margin-bottom:8px"><b>Qué hacer:</b></p>
       <ol style="margin:0 0 12px 20px;padding:0">
         <li style="margin-bottom:6px">Abrí el resumen de <b>Nave</b> del día.</li>
-        <li style="margin-bottom:6px">Buscá el <b>total neto acreditado</b> (lo que Galicia deposita, ya descontada la comisión).</li>
-        <li style="margin-bottom:6px">Copialo acá <b>tal cual</b>, sin redondear.</li>
+        <li style="margin-bottom:6px">Copiá cada total <b>tal cual</b>, sin redondear y sin sumarlos entre sí.</li>
+        <li style="margin-bottom:6px">Mirá el <b>neto acreditado</b> que calcula la app abajo: tiene que dar lo mismo que Nave deposita.</li>
       </ol>
       <p style="color:var(--text-muted);font-size:13px">
-        Si en este momento no tenés el resumen de Nave a mano, <b>dejá el campo vacío</b> y avisale a Gonza.
-        Es preferible cargar la comisión después que cargarla mal.
+        Si en este momento no tenés el resumen de Nave a mano, <b>dejá los dos campos vacíos</b> y avisale a Gonza.
+        Es preferible cargarlos después que cargarlos mal.
       </p>
     </div>`);
 }
@@ -4637,7 +4767,14 @@ function openArqueoDetalle(i) {
     fila('Mercado Pago Tincho inicial', fmt(a.mpInicial))
     + fila('Mercado Pago Tincho final', fmt(a.mpFinal))
     + fila('Diferencia apertura MP', a.diffAperturaMP ? fmt(a.diffAperturaMP) : '✓ Coincide', { sangria: true })
-    + fila('Galicia final', fmt(a.galiciaFinal), { borde: true }));
+    + fila('Galicia bruto', fmt(a.galiciaFinal), { borde: true })
+    + fila('− Costos Galicia', val(a.costosGalicia), { sangria: true })
+    + fila('− Impuestos Galicia', val(a.impuestosGalicia), { sangria: true })
+    + fila('= Galicia neto acreditado',
+        (a.costosGalicia == null && a.impuestosGalicia == null)
+          ? dash
+          : fmt(a.galiciaFinal - (a.costosGalicia || 0) - (a.impuestosGalicia || 0)),
+        { sangria: true, fuerte: true }));
 
   // Datos de auditoría: sirven para reconstruir por qué F8 quedó donde quedó.
   const auditoria = bloque('Auditoría',
@@ -4662,11 +4799,12 @@ async function cerrarCaja() {
   const efectivo    = parseFloat(document.getElementById('ci-efectivo').value) || 0;
   const mp          = parseFloat(document.getElementById('ci-mp').value) || 0;
   const galicia     = parseFloat(document.getElementById('ci-galicia').value) || 0;
-  const galiciaNeto = parseFloat(document.getElementById('ci-galicia-neto').value) || 0;
+  const galiciaCostos    = parseFloat(document.getElementById('ci-galicia-costos').value) || 0;
+  const galiciaImpuestos = parseFloat(document.getElementById('ci-galicia-impuestos').value) || 0;
   const errEl = document.getElementById('cierre-error');
   errEl.textContent = '';
 
-  state.cierrePendiente = { efectivo, mercadoPago: mp, galicia, galiciaNeto };
+  state.cierrePendiente = { efectivo, mercadoPago: mp, galicia, galiciaCostos, galiciaImpuestos };
 
   // Verificación del cierre (paso 3 y 4 del flujo):
   //   Esperado por caja = saldo inicial contado en la apertura + ingresos del día según Fudo.
@@ -4702,7 +4840,7 @@ async function cerrarCaja() {
       };
     }
   }
-  renderConfirmCierre(diffs, motivo, { bruto: galicia, neto: galiciaNeto });
+  renderConfirmCierre(diffs, motivo, { bruto: galicia, costos: galiciaCostos, impuestos: galiciaImpuestos });
 }
 
 // ─── Control de facturación del cierre (12 ago 2026) ────────────────────────
@@ -4772,17 +4910,21 @@ function renderConfirmCierre(diffs, motivo, galicia) {
   const actions = document.getElementById('confirm-cierre-actions');
 
   // Galicia no entra en la verificación contra Fudo (no se cuenta, se lee de Nave).
-  // Se repiten acá los dos valores TAL CUAL SE CARGARON — sin calcular ni estimar
-  // la comisión — para que el neto pase por delante de los ojos antes de escribir.
+  // Se repiten acá los valores TAL CUAL SE CARGARON, con el neto que sale de ellos,
+  // para que los tres pasen por delante de los ojos antes de escribir.
+  const gDeducciones = galicia ? (galicia.costos || 0) + (galicia.impuestos || 0) : 0;
+  const gSinCargar = gDeducciones === 0;
   const bloqueGalicia = !(galicia && galicia.bruto > 0) ? '' : `
     <div style="margin-top:12px;padding:10px 12px;border-radius:8px;font-size:13px;
-                background:var(--surface2);border:1px solid ${galicia.neto > 0 ? 'var(--border)' : '#e0c95c'}">
+                background:var(--surface2);border:1px solid ${gSinCargar ? '#e0c95c' : 'var(--border)'}">
       <div style="display:flex;justify-content:space-between;gap:10px">
         <span>🏦 Galicia</span>
-        <span style="text-align:right;font-size:12px;color:var(--text-muted)">
-          bruto ${fmt(galicia.bruto)} · neto ${galicia.neto > 0 ? fmt(galicia.neto) : '—'}</span>
+        <span style="text-align:right;font-size:12px;color:var(--text-muted);line-height:1.6">
+          bruto ${fmt(galicia.bruto)}<br>
+          − costos ${fmt(galicia.costos || 0)} · impuestos ${fmt(galicia.impuestos || 0)}<br>
+          = neto <b style="color:var(--text)">${fmt(galicia.bruto - gDeducciones)}</b></span>
       </div>
-      ${galicia.neto > 0 ? '' : `<div style="margin-top:4px;color:#e0c95c">⚠️ Sin Total Neto Acreditado: no se va a registrar la comisión de Galicia.</div>`}
+      ${gSinCargar ? `<div style="margin-top:4px;color:#e0c95c">⚠️ Sin costos ni impuestos cargados: no se va a registrar ninguna deducción de Galicia.</div>` : ''}
     </div>`;
   const filaCaja = (icono, nombre, d) => {
     const ok = Math.abs(d.diff) <= TOLERANCIA_CIERRE;
@@ -4905,8 +5047,9 @@ function renderResumenCierre(d, avisos = []) {
         <div class="resumen-row"><span>💵 Efectivo</span><span>${fmt(d.efectivoInicial)} → <strong>${fmt(d.efectivoFinal)}</strong> <span class="${difClass(d.difEfectivo)}">${difStr(d.difEfectivo)}</span></span></div>
         <div class="resumen-row"><span>📱 Mercado Pago Tincho</span><span>${fmt(d.mpInicial)} → <strong>${fmt(d.mpFinal)}</strong> <span class="${difClass(d.difMP)}">${difStr(d.difMP)}</span></span></div>
         ${d.galiciaBruto > 0 ? `<div class="resumen-row"><span>🏦 Galicia Bruto</span><span><strong>${fmt(d.galiciaBruto)}</strong></span></div>` : ''}
-        ${d.galiciaNeto > 0 ? `<div class="resumen-row"><span>🏦 Galicia Neto acreditado</span><span><strong>${fmt(d.galiciaNeto)}</strong></span></div>` : ''}
-        ${d.impuestosGalicia > 0 ? `<div class="resumen-row"><span style="color:var(--text-muted)">📋 Comisión Galicia</span><span style="color:var(--red)">-${fmt(d.impuestosGalicia)}</span></div>` : ''}
+        ${d.galiciaCostos > 0 ? `<div class="resumen-row"><span style="color:var(--text-muted)">📋 Costos Galicia · Financieros</span><span style="color:var(--red)">-${fmt(d.galiciaCostos)}</span></div>` : ''}
+        ${d.galiciaImpuestos > 0 ? `<div class="resumen-row"><span style="color:var(--text-muted)">🧾 Impuestos Galicia · Fiscales</span><span style="color:var(--red)">-${fmt(d.galiciaImpuestos)}</span></div>` : ''}
+        ${d.galiciaBruto > 0 ? `<div class="resumen-row"><span>🏦 Galicia Neto acreditado</span><span><strong>${fmt(d.galiciaNeto)}</strong></span></div>` : ''}
       </div>
     </div>
   `;
@@ -10001,17 +10144,21 @@ function openVinosModal(tipo) {
   } else if (tipo === 'quiebre') {
     titulo = '🔴 Bebidas en quiebre (reponer)';
     filtrados = items.filter(i => i.alerta === 'quiebre');
-    cols = ['stock','minStock','vtaSem','precio'];
+    // El proveedor va acá y no en las tiles de plata: esta lista es la lista de
+    // compras, y una lista de compras sin a quién pedirle está a medio hacer.
+    cols = ['proveedor','stock','minStock','vtaSem','precio'];
     totalLinea = filtrados.length ? '<b>'+filtrados.length+'</b> bebidas sin stock o por debajo del mínimo de Fudo. Estos son los que conviene comprar ya.' : 'No hay bebidas en quiebre. 👌';
   } else { // agotarse
     titulo = '🟠 Bebidas por agotarse y sobrestock';
     filtrados = items.filter(i => i.alerta === 'pronto' || i.alerta === 'sobrestock');
-    cols = ['stock','cobertura','vtaSem','estado'];
+    cols = ['proveedor','stock','cobertura','vtaSem','estado'];
     totalLinea = '🟠 se agotan en ≤7 días (reponer pronto) · 🔵 sobrestock >60 días (plata parada, no comprar).';
   }
 
   const th = { stock:'Stock', costo:'Costo', precio:'Precio', inmovilizado:'Inmovilizado', valorVenta:'Valor venta',
-    peso:'% del total', margenLinea:'Margen', minStock:'Mínimo', vtaSem:'Vta/sem', cobertura:'Días cob.', estado:'Estado' };
+    peso:'% del total', margenLinea:'Margen', minStock:'Mínimo', vtaSem:'Vta/sem', cobertura:'Días cob.', estado:'Estado',
+    proveedor:'Proveedor' };
+  const izquierda = new Set(['estado','proveedor']);
   const totalInmov = t.plataInmovilizada || 1;
 
   const celda = (it, c) => {
@@ -10027,6 +10174,8 @@ function openVinosModal(tipo) {
       case 'vtaSem': return '<td style="text-align:right">'+it.porSemana+'</td>';
       case 'cobertura': return '<td style="text-align:right">'+(it.diasCobertura==null?'—':it.diasCobertura+'d')+'</td>';
       case 'estado': return '<td style="text-align:left">'+(it.alerta==='pronto'?'🟠 se agota':'🔵 sobrestock')+'</td>';
+      case 'proveedor': return '<td style="text-align:left;font-size:12px'+(it.proveedorOrigen==='inferido'?';color:var(--text-muted);font-style:italic':'')+'">'
+        +(it.proveedor ? escapeHtml(it.proveedor) : '<span style="color:var(--text-muted)">—</span>')+'</td>';
       default: return '<td></td>';
     }
   };
@@ -10036,11 +10185,60 @@ function openVinosModal(tipo) {
     html += '<div style="color:var(--text-muted);padding:10px">Sin bebidas en esta categoría.</div>';
   } else {
     html += '<table class="prov-resumen-table" style="width:100%;font-size:13px"><thead><tr><th style="text-align:left">Bebida</th>'
-      + cols.map(c => '<th style="text-align:'+(c==='estado'?'left':'right')+'">'+th[c]+'</th>').join('') + '</tr></thead><tbody>'
+      + cols.map(c => '<th style="text-align:'+(izquierda.has(c)?'left':'right')+'">'+th[c]+'</th>').join('') + '</tr></thead><tbody>'
       + filtrados.map(it => '<tr><td style="text-align:left;font-weight:600">'+escapeHtml(it.nombre)+' <span style="color:var(--text-muted);font-size:11px">'+escapeHtml(it.categoria)+'</span></td>'+cols.map(c=>celda(it,c)).join('')+'</tr>').join('')
       + '</tbody></table>';
   }
   openDetalleModal(titulo, html);
+}
+
+// Repuebla un desplegable de filtro conservando lo elegido. Si el valor elegido
+// ya no está en la lista (se corrigió el proveedor de la última bebida que lo
+// tenía), se agrega igual: si no, el filtro se caería solo y la tabla mostraría
+// otra cosa que el desplegable.
+function renderVinosFiltro(sel, valores, valorActual, labelTodos) {
+  if (!sel) return;
+  const lista = valores.slice();
+  if (valorActual && !lista.includes(valorActual)) lista.push(valorActual);
+  sel.innerHTML = '<option value="">' + labelTodos + '</option>' +
+    lista.map(v => '<option value="' + escAttr2(v) + '"' + (v === valorActual ? ' selected' : '') + '>' + escapeHtml(v) + '</option>').join('');
+  sel.value = valorActual || '';
+}
+
+function limpiarFiltrosVinos() {
+  const p = document.getElementById('vinos-filtro-proveedor');
+  const c = document.getElementById('vinos-filtro-categoria');
+  if (p) p.value = '';
+  if (c) c.value = '';
+  loadVinos();
+}
+
+// Guardar el proveedor de una bebida desde el desplegable de su fila. No recarga
+// la tabla entera: recargarla la reordena y la fila que acabás de tocar se te va
+// de abajo del cursor, que es lo peor que puede hacer una pantalla donde estás
+// cargando cincuenta filas seguidas. El filtro sí se repuebla, por si el
+// proveedor elegido todavía no estaba en la lista.
+async function saveVinoProveedor(sel) {
+  const productoId = sel.getAttribute('data-id');
+  const nombre = sel.getAttribute('data-nombre') || '';
+  const proveedor = sel.value;
+  const previo = sel.getAttribute('data-previo') || '';
+  sel.disabled = true;
+  try {
+    await api('/api/vinos/proveedor', { method: 'POST', body: JSON.stringify({ productoId, producto: nombre, proveedor }) });
+    sel.setAttribute('data-previo', proveedor);
+    sel.style.color = '';
+    sel.style.fontStyle = '';
+    sel.title = 'Asignado a mano';
+    const it = (_vinosData && _vinosData.items || []).find(x => String(x.id) === String(productoId));
+    if (it) { it.proveedor = proveedor; it.proveedorOrigen = 'manual'; it.proveedorVia = null; }
+    showToast(proveedor ? (escapeHtml(nombre) + ' → ' + escapeHtml(proveedor)) : (escapeHtml(nombre) + ' queda sin proveedor'));
+  } catch (e) {
+    sel.value = previo;
+    showToast('No se pudo guardar: ' + e.message);
+  } finally {
+    sel.disabled = false;
+  }
 }
 
 async function loadVinos() {
@@ -10050,10 +10248,39 @@ async function loadVinos() {
   if (!body) return;
   body.innerHTML = '<tr><td style="color:var(--text-muted);padding:14px">Cargando inventario de Fudo...</td></tr>';
   const soloVino = document.getElementById('vinos-solo-vino') && document.getElementById('vinos-solo-vino').checked;
+  const selProv = document.getElementById('vinos-filtro-proveedor');
+  const selCat = document.getElementById('vinos-filtro-categoria');
+  const fProveedor = selProv ? selProv.value : '';
+  const fCategoria = selCat ? selCat.value : '';
+  const qs = [];
+  if (soloVino) qs.push('soloVino=1');
+  if (fProveedor) qs.push('proveedor=' + encodeURIComponent(fProveedor));
+  if (fCategoria) qs.push('categoria=' + encodeURIComponent(fCategoria));
   let data;
-  try { ({ data } = await api('/api/vinos' + (soloVino ? '?soloVino=1' : ''))); }
+  try { ({ data } = await api('/api/vinos' + (qs.length ? '?' + qs.join('&') : ''))); }
   catch (e) { body.innerHTML = '<tr><td style="color:var(--red);padding:14px">Error: '+escapeHtml(e.message)+'</td></tr>'; return; }
   _vinosData = data;
+
+  const sinProvLabel = data.sinProveedorLabel || '(sin asignar)';
+  renderVinosFiltro(selProv, [sinProvLabel].concat(data.proveedores || []), fProveedor, 'Todos');
+  renderVinosFiltro(selCat, data.categorias || [], fCategoria, 'Todas');
+  const btnLimpiar = document.getElementById('vinos-limpiar-filtros');
+  if (btnLimpiar) btnLimpiar.style.display = (fProveedor || fCategoria) ? '' : 'none';
+
+  // El aviso de las botellas por copa sólo aparece cuando hay alguna: si estuviera
+  // siempre, en dos semanas nadie lo lee.
+  const avisoCopa = document.getElementById('vinos-aviso-copa');
+  if (avisoCopa) {
+    const nDesc = (data.totales && data.totales.descargadas) || 0;
+    if (nDesc > 0) {
+      avisoCopa.style.display = '';
+      avisoCopa.innerHTML = '🍷 <b>' + nDesc + ' botellas</b> de las que salieron en estos ' + data.ventanaDias +
+        ' días se abrieron para vender <b>por copa</b>: en Fudo se cargan en una mesa aparte a $0 y la plata entra por las copas. ' +
+        'Antes esas botellas no se contaban en ningún lado. Ahora suman a <b>Vta/sem</b> y a los días de cobertura, y se ven aparte en la columna <b>Por copa</b>.';
+    } else {
+      avisoCopa.style.display = 'none';
+    }
+  }
 
   // El encargado ve el CIRCULANTE, no la plata: qué hay, cuánto sale por semana,
   // cuántos días dura y qué está por faltar. Sin KPIs arriba y sin las columnas de
@@ -10075,14 +10302,53 @@ async function loadVinos() {
 
   head.innerHTML = '<tr>'
     + '<th style="text-align:left">Bebida</th><th style="text-align:left">Categoría</th>'
+    + '<th style="text-align:left">Proveedor</th>'
     + '<th style="text-align:right">Stock</th>'
-    + '<th style="text-align:right">Vta/sem</th>'
+    + '<th style="text-align:right" title="Todo lo que salió del stock por semana: lo cobrado más las botellas abiertas para servir por copa">Vta/sem</th>'
+    + '<th style="text-align:right" title="Botellas abiertas para vender por copa (tickets en $0). Ya están sumadas en Vta/sem.">Por copa</th>'
     + '<th style="text-align:right">Días cob.</th>'
     + (esAdmin ? '<th style="text-align:right">Costo</th><th style="text-align:right">Precio</th><th style="text-align:right">Margen</th><th style="text-align:right">Inmovilizado</th>' : '')
     + '<th style="text-align:left">Alerta</th></tr>';
 
-  const nCols = esAdmin ? 10 : 6;
-  if (!data.items.length) { body.innerHTML = '<tr><td colspan="'+nCols+'" style="color:var(--text-muted);padding:14px">No se encontraron bebidas con stock en Fudo.</td></tr>'; return; }
+  const nCols = esAdmin ? 12 : 8;
+  if (!data.items.length) {
+    const conFiltro = fProveedor || fCategoria;
+    body.innerHTML = '<tr><td colspan="'+nCols+'" style="color:var(--text-muted);padding:14px">'
+      + (conFiltro ? 'Ninguna bebida con ese filtro. <a href="#" onclick="limpiarFiltrosVinos();return false" style="color:var(--accent)">Ver todas</a>.'
+                   : 'No se encontraron bebidas con stock en Fudo.')
+      + '</td></tr>';
+    return;
+  }
+
+  // La celda de proveedor. El admin la edita ahí mismo; el encargado la lee.
+  // Un proveedor INFERIDO (cruce de nombres contra la hoja Compras) se muestra en
+  // itálica y apagado a propósito: es una suposición hasta que alguien la mire, y
+  // pintarla igual que una asignada sería decir que se sabe algo que no se sabe.
+  const listaProv = data.proveedores || [];
+  const celdaProveedor = it => {
+    const inferido = it.proveedorOrigen === 'inferido';
+    if (!esAdmin) {
+      if (!it.proveedor) return '<td style="text-align:left;color:var(--text-muted);font-size:12px">—</td>';
+      return '<td style="text-align:left;font-size:12px'+(inferido?';color:var(--text-muted);font-style:italic':'')+'"'
+        + (inferido ? ' title="Sugerido por el nombre, sin confirmar"' : '') + '>'+escapeHtml(it.proveedor)+'</td>';
+    }
+    const opts = ['<option value="">— sin asignar —</option>']
+      .concat(listaProv.map(p => '<option value="'+escAttr2(p)+'"'+(p===it.proveedor?' selected':'')+'>'+escapeHtml(p)+'</option>'));
+    // Si el valor guardado no está en la lista (proveedor viejo, o borrado de la
+    // hoja Proveedores), se agrega para no perderlo al abrir el desplegable.
+    if (it.proveedor && !listaProv.includes(it.proveedor)) {
+      opts.push('<option value="'+escAttr2(it.proveedor)+'" selected>'+escapeHtml(it.proveedor)+'</option>');
+    }
+    const estilo = inferido ? 'color:var(--text-muted);font-style:italic' : '';
+    const tip = inferido ? ('Sugerido: '+(it.proveedorVia||'por el nombre')+'. Elegilo para confirmarlo.') : 'Asignado a mano';
+    // El id y el nombre viajan como data-*, no dentro del onchange: hay vinos con
+    // comillas y apóstrofes en el nombre y armar la llamada a mano los rompe.
+    return '<td style="text-align:left"><select style="padding:4px 6px;font-size:12px;max-width:170px;'+estilo+'"'
+      + ' data-id="'+escAttr2(String(it.id))+'" data-nombre="'+escAttr2(it.nombre)+'"'
+      + ' data-previo="'+escAttr2(it.proveedor||'')+'" title="'+escAttr2(tip)+'"'
+      + ' onchange="saveVinoProveedor(this)">'
+      + opts.join('') + '</select></td>';
+  };
 
   const badge = a => {
     const m = {
@@ -10098,11 +10364,16 @@ async function loadVinos() {
 
   body.innerHTML = data.items.map(it => {
     const cob = it.diasCobertura == null ? '—' : it.diasCobertura + 'd';
+    const desc = it.descargadasVentana || 0;
     return '<tr style="'+bgAlerta(it.alerta)+'">'
       + '<td style="text-align:left;font-weight:600">'+escapeHtml(it.nombre)+'</td>'
       + '<td style="text-align:left;color:var(--text-muted);font-size:12px">'+escapeHtml(it.categoria)+'</td>'
+      + celdaProveedor(it)
       + '<td style="text-align:right;font-weight:600">'+(it.stock==null?'—':it.stock)+'</td>'
       + '<td style="text-align:right">'+it.porSemana+'</td>'
+      + '<td style="text-align:right'+(desc?'':';color:var(--text-muted)')+'"'
+        + (desc ? ' title="'+desc+' de las '+it.vendidasVentana+' unidades que salieron en '+data.ventanaDias+' días se fueron en botellas abiertas para servir por copa"' : '')
+        + '>'+(desc ? '🍷 '+desc : '—')+'</td>'
       + '<td style="text-align:right">'+cob+'</td>'
       + (esAdmin
         ? '<td style="text-align:right;color:var(--text-muted)">'+(it.cost==null?'—':fmt(it.cost))+'</td>'
@@ -13112,6 +13383,10 @@ document.addEventListener('DOMContentLoaded', () => {
 // ediciones. La contra es que se pueden perder, así que hay banner permanente y
 // un guard de salida.
 const ccState = {
+  // 'produccion' (la lista de la mañana) o 'cierre' (la pantalla de marcar).
+  // Arranca en null y lo resuelve loadTabCierre según el rol, porque el rol
+  // todavía no está cargado cuando se evalúa este objeto.
+  modo: null,
   data: null, solapa: null, cambios: new Map(), guardando: false,
   // Qué categorías están plegadas, con clave solapa|grupo. Sobrevive a los
   // re-render (que son uno por marca) porque si no, plegar algo y marcar el
@@ -13225,6 +13500,9 @@ function ccComentar(solapaId, grupo, nombre, valor, input) {
 }
 
 function ccRenderBanner() {
+  // El contador también vive en el botón del otro modo, que es lo que avisa de las
+  // marcas sin guardar cuando esta pantalla está escondida.
+  ccRenderModos();
   const el = document.getElementById('cc-banner');
   if (!el) return;
   const n = ccState.cambios.size;
@@ -13407,6 +13685,231 @@ function renderCierreCocina() {
     }).join('');
   }).join('');
   ccRenderBanner();
+}
+
+// ═══ LOS DOS MODOS DE LA PANTALLA DE CIERRE ═════════════════════════════════
+//
+// La misma lista se usa de dos maneras opuestas. De noche Pablo la RECORRE
+// ENTERA y marca: necesita las cuarenta filas, los cuatro estados y el campo de
+// comentario. A la mañana Eze y Juan quieren LA LISTA CORTA de lo que hay que
+// producir y un dedo para tildarla; esa misma pantalla, con cuatro botones y un
+// input por fila, es ruido puro para eso.
+//
+// Por eso son dos modos y no una pantalla con opciones: no se trata de mostrar
+// menos de lo mismo, se trata de que son dos tareas distintas.
+function ccModoInicial() { return getRol() === 'admin' ? 'cierre' : 'produccion'; }
+
+function ccRenderModos() {
+  const el = document.getElementById('cc-modos');
+  if (!el) return;
+  const m = ccState.modo;
+  // Las marcas sin guardar viajan en memoria y sobreviven al cambio de modo,
+  // pero el banner que las cuenta queda escondido con la otra pantalla. El
+  // número en el botón es lo que evita irse a producción, olvidarse y perderlas.
+  const sinGuardar = ccState.cambios.size;
+  el.innerHTML = `
+    <button class="cp-modo${m === 'produccion' ? ' active' : ''}" onclick="ccIrA('produccion')">👨‍🍳 Producción de hoy</button>
+    <button class="cp-modo${m === 'cierre' ? ' active' : ''}" onclick="ccIrA('cierre')">🌙 Cierre de cocina${sinGuardar ? ` · ${sinGuardar} sin guardar` : ''}</button>`;
+  const p = document.getElementById('cc-modo-produccion');
+  const c = document.getElementById('cc-modo-cierre');
+  if (p) p.style.display = m === 'produccion' ? '' : 'none';
+  if (c) c.style.display = m === 'cierre' ? '' : 'none';
+}
+
+function ccIrA(modo) {
+  ccState.modo = modo;
+  ccRenderModos();
+  // Se carga sólo la primera vez que se entra a cada modo: volver de uno al otro
+  // no tiene que costar una llamada a la planilla ni perder lo que estaba a medio
+  // marcar. Para traer datos frescos está el ↻ de cada tarjeta.
+  if (modo === 'produccion') { if (!cpState.data) loadProduccion(); }
+  else if (!ccState.data) loadCierreCocina();
+}
+
+function loadTabCierre() {
+  if (!ccState.modo) ccState.modo = ccModoInicial();
+  ccRenderModos();
+  if (ccState.modo === 'produccion') loadProduccion();
+  else loadCierreCocina();
+}
+
+// ═══ PRODUCCIÓN DEL DÍA ═════════════════════════════════════════════════════
+// Lo que la cocina mira a la mañana. Ver src/cierre-cocina.js.
+//
+// Muestra SÓLO lo que quedó para hacer o para ver: lo que Pablo dejó en OK no es
+// trabajo, y meterlo tachado en la lista sería obligar a leer treinta renglones
+// para encontrar los cuatro que importan.
+//
+// El tildado va contra la hoja propia de la app, NUNCA contra la planilla de
+// Pablo: él escribe de noche, la cocina tilda de mañana, y ninguno de los dos
+// pisa lo del otro.
+const cpState = { data: null, formAbierto: false, marcando: new Set(), guardandoExtra: false };
+
+const cpDDMM = f => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((f || '').trim());
+  return m ? `${m[3]}/${m[2]}` : (f || '');
+};
+const cpHora = iso => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return isNaN(d) ? '' : d.toLocaleTimeString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour: '2-digit', minute: '2-digit' });
+};
+
+async function loadProduccion(btn) {
+  if (btn) btn.classList.add('spinning');
+  const cont = document.getElementById('cp-cuerpo');
+  try {
+    const { data } = await api('/api/cierre-cocina/produccion');
+    cpState.data = data;
+    renderProduccion();
+  } catch (e) {
+    cont.innerHTML = `<div class="prop-error">No se pudo cargar: ${escapeHtml(e.message)}</div>`;
+  } finally { if (btn) btn.classList.remove('spinning'); }
+}
+
+function cpFormulario() {
+  if (!cpState.formAbierto) {
+    return `<button class="cp-agregar" onclick="cpAbrirForm()">+ Agregar algo para producir</button>`;
+  }
+  return `
+    <div class="cp-form">
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px">Agregar a la lista de hoy</div>
+      <input type="text" id="cp-nuevo-nombre" placeholder="Qué hay que producir" autocomplete="off"
+             onkeydown="if(event.key==='Enter')cpGuardarExtra()" />
+      <input type="text" id="cp-nuevo-grupo" placeholder="Plato o sección (opcional)" autocomplete="off"
+             onkeydown="if(event.key==='Enter')cpGuardarExtra()" />
+      <input type="text" id="cp-nuevo-nota" placeholder="Detalle (opcional): cantidad, para cuándo..." autocomplete="off"
+             onkeydown="if(event.key==='Enter')cpGuardarExtra()" />
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.5">
+        Queda sólo en la lista de hoy. La planilla de Pablo no se toca: si esto tiene que estar todos los días, avisale para que lo agregue ahí.
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="cpCerrarForm()">Cancelar</button>
+        <button class="btn btn-accent" style="flex:1" onclick="cpGuardarExtra(this)">Agregar</button>
+      </div>
+    </div>`;
+}
+
+function renderProduccion() {
+  const d = cpState.data;
+  const cont = document.getElementById('cp-cuerpo');
+  if (!cont || !d) return;
+
+  if (!d.configurada) {
+    cont.innerHTML = `<div class="prop-error">La planilla de cierre de cocina no está configurada en el servidor.</div>`;
+    return;
+  }
+  // Sin cierre no hay lista y tampoco hay dónde colgar un agregado: el botón de
+  // agregar no se muestra, porque el server lo rechazaría igual y un botón que
+  // siempre falla es peor que no tenerlo.
+  if (!d.cierre) {
+    cont.innerHTML = `<div class="cp-vacio">Todavía no hay ningún cierre de cocina cargado.<br>
+      Cuando se cierre el servicio, mañana a la mañana la lista aparece acá.</div>`;
+    return;
+  }
+
+  const items = d.items || [];
+  const hechos = items.filter(i => i.hecho).length;
+  const pct = items.length ? Math.round((hechos / items.length) * 100) : 0;
+
+  const cabecera = `
+    <div class="cp-cab">
+      <span class="cp-firma">Del cierre del <b>${escapeHtml(cpDDMM(d.cierre.fechaServicio))}</b>${d.cierre.firmadoPor ? ` · ${escapeHtml(d.cierre.firmadoPor)}` : ''}</span>
+      ${items.length ? `<span class="cp-progreso" style="color:${hechos === items.length ? 'var(--green)' : 'var(--text)'}">${hechos} de ${items.length} ${items.length === 1 ? 'hecha' : 'hechas'}</span>` : ''}
+    </div>
+    ${items.length ? `<div class="cp-barra"><span style="width:${pct}%"></span></div>` : ''}`;
+
+  if (!items.length) {
+    cont.innerHTML = cabecera
+      + `<div class="cp-vacio">No quedó nada para producir.<br>Si igual hay algo que hacer, agregalo acá abajo.</div>`
+      + cpFormulario();
+    return;
+  }
+
+  // Agrupado por plato, en el orden en que vino — que es el de la planilla, y
+  // ese orden lleva la intención de quien la escribió.
+  const grupos = new Map();
+  for (const it of items) {
+    const k = it.grupo || 'Sin plato';
+    if (!grupos.has(k)) grupos.set(k, []);
+    grupos.get(k).push(it);
+  }
+
+  cont.innerHTML = cabecera + [...grupos.entries()].map(([grupo, its]) => `
+    <div class="cp-grupo">${escapeHtml(grupo)}</div>
+    ${its.map(it => `
+      <button class="cp-item${it.hecho ? ' hecho' : ''}" onclick="cpMarcar('${escapeHtml(it.id)}')">
+        <span class="cp-caja">${it.hecho ? '✓' : ''}</span>
+        <span style="flex:1;min-width:0">
+          <span class="cp-nombre">${escapeHtml(it.nombre)}</span>
+          ${it.estado === 'dudoso' ? '<span class="cp-ver">VER</span>' : ''}
+          ${it.origen === 'extra' ? `<span class="cp-extra-tag">agregado${it.creadoPor ? ' por ' + escapeHtml(it.creadoPor) : ''}</span>` : ''}
+          ${it.comentario ? `<span class="cp-nota">${escapeHtml(it.comentario)}</span>` : ''}
+          ${it.hecho && it.hechoPor ? `<span class="cp-nota">✓ ${escapeHtml(it.hechoPor)}${cpHora(it.hechoEn) ? ' · ' + cpHora(it.hechoEn) : ''}</span>` : ''}
+        </span>
+      </button>`).join('')}`).join('') + cpFormulario();
+}
+
+// Se tilda primero en pantalla y se guarda después. En la cocina el teléfono
+// está apoyado y con las manos ocupadas: esperar la respuesta de la planilla
+// para ver el tilde hace que se toque dos veces. Si la escritura falla, vuelve
+// atrás y se dice por qué — el estado que se ve nunca queda mintiendo.
+async function cpMarcar(id) {
+  const it = ((cpState.data && cpState.data.items) || []).find(x => x.id === id);
+  if (!it || cpState.marcando.has(id)) return;
+  const antes = { hecho: it.hecho, hechoPor: it.hechoPor, hechoEn: it.hechoEn };
+  const nuevo = !it.hecho;
+  cpState.marcando.add(id);
+  it.hecho = nuevo;
+  it.hechoPor = nuevo ? (getNombre() || '') : '';
+  it.hechoEn = nuevo ? new Date().toISOString() : '';
+  renderProduccion();
+  try {
+    const { data } = await api('/api/cierre-cocina/produccion/hecho', {
+      method: 'POST', body: JSON.stringify({ id, hecho: nuevo }),
+    });
+    it.hecho = data.hecho; it.hechoPor = data.hechoPor; it.hechoEn = data.hechoEn;
+  } catch (e) {
+    Object.assign(it, antes);
+    showToast('No se pudo guardar: ' + e.message, 4000);
+  } finally {
+    cpState.marcando.delete(id);
+    renderProduccion();
+  }
+}
+
+function cpAbrirForm() {
+  cpState.formAbierto = true;
+  renderProduccion();
+  const el = document.getElementById('cp-nuevo-nombre');
+  if (el) el.focus();
+}
+
+function cpCerrarForm() { cpState.formAbierto = false; renderProduccion(); }
+
+async function cpGuardarExtra(btn) {
+  if (cpState.guardandoExtra) return;
+  const nombre = (document.getElementById('cp-nuevo-nombre') || {}).value || '';
+  const grupo = (document.getElementById('cp-nuevo-grupo') || {}).value || '';
+  const comentario = (document.getElementById('cp-nuevo-nota') || {}).value || '';
+  if (!nombre.trim()) { showToast('Escribí qué hay que producir'); return; }
+  cpState.guardandoExtra = true;
+  if (btn) { btn.disabled = true; btn.textContent = 'Agregando...'; }
+  try {
+    const { data } = await api('/api/cierre-cocina/produccion/extra', {
+      method: 'POST',
+      body: JSON.stringify({ nombre: nombre.trim(), grupo: grupo.trim(), comentario: comentario.trim() }),
+    });
+    cpState.data.items.push(data);
+    cpState.formAbierto = false;
+    renderProduccion();
+    showToast('Agregado a la lista de hoy');
+  } catch (e) {
+    showToast('Error: ' + e.message, 4000);
+  } finally {
+    cpState.guardandoExtra = false;
+    if (btn) { btn.disabled = false; btn.textContent = 'Agregar'; }
+  }
 }
 
 // ═══ NÓMINA ═════════════════════════════════════════════════════════════════

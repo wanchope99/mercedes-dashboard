@@ -10,6 +10,7 @@
 // Etapa 1: stock + valor + rotación. (La demanda por hora viene en la etapa 2.)
 
 const fudo = require('./fudo');
+const bebidasProveedor = require('./bebidas-proveedor');
 
 const DIA_MS = 86_400_000;
 
@@ -61,10 +62,17 @@ function esVino(categoria) {
 
 // Análisis de inventario + rotación de las bebidas que se reponen por unidad
 // (con y sin alcohol).
-//   { desde, hasta }  → ventana para calcular la velocidad de venta (default 28 días).
+//   { desde, hasta }   → ventana para calcular la velocidad de venta (default 28 días).
+//   { proveedor, categoria } → filtros de la pantalla. Filtran los ITEMS, y por lo
+//   tanto también los KPIs: si mirás sólo Aurea, la plata inmovilizada que ves es
+//   la de Aurea. Un KPI que ignorara el filtro diría otra cosa que la tabla que
+//   tiene debajo. `proveedor` acepta el centinela '(sin asignar)'.
 // Devuelve:
-//   { ventanaDias, generado, totales, items: [...], porCategoria: [...] }
-async function analizarVinos({ desde, hasta, soloVino = false } = {}) {
+//   { ventanaDias, generado, totales, items: [...], porCategoria: [...],
+//     proveedores: [...], categorias: [...] }
+const SIN_PROVEEDOR = '(sin asignar)';
+
+async function analizarVinos({ desde, hasta, soloVino = false, proveedor = '', categoria = '' } = {}) {
   // 1) Inventario actual desde Fudo
   const productos = await fudo.getProductosConStock();
   const candidatos = productos.filter(p =>
@@ -76,26 +84,48 @@ async function analizarVinos({ desde, hasta, soloVino = false } = {}) {
   const desdeD = desde || isoDia(new Date(hoy.getTime() - 27 * DIA_MS));
   const ventanaDias = Math.max(1, Math.round((new Date(hastaD + 'T00:00:00') - new Date(desdeD + 'T00:00:00')) / DIA_MS) + 1);
 
-  const ventas = await fudo.getVentasItems({ desde: desdeD, hasta: hastaD });
-  // Agrupar unidades vendidas por productoId (y por nombre como fallback).
-  const vendidoPorId = {};
-  const vendidoPorNombre = {};
+  // `incluirDescargas: true` — las botellas que se abren para vender por copa se
+  // cargan en Fudo en una mesa aparte A $0, y esa venta queda descartada entera
+  // por valer $0. Para la PLATA está bien (la plata entra por las copas), pero
+  // para el STOCK es una botella que salió de la góndola igual: sin esto El Beppe
+  // Criolla figuraba con 7 salidas en 28 días cuando el stock bajó 21.
+  // Ver el comentario largo en getVentasItems (src/fudo.js).
+  const ventas = await fudo.getVentasItems({ desde: desdeD, hasta: hastaD, incluirDescargas: true });
+
+  // Unidades por productoId (y por nombre como fallback), separando las cobradas
+  // de las descargadas por copa. Se cuentan juntas para la rotación y se informan
+  // separadas para que el número se pueda explicar.
+  const cobradoPorId = {}, cobradoPorNombre = {};
+  const descargaPorId = {}, descargaPorNombre = {};
   for (const v of ventas) {
     // El MISMO criterio que el inventario, a propósito: si acá quedara el filtro
     // viejo, las gaseosas aparecerían con stock pero con cero ventas, o sea sin
     // rotación y sin días de cobertura — el dato que las hace útiles.
     if (!esBebidaDeStock(v.categoria)) continue;
-    if (v.productoId != null) vendidoPorId[v.productoId] = (vendidoPorId[v.productoId] || 0) + v.unidades;
-    vendidoPorNombre[norm(v.nombre)] = (vendidoPorNombre[norm(v.nombre)] || 0) + v.unidades;
+    const porId = v.descarga ? descargaPorId : cobradoPorId;
+    const porNombre = v.descarga ? descargaPorNombre : cobradoPorNombre;
+    if (v.productoId != null) porId[v.productoId] = (porId[v.productoId] || 0) + v.unidades;
+    porNombre[norm(v.nombre)] = (porNombre[norm(v.nombre)] || 0) + v.unidades;
   }
 
+  // Quién trae cada bebida. Nunca puede tumbar la pantalla: si la hoja Compras o
+  // la de correcciones no están disponibles, se sigue sin proveedor.
+  const provPorId = await bebidasProveedor.resolver(candidatos).catch(e => {
+    console.warn('Gestión de bebidas: sin proveedores (' + e.message + ')');
+    return {};
+  });
+
   // 3) Armar el detalle por producto
-  const items = candidatos.map(p => {
-    const vendidas = (p.id != null && vendidoPorId[p.id] != null)
-      ? vendidoPorId[p.id]
-      : (vendidoPorNombre[norm(p.name)] || 0);
+  const todos = candidatos.map(p => {
+    const unidadesDe = (porId, porNombre) => (p.id != null && porId[p.id] != null)
+      ? porId[p.id]
+      : (porNombre[norm(p.name)] || 0);
+    const cobradas = unidadesDe(cobradoPorId, cobradoPorNombre);
+    const descargadas = unidadesDe(descargaPorId, descargaPorNombre);
+    const vendidas = cobradas + descargadas;   // lo que salió del stock
     const porDia = ventanaDias > 0 ? vendidas / ventanaDias : 0;
     const porSemana = porDia * 7;
+    const prov = provPorId[String(p.id)] || { proveedor: '', origen: null, via: null };
 
     const stock = (typeof p.stock === 'number') ? p.stock : null;
     const cost = (typeof p.cost === 'number') ? p.cost : null;
@@ -124,8 +154,19 @@ async function analizarVinos({ desde, hasta, soloVino = false } = {}) {
     return {
       id: p.id, nombre: p.name, categoria: p.categoria,
       esVino: esVino(p.categoria),
+      proveedor: prov.proveedor || '',
+      // 'manual' = alguien lo eligió · 'inferido' = lo dedujo el cruce de nombres
+      // contra Compras · null = no se sabe. La pantalla los muestra distinto: un
+      // proveedor adivinado no puede parecer un dato confirmado.
+      proveedorOrigen: prov.origen || null,
+      proveedorVia: prov.via || null,
       stock, cost, price, minStock: p.minStock,
+      // vendidasVentana es TODO lo que salió del stock, que es lo que manda para
+      // reponer. descargadasVentana es la parte que se fue en botellas abiertas
+      // para servir por copa (tickets en $0), y cobradasVentana el resto.
       vendidasVentana: Math.round(vendidas * 100) / 100,
+      cobradasVentana: Math.round(cobradas * 100) / 100,
+      descargadasVentana: Math.round(descargadas * 100) / 100,
       porSemana: Math.round(porSemana * 100) / 100,
       diasCobertura,
       valorCosto, valorVenta,
@@ -133,6 +174,20 @@ async function analizarVinos({ desde, hasta, soloVino = false } = {}) {
       alerta,
     };
   });
+
+  // Las listas de los dos desplegables salen de TODAS las bebidas, no de las que
+  // sobrevivieron al filtro: si se armaran después de filtrar, elegir un proveedor
+  // dejaría el desplegable con un solo nombre y sin forma de volver.
+  const proveedores = await bebidasProveedor
+    .listaProveedores(todos.map(it => it.proveedor))
+    .catch(() => [...new Set(todos.map(it => it.proveedor).filter(Boolean))].sort());
+  const categorias = [...new Set(todos.map(it => it.categoria))].sort((a, b) => a.localeCompare(b, 'es'));
+
+  // Filtros de la pantalla (se aplican DESPUÉS de armar las listas y ANTES de los
+  // totales, para que los KPIs hablen de lo mismo que la tabla).
+  const items = todos.filter(it =>
+    (!categoria || it.categoria === categoria) &&
+    (!proveedor || (proveedor === SIN_PROVEEDOR ? !it.proveedor : it.proveedor === proveedor)));
 
   // Ordenar: primero lo más urgente (quiebre, pronto), luego por plata inmovilizada.
   const ordenAlerta = { quiebre: 0, pronto: 1, 'sin-ventas': 2, ok: 3, sobrestock: 4 };
@@ -152,6 +207,10 @@ async function analizarVinos({ desde, hasta, soloVino = false } = {}) {
     sobrestock: items.filter(x => x.alerta === 'sobrestock').length,
     // Margen potencial si se vendiera todo el stock al precio actual.
     margenPotencial: Math.round(sum(items, x => (x.valorVenta || 0) - (x.valorCosto || 0))),
+    // Cuántas de las salidas de la ventana fueron botellas abiertas para servir
+    // por copa. Es el número que justifica la línea de aviso de la pantalla.
+    descargadas: Math.round(sum(items, x => x.descargadasVentana) * 100) / 100,
+    productosConDescarga: items.filter(x => x.descargadasVentana > 0).length,
   };
 
   // 5) Resumen por categoría
@@ -173,10 +232,15 @@ async function analizarVinos({ desde, hasta, soloVino = false } = {}) {
     ventanaDias, desde: desdeD, hasta: hastaD,
     generado: new Date().toISOString(),
     totales, items, porCategoria,
+    // Para los desplegables. `filtro` devuelve lo que efectivamente se aplicó, así
+    // la pantalla puede repintar la selección sin adivinarla.
+    proveedores, categorias,
+    filtro: { proveedor: proveedor || '', categoria: categoria || '' },
+    sinProveedorLabel: SIN_PROVEEDOR,
   };
 }
 
 function isoDia(d) { return d.toISOString().slice(0, 10); }
 function norm(s) { return (s || '').toString().normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' '); }
 
-module.exports = { analizarVinos, esAlcohol, esSinAlcohol, esBebidaDeStock, esVino };
+module.exports = { analizarVinos, esAlcohol, esSinAlcohol, esBebidaDeStock, esVino, SIN_PROVEEDOR };

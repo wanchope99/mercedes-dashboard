@@ -915,15 +915,40 @@ async function getProductosConStock() {
 // ─── Ventas por producto a lo largo del tiempo, CON la hora de cada venta ────────
 // Recorre las ventas crudas y devuelve, por cada línea de item vendida:
 //   { fecha (servicio), closedAt (ISO), productoId, nombre, categoria, grupo,
-//     unidades, monto }
+//     unidades, monto, descarga }
 // Permite análisis de demanda por hora y de velocidad de venta por producto.
-async function getVentasItems({ desde, hasta } = {}) {
+//
+// ─── `incluirDescargas`: las botellas que se abren para vender por copa ────────
+//
+// Cuando se destapa una botella para servir copas, el bar abre una mesa aparte y
+// carga ahí las botellas A $0 — la plata entra por las copas, en la mesa real.
+// Esa venta queda CLOSED con total = 0, y `ventaComputable()` la descarta ENTERA,
+// con sus botellas adentro. Por eso El Beppe Criolla figuraba con 7 unidades
+// vendidas en 28 días cuando del stock habían salido 21 (23/08/2026: 62 ventas
+// cerradas en $0 en Fudo, 35 de ellas con bebidas).
+//
+// Con la bandera en true esas líneas también se devuelven, marcadas
+// `descarga: true` y monto 0, para que quien mide ROTACIÓN Y STOCK las cuente.
+//
+// Por defecto es false y nada cambia: la PLATA (ingresos, cierres, CMV, arqueos)
+// se sigue calculando sólo con ventas computables. Esos tickets valen $0 de
+// verdad y sumarlos como venta sería inventar ingresos que ya están contados en
+// las copas. Hoy la única que la enciende es Gestión de Bebidas (src/vinos.js).
+//
+// Lo que no entra nunca: las ventas CANCELED y las que siguen abiertas.
+function esDescargaStock(a) {
+  return a.saleState === 'CLOSED' && Boolean(a.closedAt) && (a.total || 0) <= 0;
+}
+
+async function getVentasItems({ desde, hasta, incluirDescargas = false } = {}) {
   const raw = await loadRaw();
   const { sales, prod, itemsBySale } = raw;
   const out = [];
   for (const sv of sales) {
     const a = sv.attributes || {};
-    if (!ventaComputable(a)) continue;
+    const computable = ventaComputable(a);
+    const descarga = !computable && incluirDescargas && esDescargaStock(a);
+    if (!computable && !descarga) continue;
     const fecha = fechaServicio(a.closedAt);
     if ((desde && fecha < desde) || (hasta && fecha > hasta)) continue;
     const items = itemsBySale[sv.id] || [];
@@ -941,7 +966,10 @@ async function getVentasItems({ desde, hasta } = {}) {
         categoria: producto ? producto.categoria : 'Sin categoría',
         grupo: producto ? grupoDeCategoria(producto.categoria) : 'otros',
         unidades: q,
-        monto: montoItem(it, producto),
+        // En una descarga el monto es 0 por definición: la plata está en las copas.
+        monto: descarga ? 0 : montoItem(it, producto),
+        descarga,
+        ventaId: sv.id,
       });
     }
   }

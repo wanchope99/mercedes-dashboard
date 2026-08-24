@@ -170,9 +170,27 @@ function parsearEstado(valor) {
   return { estado: 'dudoso', comentario: s };
 }
 
+// La columna "Comentario" que la app agregó en una corrida anterior, si ya existe.
+// Se busca SÓLO por nombre y no se reclama nada: acá se lee.
+//
+// Hasta el 23/08/2026 esta columna era de escritura y nadie la leía: guardarCierre
+// mandaba el estado a la columna de Pablo y el comentario acá, y leerFilas seguía
+// sacando las dos cosas de la columna de Pablo. El comentario que alguien escribía
+// desaparecía de la pantalla en la siguiente recarga — estaba en la planilla, pero
+// la app no volvía a mirarlo nunca.
+function colComentarioApp(filas) {
+  const cab = (filas || [])[0] || [];
+  return cab.findIndex(c => norm(c) === norm(COLS_APP.comentario));
+}
+
 // Rellena el grupo hacia abajo: en las checklists el plato va sólo en la primera
 // fila y las siguientes lo dejan en blanco (trampa 2 del encabezado).
-function leerFilas(filas, solapa) {
+//
+// `colComentario` es la columna propia de la app (ver colComentarioApp). Cuando
+// tiene algo, manda: es lo último que se escribió desde la pantalla. Cuando está
+// vacía se cae al comentario que parsearEstado saca del texto libre de Pablo, que
+// es lo único que hay en las filas que todavía nadie tocó desde la app.
+function leerFilas(filas, solapa, colComentario = -1) {
   const { cols, forma } = solapa;
   const out = [];
   let grupoActual = '';
@@ -190,6 +208,7 @@ function leerFilas(filas, solapa) {
     };
     if (cols.estado != null) Object.assign(item, parsearEstado(f[cols.estado]));
     else Object.assign(item, { estado: SIN_TOCAR, comentario: '' });
+    if (colComentario >= 0) item.comentario = celda(f[colComentario]) || item.comentario;
     if (cols.extra != null) item.extra = celda(f[cols.extra]);
     out.push(item);
   }
@@ -289,7 +308,7 @@ async function leerSolapa(solapaId) {
   const solapa = solapaDe(solapaId);
   if (!solapa) throw new Error(`Solapa desconocida: ${solapaId}`);
   const filas = await _leer(solapa);
-  const items = leerFilas(filas, solapa);
+  const items = leerFilas(filas, solapa, colComentarioApp(filas));
   const sueltas = notasSueltas(filas, solapa);
   const avisos = [
     ...avisosDeHeaders(filas, solapa),
@@ -372,6 +391,69 @@ const HOJA_CIERRES = process.env.CC_HOJA_CIERRES || 'Cierre Cocina';
 const HOJA_DETALLE = process.env.CC_HOJA_DETALLE || 'Cierre Cocina Detalle';
 const HEADER_CIERRES = ['ID', 'Fecha Servicio', 'Firmado Por', 'Estado', 'Nota', 'Resumen', 'Guardado'];
 const HEADER_DETALLE = ['CierreID', 'Hoja', 'Grupo', 'Item', 'Estado', 'Comentario', 'Hecho', 'Actualizado'];
+
+// ─── La lista de la mañana ──────────────────────────────────────────────────
+//
+// Tercera hoja propia, y es la única de las tres que se EDITA después de creada.
+// Existe separada de `Cierre Cocina Detalle` a propósito: el detalle es la foto de
+// cómo estaba la cocina cuando Pablo cerró, se escribe una vez y no se toca nunca
+// más; esto es el trabajo del día siguiente, que por definición cambia mientras
+// alguien lo hace. Meter las dos cosas en la misma hoja habría convertido la foto
+// en algo mutable, que es justo lo que la hace servir para reconstruir una noche.
+//
+// Se siembra al guardar el cierre con lo que quedó en "Hacer" o "Ver" de la
+// checklist de producción —lo que está en OK no es trabajo y no viaja— y crece
+// durante la mañana con los extras que agrega la cocina.
+//
+// Que los extras de ayer no aparezcan hoy no necesita ninguna limpieza: todo se
+// lee filtrando por el ID del cierre vigente, así que al guardarse el cierre
+// siguiente el día anterior entero deja de existir para la pantalla, sin borrar
+// una sola fila del historial.
+const HOJA_PRODUCCION = process.env.CC_HOJA_PRODUCCION || 'Cierre Cocina Produccion';
+const HEADER_PRODUCCION = [
+  'ID', 'CierreID', 'Fecha Servicio', 'Origen', 'Plato', 'Item', 'Estado',
+  'Comentario', 'Hecho', 'Hecho Por', 'Hecho En', 'Creado Por', 'Creado',
+];
+const RANGO_PRODUCCION = 'A:M';
+
+// Los estados de la checklist que significan trabajo pendiente. `ok` no es trabajo
+// y no llega a la mañana: la lista del cocinero tiene que ser lo que falta hacer,
+// no la checklist entera con la mayoría tachada.
+const ESTADOS_A_PRODUCIR = ['hacer', 'dudoso'];
+
+const _esSi = v => /^(si|sí|true|1)$/i.test(celda(v));
+
+// El id de una fila de producción. Lleva contador además del reloj porque el
+// sembrado escribe treinta filas dentro del mismo milisegundo, y dos filas con el
+// mismo id significan que tildar una tilda la otra.
+let _seqProduccion = 0;
+const _idProduccion = () =>
+  `pr${Date.now().toString(36)}${(_seqProduccion++).toString(36)}${Math.floor(Math.random() * 1296).toString(36).padStart(2, '0')}`;
+
+function parsearProduccion(filas) {
+  const out = [];
+  for (let i = 1; i < (filas || []).length; i++) {
+    const f = filas[i] || [];
+    if (!celda(f[0])) continue;
+    out.push({
+      id: celda(f[0]),
+      cierreId: celda(f[1]),
+      fechaServicio: celda(f[2]),
+      origen: celda(f[3]) || 'checklist',
+      grupo: celda(f[4]),
+      nombre: celda(f[5]),
+      estado: celda(f[6]) || 'hacer',
+      comentario: celda(f[7]),
+      hecho: _esSi(f[8]),
+      hechoPor: celda(f[9]),
+      hechoEn: celda(f[10]),
+      creadoPor: celda(f[11]),
+      creado: celda(f[12]),
+      rowIndex: i + 1,
+    });
+  }
+  return out;
+}
 
 // Los nombres de las columnas que la app agrega al final de las hojas de Pablo.
 const COLS_APP = { estado: 'Estado', comentario: 'Comentario', actualizado: 'Actualizado' };
@@ -458,9 +540,9 @@ async function _ensureHojaPropia(api, titulo, header) {
   }
 }
 
-async function _leerHojaPropia(api, titulo) {
+async function _leerHojaPropia(api, titulo, rango = 'A:H') {
   try {
-    const r = await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${titulo}!A:H` });
+    const r = await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${titulo}!${rango}` });
     return r.data.values || [];
   } catch (e) {
     // Todavía no existe: es el estado normal antes del primer cierre.
@@ -516,6 +598,178 @@ async function detalleCierre(cierreId) {
   return { cierre: cab, items };
 }
 
+// ─── La producción del día ──────────────────────────────────────────────────
+//
+// El cierre que manda NO es el de la fecha de servicio en curso: es el ÚLTIMO
+// guardado. A las diez de la mañana `fechaServicioHoy()` ya devuelve el día de
+// hoy, mientras que lo que Pablo escribió anoche quedó firmado con el día de
+// ayer; buscar por fecha le habría mostrado a la cocina una lista vacía todas las
+// mañanas. La pregunta que contesta esta pantalla es "qué dejó dicho el último
+// cierre", y esa se contesta por orden de guardado.
+function cierreVigenteMasReciente(cierres) {
+  return (cierres || [])
+    .filter(c => c.estado !== 'reemplazado')
+    .sort((a, b) => (b.guardado || '').localeCompare(a.guardado || ''))[0] || null;
+}
+
+// Sembrar la lista de un cierre a partir de su propia foto.
+//
+// Existe por dos razones. La primera es de estreno: los cierres guardados ANTES
+// de que existiera esta pantalla no sembraron nada, así que sin esto la cocina
+// habría abierto la pantalla y visto una lista vacía teniendo veintisiete cosas
+// para producir escritas en la planilla, hasta el cierre siguiente. La segunda
+// es que la deja auto-repararse — si un cierre se guarda a medias, la primera
+// lectura de la mañana lo completa en vez de mostrar una lista que falta.
+//
+// Sale de `Cierre Cocina Detalle` y no de la planilla de Pablo a propósito: lo que
+// hay que producir hoy es lo que estaba escrito CUANDO SE CERRÓ, no lo que la
+// planilla diga ahora — Pablo la sigue editando durante el día.
+async function _sembrarDesdeCierre(cierre) {
+  const hojaProdu = solapaDe('produ').hoja;
+  const filas = await _leerHojaPropia(_sheets(), HOJA_DETALLE);
+  const ahora = new Date().toISOString();
+  const rows = [];
+  for (let i = 1; i < filas.length; i++) {
+    const f = filas[i] || [];
+    if (celda(f[0]) !== cierre.id || celda(f[1]) !== hojaProdu) continue;
+    const estado = celda(f[4]);
+    if (!ESTADOS_A_PRODUCIR.includes(estado)) continue;
+    rows.push([
+      _idProduccion(), cierre.id, cierre.fechaServicio, 'checklist',
+      celda(f[2]), celda(f[3]), estado, celda(f[5]),
+      '', '', '', cierre.firmadoPor || '', ahora,
+    ]);
+  }
+  if (!rows.length) return 0;
+  const api = _sheets(false);
+  await _ensureHojaPropia(api, HOJA_PRODUCCION, HEADER_PRODUCCION);
+  await api.spreadsheets.values.append({
+    spreadsheetId: SHEET_ID,
+    range: `${HOJA_PRODUCCION}!${RANGO_PRODUCCION}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: rows },
+  });
+  return rows.length;
+}
+
+// Dos personas abriendo la pantalla en el mismo segundo pueden sembrar las dos.
+// La ventana es de un parpadeo y no vale un lock, pero sí vale que la lista no
+// muestre todo dos veces: los ítems que vienen de la checklist son únicos por
+// plato + nombre, así que se queda el primero — y si alguno de los repetidos ya
+// está tildado, ese gana, porque alguien lo hizo de verdad.
+//
+// Los extras NO se deduplican: dos personas pueden agregar "caldo" con toda
+// intención, y decidir por ellas que es lo mismo sería inventar.
+function _dedupProduccion(items) {
+  const porClave = new Map();
+  const out = [];
+  for (const it of items) {
+    if (it.origen !== 'checklist') { out.push(it); continue; }
+    const k = `${norm(it.grupo)}|${norm(it.nombre)}`;
+    const previo = porClave.get(k);
+    if (!previo) { porClave.set(k, it); out.push(it); continue; }
+    // Sólo se hereda el tilde, no el nombre: la fila que se ve tiene que seguir
+    // siendo la primera, con la grafía con la que se sembró.
+    if (it.hecho && !previo.hecho) {
+      previo.hecho = true;
+      previo.hechoPor = it.hechoPor;
+      previo.hechoEn = it.hechoEn;
+    }
+  }
+  return out;
+}
+
+async function produccionDelDia() {
+  const vacio = { configurada: configurada(), cierre: null, items: [], resumen: { total: 0, hechos: 0 } };
+  if (!configurada()) return vacio;
+  const api = _sheets();
+  const cierre = cierreVigenteMasReciente(parsearCierres(await _leerHojaPropia(api, HOJA_CIERRES)));
+  if (!cierre) return vacio;
+
+  // El filtro por cierre es lo que hace que ayer desaparezca solo: las filas del
+  // día anterior siguen en la hoja, pero no son de este cierre y no se miran.
+  const delCierre = async () => parsearProduccion(await _leerHojaPropia(api, HOJA_PRODUCCION, RANGO_PRODUCCION))
+    .filter(p => p.cierreId === cierre.id);
+
+  let filas = await delCierre();
+  // Sin una sola fila para este cierre, se siembra y se vuelve a leer. Un GET que
+  // escribe es raro y acá está a propósito: la alternativa era que la cocina
+  // abriera la pantalla en blanco y no tuviera forma de arreglarlo desde el
+  // teléfono. Sólo toca la hoja propia de la app, nunca la planilla de Pablo.
+  if (!filas.length && await _sembrarDesdeCierre(cierre)) filas = await delCierre();
+
+  const items = _dedupProduccion(filas)
+    .map(({ rowIndex, cierreId, fechaServicio, ...resto }) => resto);
+  const { rowIndex, ...cab } = cierre;
+  return {
+    configurada: true,
+    cierre: cab,
+    items,
+    resumen: { total: items.length, hechos: items.filter(i => i.hecho).length },
+  };
+}
+
+// Tildar (o destildar) un ítem. Se releen las filas y se busca por id: un
+// rowIndex traído del navegador no se usa para escribir, misma regla que el resto
+// del módulo. Destildar borra también la firma — dejar "hecho por Eze" en algo que
+// se volvió a marcar como pendiente es peor que no tener firma.
+async function marcarHecho({ id, hecho = true } = {}, { usuario } = {}) {
+  if (!configurada()) throw new Error('Falta STOCKS_SHEET_ID');
+  if (!usuario) throw new Error('Falta el usuario');
+  if (!txt(id)) throw new Error('Falta el ítem');
+  const api = _sheets(false);
+  const fila = parsearProduccion(await _leerHojaPropia(api, HOJA_PRODUCCION, RANGO_PRODUCCION))
+    .find(p => p.id === txt(id));
+  if (!fila) throw new Error('Ese ítem ya no está en la lista de hoy');
+  const ahora = new Date().toISOString();
+  const marca = hecho ? ['si', usuario, ahora] : ['', '', ''];
+  await api.spreadsheets.values.batchUpdate({
+    spreadsheetId: SHEET_ID,
+    requestBody: {
+      valueInputOption: 'RAW',
+      data: [
+        { range: `${HOJA_PRODUCCION}!I${fila.rowIndex}`, values: [[marca[0]]] },
+        { range: `${HOJA_PRODUCCION}!J${fila.rowIndex}`, values: [[marca[1]]] },
+        { range: `${HOJA_PRODUCCION}!K${fila.rowIndex}`, values: [[marca[2]]] },
+      ],
+    },
+  });
+  return { id: fila.id, hecho: !!hecho, hechoPor: marca[1], hechoEn: marca[2] };
+}
+
+// Algo para producir que no estaba en la lista. Vive acá y NO en la planilla de
+// Pablo: es trabajo de este turno, no un ítem que la checklist tendría que tener
+// siempre. Si resulta que sí tiene que estar siempre, lo agrega él a su planilla,
+// que es de donde salen las listas.
+async function agregarExtra({ grupo = '', nombre = '', comentario = '' } = {}, { usuario } = {}) {
+  if (!configurada()) throw new Error('Falta STOCKS_SHEET_ID');
+  if (!usuario) throw new Error('Falta el usuario');
+  if (!txt(nombre)) throw new Error('Escribí qué hay que producir');
+  const api = _sheets(false);
+  await _ensureHojaPropia(api, HOJA_PRODUCCION, HEADER_PRODUCCION);
+  const cierre = cierreVigenteMasReciente(parsearCierres(await _leerHojaPropia(api, HOJA_CIERRES)));
+  // Sin cierre no hay a qué colgarlo, y un extra sin cierre sería una fila que no
+  // aparece en ninguna pantalla. Se dice por qué en vez de guardar en el vacío.
+  if (!cierre) throw new Error('Todavía no hay ningún cierre de cocina cargado, así que no sé a qué día agregarlo.');
+  const ahora = new Date().toISOString();
+  const fila = [
+    _idProduccion(), cierre.id, cierre.fechaServicio, 'extra',
+    txt(grupo) || 'Agregado en el turno', txt(nombre), 'hacer', txt(comentario),
+    '', '', '', usuario, ahora,
+  ];
+  await api.spreadsheets.values.append({
+    spreadsheetId: SHEET_ID,
+    range: `${HOJA_PRODUCCION}!${RANGO_PRODUCCION}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [fila] },
+  });
+  return {
+    id: fila[0], origen: 'extra', grupo: fila[4], nombre: fila[5],
+    estado: 'hacer', comentario: fila[7], hecho: false,
+    creadoPor: usuario, creado: ahora,
+  };
+}
+
 // ─── Guardar la foto del servicio ───────────────────────────────────────────
 //
 // `cambios` son SÓLO los ítems que alguien tocó: [{ solapa, grupo, nombre,
@@ -562,6 +816,7 @@ async function guardarCierre({ fechaServicio, cambios = [], nota = '', reemplaza
   const api = _sheets(false);
   await _ensureHojaPropia(api, HOJA_CIERRES, HEADER_CIERRES);
   await _ensureHojaPropia(api, HOJA_DETALLE, HEADER_DETALLE);
+  await _ensureHojaPropia(api, HOJA_PRODUCCION, HEADER_PRODUCCION);
 
   // Idempotencia por servicio: dos personas cerrando la misma noche no se pisan
   // en silencio. Reemplazar es explícito y conserva el anterior.
@@ -585,16 +840,35 @@ async function guardarCierre({ fechaServicio, cambios = [], nota = '', reemplaza
   const conflictos = [];
   const detalle = [];
   const resumenPorSolapa = {};
+  let itemsProdu = [];
 
   for (const solapa of permitidas) {
     // Relectura fresca: es lo que hace que la clave natural sea suficiente.
     const filas = await _leer(solapa);
-    const items = leerFilas(filas, solapa);
+    const colCom = colComentarioApp(filas);
+    const items = leerFilas(filas, solapa, colCom);
     const porClave = new Map(items.map(it => [claveDe(solapa.id, it), it]));
 
     const misCambios = cambiosPorSolapa.get(solapa.id) || [];
+
+    // ─── El comentario de anoche no vale hoy ───
+    //
+    // "Hacer masa de empanadas" tiene sentido la noche que se escribe y ninguno
+    // la noche siguiente: o ya se hizo, o el número cambió. Al arrancar un cierre
+    // nuevo la columna de comentarios de la checklist de producción se limpia, y
+    // arriba de esa hoja en blanco se escribe lo de hoy. El ESTADO sobrevive: lo
+    // que se vuelve viejo es el texto, no el hecho de que algo esté marcado.
+    //
+    // Sólo en `produ`. En Comprar un comentario es "entra martes 26", que el lunes
+    // a la noche sigue siendo el dato más importante de la fila.
+    //
+    // Y sólo cuando este cierre ABRE una fecha de servicio. Si se está
+    // reemplazando el cierre de esta misma noche, lo que hay escrito es de hoy y
+    // borrarlo sería tirar lo que se acaba de cargar por corregir un solo ítem.
+    const limpiarComentarios = solapa.id === 'produ' && !vigente;
+
     let cols = null;
-    if (misCambios.length) {
+    if (misCambios.length || limpiarComentarios) {
       cols = resolverColumnas(filas, solapa);
       if (cols.nuevas.length) {
         // Las columnas nuevas se reclaman sólo entre las que están vacías de
@@ -628,6 +902,29 @@ async function guardarCierre({ fechaServicio, cambios = [], nota = '', reemplaza
       item.comentario = c.comentario || '';
     }
 
+    if (limpiarComentarios) {
+      // Se excluyen las filas que este cierre está escribiendo, en vez de confiar
+      // en que el borrado se aplique antes que la escritura: las dos cosas van en
+      // el mismo batchUpdate y depender del orden para no pisarse es frágil.
+      const escritas = new Set(misCambios
+        .map(c => (porClave.get(claveDe(solapa.id, c)) || {}).rowIndex)
+        .filter(Boolean));
+      for (const it of items) {
+        if (escritas.has(it.rowIndex)) continue;
+        // Se borra la columna de la app y NADA MÁS. El comentario viejo que vive
+        // metido dentro del texto libre de Pablo —"comprar 3kg", donde "3kg" es el
+        // comentario y sale de parsearlo— no se toca: limpiarlo sería reescribirle
+        // una celda suya, que es la línea que este módulo no cruza. Esas filas se
+        // normalizan solas la primera vez que alguien las marca desde la pantalla.
+        const enLaApp = colCom >= 0 ? celda((filas[it.rowIndex - 1] || [])[colCom]) : '';
+        if (!enLaApp) continue;
+        celdas.push({ range: `${solapa.hoja}!${colLetra(cols.comentario)}${it.rowIndex}`, values: [['']] });
+        // También en memoria: la foto tiene que salir con lo de esta noche, y el
+        // comentario de anoche ya no es parte de esta noche.
+        it.comentario = '';
+      }
+    }
+
     // La foto guarda TODO lo que no está en el default, lo hayan tocado ahora o
     // ya estuviera escrito. Los `sinTocar` no se escriben: una noche entera en
     // orden son cero filas de detalle, y el total vive en el resumen.
@@ -636,6 +933,7 @@ async function guardarCierre({ fechaServicio, cambios = [], nota = '', reemplaza
       detalle.push([solapa.hoja, it.grupo, it.nombre, it.estado, it.comentario || '', '', ahora]);
     }
     resumenPorSolapa[solapa.id] = resumenCierre(items);
+    if (solapa.id === 'produ') itemsProdu = items;
   }
 
   if (celdas.length) {
@@ -678,8 +976,32 @@ async function guardarCierre({ fechaServicio, cambios = [], nota = '', reemplaza
     });
   }
 
+  // La lista que la cocina va a ver mañana a la mañana: sólo lo que quedó para
+  // hacer o para ver. Se siembra acá y no se calcula al leer para que sea un
+  // documento con estado propio — lo que se tilda a las nueve de la mañana tiene
+  // dónde guardarse sin tocar la foto del cierre ni la planilla de Pablo.
+  const produccion = itemsProdu
+    .filter(it => ESTADOS_A_PRODUCIR.includes(it.estado))
+    .map(it => [
+      _idProduccion(), id, fecha, 'checklist',
+      it.grupo, it.nombre, it.estado, it.comentario || '',
+      '', '', '', usuario, ahora,
+    ]);
+  if (produccion.length) {
+    await api.spreadsheets.values.append({
+      spreadsheetId: SHEET_ID,
+      range: `${HOJA_PRODUCCION}!${RANGO_PRODUCCION}`,
+      valueInputOption: 'RAW',
+      requestBody: { values: produccion },
+    });
+  }
+
   clearCache();
-  return { id, fechaServicio: fecha, firmadoPor: usuario, resumen, conflictos, itemsEnLaFoto: detalle.length };
+  return {
+    id, fechaServicio: fecha, firmadoPor: usuario, resumen, conflictos,
+    itemsEnLaFoto: detalle.length,
+    paraProducir: produccion.length,
+  };
 }
 
 function clearCache() { cache.flushAll(); }
@@ -688,9 +1010,13 @@ module.exports = {
   // I/O
   estadoActual, leerSolapa, leerSolapaCacheada, clearCache, configurada,
   guardarCierre, listarCierres, detalleCierre, fechaServicioActual,
+  // I/O — la lista de la mañana
+  produccionDelDia, marcarHecho, agregarExtra,
   // Puras — se ejercitan sin red
   parsearEstado, leerFilas, notasSueltas, claveDe, duplicadosDe, resumenCierre, avisosDeHeaders,
   resolverColumnas, colLetra, parsearCierres, norm, celda, esError,
+  colComentarioApp, parsearProduccion, cierreVigenteMasReciente, _dedupProduccion,
   // Constantes
   SOLAPAS, ESTADOS, SIN_TOCAR, solapaDe, HOJA_CIERRES, HOJA_DETALLE, ESTADOS_CON_COMENTARIO_OBLIGATORIO,
+  HOJA_PRODUCCION, HEADER_PRODUCCION, ESTADOS_A_PRODUCIR,
 };

@@ -12,6 +12,7 @@ const {
 } = require('./sheets');
 const { getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos, getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo, clearFudoCache, fechaServicio: fechaServicioDe, fechaServicioHoy, probeStock, probeStockMovements, getVentasItems, getVentasConCosto } = require('./fudo');
 const vinos = require('./vinos');
+const bebidasProveedor = require('./bebidas-proveedor');
 const { proyectar, calcularCalculadora, proyeccionMes, calcularBaselines } = require('./proyecciones');
 const proveedoresRoutes = require('./proveedores-routes');
 const prov = require('./proveedores');
@@ -267,8 +268,17 @@ app.get('/api/me', authMiddleware, (req, res) => {
 //    (Ingreso si sobra, Gasto si falta) con descripción explícita.
 //    Así la planilla siempre matchea con Fudo y la diferencia queda a la vista.
 //  · Sin datos de Fudo: se registra el delta contado (comportamiento anterior).
-//  · Galicia: el ingreso se registra en BRUTO; la comisión del posnet (Bruto − Neto)
-//    va como Gasto · Financieros. El neto queda como resultado, discriminado.
+//  · Galicia: el ingreso se registra en BRUTO, y lo que el banco descuenta entra
+//    en dos campos separados que se copian del resumen de Nave:
+//      Total costos        → Gasto · Financieros  (comisión del posnet, alquiler de
+//                            terminal: lo que cobra el adquirente)
+//      Impuestos asociados → Gasto · Fiscales     (retenciones e impuestos)
+//    Hasta el 23/08/2026 se cargaba un solo campo, el "Total Neto Acreditado", y la
+//    app hacía Bruto − Neto para sacar UN gasto Financieros. Eso metía los impuestos
+//    adentro de la comisión: el balance mostraba como costo financiero plata que era
+//    carga fiscal, y Fiscales quedaba subvaluado todos los meses. Ahora los dos
+//    conceptos entran por separado y el neto pasa a ser un RESULTADO
+//    (Bruto − costos − impuestos), no un número que alguien tipea.
 // gastosEfectivoSesion / gastosMPSesion: gastos YA registrados en Movimientos con la
 // caja abierta (ej: hielo). Reducen el esperado y NO deben generar fila delta duplicada.
 // ─── Zona horaria: TODA la app muestra horarios en Buenos Aires, Argentina ──────
@@ -277,7 +287,7 @@ function fechaAR(d = new Date()) { return d.toLocaleDateString('es-AR', { timeZo
 function horaAR(d = new Date()) { return d.toLocaleTimeString('es-AR', { timeZone: TZ_AR, hour: '2-digit', minute: '2-digit' }); }
 function fechaHoraAR(d = new Date()) { return d.toLocaleString('es-AR', { timeZone: TZ_AR }); }
 
-function buildFilasCierreServicio({ fechaServicio, mesServicio, descripcionServicio, deltaEfectivo, deltaMP, galiciaBruto, impuestos, fudo, gastosEfectivoSesion = 0, gastosMPSesion = 0 }) {
+function buildFilasCierreServicio({ fechaServicio, mesServicio, descripcionServicio, deltaEfectivo, deltaMP, galiciaBruto, galiciaCostos = 0, galiciaImpuestos = 0, fudo, gastosEfectivoSesion = 0, gastosMPSesion = 0 }) {
   const ingreso = (medio, monto, desc) => [
     fechaServicio, mesServicio, 'Ingreso', 'Pagado', '', '', '', '',
     'Servicio', 'Ingreso', desc || descripcionServicio,
@@ -315,11 +325,15 @@ function buildFilasCierreServicio({ fechaServicio, mesServicio, descripcionServi
   registrarCaja(CAJA_EFECTIVO, deltaEfectivo, fudoOk ? (Number(fudo.efectivo) || 0) : 0, gastosEfectivoSesion, 'efectivo');
   registrarCaja(CAJA_MP, deltaMP, fudoOk ? (Number(fudo.mercadoPago) || 0) : 0, gastosMPSesion, 'mercado pago');
 
-  // Galicia: ingreso BRUTO + impuestos (comisión del posnet) como gasto financiero
-  // → resultado neto discriminado
+  // Galicia: ingreso BRUTO + las dos deducciones, cada una en su categoría.
+  // La descripción dice el concepto porque son dos gastos del mismo medio, la misma
+  // fecha y de orden de magnitud parecido: sin eso son indistinguibles en el ledger.
   if (galiciaBruto > 0) rows.push(ingreso('Galicia', galiciaBruto));
-  if (impuestos > 0) {
-    rows.push(gasto('Galicia', impuestos, descripcionServicio, 'Financieros'));
+  if (galiciaCostos > 0) {
+    rows.push(gasto('Galicia', galiciaCostos, `${descripcionServicio} costos Galicia`, 'Financieros'));
+  }
+  if (galiciaImpuestos > 0) {
+    rows.push(gasto('Galicia', galiciaImpuestos, `${descripcionServicio} impuestos Galicia`, 'Fiscales'));
   }
   return rows;
 }
@@ -374,7 +388,7 @@ async function filaCaja(sheets, nombre) {
 
 // ─── Arqueo de Cajas ──────────────────────────────────────────────────────────
 
-// Encabezados canónicos de la hoja "Arqueo de Cajas" (A1:X1). Deben coincidir EXACTO
+// Encabezados canónicos de la hoja "Arqueo de Cajas" (A1:Z1). Deben coincidir EXACTO
 // con el orden en que se escribe rowArqueo y en que lee /api/arqueo/historial. Se
 // reescriben en cada cierre para que la planilla se autocorrija (ver POST cerrar).
 //
@@ -406,6 +420,12 @@ const ARQUEO_HEADERS = [
   // habría forma de saber después qué noches se confirmó ni sobre qué monto.
   'Facturación Confirmada',       // W — quién y cuándo confirmó haber facturado
   'Bancarizado del Turno',        // X — monto Galicia según Fudo sobre el que se confirmó
+  // ─── Deducciones de Galicia (23 ago 2026) ───
+  // Y y Z guardan lo que se cargó del resumen de Nave. Antes el único rastro de la
+  // comisión era su fila en Movimientos: si el techo la descartaba por venir mal
+  // cargada, no quedaba en ningún lado qué se había tipeado esa noche.
+  'Costos Galicia',               // Y — total costos del turno (Gasto · Financieros)
+  'Impuestos Galicia',            // Z — impuestos asociados (Gasto · Fiscales)
 ];
 
 // Diferencias de efectivo por debajo de esto se ignoran (redondeo, no plata real).
@@ -498,7 +518,7 @@ app.get('/api/arqueo/historial', authMiddleware, adminOnly, async (req, res) => 
     const sheets = google.sheets({ version: 'v4', auth });
     const r = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Arqueo de Cajas!A:X',
+      range: 'Arqueo de Cajas!A:Z',
     });
     const rows = r.data.values || [];
     const num = v => {
@@ -538,6 +558,10 @@ app.get('/api/arqueo/historial', authMiddleware, adminOnly, async (req, res) => 
         efectivoEsperadoCierre: opt(row[19]),
         saldoCalculadoAlCerrar: opt(row[20]),
         ajusteApertura: opt(row[21]),
+        // Y–Z: null en los arqueos anteriores al 23/08/2026, cuando la deducción de
+        // Galicia no se persistía en esta hoja.
+        costosGalicia: opt(row[24]),
+        impuestosGalicia: opt(row[25]),
       });
     }
     // Continuidad entre turnos (referencial): efvo abierto vs cerrado el turno previo.
@@ -656,10 +680,13 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   }
   estadoCaja.cerrando = true;
 
-  // galicia = Total Bruto; galiciaNeto = Total Neto Acreditado
-  // impuestos se calcula como Bruto - Neto
+  // galicia          = Total Bruto (precargado de Fudo)
+  // galiciaCostos    = "Total costos" del resumen de Nave  → Gasto · Financieros
+  // galiciaImpuestos = "Impuestos asociados" de Nave       → Gasto · Fiscales
+  // galiciaNeto      = campo VIEJO, ya no se pide: sólo llega desde una pestaña
+  //                    cargada antes del deploy (ver el rescate más abajo).
   // fudo = ingresos del día según Fudo { encontrado, efectivo, mercadoPago, galicia }
-  const { efectivo, mercadoPago, galicia, galiciaNeto, fudo, nota, facturacionConfirmada } = req.body;
+  const { efectivo, mercadoPago, galicia, galiciaCostos, galiciaImpuestos, galiciaNeto, fudo, nota, facturacionConfirmada } = req.body;
   if (efectivo === undefined || mercadoPago === undefined || galicia === undefined) {
     estadoCaja.cerrando = false;
     return res.status(400).json({ ok: false, error: 'Faltan valores de saldo final' });
@@ -703,33 +730,59 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   const aperturaStr = horaAR(apertura);
   const cierreStr = horaAR(cierre);
 
-  // Impuestos = diferencia entre Bruto y Neto Acreditado
   const galiciaBruto = Number(galicia) || 0;
-  const galiciaNetoVal = Number(galiciaNeto) || 0;
   // Avisos no fatales del cierre (ver paso 1b): el cierre igual se completa.
   let avisoCajas = null;
   let avisoGalicia = null;
-  let impuestos = galiciaBruto > galiciaNetoVal ? galiciaBruto - galiciaNetoVal : 0;
 
-  // Guarda contra el "Neto Acreditado" mal tipeado. El campo Neto se carga a mano
-  // (el Bruto viene precargado de Fudo), así que un blanco o un dedazo se traduce
-  // 1:1 en la comisión: el 28/07/2026 se cargó neto = 1 contra un bruto de
-  // $1.285.500 y quedó un gasto Financieros de $1.285.499 — el servicio entero
-  // contabilizado como comisión. Una comisión de posnet real anda en pocos puntos;
-  // por encima de este techo no es una comisión cara, es un dato equivocado, así
-  // que NO se escribe la fila de gasto (el ingreso bruto sí) y se avisa. Perder la
-  // comisión de un día y cargarla después es infinitamente más barato que meter un
-  // gasto falso del tamaño de la venta en el resultado del mes.
-  const COMISION_GALICIA_TECHO = 0.5;
-  if (impuestos > 0 && impuestos > galiciaBruto * COMISION_GALICIA_TECHO) {
-    avisoGalicia =
-      `No se registró la comisión de Galicia: el Neto Acreditado cargado (${fmtARS(galiciaNetoVal)}) ` +
-      `daría una comisión de ${fmtARS(impuestos)} sobre un bruto de ${fmtARS(galiciaBruto)} ` +
-      `(${Math.round((impuestos / galiciaBruto) * 100)}%), lo que no es posible. ` +
-      `El ingreso bruto sí quedó registrado. Revisá el neto en Nave y cargá la comisión a mano.`;
-    console.error('[cierre] ' + avisoGalicia);
+  // En Nave los descuentos figuran con signo menos, y tarde o temprano alguien los
+  // va a copiar con el menos incluido. Se toma el valor absoluto y no el máximo
+  // contra cero: son montos que se restan del bruto, el signo no agrega información
+  // y clampear a cero borraría la deducción del día sin que nadie se entere.
+  let costos = Math.abs(Number(galiciaCostos) || 0);
+  let impuestos = Math.abs(Number(galiciaImpuestos) || 0);
+
+  // Rescate de la pantalla vieja. El cierre lo hace un encargado desde un teléfono
+  // que puede tener la página cargada desde antes del deploy: esa pestaña manda
+  // `galiciaNeto` y ninguno de los dos campos nuevos. Sin esto el cierre entraría
+  // con las deducciones en cero — la comisión desaparecida y en silencio, que es
+  // exactamente el error que este endpoint ya aprendió a no cometer. Bruto − Neto
+  // es lo que esa pantalla significaba, y va entero a Financieros porque desde el
+  // neto los impuestos no se pueden separar.
+  if (galiciaCostos === undefined && galiciaImpuestos === undefined && galiciaNeto !== undefined) {
+    const neto = Number(galiciaNeto) || 0;
+    costos = galiciaBruto > neto ? galiciaBruto - neto : 0;
     impuestos = 0;
   }
+
+  // Guarda contra el dedazo. Los dos campos se copian a mano del resumen de Nave
+  // (el Bruto viene precargado de Fudo), así que un número mal tipeado se traduce
+  // 1:1 en un gasto. El 28/07/2026, cuando el campo era el Neto Acreditado, se
+  // cargó neto = 1 contra un bruto de $1.285.500 y quedó un gasto Financieros de
+  // $1.285.499 — el servicio entero contabilizado como comisión. Entre costos e
+  // impuestos un posnet se lleva pocos puntos del bruto; por encima de este techo
+  // no es un descuento caro, es un dato equivocado, así que NO se escriben las
+  // filas de gasto (el ingreso bruto sí) y se avisa. El techo mira la SUMA porque
+  // lo que no puede pasar es que el neto quede en cualquier lado: dos números
+  // creíbles por separado pueden ser imposibles juntos. Perder las deducciones de
+  // un día y cargarlas después es infinitamente más barato que meter un gasto
+  // falso del tamaño de la venta en el resultado del mes.
+  const COMISION_GALICIA_TECHO = 0.5;
+  const deducciones = costos + impuestos;
+  if (deducciones > 0 && deducciones > galiciaBruto * COMISION_GALICIA_TECHO) {
+    avisoGalicia =
+      `No se registraron las deducciones de Galicia: costos ${fmtARS(costos)} + impuestos ` +
+      `${fmtARS(impuestos)} dan ${fmtARS(deducciones)} sobre un bruto de ${fmtARS(galiciaBruto)}` +
+      `${galiciaBruto > 0 ? ` (${Math.round((deducciones / galiciaBruto) * 100)}%)` : ''}, lo que no es posible. ` +
+      `El ingreso bruto sí quedó registrado. Revisá el resumen de Nave y cargá los gastos a mano.`;
+    console.error('[cierre] ' + avisoGalicia);
+    costos = 0;
+    impuestos = 0;
+  }
+
+  // El neto ya no se carga: es lo que queda. Va al resumen del cierre para que el
+  // encargado lo compare contra lo que Nave dice que se acredita.
+  const galiciaNetoResultante = Math.round((galiciaBruto - costos - impuestos) * 100) / 100;
 
   try {
     const auth = getAuth();
@@ -802,6 +855,11 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
       // X: el monto bancarizado del turno según Fudo, que es sobre lo que se
       // confirmó. Sin esto la confirmación no dice sobre qué plata se confirmó.
       fudoGalicia,
+      // Y y Z: lo que se descontó del bruto, ya pasado por el techo. Si el techo lo
+      // descartó van en 0, igual que las filas de Movimientos: la hoja y el ledger
+      // dicen lo mismo, y lo que explica el 0 es el aviso que ve el encargado.
+      costos,                                // Y: total costos (Gasto · Financieros)
+      impuestos,                             // Z: impuestos asociados (Gasto · Fiscales)
     ];
     // Escribimos en una fila absoluta calculada a partir de la columna A, NO con
     // values.append. append detecta automáticamente una "tabla" y agrega la fila
@@ -815,7 +873,7 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
       range: 'Arqueo de Cajas!A:A',
     });
     const proxFila = (colA.data.values || []).length + 1;
-    // Reescribimos SIEMPRE la fila de encabezados (A1:O1) junto con el dato. Así la
+    // Reescribimos SIEMPRE la fila de encabezados (A1:Z1) junto con el dato. Así la
     // planilla se autocorrige: si los títulos quedaron desordenados o falta alguno,
     // el próximo cierre los deja en el orden exacto en que el código escribe/lee.
     await sheets.spreadsheets.values.batchUpdate({
@@ -823,8 +881,8 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
       requestBody: {
         valueInputOption: 'USER_ENTERED',
         data: [
-          { range: 'Arqueo de Cajas!A1:X1', values: [ARQUEO_HEADERS] },
-          { range: `Arqueo de Cajas!A${proxFila}:X${proxFila}`, values: [rowArqueo] },
+          { range: 'Arqueo de Cajas!A1:Z1', values: [ARQUEO_HEADERS] },
+          { range: `Arqueo de Cajas!A${proxFila}:Z${proxFila}`, values: [rowArqueo] },
         ],
       },
     });
@@ -871,7 +929,7 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
     const rowsMovimientos = buildFilasCierreServicio({
       fechaServicio, mesServicio, descripcionServicio,
       deltaEfectivo, deltaMP,
-      galiciaBruto, impuestos,
+      galiciaBruto, galiciaCostos: costos, galiciaImpuestos: impuestos,
       fudo,
       gastosEfectivoSesion, gastosMPSesion,
     });
@@ -902,8 +960,9 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
     efectivoFinal: Number(efectivo),
     mpFinal: Number(mercadoPago),
     galiciaBruto,
-    galiciaNeto: galiciaNetoVal,
-    impuestosGalicia: impuestos,
+    galiciaCostos: costos,
+    galiciaImpuestos: impuestos,
+    galiciaNeto: galiciaNetoResultante,
     difEfectivo: Number(efectivo) - estadoCaja.efectivoInicial,
     difMP: Number(mercadoPago) - estadoCaja.mpInicial,
   };
@@ -1190,26 +1249,60 @@ function vinosSoloCirculante(data) {
       enQuiebre: data.totales.enQuiebre,
       porAgotarse: data.totales.porAgotarse,
       sobrestock: data.totales.sobrestock,
+      // No es plata: es cuántas botellas se fueron por copa. Al encargado le
+      // explica por qué un vino "sin ventas" en realidad se está acabando.
+      descargadas: data.totales.descargadas,
+      productosConDescarga: data.totales.productosConDescarga,
     },
     items: (data.items || []).map(it => ({
       id: it.id, nombre: it.nombre, categoria: it.categoria, esVino: it.esVino,
+      // El proveedor NO es plata: es a quién hay que pedirle. Es justo lo que el
+      // encargado necesita cuando ve un quiebre, así que viaja para los dos roles.
+      proveedor: it.proveedor, proveedorOrigen: it.proveedorOrigen, proveedorVia: it.proveedorVia,
       stock: it.stock, minStock: it.minStock,
-      vendidasVentana: it.vendidasVentana, porSemana: it.porSemana,
+      vendidasVentana: it.vendidasVentana,
+      cobradasVentana: it.cobradasVentana, descargadasVentana: it.descargadasVentana,
+      porSemana: it.porSemana,
       diasCobertura: it.diasCobertura, alerta: it.alerta,
     })),
     porCategoria: (data.porCategoria || []).map(c => ({
       categoria: c.categoria, items: c.items, stock: c.stock,
     })),
+    proveedores: data.proveedores || [],
+    categorias: data.categorias || [],
+    filtro: data.filtro,
+    sinProveedorLabel: data.sinProveedorLabel,
   };
 }
 
 app.get('/api/vinos', authMiddleware, async (req, res) => {
   try {
-    const { desde, hasta, soloVino } = req.query;
-    const data = await vinos.analizarVinos({ desde, hasta, soloVino: soloVino === '1' || soloVino === 'true' });
+    const { desde, hasta, soloVino, proveedor, categoria } = req.query;
+    const data = await vinos.analizarVinos({
+      desde, hasta,
+      soloVino: soloVino === '1' || soloVino === 'true',
+      proveedor: proveedor || '', categoria: categoria || '',
+    });
     res.json({ ok: true, data: req.user.rol === 'admin' ? data : vinosSoloCirculante(data) });
   } catch (err) {
     console.error('Error /api/vinos:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Asignar (o corregir) el proveedor de una bebida. Sólo admin: la lista de
+// proveedores se cruza después con pagos y compras, y no es algo que deba poder
+// cambiarse desde la barra en medio de un servicio.
+// proveedor: '' es una respuesta válida y significa "ninguno de la lista" — apaga
+// la inferencia para ese producto en vez de dejar que vuelva sola.
+app.post('/api/vinos/proveedor', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { productoId, producto, proveedor } = req.body || {};
+    if (!productoId) return res.status(400).json({ ok: false, error: 'Falta el producto' });
+    const out = await bebidasProveedor.setProveedor(productoId, producto, proveedor);
+    res.json({ ok: true, data: out });
+  } catch (err) {
+    console.error('Error /api/vinos/proveedor:', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -2527,6 +2620,41 @@ app.get('/api/cierre-cocina/cierres', authMiddleware, async (req, res) => {
 app.get('/api/cierre-cocina/cierres/:id', authMiddleware, async (req, res) => {
   try { res.json({ ok: true, data: await cierreCocina.detalleCierre(req.params.id) }); }
   catch (err) { res.status(404).json({ ok: false, error: err.message }); }
+});
+
+// ─── La producción del día, que es la otra mitad de la misma feature ────────
+//
+// La checklist tiene dos usos y dos personas. De noche Pablo ESCRIBE: recorre la
+// lista entera y marca. A la mañana Eze y Juan LEEN: quieren ver qué hay que
+// producir hoy y tildar lo que van terminando, y para eso la pantalla de escribir
+// —cuarenta filas con cuatro botones y un campo de texto cada una— es lo contrario
+// de lo que hace falta.
+//
+// Ninguna de las tres lleva adminOnly: son justamente las rutas del personal de
+// cocina, que tiene rol encargado. Lo que sí sigue decidiendo el server es qué se
+// puede tocar — acá sólo se escribe en la hoja propia de la app, nunca en la
+// planilla de Pablo. Ver src/cierre-cocina.js.
+app.get('/api/cierre-cocina/produccion', authMiddleware, async (req, res) => {
+  try { res.json({ ok: true, data: await cierreCocina.produccionDelDia() }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// Quién tildó sale del token, igual que la firma del cierre. Es lo único que
+// después contesta "¿esto lo hizo alguien o quedó tildado de ayer?".
+app.post('/api/cierre-cocina/produccion/hecho', authMiddleware, async (req, res) => {
+  try {
+    const data = await cierreCocina.marcarHecho(
+      { id: req.body.id, hecho: req.body.hecho !== false },
+      { usuario: req.user.nombre });
+    res.json({ ok: true, data });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.post('/api/cierre-cocina/produccion/extra', authMiddleware, async (req, res) => {
+  try {
+    const data = await cierreCocina.agregarExtra(req.body, { usuario: req.user.nombre });
+    res.json({ ok: true, data });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
 });
 
 // ─── Mantenimiento — la libreta de lo que hay que arreglar ──────────────────
