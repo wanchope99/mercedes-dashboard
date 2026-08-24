@@ -196,6 +196,36 @@ function buscarEnPadron(padron, proveedor) {
   return padron[normNombre(proveedor)] || null;
 }
 
+// ─── Qué filas del libro NO son gasto ─────────────────────────────────────────
+//
+// `Movimientos` mezcla el gasto con la tesorería: los retiros de efectivo, los
+// cambios entre cajas y los ajustes por arqueo se escriben como filas de Gasto,
+// pero no son una compra. No hay proveedor, no hay factura y no hay IVA que
+// recuperar — es la misma plata en otro bolsillo, o menos plata en el bolsillo
+// de los socios.
+//
+// Colarlas hacía dos daños a la vez. En el cálculo, "Retiro eft Galicia" son
+// $8.000.000 en un solo mes que entraban como gasto sin clasificar con techo del
+// 21%: inflaban el crédito máximo, ensuciaban el porcentaje relevado y se
+// deducían enteros en Ganancias. Y en la cola de relevamiento, que ordena por
+// plata, encabezaban la lista de proveedores a relevar.
+//
+// Se reconocen por tres marcas porque la planilla las escribe de tres formas:
+//   · `esCambio` / categoría `Cambio` → los cambios y retiros entre cajas.
+//   · `esFondeo` (Tipo = Otros)       → lo que no es ni ingreso ni gasto.
+//   · Proveedor `Ajuste de Caja`      → lo que postea el arqueo. Su categoría es
+//     `Otros` porque la validación de la columna J no acepta otra cosa, así que
+//     la única marca que queda es el nombre (ver `postearAjusteEfectivo`).
+const PROVEEDORES_DE_CAJA = [/^retiro\b/, /^ajuste de caja\b/, /^cambio\b/, /^fondeo\b/];
+
+function esMovimientoDeCaja(m) {
+  if (!m) return false;
+  if (m.esCambio || m.esFondeo) return true;
+  if ((m.categoria || '').trim() === 'Cambio') return true;
+  const p = normNombre(m.proveedor);
+  return !!p && PROVEEDORES_DE_CAJA.some(re => re.test(p));
+}
+
 // ─── Calibración: qué sabe la hoja Compras de verdad ──────────────────────────
 //
 // Compras cubre poco, pero lo que cubre es dato real y no supuesto. Se usa para
@@ -298,6 +328,7 @@ function estimarCreditoFiscal({ movimientos = [], padron = {}, calibracion = {},
   for (const m of movimientos) {
     if (!m || m.tipo !== 'Gasto') continue;
     if (m.esCuota) continue;
+    if (esMovimientoDeCaja(m)) continue;   // retiros, cambios y ajustes de caja
 
     const monto = Number(m.salidaTotal) || 0;
     if (monto <= 0) continue;
@@ -743,7 +774,7 @@ module.exports = {
   PARAMETROS,
   // Cálculo
   estimarCreditoFiscal, simularMes, simular, oportunidades,
-  calibrarDesdeCompras,
+  calibrarDesdeCompras, esMovimientoDeCaja,
   // Helpers exportados para poder ejercitarlos sin montar el módulo entero
   ivaContenido, netoDe, aplicarEscala, normNombre, normalizarAlicuota, ALICUOTAS_CONOCIDAS,
 };

@@ -59,8 +59,30 @@ const norm = provCfg.norm;
 // Devuelve { [nombreNorm]: { nombre, cuit, condicion, comprobante, alicuotaIva,
 //            emiteFacturaA, fuente, relevado } }
 //
-// `emiteFacturaA` es lo único que consume el módulo de cálculo, y sale de la
-// cascada: el override manual del contador primero, la regla derivada después.
+// `emiteFacturaA` es lo único que consume el módulo de cálculo, y sale de una
+// cascada donde manda EL RELEVAMIENTO FISCAL, no `IVA Deducible`.
+//
+// Hasta el 2026-08-24 era al revés y estaba mal. `IVA Deducible` es la respuesta
+// a la pregunta que el bot hace al confirmar una factura —"¿esta factura sirve
+// para descontar IVA?"— y se contesta desde el régimen de HOY, donde el bar es
+// monotributista y no descuenta IVA de nada: por eso hay proveedores cargados en
+// `N` que sí emiten factura A. Como ese campo pisaba a la condición fiscal, El
+// Ekeko quedaba relevado como RI con comprobante A y la pantalla lo seguía
+// mostrando en rojo, "no da factura A", sin forma de corregirlo desde la app.
+//
+// Ahora el comprobante habitual manda —es la pregunta correcta, hecha sobre el
+// régimen que se está simulando— y `IVA Deducible` queda como último recurso
+// para los proveedores que nadie relevó todavía.
+//
+// Y como último recurso vale en UN SOLO SENTIDO, que es la parte que importa:
+//   · `Sí` → factura A. Hoy no se descuenta IVA de nada, así que contestar que sí
+//     sólo se explica porque ese proveedor factura A. Es información.
+//   · `No` → NO se lee como "no da factura A": se deja en `?`. Es la respuesta
+//     por defecto bajo monotributo y no dice nada del proveedor. Leerla como un
+//     hecho pintaba de rojo a seis proveedores que nadie relevó —San Cipriano,
+//     Thames, Huevos Cósmicos entre ellos— afirmando una pérdida que nadie
+//     verificó. Sin relevar, la respuesta honesta es que no se sabe, y eso ya
+//     tiene su lugar: ensancha el rango y manda al proveedor a la cola.
 async function leerPadron() {
   const cfg = await provCfg.leerConfig();
   const filas = await _filasCrudas();
@@ -71,12 +93,15 @@ async function leerPadron() {
     const condicion = extra[COL_CONDICION] || 'Desconocido';
     const comprobante = extra[COL_COMPROBANTE] || 'Desconocido';
 
-    // La regla derivada, y el override manual por encima.
+    // 1) El comprobante habitual: es el dato que decide si hay crédito fiscal.
+    // 2) La condición: Monotributo, Exento y Consumidor Final no emiten A nunca.
+    //    RI sin comprobante cargado queda en '?' — un RI también puede darte B.
+    // 3) Recién ahí, `IVA Deducible`, y sólo cuando dice que sí.
     let emiteFacturaA;
-    if (p.ivaDeducible === true) emiteFacturaA = 'S';
-    else if (p.ivaDeducible === false) emiteFacturaA = 'N';
-    else if (condicion === 'RI' && comprobante === 'A') emiteFacturaA = 'S';
-    else if (condicion !== 'Desconocido' && comprobante !== 'Desconocido') emiteFacturaA = 'N';
+    if (comprobante === 'A') emiteFacturaA = 'S';
+    else if (comprobante !== 'Desconocido') emiteFacturaA = 'N';
+    else if (condicion !== 'Desconocido' && condicion !== 'RI') emiteFacturaA = 'N';
+    else if (p.ivaDeducible === true) emiteFacturaA = 'S';
     else emiteFacturaA = '?';
 
     out[clave] = {
@@ -248,6 +273,10 @@ function armarCola({ movimientos = [], padron = {}, credito = null, parametros =
   const porProv = {};
   for (const m of movimientos) {
     if (!m || m.tipo !== 'Gasto' || m.esCuota) continue;
+    // Los retiros, los cambios entre cajas y los ajustes de arqueo no son
+    // proveedores: son tesorería. Y como acá se ordena por plata, encabezaban la
+    // lista — "Retiro eft Galicia", $8.000.000, primero de la cola.
+    if (fiscal.esMovimientoDeCaja(m)) continue;
     if (sinCredito.has((m.categoria || '').trim())) continue;
     const nombre = (m.proveedor || '').trim();
     const monto = Number(m.salidaTotal) || 0;

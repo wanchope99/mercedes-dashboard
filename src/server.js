@@ -3923,6 +3923,25 @@ function ultimosMesesCerrados(resumenes, n = 3) {
   return resumenes.filter(r => r.mes && r.mes !== mesActual).slice(-n);
 }
 
+// ─── Desde cuándo el gasto describe la operación ──────────────────────────────
+//
+// El bar abrió en marzo de 2026 y hasta junio el gasto está dominado por la
+// puesta en marcha: fondo de comercio, habilitación, muebles, vajilla, un
+// herrero, una destapación. Nada de eso se repite, y para relevar proveedores es
+// ruido puro — manda a la cabeza de la cola (que ordena por plata) gente a la
+// que no se le va a comprar nunca más.
+//
+// JULIO es el primer mes entero a régimen, así que la cola de relevamiento
+// arranca ahí. El corte es por POSICIÓN en la planilla, no por número de mes:
+// `Mes` es texto sin año (convención del repo) y comparar índices de mes deja la
+// lista vacía apenas empiece el año que viene.
+const FISCAL_PRIMER_MES = 'Julio';
+
+function mesesDesdeRegimen(resumenes) {
+  const i = (resumenes || []).findIndex(r => r.mes === FISCAL_PRIMER_MES);
+  return i >= 0 ? resumenes.slice(i) : (resumenes || []);
+}
+
 // Qué porción del sueldo va por recibo. Sólo esa parte se puede deducir en
 // Ganancias; lo que se paga por fuera es costo real y no es gasto deducible.
 async function pctPersonalDeducible() {
@@ -4011,6 +4030,10 @@ app.get('/api/fiscal/defaults', authMiddleware, adminOnly, async (req, res) => {
 // ─── Padrón fiscal de proveedores ────────────────────────────────────────────
 // La cola viene ordenada por PLATA, no por nombre: con dieciséis proveedores
 // para relevar, el orden decide si se resuelve el 80% del gasto o se abandona.
+//
+// Y sale de los meses A RÉGIMEN (ver `mesesDesdeRegimen`), no de los últimos
+// tres cerrados: con mayo y junio adentro, la cabeza de la lista eran compras de
+// puesta en marcha que no se repiten.
 app.get('/api/fiscal/padron', authMiddleware, adminOnly, async (req, res) => {
   try {
     const [movimientos, resumenes, compras, padron] = await Promise.all([
@@ -4018,7 +4041,8 @@ app.get('/api/fiscal/padron', authMiddleware, adminOnly, async (req, res) => {
       prov.getCompras().catch(() => []),
       fiscalProv.leerPadron().catch(() => ({})),
     ]);
-    const elegidos = ultimosMesesCerrados(resumenes, Number(req.query.meses) || 3);
+    const cerrados = mesesDesdeRegimen(ultimosMesesCerrados(resumenes, 999));
+    const elegidos = cerrados.slice(-(Number(req.query.meses) || 12));
     const nombres = new Set(elegidos.map(r => r.mes));
     const movs = movimientos.filter(m => nombres.has(m.mes));
     const credito = regimenFiscal.estimarCreditoFiscal({
