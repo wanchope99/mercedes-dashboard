@@ -606,6 +606,18 @@
     .ped-item.previsto { border-style: dashed; background: transparent; }
     .ped-item-titulo { font-size: 13.5px; font-weight: 500; }
     .ped-item-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    /* ── Plegar un proveedor ──────────────────────────────────────────
+       La cabecera del pedido es el botón. Con la lista de renglones abierta
+       un solo pedido de doce productos ocupa la pantalla entera y los otros
+       del día quedan abajo, fuera de la vista. Plegado quedan el nombre, si
+       hay que pagarlo y cómo viene el chequeo: lo que hace falta para
+       decidir cuál abrir, sin recorrer el día entero. */
+    .ped-item-cab { display: flex; gap: 8px; align-items: flex-start; min-width: 0;
+                    cursor: pointer; user-select: none; }
+    .ped-caret { font-size: 11px; color: var(--text-muted); line-height: 1.6; flex: none; }
+    .ped-item-items { grid-column: 1 / -1; }
+    .ped-item.plegado .ped-acciones,
+    .ped-item.plegado .ped-item-items { display: none; }
     .ped-acciones { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
     .ped-acciones button { background: none; border: 1px solid var(--border); color: var(--text-muted); cursor: pointer;
                            font-size: 12px; padding: 5px 10px; border-radius: 7px; font-family: inherit; white-space: nowrap; }
@@ -14032,6 +14044,11 @@ const pedState = {
   // Qué pedidos tienen los renglones desplegados adentro del modal. Es local a
   // la vista y no se guarda en ningún lado: es "qué estoy mirando ahora".
   itemsAbiertos: new Set(),
+  // Qué pedidos están PLEGADOS adentro del modal: se ve el encabezado y nada
+  // más. Igual que itemsAbiertos vive en la vista y no se guarda: sobrevive a
+  // los redibujados (tildar un renglón redibuja el modal entero) y no a la
+  // recarga de la página.
+  plegados: new Set(),
   pegandoEn: null,        // a qué pedido va lo próximo que se pegue
   moviendo: null,         // el pedido que se está pasando a otro día
   recibiendo: null,       // el pedido que está en el modal
@@ -14331,17 +14348,34 @@ function itemPedido(p) {
     ? (pedEsAdmin() ? `<button onclick="borrarPedido('${id}')">🗑️</button>` : '')
     : accionesRecibir(p);
 
-  return `<div class="ped-item ${recibido ? 'recibido' : 'esperando'}">
-    <div>
-      <div class="ped-item-titulo">
-        <span class="ped-estado ${recibido ? 'llego' : 'esperando'}">${recibido ? '✓ llegó' : 'esperando'}</span>
-        ${escapeHtml(p.proveedor)}
+  // Plegado se esconden los botones y los renglones; la cabecera queda. El
+  // resumen del chequeo sube al encabezado justamente ahí: plegado es cuando
+  // no se ve, y es el dato que dice si a este pedido todavía le falta algo.
+  const plegado = pedState.plegados.has(p.id);
+
+  return `<div class="ped-item ${recibido ? 'recibido' : 'esperando'}${plegado ? ' plegado' : ''}">
+    <div class="ped-item-cab" onclick="togglePedido('${id}')"
+         title="${plegado ? 'Mostrar este pedido' : 'Plegar este pedido para ver los demás'}">
+      <span class="ped-caret">${plegado ? '▸' : '▾'}</span>
+      <div style="flex:1;min-width:0">
+        <div class="ped-item-titulo">
+          <span class="ped-estado ${recibido ? 'llego' : 'esperando'}">${recibido ? '✓ llegó' : 'esperando'}</span>
+          ${escapeHtml(p.proveedor)}
+        </div>
+        <div class="ped-item-meta">${meta}${plegado ? `<span>${resumenItems(p)}</span>` : ''}</div>
       </div>
-      <div class="ped-item-meta">${meta}</div>
     </div>
     <div class="ped-acciones">${acciones}</div>
-    <div style="grid-column:1/-1">${bloqueItems(p)}</div>
+    <div class="ped-item-items">${bloqueItems(p)}</div>
   </div>`;
+}
+
+// Plegar/desplegar un proveedor entero adentro del día. Es lo que devuelve la
+// pantalla cuando un pedido con muchos renglones se comió el día entero.
+function togglePedido(pedidoId) {
+  if (pedState.plegados.has(pedidoId)) pedState.plegados.delete(pedidoId);
+  else pedState.plegados.add(pedidoId);
+  refrescarPedDia();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -14513,21 +14547,27 @@ function toggleOtrasFormas(id, ev) {
 // productos son cincuenta renglones, y lo que se mira al abrir un día es qué
 // llega, no el detalle de cada cosa.
 
-function bloqueItems(p) {
-  const id = escapeHtml(p.id);
-  const its = p.items || [];
+// Cómo viene el chequeo de los renglones, en una línea. Lo usan los dos que
+// tienen que decir lo mismo: el botón que abre la lista, y la cabecera del
+// pedido cuando está plegado y la lista no se ve.
+function resumenItems(p) {
   const r = p.itemsResumen;
-  const abierto = pedState.itemsAbiertos.has(p.id);
-
   // Con el chequeo empezado importa lo que falta, no el total: "2 sin tildar"
   // es lo que hay que hacer todavía. El total se ve al abrir la lista.
   const empezado = r && (r.ok || r.falta);
-  const resumen = !r ? 'Sin lista de productos'
+  return !r ? 'Sin lista de productos'
     : !empezado ? `${r.total} producto${r.total !== 1 ? 's' : ''}`
     : `<span style="color:var(--green)">${r.ok} ok</span>`
       + (r.falta ? ` · <span style="color:var(--red)">${r.falta} falta${r.falta !== 1 ? 'n' : ''}</span>` : '')
       + (r.pendientes ? ` · ${r.pendientes} sin tildar` : '')
       + (!r.pendientes ? ` · <span style="color:var(--green)">completo</span>` : '');
+}
+
+function bloqueItems(p) {
+  const id = escapeHtml(p.id);
+  const its = p.items || [];
+  const abierto = pedState.itemsAbiertos.has(p.id);
+  const resumen = resumenItems(p);
 
   const cabecera = `<div style="display:flex;align-items:center;gap:10px;margin-top:8px">
     <button class="ped-it-btn" onclick="toggleItems('${id}')" style="font-size:11px">

@@ -1136,7 +1136,12 @@ function construirFilaGasto({
     facturaId,                             // H ID Compra — la clave de idempotencia
     proveedor,                             // I Proveedor
     categoriaRow,                          // J Categoría
-    descripcion || `Factura ${proveedor}`, // K Descripción
+    // Sin descripción la celda queda vacía. Antes se rellenaba con
+    // "Factura <proveedor>", que decía algo que nadie escribió: la columna I ya
+    // tiene el proveedor y no todo gasto es una factura. Los que SÍ tienen algo
+    // que decir (el bot de facturas, el recibido de Pedidos) mandan su propio
+    // texto y no dependen de este fallback.
+    descripcion || '',                     // K Descripción
     medioRow,                              // L Medio de pago (vacío si "A pagar")
     '', '',                                // M/N Entradas
     montoNum,                              // O Salida ARS
