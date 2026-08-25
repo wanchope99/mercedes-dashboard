@@ -608,8 +608,6 @@
     }
 
     /* ── Pedidos por día ────────────────────────────────────────────────── */
-    .ped-alta { display: grid; grid-template-columns: 150px 1fr 1fr 130px 165px auto; gap: 10px; align-items: center; }
-    .ped-alta > * { min-width: 0; }
     /* El renglón del día. Cerrado es una línea; abierto despliega los pedidos. */
     .ped-dia { border: 1px solid var(--border); background: var(--surface2); border-radius: 10px; margin-bottom: 8px; overflow: hidden; }
     .ped-dia.hoy { border-color: var(--accent); }
@@ -853,8 +851,6 @@
        cierra. Mismo componente que el modal de Pagos (.pg-item). */
 
     @media (max-width: 900px) {
-      .ped-alta { grid-template-columns: 1fr 1fr; }
-      .ped-alta input[id="ped-detalle"], .ped-alta button { grid-column: 1 / -1; }
       .ped-item { grid-template-columns: 1fr; }
       .ped-acciones { justify-content: flex-start; }
       /* El drag nativo de HTML5 no existe en el teléfono: el cuadro pasa a ser
@@ -1999,46 +1995,11 @@
 
 <!-- ═══ PEDIDOS POR DÍA ═══════════════════════════════════════════════════════
      Qué llega cada día, si hay que pagarlo y cuánto. Reemplaza el Google Doc
-     "PEDIDOS X DIA". Ver src/pedidos.js y la sección de JS más abajo.        -->
+     "PEDIDOS X DIA". Un pedido NO se carga acá: nace al registrar la compra
+     (🛒 Nueva compra) o del cuadro semanal. Ver src/pedidos.js y el JS de abajo. -->
 <div id="tab-pedidos" class="tab-panel">
   <main>
     <div class="card">
-      <div class="card-title"><span>Esperar un pedido</span>
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· lo que va a llegar, para saber qué recibir y qué pagar</span>
-      </div>
-      <div class="ped-alta">
-        <input type="date" id="ped-fecha" />
-        <input type="text" id="ped-proveedor" list="proveedores-datalist" autocomplete="off" placeholder="Proveedor"
-               onkeydown="if(event.key==='Enter')crearPedido(this)" />
-        <input type="text" id="ped-detalle" maxlength="500" placeholder="Qué trae (ej: 4 cajones de birra)"
-               onkeydown="if(event.key==='Enter')crearPedido(this)" />
-        <input type="text" id="ped-costo" inputmode="numeric" placeholder="Costo aprox." />
-        <select id="ped-medio"></select>
-        <button class="btn btn-acento" onclick="crearPedido(this)">+ Agregar</button>
-      </div>
-      <!-- Las mismas tres opciones que "Nueva compra", para que un pedido
-           cargado por acá tampoco aparezca en blanco en el listado. La
-           diferencia es que esto NO escribe nada en Movimientos: un pedido
-           esperado no es un gasto, la mercadería todavía no llegó. Lo que se
-           guarda es la intención, y el asiento lo hace recibir. -->
-      <div class="pp-grupo" style="margin-top:10px">
-        <button type="button" class="pp-btn activo" id="pa-vacio" onclick="setPedAltaPago('')">
-          🤷 No sé todavía<small>se decide al recibir</small></button>
-        <button type="button" class="pp-btn" id="pa-pagado" onclick="setPedAltaPago('pagado')">
-          ✅ Ya está pago<small>sólo hay que recibirlo</small></button>
-        <button type="button" class="pp-btn" id="pa-al-recibir" onclick="setPedAltaPago('al-recibir')">
-          💰 Se paga al recibir<small>en la puerta, en efectivo</small></button>
-        <button type="button" class="pp-btn" id="pa-a-pagar" onclick="setPedAltaPago('a-pagar')">
-          📒 Queda a pagar<small>con vencimiento</small></button>
-      </div>
-      <div id="ped-vence-wrap" style="display:none;margin-top:10px">
-        <label style="font-size:11px;color:var(--text-muted)">Vence</label>
-        <input type="date" id="ped-vence" />
-      </div>
-      <div id="ped-alta-msg" style="font-size:12px;margin-top:10px;min-height:16px"></div>
-    </div>
-
-    <div class="card" style="margin-top:24px">
       <div class="card-title"><span>Los próximos días</span>
         <button class="btn" style="padding:4px 12px" onclick="loadPedidos(this)">↻ Actualizar</button>
       </div>
@@ -14644,11 +14605,9 @@ const pedState = {
   moviendo: null,         // el pedido que se está pasando a otro día
   recibiendo: null,       // el pedido que está en el modal
   modo: null,             // cuál de los tres botones lo abrió: ver PED_MODOS
-  altaPago: '',           // cómo se paga, en el alta suelta. '' = no sé todavía
   plan: null,             // qué dijo el server que va a hacer: ver pedCargarPlan
   editandoSem: null,
   arrastrando: null,
-  msgTimer: null,
 };
 
 // Las mismas cajas que ofrece el modal de Pagos. Es la lista corta a propósito:
@@ -14739,7 +14698,6 @@ function poblarPedidosSelects() {
     const el = document.getElementById(id);
     if (el && !el.dataset.listo) { el.innerHTML = html; el.dataset.listo = '1'; }
   };
-  setSi('ped-medio', medios);
   setSi('ped-sem-medio', medios);
   setSi('ped-r-medio', PED_MEDIOS.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join(''));
   // Sólo los días que el cuadro ofrece: ofrecer un lunes que después el server
@@ -14747,10 +14705,8 @@ function poblarPedidosSelects() {
   setSi('ped-sem-dia', (pedState.data.diasCuadro || pedState.data.diasSemana || []).map(d =>
     `<option value="${escapeHtml(d)}">${escapeHtml(d.charAt(0).toUpperCase() + d.slice(1))}</option>`).join(''));
 
-  // La fecha del alta arranca en hoy, y el proveedor usa las mismas sugerencias
-  // que el resto de la app (Movimientos + hoja Proveedores).
-  const f = document.getElementById('ped-fecha');
-  if (f && !f.value) f.value = pedState.data.hoy;
+  // El proveedor del cuadro semanal usa las mismas sugerencias que el resto de
+  // la app (Movimientos + hoja Proveedores).
   ensureSugerencias();
 }
 
@@ -14767,7 +14723,8 @@ function renderPedidosDias() {
 
   if (!visibles.length) {
     cont.innerHTML = '<div class="mant-vacio">No hay nada esperado para los próximos días.<br>'
-      + 'Cargá arriba lo que va a llegar, o armá el cuadro semanal para que aparezca solo.</div>';
+      + 'Un pedido aparece acá cuando se carga la compra (🛒 Nueva compra), o solo '
+      + 'desde el cuadro semanal de abajo.</div>';
     return;
   }
   cont.innerHTML = visibles.map(diaPedidos).join('');
@@ -15406,68 +15363,6 @@ async function pedRestaurar(id) {
     await loadPedidos();
     showToast('Vuelve a aparecer en el día');
   } catch (e) { showToast('Error: ' + e.message, 4000); }
-}
-
-// ─── Alta ───────────────────────────────────────────────────────────────────
-
-function pedMensaje(html) {
-  clearTimeout(pedState.msgTimer);
-  pedState.msgTimer = null;
-  document.getElementById('ped-alta-msg').innerHTML = html;
-}
-
-// A diferencia de "Nueva compra", acá hay un cuarto estado y es el default:
-// "no sé todavía". Un pedido anotado a las apuradas —"mañana llega algo de
-// Mercado Libre"— muchas veces se carga sin saber cómo se paga, y obligar a
-// elegir haría que se elija cualquiera. Vacío se muestra como nada, que es lo
-// honesto, y sigue habiendo tres botones al recibir.
-function setPedAltaPago(v) {
-  pedState.altaPago = v;
-  for (const k of ['vacio', 'pagado', 'al-recibir', 'a-pagar']) {
-    const b = document.getElementById('pa-' + (k === 'vacio' ? 'vacio' : k));
-    if (b) b.classList.toggle('activo', (k === 'vacio' ? '' : k) === v);
-  }
-  document.getElementById('ped-vence-wrap').style.display = v === 'a-pagar' ? '' : 'none';
-}
-
-async function crearPedido(btn) {
-  const prov = document.getElementById('ped-proveedor');
-  const proveedor = prov.value.trim();
-  if (!proveedor) { pedMensaje('<span style="color:var(--orange)">¿De qué proveedor?</span>'); prov.focus(); return; }
-
-  const boton = btn && btn.tagName === 'BUTTON' ? btn : null;
-  if (boton) boton.disabled = true;
-  pedMensaje('<span style="color:var(--text-muted)">Guardando...</span>');
-  try {
-    await api('/api/pedidos', {
-      method: 'POST',
-      body: JSON.stringify({
-        fecha: document.getElementById('ped-fecha').value,
-        proveedor,
-        detalle: document.getElementById('ped-detalle').value,
-        costoEstimado: pedNumero(document.getElementById('ped-costo').value),
-        medioPrevisto: document.getElementById('ped-medio').value,
-        pagoPrevisto: pedState.altaPago || '',
-        vence: pedState.altaPago === 'a-pagar' ? document.getElementById('ped-vence').value : '',
-      }),
-    });
-    // La fecha NO se limpia: lo normal es cargar dos o tres pedidos del mismo
-    // día seguidos. Sí se limpia lo que cambia entre uno y otro.
-    prov.value = ''; document.getElementById('ped-detalle').value = ''; document.getElementById('ped-costo').value = '';
-    // La forma de pago NO se limpia, igual que la fecha: si llegan tres cosas
-    // el jueves y las tres se pagan en la puerta, volver a elegirlo tres veces
-    // es la fricción que hace que la pantalla no se use.
-    pedMensaje('<span style="color:var(--green)">✓ Anotado.</span>');
-    pedState.msgTimer = setTimeout(() => { document.getElementById('ped-alta-msg').innerHTML = ''; }, 2500);
-    prov.focus();
-    // Cargar un pedido abre su día: es donde se ve lo que se acaba de anotar.
-    pedState.diaAbierto = document.getElementById('ped-fecha').value;
-    await loadPedidos();
-  } catch (e) {
-    pedMensaje('<span style="color:var(--red)">' + escapeHtml(e.message) + '</span>');
-  } finally {
-    if (boton) boton.disabled = false;
-  }
 }
 
 /**
