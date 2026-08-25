@@ -1282,7 +1282,14 @@ function vinosSoloCirculante(data) {
 
 app.get('/api/vinos', authMiddleware, async (req, res) => {
   try {
-    const { desde, hasta, soloVino, proveedor, categoria } = req.query;
+    const { desde, hasta, soloVino, proveedor, categoria, refrescar } = req.query;
+    // El botón "Actualizar" de la pantalla. Tira el análisis cacheado y las
+    // asignaciones de proveedor leídas de la planilla; el crudo de Fudo sigue
+    // con su propio caché de 5 min (volver a bajarlo son minutos, no segundos).
+    if (refrescar === '1' || refrescar === 'true') {
+      vinos.clearCache();
+      bebidasProveedor.clearCache();
+    }
     const data = await vinos.analizarVinos({
       desde, hasta,
       soloVino: soloVino === '1' || soloVino === 'true',
@@ -1305,6 +1312,9 @@ app.post('/api/vinos/proveedor', authMiddleware, adminOnly, async (req, res) => 
     const { productoId, producto, proveedor } = req.body || {};
     if (!productoId) return res.status(400).json({ ok: false, error: 'Falta el producto' });
     const out = await bebidasProveedor.setProveedor(productoId, producto, proveedor);
+    // El análisis cacheado tiene adentro el proveedor viejo de ese producto: sin
+    // esto, la asignación recién guardada tardaría hasta 5 minutos en verse.
+    vinos.clearCache();
     res.json({ ok: true, data: out });
   } catch (err) {
     console.error('Error /api/vinos/proveedor:', err.message);
@@ -1703,6 +1713,9 @@ app.get('/api/movimientos', authMiddleware, adminOnly, async (req, res) => {
 
 app.post('/api/refresh', authMiddleware, adminOnly, (req, res) => {
   clearCache();
+  // El análisis de bebidas tiene su propio caché (ver baseAnalisis en vinos.js);
+  // vaciar sólo el de las planillas lo dejaría contestando lo de hace 5 minutos.
+  vinos.clearCache();
   res.json({ ok: true, message: 'Cache limpiado.' });
 });
 
@@ -1909,23 +1922,60 @@ app.post('/api/pagos', authMiddleware, async (req, res) => {
       ? pedidos.nuevoId()
       : `cmp${Date.now()}${Math.floor(Math.random() * 100)}`;
 
-    const r = await registrarGastoEnLibro({
-      facturaId: idCompra,
-      fecha, mes, proveedor, categoria,
-      monto: salidaARS,
-      descripcion,
-      medioPago,
-      estado: estadoLibro,
-      vencimiento: vencLibro,
-      usuario: req.user.nombre,
-    });
-    if (!r.ok) return res.status(400).json({ ok: false, error: r.error });
+    // ─── Cuándo entra al libro (25/08/2026) ──────────────────────────────────
+    //
+    // Un pedido está en Movimientos si se RECIBIÓ o si se PAGÓ. Ni recibido ni
+    // pagado no es un gasto todavía: la mercadería no llegó y la plata no salió.
+    //
+    // Hasta esta fecha la compra escribía la fila siempre, en el acto, también
+    // cuando se pagaba al recibir o quedaba a cuenta. Eso ponía en el libro
+    // —y en la sección Pagos, reclamando— entregas que no habían llegado: la de
+    // Thames de esta semana figuraba como deuda sin haber llegado ni pagarse.
+    //
+    // Así que la fila la escribe quien hace verdadero el hecho:
+    //   · "ya está pago"        → la plata YA salió: se escribe ahora.
+    //   · "se paga al recibir"  → la escribe la recepción (POST /:id/recibir).
+    //   · "queda a pagar"       → la escribe la recepción.
+    //
+    // Sin entrega no hay recepción que la escriba nunca (un alquiler, un VEP),
+    // así que ahí se escribe ahora como siempre — la regla es de los pedidos.
+    const escribeAhora = previsto === 'pagado' || !entregaFecha;
+
+    // El monto lo validaba `registrarGastoEnLibro` al escribir la fila. Cuando
+    // la fila no se escribe hoy, esa validación no corre, y un pedido sin monto
+    // llega a la puerta sin poder recibirse ("poné cuánto es") justo cuando no
+    // hay tiempo. Se rechaza acá, que es donde se puede corregir.
+    if (!escribeAhora && !(Number(salidaARS) > 0)) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Poné el monto de la compra: es lo que se va a registrar cuando llegue el pedido.',
+      });
+    }
+
+    let r = { ok: true, registradoEnSesion: false };
+    if (escribeAhora) {
+      r = await registrarGastoEnLibro({
+        facturaId: idCompra,
+        fecha, mes, proveedor, categoria,
+        monto: salidaARS,
+        descripcion,
+        medioPago,
+        estado: estadoLibro,
+        vencimiento: vencLibro,
+        usuario: req.user.nombre,
+      });
+      if (!r.ok) return res.status(400).json({ ok: false, error: r.error });
+    }
 
     // ─── Y ahora el pedido ───────────────────────────────────────────────────
     //
-    // Si esto falla, la compra YA está registrada. No se deshace ni se esconde:
-    // se dice, y se dice dónde cargarlo a mano. Deshacer la fila del libro sería
-    // peor —quedaría plata sin registrar— y quedarse callado, peor todavía.
+    // Si la fila YA se escribió y esto falla, la compra está registrada igual:
+    // no se deshace ni se esconde, se dice dónde cargarlo a mano. Deshacer la
+    // fila sería peor —quedaría plata sin registrar— y callarse, peor todavía.
+    //
+    // Si la fila NO se escribió (se paga al recibir, o queda a pagar), el pedido
+    // es lo ÚNICO que se estaba escribiendo: un fallo ahí no deja nada a medias,
+    // y por eso se contesta como error en vez de como "compra registrada".
     let pedido = null, aviso = '';
     if (entregaFecha) {
       try {
@@ -1935,6 +1985,11 @@ app.post('/api/pagos', authMiddleware, async (req, res) => {
           proveedor,
           detalle: descripcion || '',
           costoEstimado: Number(salidaARS) || 0,
+          // Con qué categoría y a qué mes entra el gasto cuando llegue. Se
+          // deciden acá y viajan con el pedido: entre la compra y la entrega
+          // pueden pasar días, y la recepción no tiene de dónde sacarlos.
+          categoria,
+          mes,
           // En la puerta se paga siempre en efectivo del local; es la única
           // caja que existe ahí. En los otros dos casos, el medio elegido.
           medioPrevisto: previsto === 'al-recibir' ? CAJA_EFECTIVO : (medioPago || ''),
@@ -1943,6 +1998,14 @@ app.post('/api/pagos', authMiddleware, async (req, res) => {
           origen: 'compra',
         });
       } catch (e) {
+        // Sin fila escrita, el pedido era todo: no hay nada a medias que
+        // explicar, hay un error que decir.
+        if (!escribeAhora) {
+          return res.status(500).json({
+            ok: false,
+            error: `No se pudo anotar el pedido (${e.message}). No se escribió nada: volvé a intentarlo.`,
+          });
+        }
         aviso = `La compra quedó registrada en Movimientos, pero el pedido NO se pudo crear (${e.message}). `
           + 'Cargalo a mano desde Operación › Pedidos.';
       }
@@ -1952,6 +2015,10 @@ app.post('/api/pagos', authMiddleware, async (req, res) => {
       ok: true,
       message: r.yaExistia ? 'Esa compra ya estaba registrada' : 'Compra registrada correctamente',
       pedido, aviso,
+      // Si es false, el gasto todavía NO está en Movimientos: lo escribe la
+      // recepción. La pantalla lo dice, porque es lo que cambia respecto de lo
+      // que esta pantalla venía haciendo.
+      enElLibro: escribeAhora,
       registradoEnSesion: r.registradoEnSesion,
     });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
@@ -3080,6 +3147,30 @@ async function planificarAsiento({ pedido, modo, monto = 0 }) {
       : { accion: 'cerrar-fila', fila: resumen(propia), otrasPendientes: otras };
   }
 
+  // ─── Un pedido que nació de una compra escribe SU fila, no adopta otra ────
+  //
+  // Desde el 25/08/2026 la compra que se paga al recibir o queda a cuenta NO
+  // escribe nada en el libro: lo escribe esta recepción (ver POST /api/pagos).
+  // Así que si llegamos acá sin fila propia, el gasto de ESTA entrega no está
+  // escrito en ningún lado, y adoptar la fila de otra cosa lo dejaría sin
+  // escribir para siempre — cerrando de paso una deuda que nadie pagó.
+  //
+  // Las pistas por descripción, monto y fecha siguen sirviendo para los pedidos
+  // que NO nacieron de una compra (los del cuadro semanal, o los que quedaron
+  // cargados a mano): ésos no saben cuánto salen y bien pueden corresponder a
+  // una factura que ya entró por el bot.
+  //
+  // Las otras cuentas abiertas del proveedor no se tocan y se informan, igual
+  // que en "pago aparte": si hay que cancelarlas, se hace desde Pagos.
+  if (pedido.origen === 'compra') {
+    return {
+      accion: modo === 'cuenta' ? 'crear-a-pagar' : 'crear-pagado',
+      fila: null,
+      otrasPendientes: aPagar.length,
+      deCompra: true,
+    };
+  }
+
   if (modo === 'efectivo') {
     const f = _elegirCandidata(aPagar, pistas);
     return f
@@ -3231,12 +3322,16 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
         facturaId: pedido.id,
         fecha: pedido.fecha,
         proveedor: pedido.proveedor,
-        categoria: req.body.categoria || 'Mercaderia',
+        // La categoría y el mes los eligió quien compró y viajaron con el
+        // pedido. 'Mercaderia' es el default de siempre para los pedidos que
+        // no nacieron de una compra; el mes vacío lo saca de la fecha.
+        categoria: req.body.categoria || pedido.categoria || 'Mercaderia',
+        mes: pedido.mes || '',
         monto,
         descripcion: pedido.detalle || `Pedido ${pedido.proveedor}`,
         medioPago,
         estado: plan.accion === 'crear-a-pagar' ? 'A pagar' : 'Pagado',
-        vencimiento: req.body.vencimiento || pedido.fecha,
+        vencimiento: req.body.vencimiento || pedido.vence || pedido.fecha,
         usuario: req.user.nombre,
       });
       if (!r.ok) return res.status(400).json({ ok: false, error: r.error });
@@ -3291,7 +3386,12 @@ app.post('/api/pedidos/:id/items', authMiddleware, async (req, res) => {
     const pedido = await pedidos.getPedido(req.params.id);
     if (!pedido) return res.status(404).json({ ok: false, error: 'No se encontró ese pedido' });
     const lista = Array.isArray(req.body && req.body.items) ? req.body.items : [req.body];
-    const data = await pedidos.agregarItems(pedido.id, lista, { origen: 'manual' });
+    // `origen` dice de dónde salió el renglón, y es un dato: los que se leyeron
+    // de un remito al cargar la compra llegan por acá (el pedido recién existe
+    // en ese momento) y siguen siendo del remito, no cargados a mano. Cualquier
+    // otro valor cae en 'manual'.
+    const origen = (req.body && req.body.origen) === 'remito' ? 'remito' : 'manual';
+    const data = await pedidos.agregarItems(pedido.id, lista, { origen });
     res.json({ ok: true, data });
   } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
 });
@@ -3333,40 +3433,63 @@ app.delete('/api/pedidos-items/:itemId', authMiddleware, async (req, res) => {
 // confirmación para quince productos que casi siempre están bien.
 const IMAGEN_MAX_BYTES = 6 * 1024 * 1024;   // el límite de la API de Anthropic
 
+// Leer la imagen y devolver los renglones. No escribe nada y no sabe de pedidos:
+// eso lo decide quien la llama. Los errores viajan con su `status` para que cada
+// ruta conteste el mismo código que contestaba antes.
+async function leerRemitoDeImagen({ imageBase64, mime } = {}) {
+  const fallo = (status, mensaje) => Object.assign(new Error(mensaje), { status });
+  if (!imageBase64) throw fallo(400, 'No llegó ninguna imagen.');
+  // El largo del base64 es ~4/3 del binario. Se mide acá y no después para no
+  // mandarle a la API algo que va a rechazar.
+  if (imageBase64.length * 0.75 > IMAGEN_MAX_BYTES) {
+    throw fallo(400, 'La imagen es muy grande (más de 6 MB). Probá con un recorte más chico.');
+  }
+  const mimeOk = ['image/jpeg', 'image/png', 'image/webp'].includes(mime) ? mime : 'image/jpeg';
+
+  let leidos;
+  try {
+    const r = await extractor.extraerItemsRemito({ base64: imageBase64, mime: mimeOk });
+    leidos = r.items;
+  } catch (e) {
+    // Que el modelo falle o no esté la API key no puede tumbar la pantalla: los
+    // renglones se pueden cargar a mano.
+    throw fallo(502, `No se pudo leer la imagen (${e.message}). Podés cargar los productos a mano.`);
+  }
+  if (!leidos.length) {
+    throw fallo(422, 'No se reconoció ningún producto en esa imagen. Si es un remito, probá con un recorte más nítido.');
+  }
+  return leidos;
+}
+
+// ─── Leer un remito SIN pedido todavía ──────────────────────────────────────
+//
+// Es lo que permite pegar el remito mientras se carga la compra: ahí el pedido
+// no existe —lo crea el POST /api/pagos al final— así que no hay a quién
+// colgarle los renglones. Se leen, se muestran, y se guardan recién cuando la
+// compra se guarda y el pedido nace con su id.
+//
+// Leer y guardar quedan separados a propósito: si el modelo falla, todavía no
+// se escribió nada y se puede probar con otro recorte. Y quien carga la compra
+// ve la lista ANTES de confirmar, en vez de descubrirla después en Pedidos.
+app.post('/api/remitos/leer', authMiddleware, async (req, res) => {
+  try {
+    const leidos = await leerRemitoDeImagen(req.body || {});
+    res.json({ ok: true, data: leidos, dudosos: leidos.filter(i => i.dudoso).length });
+  } catch (err) {
+    res.status(err.status || 500).json({ ok: false, error: err.message });
+  }
+});
+
 app.post('/api/pedidos/:id/items/imagen', authMiddleware, async (req, res) => {
   try {
     const pedido = await pedidos.getPedido(req.params.id);
     if (!pedido) return res.status(404).json({ ok: false, error: 'No se encontró ese pedido' });
 
-    const { imageBase64, mime } = req.body || {};
-    if (!imageBase64) return res.status(400).json({ ok: false, error: 'No llegó ninguna imagen.' });
-    // El largo del base64 es ~4/3 del binario. Se mide acá y no después para no
-    // mandarle a la API algo que va a rechazar.
-    if (imageBase64.length * 0.75 > IMAGEN_MAX_BYTES) {
-      return res.status(400).json({
-        ok: false,
-        error: 'La imagen es muy grande (más de 6 MB). Probá con un recorte más chico.',
-      });
-    }
-    const mimeOk = ['image/jpeg', 'image/png', 'image/webp'].includes(mime) ? mime : 'image/jpeg';
-
     let leidos;
     try {
-      const r = await extractor.extraerItemsRemito({ base64: imageBase64, mime: mimeOk });
-      leidos = r.items;
+      leidos = await leerRemitoDeImagen(req.body || {});
     } catch (e) {
-      // Que el modelo falle o no esté la API key no puede tumbar la pantalla: el
-      // pedido sigue existiendo y los renglones se pueden cargar a mano.
-      return res.status(502).json({
-        ok: false,
-        error: `No se pudo leer la imagen (${e.message}). Podés cargar los productos a mano.`,
-      });
-    }
-    if (!leidos.length) {
-      return res.status(422).json({
-        ok: false,
-        error: 'No se reconoció ningún producto en esa imagen. Si es un remito, probá con un recorte más nítido.',
-      });
+      return res.status(e.status || 500).json({ ok: false, error: e.message });
     }
 
     const data = await pedidos.agregarItems(pedido.id, leidos, { origen: 'remito' });

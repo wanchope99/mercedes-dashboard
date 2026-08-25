@@ -80,27 +80,38 @@ function clave(s) {
   return tokens(s).join(' ');
 }
 
-// Puntaje 0-100 de cuánto se parecen dos nombres de producto.
-function parecido(nombreFudo, nombreCompra) {
-  const a = clave(nombreFudo);
-  const b = clave(nombreCompra);
-  if (!a || !b) return 0;
-  if (a === b) return 100;
+// Un nombre, ya masticado: la clave y sus tokens. Es lo único que mira el
+// puntaje, y calcularlo es lo caro (cuatro regex y un split por nombre). Se hace
+// UNA vez por nombre en vez de una vez por PAR: con 200 productos y 2.000
+// renglones de compra, la diferencia es 400.000 normalizaciones contra 2.200.
+function preparar(nombre) {
+  const ts = tokens(nombre);
+  return { clave: ts.join(' '), tokens: ts, set: new Set(ts) };
+}
+
+// Puntaje 0-100 de cuánto se parecen dos nombres YA preparados.
+function parecidoPre(a, b) {
+  if (!a.clave || !b.clave) return 0;
+  if (a.clave === b.clave) return 100;
 
   // Uno contenido en el otro. Es el caso "El Beppe Criolla" vs "El Beppe Criolla
   // 2024", y también el falso positivo conocido: "Coca-Cola" se come el renglón
   // de "Coca-Cola Zero". Se acepta igual porque el resultado NO se guarda ni se
   // presenta como confirmado — sale en itálica y con el renglón de compra en el
   // tooltip, para que quien mira decida. Si algún día molesta, acá va el corte.
-  const largo = Math.min(a.length, b.length);
-  if (largo >= 8 && (a.includes(b) || b.includes(a))) return 85;
+  const largo = Math.min(a.clave.length, b.clave.length);
+  if (largo >= 8 && (a.clave.includes(b.clave) || b.clave.includes(a.clave))) return 85;
 
-  const ta = tokens(nombreFudo);
-  const tb = new Set(tokens(nombreCompra));
-  const comunes = ta.filter(t => tb.has(t));
+  const comunes = a.tokens.filter(t => b.set.has(t));
   if (comunes.length < 2) return 0;
-  const cobertura = comunes.length / Math.min(ta.length, tb.size);
+  const cobertura = comunes.length / Math.min(a.tokens.length, b.set.size);
   return Math.round(Math.min(80, 70 * cobertura));
+}
+
+// Puntaje entre dos nombres crudos. Es la misma cuenta; queda para poder
+// probarla y para quien la llame de a un par.
+function parecido(nombreFudo, nombreCompra) {
+  return parecidoPre(preparar(nombreFudo), preparar(nombreCompra));
 }
 
 const UMBRAL = 60;
@@ -127,21 +138,34 @@ async function inferir(productos) {
   // Sólo renglones que nombran algo y tienen proveedor. Se privilegian los de
   // categoría bebida, pero no se descartan los demás: una compra de vino mal
   // categorizada sigue diciendo la verdad sobre quién la trajo.
-  const candidatos = compras
-    .filter(c => c.proveedor && (c.producto || c.nombreMostrar))
-    .map(c => ({
-      proveedor: c.proveedor,
-      nombre: c.nombreMostrar || c.producto,
-      fecha: c.fecha || '',
-      esBebida: /bebida|alcohol/i.test(c.categoria || ''),
-    }));
+  //
+  // Se COLAPSAN los renglones que dicen lo mismo. La hoja Compras tiene un
+  // renglón por compra, así que el mismo vino al mismo proveedor aparece
+  // decenas de veces, y el puntaje sólo mira la clave del nombre: comparar las
+  // treinta copias da treinta veces el mismo número. De cada grupo queda la
+  // compra más reciente, que es la que el desempate habría elegido igual.
+  const porClave = new Map();
+  for (const c of compras) {
+    if (!c.proveedor || !(c.producto || c.nombreMostrar)) continue;
+    const nombre = c.nombreMostrar || c.producto;
+    const esBebida = /bebida|alcohol/i.test(c.categoria || '');
+    const pre = preparar(nombre);
+    const k = c.proveedor + '|' + pre.clave + '|' + esBebida;
+    const previo = porClave.get(k);
+    const fecha = c.fecha || '';
+    if (!previo || fecha > previo.fecha) {
+      porClave.set(k, { proveedor: c.proveedor, nombre, fecha, esBebida, pre });
+    }
+  }
+  const candidatos = [...porClave.values()];
 
   const out = {};
   for (const p of productos) {
     if (p.id == null) continue;
+    const prePro = preparar(p.name);
     let mejor = null;
     for (const c of candidatos) {
-      const base = parecido(p.name, c.nombre);
+      const base = parecidoPre(prePro, c.pre);
       if (!base) continue;
       const score = Math.min(100, base + (c.esBebida ? 8 : 0));
       if (score < UMBRAL) continue;
@@ -270,18 +294,85 @@ async function resolver(productos) {
   return out;
 }
 
-// Nombres para el desplegable: los de la hoja Proveedores (la lista real del bar)
-// más cualquiera que ya esté asignado a una bebida, por si alguno quedó fuera.
-async function listaProveedores(asignados = []) {
+// ─── Quiénes traen bebidas ─────────────────────────────────────────────────────
+//
+// La hoja Proveedores no dice de qué rubro es cada uno: son los ~40 del bar, la
+// verdulería y el pescadero incluidos. Quién trae bebidas no está declarado en
+// ningún lado, pero está DICHO en las compras: el que alguna vez facturó un
+// renglón de categoría bebida trae bebidas. Es el mismo dato del que ya sale la
+// inferencia, leído para la otra pregunta.
+//
+// Se devuelven los nombres tal como los escribe Compras; el cruce contra la hoja
+// Proveedores lo hace listaProveedores, que es la que arma el desplegable.
+async function proveedoresDeBebidas() {
+  const cached = cache.get('prov_bebidas');
+  if (cached) return cached;
+
+  let compras = [];
+  try {
+    compras = await require('./proveedores').getCompras();
+  } catch (e) {
+    console.warn('Bebidas Proveedor: no se pudo leer Compras para la lista:', e.message);
+    cache.set('prov_bebidas', [], 60);
+    return [];
+  }
+
   const nombres = new Set();
+  for (const c of compras) {
+    if (!c.proveedor) continue;
+    if (!/bebida|alcohol/i.test(c.categoria || '')) continue;
+    nombres.add(c.proveedor.toString().trim());
+  }
+  const out = [...nombres];
+  cache.set('prov_bebidas', out);
+  return out;
+}
+
+function normNombre(s) {
+  return (s || '').toString().normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+}
+
+// Nombres para el desplegable de la pantalla de bebidas. NO son los 40
+// proveedores del bar: son los que traen bebidas — los que facturaron algún
+// renglón de categoría bebida — más los que ya están asignados a una bebida a
+// mano, que son una decisión de alguien y no se pueden perder.
+//
+// La hoja Proveedores manda sobre la ortografía: si el proveedor está ahí, se
+// muestra como está escrito ahí, y no como vino tipeado en un renglón de compra.
+//
+// Si el cruce no deja a NADIE (la hoja Compras caída, o sin categorías cargadas)
+// se cae a la lista completa: un desplegable vacío no deja asignar nada, que es
+// peor que uno largo.
+async function listaProveedores(asignados = []) {
+  let delBar = [];
   try {
     const cfg = await provConfig.leerConfig();
-    for (const p of Object.values(cfg.byNombre || {})) if (p.nombre) nombres.add(p.nombre);
-  } catch (e) { /* sin hoja Proveedores, la lista sale de lo ya asignado */ }
-  for (const n of asignados) if (n) nombres.add(n);
-  return [...nombres].sort((a, b) => a.localeCompare(b, 'es'));
+    delBar = Object.values(cfg.byNombre || {}).map(p => p.nombre).filter(Boolean);
+  } catch (e) { /* sin hoja Proveedores, la lista sale de Compras y de lo asignado */ }
+
+  const deBebidas = await proveedoresDeBebidas().catch(() => []);
+  const bebidasNorm = new Set(deBebidas.map(normNombre));
+  const asignadosNorm = new Set((asignados || []).filter(Boolean).map(normNombre));
+
+  const nombres = new Map();   // norm → cómo se escribe
+  const agregar = n => { const k = normNombre(n); if (k && !nombres.has(k)) nombres.set(k, n); };
+
+  // Primero la hoja Proveedores (su ortografía gana), sólo los de bebidas o los
+  // que ya están asignados a alguna.
+  for (const n of delBar) {
+    const k = normNombre(n);
+    if (bebidasNorm.has(k) || asignadosNorm.has(k)) agregar(n);
+  }
+  // Después los que sólo existen en Compras o en una asignación vieja.
+  for (const n of deBebidas) agregar(n);
+  for (const n of (asignados || [])) if (n) agregar(n);
+
+  const out = [...nombres.values()];
+  if (!out.length) return delBar.slice().sort((a, b) => a.localeCompare(b, 'es'));
+  return out.sort((a, b) => a.localeCompare(b, 'es'));
 }
 
 function clearCache() { cache.flushAll(); }
 
-module.exports = { resolver, setProveedor, getMapaManual, inferir, listaProveedores, clearCache };
+module.exports = { resolver, setProveedor, getMapaManual, inferir, listaProveedores,
+  proveedoresDeBebidas, parecido, clearCache };

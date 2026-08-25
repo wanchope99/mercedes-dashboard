@@ -237,6 +237,16 @@
     .group-rows-hidden { display: none; }
     .group-header .group-badge { display: inline-flex; align-items: center; gap: 5px; background: var(--blue-dim); color: var(--blue); border: 1px solid rgba(92,143,224,0.3); padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
     .group-header.group-proveedores .group-badge { background: rgba(201,168,76,0.15); color: #c9a84c; border-color: rgba(201,168,76,0.4); }
+    /* Los vencidos van arriba de todo y con su propio color: es la única franja
+       roja de la tabla, así que no hay que leerla para saber qué dice. */
+    .group-header.group-vencidos { background: rgba(224,92,92,0.12); border-bottom-color: rgba(224,92,92,0.35); color: var(--red); }
+    .group-header.group-vencidos:hover { background: rgba(224,92,92,0.2); }
+    .group-header.group-vencidos .group-badge { background: rgba(224,92,92,0.18); color: var(--red); border-color: rgba(224,92,92,0.45); }
+    .group-header.group-vencidos .group-total { color: var(--red); font-weight: 700; }
+    /* Toda la fila abre el detalle del pago. */
+    .pagos-table tbody tr.pago-row { cursor: pointer; }
+    .pagos-table tbody tr.pago-row:hover { background: var(--surface2); }
+    tr.pago-row.fila-vencida td:first-child { box-shadow: inset 3px 0 0 var(--red); }
     .gastos-chevron { font-size: 10px; transition: transform 0.2s; display: inline-block; margin-right: 6px; }
     .gastos-chevron.collapsed { transform: rotate(-90deg); }
     .group-total { margin-left: auto; font-size: 12px; color: var(--text-muted); font-weight: 500; }
@@ -2493,19 +2503,19 @@
         <span id="vinos-subtitulo" style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· stock, plata inmovilizada y rotación · datos de Fudo</span>
         <span style="float:right">
           <label class="switch" style="margin-right:12px" title="Filtrar el listado para ver únicamente los vinos">
-            <input type="checkbox" id="vinos-solo-vino" onchange="loadVinos()"><span class="switch-track"></span><span class="switch-label">🍷 Solo vinos</span>
+            <input type="checkbox" id="vinos-solo-vino" onchange="renderVinos()"><span class="switch-track"></span><span class="switch-label">🍷 Solo vinos</span>
           </label>
-          <button class="btn" style="font-size:12px;padding:5px 12px" onclick="spinRefresh(this, loadVinos)"><span class="refresh-icon">↻</span> Actualizar</button>
+          <button class="btn" style="font-size:12px;padding:5px 12px" onclick="spinRefresh(this, refrescarVinos)"><span class="refresh-icon">↻</span> Actualizar</button>
         </span>
       </div>
       <div id="vinos-kpis" class="kpi-grid" style="margin-bottom:14px"></div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
         <span class="filter-label">Proveedor</span>
-        <select id="vinos-filtro-proveedor" onchange="loadVinos()" style="padding:6px 10px;font-size:12px">
+        <select id="vinos-filtro-proveedor" onchange="renderVinos()" style="padding:6px 10px;font-size:12px">
           <option value="">Todos</option>
         </select>
         <span class="filter-label">Categoría</span>
-        <select id="vinos-filtro-categoria" onchange="loadVinos()" style="padding:6px 10px;font-size:12px">
+        <select id="vinos-filtro-categoria" onchange="renderVinos()" style="padding:6px 10px;font-size:12px">
           <option value="">Todas</option>
         </select>
         <button class="btn" id="vinos-limpiar-filtros" style="display:none;font-size:12px;padding:5px 12px" onclick="limpiarFiltrosVinos()">Limpiar filtros</button>
@@ -3007,13 +3017,13 @@
   <div class="pagos-filters">
     <span class="filter-label" id="pagos-filtros-admin-label">Ordenar por</span>
     <span id="pagos-filtros-admin" style="display:contents">
-      <select id="pagos-sort" onchange="loadPagos()">
+      <select id="pagos-sort" onchange="renderPagos()">
         <option value="vencimiento">Próximo vencimiento</option>
         <option value="monto">Mayor monto</option>
         <option value="proveedor">Proveedor A-Z</option>
         <option value="formapago">Forma de pago</option>
       </select>
-      <select id="pagos-filter-mp" onchange="loadPagos()">
+      <select id="pagos-filter-mp" onchange="renderPagos()">
         <option value="">Todas las formas de pago</option>
         <option value="Efectivo Local">Efectivo Local</option>
         <option value="Efectivo Pablo">Efectivo Pablo</option>
@@ -3022,7 +3032,7 @@
         <option value="Mercado Pago">Mercado Pago (Tincho y Pablo)</option>
         <option value="Echeq">Echeq</option>
       </select>
-      <input type="text" id="pagos-search" placeholder="Buscar proveedor..." oninput="loadPagos()" style="width:200px" />
+      <input type="text" id="pagos-search" placeholder="Buscar proveedor..." oninput="renderPagos()" style="width:200px" />
     </span>
     <div style="flex:1"></div>
     <!-- Las facturas que entran por el bot de Telegram se confirman acá desde el
@@ -3537,6 +3547,24 @@
           <div class="ped-atajos" id="f-entrega-atajos"></div>
           <input type="date" id="f-entrega" onchange="pintarAtajosEntrega()">
         </div>
+
+        <!-- El remito, acá y no después en Pedidos. Hasta el 25/08/2026 había
+             que guardar la compra, ir a Operación › Pedidos, abrir el día,
+             abrir el pedido y recién ahí pegar el recorte — cinco pasos para
+             algo que se tiene en el portapapeles justo en este momento.
+             La imagen se lee ahora y los renglones se guardan al guardar la
+             compra, porque el pedido todavía no existe: lo crea el POST del
+             final con su id. Ver leerRemitoDeImagen en server.js. -->
+        <div class="form-group full">
+          <label>¿Qué trae? <span style="color:var(--text-muted);font-weight:400;text-transform:none">· opcional</span></label>
+          <div class="ped-pegar activo" id="f-remito-zona">
+            <b>Ctrl+V</b> pega un recorte del remito y los productos se cargan solos.<br>
+            <span style="font-size:11px">O elegí una imagen:
+              <input type="file" accept="image/*" onchange="archivoRemitoCompra(this)" style="font-size:11px">
+            </span>
+          </div>
+          <div id="f-remito-lista"></div>
+        </div>
       </div>
       <div id="modal-status2"></div>
       <div class="modal-actions">
@@ -3900,7 +3928,7 @@ function onLoginSuccess(rol, nombre) {
     // Encargado: Cajas (con submenús Cajas / Arqueo) + Pagos + Stocks. Qué ve y
     // qué no lo decide el soloAdmin de TAB_GROUPS, ya aplicado por renderNav().
     // Stocks se le abre sólo por Gestión de Bebidas: los otros dos submenús están
-    // marcados soloAdmin y la tabla se recorta en loadVinos().
+    // marcados soloAdmin y la tabla se recorta en renderVinos().
     // Pagos visible solo para registrar una compra nueva: sin listado, KPIs ni "Pagar"
     document.getElementById('pagos-filtros-admin-label').style.display = 'none';
     document.getElementById('pagos-filtros-admin').style.display = 'none';
@@ -6469,7 +6497,7 @@ function refreshData() {
 }
 
 // ─── PAGOS ────────────────────────────────────────────────────────────────────
-function setSortPagos(s) { document.getElementById('pagos-sort').value = s; loadPagos(); }
+function setSortPagos(s) { document.getElementById('pagos-sort').value = s; renderPagos(); }
 
 function urgenciaBadge(p) {
   const map = {
@@ -6504,13 +6532,15 @@ function buildPagosRows(pagos, groupId) {
     const desc = (p.descripcion || '').substring(0, 60) + (p.descripcion && p.descripcion.length > 60 ? '…' : '');
     const provKey = (p.proveedor || '').toLowerCase();
     const hasData = !!state.proveedores[provKey];
-    const provCell = `<span class="proveedor-link ${hasData ? 'has-data' : ''}" onclick="openProvModal('${(p.proveedor||'').replace(/'/g, "\\'")}')">${p.proveedor || '—'}</span>`;
+    // stopPropagation: el nombre sigue abriendo la ficha del proveedor, que es
+    // otra pregunta que la del pago. Sin eso, la fila se lo come.
+    const provCell = `<span class="proveedor-link ${hasData ? 'has-data' : ''}" onclick="event.stopPropagation();openProvModal('${(p.proveedor||'').replace(/'/g, "\\'")}')">${p.proveedor || '—'}</span>`;
     const formaPago = p.medioPago || (state.proveedores[provKey] && state.proveedores[provKey].formaPago) || '—';
     const formaPagoStyle = !p.medioPago && formaPago !== '—' ? 'opacity:0.7;font-style:italic' : '';
     const cuotaBadge = p.cuotaLabel ? `<span class="badge-cuota">Cuota ${p.cuotaLabel}</span>` : '';
     const cuotaRestante = p.cuotaLabel && p.compraTotal
       ? `<div class="cuota-restante">Restan ${fmt(p.compraRestante || 0)} de ${fmt(p.compraTotal)}</div>` : '';
-    return `<tr class="${cls}">
+    return `<tr class="${cls} pago-row${p.urgencia === 'vencido' ? ' fila-vencida' : ''}" onclick="openPagoDetalle(${p.rowIndex})" title="Ver el detalle de este pago">
       <td><div class="td-proveedor">${provCell}${cuotaBadge}</div>${desc ? `<div class="td-desc">${desc}</div>` : ''}</td>
       <td style="color:var(--text-muted);font-size:12px">${p.categoria || '—'}</td>
       <td style="font-size:13px;white-space:nowrap">${vencLabel}</td>
@@ -6520,6 +6550,94 @@ function buildPagosRows(pagos, groupId) {
       <td style="font-size:11px;color:var(--text-muted);max-width:160px">${p.descripcion && p.descripcion.length > 60 ? p.descripcion.substring(0,100)+'…' : ''}</td>
     </tr>`;
   }).join('');
+}
+
+// ─── El detalle de un pago ────────────────────────────────────────────────────
+//
+// La tabla muestra siete columnas recortadas: la descripción se corta a 60
+// caracteres, la nota a 100, y de una cuota se ve el "3/6" pero no cuánto queda
+// de la compra. Para ver el resto había que abrir la planilla. Ahora la fila
+// entera abre esto.
+//
+// Es de sólo lectura salvo por el botón de pagar, que es el mismo camino de
+// siempre (`openPagarModal`), con la fila ya elegida.
+function openPagoDetalle(rowIndex) {
+  const p = (state.pagosData || []).find(x => x.rowIndex === rowIndex);
+  if (!p) return;
+
+  const fmtFecha = iso => iso ? new Date(iso + 'T12:00:00').toLocaleDateString('es-AR') : null;
+  const provKey = (p.proveedor || '').toLowerCase();
+  const provSheet = state.proveedores[provKey];
+  const monto = p.salidaARS > 0 ? fmt(p.salidaARS)
+    : p.salidaUSD > 0 ? 'USD ' + p.salidaUSD.toLocaleString('es-AR') : '—';
+
+  // Cuánto falta o hace cuánto venció, dicho en palabras. El badge de la tabla
+  // dice "12d" y acá hay lugar para decirlo entero.
+  let cuando = 'Sin fecha de vencimiento';
+  if (p.diasHastaVenc !== null && p.diasHastaVenc !== undefined) {
+    const d = Math.abs(p.diasHastaVenc), plural = d !== 1 ? 's' : '';
+    cuando = p.urgencia === 'vencido' ? `Venció hace ${d} día${plural}`
+      : p.urgencia === 'hoy' ? 'Vence hoy'
+      : `Vence en ${d} día${plural}`;
+  }
+
+  // El medio puede no estar en la fila y venir de la hoja Proveedores. Eso se
+  // dice, no se disimula: no es lo mismo un dato de la fila que una costumbre.
+  const medioFila = p.medioPago || '';
+  const medioProv = (provSheet && provSheet.formaPago) || '';
+  const medio = medioFila
+    ? `<b>${escapeHtml(medioFila)}</b>`
+    : medioProv
+      ? `<b>${escapeHtml(medioProv)}</b> <span style="color:var(--orange);font-size:11px">· la fila no lo dice, sale de la ficha del proveedor</span>`
+      : '<span style="color:var(--orange)">La fila no tiene medio de pago</span>';
+
+  const fila = (label, valor) => valor == null || valor === ''
+    ? ''
+    : `<div style="display:flex;justify-content:space-between;gap:16px;padding:7px 0;border-bottom:1px solid var(--border)">
+         <span style="color:var(--text-muted)">${label}</span><span style="text-align:right">${valor}</span>
+       </div>`;
+
+  let html = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      ${urgenciaBadge(p)}
+      <span style="color:${p.urgencia === 'vencido' ? 'var(--red)' : 'var(--text-muted)'}">${cuando}</span>
+      <span style="margin-left:auto;font-size:22px;font-weight:700;color:var(--red)">${monto}</span>
+    </div>`;
+
+  html += fila('Vencimiento', fmtFecha(p.vencDate) || escapeHtml(p.vencimiento || '') || '—');
+  html += fila('Forma de pago', medio);
+  html += fila('Categoría', escapeHtml(p.categoria || '—'));
+  html += fila('Registrado', (fmtFecha(p.fecha) || escapeHtml(p.fecha || '—'))
+    + (p.mes ? ` <span style="color:var(--text-muted);font-size:11px">· mes ${escapeHtml(p.mes)}</span>` : ''));
+  html += fila('Estado en la planilla', escapeHtml(p.estado || 'A pagar'));
+
+  // De una cuota interesa la compra entera: la fila sola no dice de qué es.
+  if (p.cuotaLabel) {
+    html += fila('Cuota', `<b>${escapeHtml(p.cuotaLabel)}</b>`
+      + (p.compraCuotasPagadas != null ? ` <span style="color:var(--text-muted);font-size:11px">· ${p.compraCuotasPagadas} de ${p.compraCuotasTotal} pagadas</span>` : ''));
+    if (p.compraTotal) html += fila('Total de la compra', fmt(p.compraTotal));
+    if (p.compraRestante != null) html += fila('Restan', `<b>${fmt(p.compraRestante)}</b>`);
+  }
+  if (p.descripcion) {
+    html += `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="color:var(--text-muted);margin-bottom:4px">Descripción</div>
+      <div>${escapeHtml(p.descripcion)}</div></div>`;
+  }
+  html += fila('Fila en Movimientos', `<span style="color:var(--text-muted)">${p.rowIndex}</span>`);
+
+  html += `<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap">
+      <button class="btn" onclick="closeDetalleModal();openProvModal('${(p.proveedor||'').replace(/'/g, "\\'")}')">Ver proveedor</button>
+      <button class="btn btn-accent" onclick="pagarDesdeDetalle(${p.rowIndex})">✓ Pagar este</button>
+    </div>`;
+
+  openDetalleModal(escapeHtml(p.proveedor || 'Pago pendiente'), html);
+}
+
+// El modal de pagar tiene z-index 560 y este 850, así que abrirlo encima lo
+// dejaría ATRÁS — el mismo error que ya pasó con la ventana de recibir un
+// pedido. Se cierra este primero y recién ahí se abre el otro.
+async function pagarDesdeDetalle(rowIndex) {
+  closeDetalleModal();
+  await openPagarModal(rowIndex);
 }
 
 // ─── Ciclo de resumen de la tarjeta Galicia ───────────────────────────────────
@@ -6601,82 +6719,166 @@ function cerrarGaliciaRecordatorio() {
   document.getElementById('galicia-recordatorio-overlay').classList.remove('open');
 }
 
+// ─── Cargar una vez, ordenar y filtrar acá ───────────────────────────────────
+//
+// Los tres filtros iban al server, y el buscador tenía `oninput`: una llamada a
+// la API POR CADA TECLA. Del otro lado no hay una consulta: /api/pagos lee TODO
+// el libro y después ordena y descarta filas — o sea que buscar "au" y después
+// "aur" pagaba dos veces la lectura entera para mirar la misma lista.
+//
+// Ahora el libro viaja una vez y ordenar, filtrar por medio y buscar se
+// resuelven en la pantalla. El resumen de arriba se recalcula sobre lo que
+// quedó, igual que antes lo hacía el server: un KPI que ignore el filtro dice
+// otra cosa que la tabla que tiene debajo.
 async function loadPagos() {
   if (Object.keys(state.proveedores).length === 0) {
     try { const { data } = await api('/api/proveedores'); state.proveedores = data; } catch(e) {}
   }
-  const sort = document.getElementById('pagos-sort').value;
-  const mp = document.getElementById('pagos-filter-mp').value;
-  const q = document.getElementById('pagos-search').value;
-  let url = `/api/pagos?sort=${sort}`;
-  if (mp) url += `&medioPago=${encodeURIComponent(mp)}`;
-  if (q) url += `&q=${encodeURIComponent(q)}`;
-
   try {
-    const { data: pagos, summary } = await api(url);
-    state.vencidosPagos = pagos.filter(p => p.urgencia === 'vencido');
-    state.estaSemanaPagos = pagos.filter(p => p.diasHastaVenc !== null && p.diasHastaVenc >= 0 && p.diasHastaVenc <= 7);
-    const galiciaPagos = pagos.filter(p => (p.medioPago || '').toLowerCase().includes('galicia'));
-    const galiciaTotal = galiciaPagos.reduce((s, p) => s + p.salidaARS, 0);
-    const independientes = pagos.filter(p => !(p.medioPago || '').toLowerCase().includes('galicia'));
-
-    // Próximo vencimiento de la tarjeta: por defecto se muestran los vencidos
-    // (siempre) más los cargos del próximo RESUMEN aún no vencido. Cada cargo se
-    // asigna al resumen de la tarjeta (galiciaStatementVenc) para que cargos con
-    // pequeñas diferencias de fecha (p.ej. cuotas al 5 y cargos al 7) queden en un
-    // único vencimiento en lugar de partirse en dos.
-    const hoyISO = new Date().toISOString().split('T')[0];
-    galiciaPagos.forEach(p => { p.statementVenc = galiciaStatementVenc(p.vencDate); });
-    const vencsGaliciaFuturos = [...new Set(galiciaPagos.filter(p => p.statementVenc && p.statementVenc >= hoyISO).map(p => p.statementVenc))].sort();
-    const proxVencGalicia = vencsGaliciaFuturos[0] || null;
-    const esVisibleGalicia = p => p.urgencia === 'vencido' || !p.statementVenc || !proxVencGalicia || p.statementVenc <= proxVencGalicia;
-    const galiciaVisibles = state.galiciaFuturos ? galiciaPagos : galiciaPagos.filter(esVisibleGalicia);
-    const galiciaProxTotal = (state.galiciaFuturos ? galiciaPagos : galiciaPagos.filter(esVisibleGalicia)).reduce((s, p) => s + p.salidaARS, 0);
-
-    document.getElementById('pagos-kpis').innerHTML = `
-      <div class="kpi-card red"><div class="kpi-label">Total pendiente ARS</div><div class="kpi-value">${fmt(summary.totalARS)}</div><div class="kpi-sub">${summary.total} pagos</div></div>
-      <div class="kpi-card blue"><div class="kpi-label">Tarjeta Galicia</div><div class="kpi-value">${fmt(galiciaTotal)}</div><div class="kpi-sub">${galiciaPagos.length} cargo${galiciaPagos.length !== 1 ? 's' : ''}${galiciaProxTotal > 0 && galiciaProxTotal < galiciaTotal ? ` · próx. venc: ${fmt(galiciaProxTotal)}` : ''}</div></div>
-      <div class="kpi-card accent"><div class="kpi-label">Proveedores independientes</div><div class="kpi-value">${fmt(summary.totalARS - galiciaTotal)}</div><div class="kpi-sub">${independientes.length} pago${independientes.length !== 1 ? 's' : ''}</div></div>
-      <div class="kpi-card ${summary.vencidos > 0 ? 'red' : 'green'}" ${summary.vencidos > 0 ? 'onclick="openVencidosModal(state.vencidosPagos)" style="cursor:pointer;transition:opacity 0.15s" onmouseenter="this.style.opacity=\'0.8\'" onmouseleave="this.style.opacity=\'1\'"' : ''}><div class="kpi-label">Vencidos</div><div class="kpi-value">${summary.vencidos}</div><div class="kpi-sub">${summary.vencidos > 0 ? '⚠️ Clic para ver' : 'Al día ✓'}</div></div>
-      <div class="kpi-card ${summary.estaSemanaCant > 0 ? 'orange' : 'green'}" ${summary.estaSemanaCant > 0 ? 'onclick="openSemanModal(state.estaSemanaPagos)" style="cursor:pointer;transition:opacity 0.15s" onmouseenter="this.style.opacity=\'0.8\'" onmouseleave="this.style.opacity=\'1\'"' : ''}><div class="kpi-label">Esta semana</div><div class="kpi-value">${summary.estaSemanaCant}</div><div class="kpi-sub">${summary.estaSemanaCant > 0 ? fmt(summary.estaSemanaARS) + ' · Clic para ver' : fmt(summary.estaSemanaARS)}</div></div>
-    `;
-
-    document.getElementById('pagos-count').textContent = `· ${pagos.length} resultado${pagos.length !== 1 ? 's' : ''}`;
-
-    state.pagosData = pagos;
-    if (state.pagosVista === 'cuotas') { renderPagosCuotas(pagos); return; }
-
-    if (!pagos.length) {
-      document.getElementById('pagos-tbody').innerHTML = `<tr><td colspan="7"><div class="pagos-empty">No hay pagos pendientes con esos filtros.</div></td></tr>`;
-      return;
-    }
-
-    let html = '';
-    if (galiciaPagos.length > 0) {
-      const ocultos = galiciaPagos.length - galiciaVisibles.length;
-      const vencLbl = proxVencGalicia ? new Date(proxVencGalicia + 'T12:00:00').toLocaleDateString('es-AR') : '';
-      html += `<tr class="group-header-row" id="grp-hdr-galicia"><td colspan="7" style="padding:0"><div class="group-header" onclick="toggleGroup('galicia')">
-        <span class="group-chevron" id="grp-chv-galicia">▾</span>
-        <span class="group-badge">💳 Tarjeta Galicia</span>
-        <span>${state.galiciaFuturos ? `${galiciaPagos.length} cargo${galiciaPagos.length !== 1 ? 's' : ''}` : `${galiciaVisibles.length} de ${galiciaPagos.length} cargo${galiciaPagos.length !== 1 ? 's' : ''}${vencLbl ? ` · venc ${vencLbl}` : ''}`}</span>
-        <label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted);cursor:pointer;font-weight:400" onclick="event.stopPropagation()">
-          <input type="checkbox" ${state.galiciaFuturos ? 'checked' : ''} onchange="toggleGaliciaFuturos(this.checked)" style="accent-color:var(--accent)">
-          mostrar futuros vencimientos${ocultos > 0 ? ` (${ocultos})` : ''}
-        </label>
-        <span class="group-total">${fmt(galiciaVisibles.reduce((s, p) => s + p.salidaARS, 0))}${!state.galiciaFuturos && ocultos > 0 ? ` <span style="color:var(--text-muted);font-weight:400;font-size:11px">de ${fmt(galiciaTotal)}</span>` : ''}</span>
-      </div></td></tr>`;
-      html += buildPagosRows(galiciaVisibles, 'galicia');
-    }
-    if (independientes.length > 0) {
-      if (galiciaPagos.length > 0) {
-        html += `<tr class="group-header-row" id="grp-hdr-indep"><td colspan="7" style="padding:0"><div class="group-header group-proveedores" onclick="toggleGroup('indep')"><span class="group-chevron" id="grp-chv-indep">▾</span><span class="group-badge">🤝 Proveedores independientes</span><span>${independientes.length} pago${independientes.length !== 1 ? 's' : ''}</span><span class="group-total">${fmt(independientes.reduce((s,p)=>s+p.salidaARS,0))}</span></div></td></tr>`;
-      }
-      html += buildPagosRows(independientes, 'indep');
-    }
-    document.getElementById('pagos-tbody').innerHTML = html;
-  } catch(err) {
+    const { data } = await api('/api/pagos');
+    // Sin filtrar. Es lo que mira el modal de "Pagar", que tiene que ofrecer
+    // todos los proveedores con deuda y no sólo los que sobrevivieron a un
+    // filtro puesto para otra cosa.
+    state.pagosData = data;
+  } catch (err) {
     document.getElementById('pagos-tbody').innerHTML = `<tr><td colspan="7" style="color:var(--red);padding:20px">Error: ${err.message}</td></tr>`;
+    return;
   }
+  renderPagos();
+}
+
+// El mismo orden que hacía el server (ver GET /api/pagos en server.js). Vencido
+// primero, y dentro de eso lo que vence antes.
+const ORDEN_URGENCIA = { vencido: 0, hoy: 1, urgente: 2, proximo: 3, ok: 4, 'sin-fecha': 5 };
+
+function pagosVisibles() {
+  const sort = document.getElementById('pagos-sort').value;
+  const mp = (document.getElementById('pagos-filter-mp').value || '').toLowerCase();
+  const q = (document.getElementById('pagos-search').value || '').trim().toLowerCase();
+
+  const out = (state.pagosData || []).filter(p =>
+    (!mp || (p.medioPago || '').toLowerCase().includes(mp)) &&
+    (!q || (p.proveedor || '').toLowerCase().includes(q)));
+
+  if (sort === 'monto') out.sort((a, b) => (b.salidaTotal || 0) - (a.salidaTotal || 0));
+  else if (sort === 'proveedor') out.sort((a, b) => (a.proveedor || '').localeCompare(b.proveedor || ''));
+  else if (sort === 'formapago') out.sort((a, b) => (a.medioPago || '').localeCompare(b.medioPago || ''));
+  else out.sort((a, b) => (ORDEN_URGENCIA[a.urgencia] ?? 5) - (ORDEN_URGENCIA[b.urgencia] ?? 5)
+    || ((a.diasHastaVenc ?? 999) - (b.diasHastaVenc ?? 999)));
+  return out;
+}
+
+// El `summary` que antes venía en la respuesta. Misma cuenta, de este lado.
+function resumenPagos(pagos) {
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const finSemana = new Date(hoy); finSemana.setDate(hoy.getDate() + 7);
+  const estaSemana = pagos.filter(p => p.vencDate && new Date(p.vencDate + 'T12:00:00') <= finSemana && p.urgencia !== 'vencido');
+  return {
+    total: pagos.length,
+    totalARS: pagos.reduce((s, p) => s + (p.salidaARS || 0), 0),
+    totalUSD: pagos.reduce((s, p) => s + (p.salidaUSD || 0), 0),
+    vencidos: pagos.filter(p => p.urgencia === 'vencido').length,
+    estaSemanaCant: estaSemana.length,
+    estaSemanaARS: estaSemana.reduce((s, p) => s + (p.salidaARS || 0), 0),
+  };
+}
+
+function renderPagos() {
+  const pagos = pagosVisibles();
+  const summary = resumenPagos(pagos);
+  state.vencidosPagos = pagos.filter(p => p.urgencia === 'vencido');
+  state.estaSemanaPagos = pagos.filter(p => p.diasHastaVenc !== null && p.diasHastaVenc >= 0 && p.diasHastaVenc <= 7);
+  const esGalicia = p => (p.medioPago || '').toLowerCase().includes('galicia');
+
+  // ── Los vencidos van FIJADOS arriba de todo ──────────────────────────────
+  // Antes caían dentro de su grupo, así que un vencido de un proveedor
+  // independiente aparecía después de todos los cargos de la tarjeta — o sea
+  // al final, que es exactamente donde no tiene que estar. Y ordenando por
+  // monto o por proveedor quedaban desparramados por toda la tabla.
+  // Salen de los dos grupos de abajo: si no, la misma fila se vería dos veces.
+  const vencidos = pagos.filter(p => p.urgencia === 'vencido');
+  const vencidosTotal = vencidos.reduce((s, p) => s + p.salidaARS, 0);
+  const alDia = pagos.filter(p => p.urgencia !== 'vencido');
+
+  // Los KPIs siguen hablando de TODO lo pendiente (la tarjeta debe lo que
+  // debe, esté vencido o no); lo que cambió es sólo cómo se agrupa la tabla.
+  const galiciaTodos = pagos.filter(esGalicia);
+  const galiciaTotal = galiciaTodos.reduce((s, p) => s + p.salidaARS, 0);
+  const independientesTodos = pagos.filter(p => !esGalicia(p));
+
+  const galiciaPagos = alDia.filter(esGalicia);
+  const independientes = alDia.filter(p => !esGalicia(p));
+
+  // Próximo vencimiento de la tarjeta: por defecto se muestran los vencidos
+  // (siempre) más los cargos del próximo RESUMEN aún no vencido. Cada cargo se
+  // asigna al resumen de la tarjeta (galiciaStatementVenc) para que cargos con
+  // pequeñas diferencias de fecha (p.ej. cuotas al 5 y cargos al 7) queden en un
+  // único vencimiento en lugar de partirse en dos.
+  const hoyISO = new Date().toISOString().split('T')[0];
+  galiciaTodos.forEach(p => { p.statementVenc = galiciaStatementVenc(p.vencDate); });
+  const vencsGaliciaFuturos = [...new Set(galiciaTodos.filter(p => p.statementVenc && p.statementVenc >= hoyISO).map(p => p.statementVenc))].sort();
+  const proxVencGalicia = vencsGaliciaFuturos[0] || null;
+  const esVisibleGalicia = p => p.urgencia === 'vencido' || !p.statementVenc || !proxVencGalicia || p.statementVenc <= proxVencGalicia;
+  // El KPI de la tarjeta sigue contando los cargos vencidos: lo que se paga en
+  // el próximo resumen los incluye. La TABLA no, porque ya están arriba.
+  const galiciaProxTotal = (state.galiciaFuturos ? galiciaTodos : galiciaTodos.filter(esVisibleGalicia)).reduce((s, p) => s + p.salidaARS, 0);
+  const galiciaVisibles = state.galiciaFuturos ? galiciaPagos : galiciaPagos.filter(esVisibleGalicia);
+  const galiciaGrupoTotal = galiciaPagos.reduce((s, p) => s + p.salidaARS, 0);
+
+  document.getElementById('pagos-kpis').innerHTML = `
+    <div class="kpi-card red"><div class="kpi-label">Total pendiente ARS</div><div class="kpi-value">${fmt(summary.totalARS)}</div><div class="kpi-sub">${summary.total} pagos</div></div>
+    <div class="kpi-card blue"><div class="kpi-label">Tarjeta Galicia</div><div class="kpi-value">${fmt(galiciaTotal)}</div><div class="kpi-sub">${galiciaTodos.length} cargo${galiciaTodos.length !== 1 ? 's' : ''}${galiciaProxTotal > 0 && galiciaProxTotal < galiciaTotal ? ` · próx. venc: ${fmt(galiciaProxTotal)}` : ''}</div></div>
+    <div class="kpi-card accent"><div class="kpi-label">Proveedores independientes</div><div class="kpi-value">${fmt(summary.totalARS - galiciaTotal)}</div><div class="kpi-sub">${independientesTodos.length} pago${independientesTodos.length !== 1 ? 's' : ''}</div></div>
+    <div class="kpi-card ${summary.vencidos > 0 ? 'red' : 'green'}" ${summary.vencidos > 0 ? 'onclick="openVencidosModal(state.vencidosPagos)" style="cursor:pointer;transition:opacity 0.15s" onmouseenter="this.style.opacity=\'0.8\'" onmouseleave="this.style.opacity=\'1\'"' : ''}><div class="kpi-label">Vencidos</div><div class="kpi-value">${summary.vencidos}</div><div class="kpi-sub">${summary.vencidos > 0 ? '⚠️ Clic para ver' : 'Al día ✓'}</div></div>
+    <div class="kpi-card ${summary.estaSemanaCant > 0 ? 'orange' : 'green'}" ${summary.estaSemanaCant > 0 ? 'onclick="openSemanModal(state.estaSemanaPagos)" style="cursor:pointer;transition:opacity 0.15s" onmouseenter="this.style.opacity=\'0.8\'" onmouseleave="this.style.opacity=\'1\'"' : ''}><div class="kpi-label">Esta semana</div><div class="kpi-value">${summary.estaSemanaCant}</div><div class="kpi-sub">${summary.estaSemanaCant > 0 ? fmt(summary.estaSemanaARS) + ' · Clic para ver' : fmt(summary.estaSemanaARS)}</div></div>
+  `;
+
+  document.getElementById('pagos-count').textContent = `· ${pagos.length} resultado${pagos.length !== 1 ? 's' : ''}`;
+
+  if (state.pagosVista === 'cuotas') { renderPagosCuotas(pagos); return; }
+
+  if (!pagos.length) {
+    document.getElementById('pagos-tbody').innerHTML = `<tr><td colspan="7"><div class="pagos-empty">No hay pagos pendientes con esos filtros.</div></td></tr>`;
+    return;
+  }
+
+  let html = '';
+  // Fijados arriba de todo, antes que cualquier grupo. Se pliega como los
+  // otros, pero arranca abierto: es lo único de esta pantalla que ya está
+  // tarde.
+  if (vencidos.length > 0) {
+    html += `<tr class="group-header-row" id="grp-hdr-vencidos"><td colspan="7" style="padding:0"><div class="group-header group-vencidos" onclick="toggleGroup('vencidos')">
+      <span class="group-chevron" id="grp-chv-vencidos">▾</span>
+      <span class="group-badge">⚠️ Vencidos</span>
+      <span>${vencidos.length} pago${vencidos.length !== 1 ? 's' : ''} · hay que resolverlos</span>
+      <span class="group-total">${fmt(vencidosTotal)}</span>
+    </div></td></tr>`;
+    html += buildPagosRows(vencidos, 'vencidos');
+  }
+  if (galiciaPagos.length > 0) {
+    const ocultos = galiciaPagos.length - galiciaVisibles.length;
+    const vencLbl = proxVencGalicia ? new Date(proxVencGalicia + 'T12:00:00').toLocaleDateString('es-AR') : '';
+    html += `<tr class="group-header-row" id="grp-hdr-galicia"><td colspan="7" style="padding:0"><div class="group-header" onclick="toggleGroup('galicia')">
+      <span class="group-chevron" id="grp-chv-galicia">▾</span>
+      <span class="group-badge">💳 Tarjeta Galicia</span>
+      <span>${state.galiciaFuturos ? `${galiciaPagos.length} cargo${galiciaPagos.length !== 1 ? 's' : ''}` : `${galiciaVisibles.length} de ${galiciaPagos.length} cargo${galiciaPagos.length !== 1 ? 's' : ''}${vencLbl ? ` · venc ${vencLbl}` : ''}`}</span>
+      <label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted);cursor:pointer;font-weight:400" onclick="event.stopPropagation()">
+        <input type="checkbox" ${state.galiciaFuturos ? 'checked' : ''} onchange="toggleGaliciaFuturos(this.checked)" style="accent-color:var(--accent)">
+        mostrar futuros vencimientos${ocultos > 0 ? ` (${ocultos})` : ''}
+      </label>
+      <span class="group-total">${fmt(galiciaVisibles.reduce((s, p) => s + p.salidaARS, 0))}${!state.galiciaFuturos && ocultos > 0 ? ` <span style="color:var(--text-muted);font-weight:400;font-size:11px">de ${fmt(galiciaGrupoTotal)}</span>` : ''}</span>
+    </div></td></tr>`;
+    html += buildPagosRows(galiciaVisibles, 'galicia');
+  }
+  if (independientes.length > 0) {
+    // Con algo fijado arriba, estas filas necesitan su título aunque no haya
+    // grupo de Galicia: si no, cuelgan del encabezado de los vencidos.
+    if (galiciaPagos.length > 0 || vencidos.length > 0) {
+      html += `<tr class="group-header-row" id="grp-hdr-indep"><td colspan="7" style="padding:0"><div class="group-header group-proveedores" onclick="toggleGroup('indep')"><span class="group-chevron" id="grp-chv-indep">▾</span><span class="group-badge">🤝 Proveedores independientes</span><span>${independientes.length} pago${independientes.length !== 1 ? 's' : ''}</span><span class="group-total">${fmt(independientes.reduce((s,p)=>s+p.salidaARS,0))}</span></div></td></tr>`;
+    }
+    html += buildPagosRows(independientes, 'indep');
+  }
+  document.getElementById('pagos-tbody').innerHTML = html;
 }
 
 // ─── Vista de cuotas en Pagos ─────────────────────────────────────────────────
@@ -6685,19 +6887,21 @@ function setPagosVista(vista) {
   document.getElementById('pv-btn-todos').classList.toggle('active', vista === 'todos');
   document.getElementById('pv-btn-cuotas').classList.toggle('active', vista === 'cuotas');
   document.getElementById('pv-agrup').style.display = vista === 'cuotas' ? '' : 'none';
-  loadPagos();
+  renderPagos();
 }
 
 function toggleGaliciaFuturos(v) {
   state.galiciaFuturos = v;
-  loadPagos();
+  renderPagos();
 }
 
 function setCuotasAgrup(modo) {
   state.cuotasAgrup = modo;
   document.getElementById('pv-agrup-compra').classList.toggle('active', modo === 'compra');
   document.getElementById('pv-agrup-venc').classList.toggle('active', modo === 'vencimiento');
-  if (state.pagosData.length) renderPagosCuotas(state.pagosData);
+  // Por renderPagos y no directo a renderPagosCuotas: si no, cambiar el
+  // agrupamiento se llevaba puestos los filtros de arriba.
+  if (state.pagosData.length) renderPagos();
 }
 
 function renderPagosCuotas(pagos) {
@@ -9010,7 +9214,9 @@ async function togglePlanIncluir(checked) {
 }
 
 // ─── Pagar registro pendiente ─────────────────────────────────────────────────
-async function openPagarModal() {
+// `rowIndex` es opcional: cuando se llega desde el detalle de un pago, ese pago
+// ya está elegido y no hay que volver a buscarlo por proveedor.
+async function openPagarModal(rowIndex) {
   document.getElementById('pg-error').textContent = '';
   document.getElementById('pg-proveedor').value = '';
   document.getElementById('pg-lista-wrap').style.display = 'none';
@@ -9025,7 +9231,7 @@ async function openPagarModal() {
   document.getElementById('pagar-modal-overlay').style.display = 'flex';
 
   if (!state.pagosData.length) {
-    try { const { data } = await api('/api/pagos?sort=vencimiento'); state.pagosData = data; } catch (e) {}
+    try { const { data } = await api('/api/pagos'); state.pagosData = data; } catch (e) {}
   }
   ensureSugerencias();
 
@@ -9035,6 +9241,18 @@ async function openPagarModal() {
     .sort((a, b) => a.nombre.localeCompare(b.nombre))
     .map(g => `<option value="${escapeHtml(g.nombre)}">${g.items.length} pendiente${g.items.length !== 1 ? 's' : ''}</option>`)
     .join('');
+
+  // Preselección: se llena el proveedor, se despliega su lista y se marca la
+  // fila. Va por el mismo camino que un tipeo a mano para que no haya dos formas
+  // de dejar el modal listo — sólo que acá no hay nada que adivinar.
+  if (rowIndex != null) {
+    const p = state.pagosData.find(x => x.rowIndex === rowIndex);
+    if (p) {
+      document.getElementById('pg-proveedor').value = p.proveedor || '';
+      onPgProveedorInput();
+      selectPgRow(rowIndex);
+    }
+  }
 }
 
 function pgAgruparPorProveedor() {
@@ -9214,6 +9432,7 @@ async function openModal() {
   document.getElementById('f-entrega').value = '';
   state.vencManual = false;
   state.pagoPrevisto = 'pagado';
+  resetRemitoCompra();
   volverAPaso1();
   onCategoriaChange();
   document.getElementById('modal-overlay').classList.add('open');
@@ -9227,11 +9446,22 @@ async function openModal() {
 // Los tres valores son los mismos tres botones que aprieta el cocinero al
 // recibir, decididos acá. Ver PAGOS_PREVISTOS en src/pedidos.js y MODOS_RECIBIR
 // en src/server.js — el que manda es el server: acá sólo se elige y se muestra.
-const PP_TEXTOS = {
-  'pagado':     'La fila queda <b>Pagado</b> y sale de la caja que elijas.',
-  'al-recibir': 'La fila queda <b>A pagar</b> y vence el día de la entrega. En la puerta se paga siempre en <b>' + 'Efectivo Local' + '</b>, así que no se pregunta con qué.',
-  'a-pagar':    'La fila queda <b>A pagar</b> y la persigue la sección Pagos hasta el vencimiento.',
-};
+// Qué va a pasar en la planilla, dicho antes de guardar. Depende de si la
+// compra llega en una entrega, porque desde el 25/08/2026 un pedido entra a
+// Movimientos cuando se recibe o cuando se paga, y no antes: ni recibido ni
+// pagado no es un gasto todavía. Sin entrega no hay recepción que lo escriba
+// nunca (un alquiler, un VEP), así que ahí la fila se escribe en el acto.
+function ppTexto(v, conEntrega) {
+  if (v === 'pagado') return 'La fila queda <b>Pagado</b> y sale de la caja que elijas.';
+  if (v === 'al-recibir') {
+    return 'Todavía <b>no entra en Movimientos</b>: el gasto se escribe cuando se reciba. '
+      + 'En la puerta se paga siempre en <b>Efectivo Local</b>, así que no se pregunta con qué.';
+  }
+  return conEntrega
+    ? 'Todavía <b>no entra en Movimientos</b>: el gasto se escribe cuando se reciba, '
+      + 'y desde ahí la sección Pagos lo persigue hasta el vencimiento.'
+    : 'La fila queda <b>A pagar</b> y la persigue la sección Pagos hasta el vencimiento.';
+}
 
 // ¿Esta compra llega en una entrega? Lo dice la categoría — ver data-entrega en
 // el <select>. Un alquiler o un VEP no tienen puerta donde recibirlos.
@@ -9249,7 +9479,7 @@ function setPagoPrevisto(v) {
     const b = document.getElementById('pp-' + k);
     if (b) b.classList.toggle('activo', k === v);
   }
-  document.getElementById('f-previsto-hint').innerHTML = PP_TEXTOS[v] || '';
+  document.getElementById('f-previsto-hint').innerHTML = ppTexto(v, categoriaLlevaEntrega());
   // El medio se pregunta salvo en la puerta, donde es siempre el mismo. En
   // "queda a pagar" se sigue preguntando —es con qué se va a pagar cuando
   // venza— aunque el server no lo escriba en la columna L todavía.
@@ -9333,6 +9563,107 @@ function pintarAtajosEntrega() {
   document.querySelectorAll('#f-entrega-atajos .btn').forEach(b => {
     b.classList.toggle('activo', b.dataset.iso === v);
   });
+}
+
+// ─── El remito, mientras se carga la compra ─────────────────────────────────
+//
+// Los renglones se LEEN acá y se GUARDAN al guardar la compra, porque hasta ese
+// momento no hay pedido al que colgarlos: lo crea el POST /api/pagos con el id
+// que se acuña antes de escribir la fila del libro.
+//
+// Separar leer de guardar tiene dos ventajas y las dos importan: si el modelo
+// falla o lee cualquier cosa, todavía no se escribió nada y se puede probar con
+// otro recorte; y quien carga la compra VE la lista antes de confirmar, en vez
+// de enterarse después abriendo Pedidos.
+//
+// Como en el otro camino, la imagen no se guarda en ningún lado: se lee, se
+// convierte en datos y se descarta.
+const REMITO_ZONA_HTML =
+  '<b>Ctrl+V</b> pega un recorte del remito y los productos se cargan solos.<br>'
+  + '<span style="font-size:11px">O elegí una imagen: '
+  + '<input type="file" accept="image/*" onchange="archivoRemitoCompra(this)" style="font-size:11px"></span>';
+
+function resetRemitoCompra() {
+  state.remitoItems = [];
+  const zona = document.getElementById('f-remito-zona');
+  if (zona) zona.innerHTML = REMITO_ZONA_HTML;
+  renderRemitoCompra();
+}
+
+// ¿El Ctrl+V de la ventana va a la compra? Sólo con el modal abierto y en el
+// paso de la entrega: es el único momento en que hay un pedido por venir.
+function compraEsperaRemito() {
+  const overlay = document.getElementById('modal-overlay');
+  const paso2 = document.getElementById('modal-paso2');
+  return !!overlay && overlay.classList.contains('open')
+    && !!paso2 && paso2.style.display !== 'none';
+}
+
+function renderRemitoCompra() {
+  const cont = document.getElementById('f-remito-lista');
+  if (!cont) return;
+  const items = state.remitoItems || [];
+  if (!items.length) { cont.innerHTML = ''; return; }
+  cont.innerHTML = '<div class="ped-items">'
+    + items.map((it, i) => `<div class="ped-it">
+        <span class="ped-it-nom">${escapeHtml(it.producto)}${it.dudoso ? ' <span class="ped-it-dudoso">· revisalo</span>' : ''}</span>
+        <span class="ped-it-cant">${escapeHtml(String(it.cantidad ?? 1))} ${escapeHtml(it.unidad || 'Unidad')}</span>
+        <button type="button" class="ped-it-btn" title="Sacar este renglón" onclick="quitarItemRemito(${i})">🗑️</button>
+      </div>`).join('')
+    + `<div style="font-size:11px;color:var(--text-muted);padding-top:8px">
+        ${items.length} producto${items.length !== 1 ? 's' : ''} · se guardan con la compra, en el pedido.
+       </div></div>`;
+}
+
+function quitarItemRemito(i) {
+  (state.remitoItems || []).splice(i, 1);
+  renderRemitoCompra();
+}
+
+// En el teléfono no hay Ctrl+V: el input abre la cámara o la galería.
+function archivoRemitoCompra(input) {
+  const f = input.files && input.files[0];
+  if (f) leerRemitoCompra(f);
+}
+
+function leerRemitoCompra(file) {
+  const lector = new FileReader();
+  lector.onload = () => {
+    const s = String(lector.result || '');
+    const coma = s.indexOf(',');
+    const mime = (s.match(/^data:([^;]+);/) || [])[1] || 'image/png';
+    enviarRemitoCompra(s.slice(coma + 1), mime);
+  };
+  lector.onerror = () => showToast('No se pudo leer la imagen', 4000);
+  lector.readAsDataURL(file);
+}
+
+async function enviarRemitoCompra(base64, mime) {
+  const zona = document.getElementById('f-remito-zona');
+  if (zona) zona.innerHTML = '<div class="spinner" style="display:inline-block;vertical-align:middle"></div> Leyendo el remito…';
+  try {
+    const r = await api('/api/remitos/leer', {
+      method: 'POST', body: JSON.stringify({ imageBase64: base64, mime }),
+    });
+    // Un segundo remito SUMA renglones, no pisa los primeros: una compra puede
+    // venir en dos remitos. Es la misma regla que del otro lado.
+    state.remitoItems = (state.remitoItems || []).concat(r.data || []);
+    if (zona) zona.innerHTML = REMITO_ZONA_HTML;
+    renderRemitoCompra();
+    const n = (r.data || []).length;
+    showToast(`✓ ${n} producto${n !== 1 ? 's' : ''} leído${n !== 1 ? 's' : ''}`
+      + (r.dudosos ? ` · ${r.dudosos} para revisar` : ''), 3500);
+  } catch (e) {
+    // Nada se escribió todavía, así que lo único que hace falta es poder probar
+    // con otro recorte. Lo ya leído se conserva.
+    if (zona) {
+      zona.innerHTML = `<span style="color:var(--red)">${escapeHtml(e.message)}</span><br>`
+        + `<span style="font-size:11px">Probá con otro recorte, o seguí sin remito y cargá los productos después.</span><br>`
+        + REMITO_ZONA_HTML;
+    } else {
+      showToast('Error: ' + e.message, 5000);
+    }
+  }
 }
 
 // Sugerencias de proveedor: Movimientos + hoja Proveedores (se cachean por sesión)
@@ -9525,11 +9856,45 @@ async function guardarCompra(conEntrega) {
       entrega: entregaISO ? { fecha: entregaISO } : null,
     }) });
 
+    // `enElLibro` es false cuando el gasto todavía NO se escribió: se paga al
+    // recibir, o queda a pagar, y la fila la escribe la recepción. Decirlo es
+    // el punto — la pantalla venía diciendo "A pagar" para algo que ahora no
+    // está en ningún lado hasta que llegue.
+    const enElLibro = r.enElLibro !== false;
     const linea2 = d.cuotas > 1
       ? `Compra en ${d.cuotas} cuotas (madre + ${d.cuotas} filas creadas)`
       : d.previsto === 'pagado' ? `Pagado · ${escapeHtml(d.medioPago)}`
+      : !enElLibro ? (d.previsto === 'al-recibir'
+          ? 'Se paga al recibir — el gasto entra al libro cuando llegue'
+          : `Queda a pagar${d.vencRaw ? ` · vence ${fmtDate(d.vencRaw)}` : ''} — el gasto entra al libro cuando llegue`)
       : d.previsto === 'al-recibir' ? 'A pagar · se paga al recibir'
       : `A pagar${d.vencRaw ? ` · vence ${fmtDate(d.vencRaw)}` : ''}`;
+    // ── Los renglones del remito ─────────────────────────────────────────────
+    // Recién ahora existe el pedido, que es lo que les da un lugar. Si esto
+    // falla, la compra y el pedido YA están guardados: se dice, y se dice dónde
+    // volver a pegarlo. Misma regla que el pedido con la compra.
+    const nRemito = (state.remitoItems || []).length;
+    const sinGuardar = nRemito === 1
+      ? 'El producto del remito NO se guardó'
+      : `Los ${nRemito} productos del remito NO se guardaron`;
+    let lineaRemito = '';
+    if (nRemito && r.pedido) {
+      try {
+        await api('/api/pedidos/' + encodeURIComponent(r.pedido.id) + '/items', {
+          method: 'POST',
+          body: JSON.stringify({ items: state.remitoItems, origen: 'remito' }),
+        });
+        lineaRemito = `<br>📋 <b>${nRemito} producto${nRemito !== 1 ? 's' : ''}</b> del remito, cargado${nRemito !== 1 ? 's' : ''} en el pedido.`;
+      } catch (e) {
+        lineaRemito = `<br><span style="color:var(--orange)">⚠ ${sinGuardar} `
+          + `(${escapeHtml(e.message)}). El pedido está: pegá el remito de nuevo desde Operación › Pedidos.</span>`;
+      }
+    } else if (nRemito) {
+      lineaRemito = `<br><span style="color:var(--orange)">⚠ ${sinGuardar}: `
+        + `esta compra no lleva entrega, así que no hay pedido donde ponerlos.</span>`;
+    }
+    state.remitoItems = [];
+
     // Lo que pasó con el pedido se cuenta igual que el asiento de Pedidos: qué
     // se hizo, no qué se iba a hacer.
     const linea3 = r.aviso
@@ -9541,8 +9906,10 @@ async function guardarCompra(conEntrega) {
     showResultadoModal({
       ok: true,
       titulo: 'Compra registrada',
-      detalle: `<b>${escapeHtml(d.proveedor)}</b> · ${fmt(d.salidaARS)}<br>` + linea2 + linea3
-        + `<br><span style="font-size:11px">Escrito en la hoja Movimientos ✓${r.registradoEnSesion ? ' · descontado del arqueo en curso ✓' : ''}</span>`,
+      detalle: `<b>${escapeHtml(d.proveedor)}</b> · ${fmt(d.salidaARS)}<br>` + linea2 + linea3 + lineaRemito
+        + `<br><span style="font-size:11px">${enElLibro
+            ? `Escrito en la hoja Movimientos ✓${r.registradoEnSesion ? ' · descontado del arqueo en curso ✓' : ''}`
+            : 'No se escribió nada en Movimientos todavía: el gasto entra al recibir el pedido.'}</span>`,
     });
     if (state.rol === 'admin') loadPagos();
   } catch (err) {
@@ -10262,6 +10629,10 @@ let _stkInit = false;
 let _stkProductos = [], _stkCategorias = [];
 
 // ─── Gestión de bebidas: inventario + rotación (datos de Fudo) ────────────────
+// _vinosBase es TODO lo que mandó el server; _vinosData es lo que se está
+// mirando (lo mismo, ya pasado por los filtros de la pantalla). Los modales de
+// los KPIs leen el segundo, porque tienen que decir lo mismo que la tabla.
+let _vinosBase = null;
 let _vinosData = null;
 
 // Modal de detalle al clickear un KPI. tipo: inmovilizado | valor | quiebre | agotarse
@@ -10350,7 +10721,7 @@ function limpiarFiltrosVinos() {
   const c = document.getElementById('vinos-filtro-categoria');
   if (p) p.value = '';
   if (c) c.value = '';
-  loadVinos();
+  renderVinos();
 }
 
 // Guardar el proveedor de una bebida desde el desplegable de su fila. No recarga
@@ -10370,7 +10741,7 @@ async function saveVinoProveedor(sel) {
     sel.style.color = '';
     sel.style.fontStyle = '';
     sel.title = 'Asignado a mano';
-    const it = (_vinosData && _vinosData.items || []).find(x => String(x.id) === String(productoId));
+    const it = (_vinosBase && _vinosBase.items || []).find(x => String(x.id) === String(productoId));
     if (it) { it.proveedor = proveedor; it.proveedorOrigen = 'manual'; it.proveedorVia = null; }
     showToast(proveedor ? (escapeHtml(nombre) + ' → ' + escapeHtml(proveedor)) : (escapeHtml(nombre) + ' queda sin proveedor'));
   } catch (e) {
@@ -10381,31 +10752,85 @@ async function saveVinoProveedor(sel) {
   }
 }
 
-async function loadVinos() {
+// ─── Cargar una vez, filtrar en la pantalla ───────────────────────────────────
+//
+// Hasta el 25/08/2026 cada filtro era un pedido nuevo a /api/vinos, y ese pedido
+// vuelve a leer el inventario de Fudo, a recorrer las ventas de 28 días y a
+// cruzar cada bebida contra la hoja Compras para deducir el proveedor. Nada de
+// eso cambia porque alguien elija "Aurea": elegir un proveedor es TIRAR FILAS de
+// una lista que ya está armada. Eran segundos de espera por cada clic.
+//
+// Ahora el server manda todo una vez y los tres filtros se resuelven acá, sin
+// red. Los KPIs se recalculan sobre lo filtrado, que es la regla de siempre: un
+// KPI que ignorara el filtro diría otra cosa que la tabla que tiene debajo.
+async function loadVinos(opts) {
+  const body = document.getElementById('vinos-body');
+  if (!body) return;
+  body.innerHTML = '<tr><td style="color:var(--text-muted);padding:14px">Cargando inventario de Fudo...</td></tr>';
+  try {
+    const { data } = await api('/api/vinos' + (opts && opts.refrescar ? '?refrescar=1' : ''));
+    _vinosBase = data;
+  } catch (e) {
+    body.innerHTML = '<tr><td style="color:var(--red);padding:14px">Error: '+escapeHtml(e.message)+'</td></tr>';
+    return;
+  }
+  renderVinos();
+}
+
+// El botón "↻ Actualizar". Es lo único que vuelve a pedir los datos: tira el
+// análisis cacheado del server en vez de repintar lo que ya está en memoria.
+function refrescarVinos() { return loadVinos({ refrescar: true }); }
+
+// Los totales que antes calculaba el server sobre los items filtrados. Misma
+// cuenta, del otro lado del cable (ver `totales` en src/vinos.js).
+function totalesVinos(items) {
+  const sum = (f) => items.reduce((s, x) => s + (f(x) || 0), 0);
+  return {
+    items: items.length,
+    stockTotal: sum(x => x.stock),
+    plataInmovilizada: Math.round(sum(x => x.valorCosto)),
+    valorVentaStock: Math.round(sum(x => x.valorVenta)),
+    enQuiebre: items.filter(x => x.alerta === 'quiebre').length,
+    porAgotarse: items.filter(x => x.alerta === 'pronto').length,
+    sobrestock: items.filter(x => x.alerta === 'sobrestock').length,
+    margenPotencial: Math.round(sum(x => (x.valorVenta || 0) - (x.valorCosto || 0))),
+    descargadas: Math.round(sum(x => x.descargadasVentana) * 100) / 100,
+    productosConDescarga: items.filter(x => x.descargadasVentana > 0).length,
+  };
+}
+
+function renderVinos() {
   const head = document.getElementById('vinos-head');
   const body = document.getElementById('vinos-body');
   const kpis = document.getElementById('vinos-kpis');
-  if (!body) return;
-  body.innerHTML = '<tr><td style="color:var(--text-muted);padding:14px">Cargando inventario de Fudo...</td></tr>';
+  if (!body || !_vinosBase) return;
+
   const soloVino = document.getElementById('vinos-solo-vino') && document.getElementById('vinos-solo-vino').checked;
   const selProv = document.getElementById('vinos-filtro-proveedor');
   const selCat = document.getElementById('vinos-filtro-categoria');
   const fProveedor = selProv ? selProv.value : '';
   const fCategoria = selCat ? selCat.value : '';
-  const qs = [];
-  if (soloVino) qs.push('soloVino=1');
-  if (fProveedor) qs.push('proveedor=' + encodeURIComponent(fProveedor));
-  if (fCategoria) qs.push('categoria=' + encodeURIComponent(fCategoria));
-  let data;
-  try { ({ data } = await api('/api/vinos' + (qs.length ? '?' + qs.join('&') : ''))); }
-  catch (e) { body.innerHTML = '<tr><td style="color:var(--red);padding:14px">Error: '+escapeHtml(e.message)+'</td></tr>'; return; }
-  _vinosData = data;
+  const sinProvLabel = _vinosBase.sinProveedorLabel || '(sin asignar)';
 
-  const sinProvLabel = data.sinProveedorLabel || '(sin asignar)';
-  renderVinosFiltro(selProv, [sinProvLabel].concat(data.proveedores || []), fProveedor, 'Todos');
-  renderVinosFiltro(selCat, data.categorias || [], fCategoria, 'Todas');
+  // El switch achica el universo, así que la lista de categorías sale de ahí:
+  // ofrecer "Sin Alcohol" con el switch prendido sería ofrecer un filtro que no
+  // deja nada. La de proveedores no depende del switch — es la del bar.
+  const universo = soloVino ? (_vinosBase.items || []).filter(it => it.esVino) : (_vinosBase.items || []);
+  const items = universo.filter(it =>
+    (!fCategoria || it.categoria === fCategoria) &&
+    (!fProveedor || (fProveedor === sinProvLabel ? !it.proveedor : it.proveedor === fProveedor)));
+
+  const categorias = [...new Set(universo.map(it => it.categoria))].sort((a, b) => a.localeCompare(b, 'es'));
+  renderVinosFiltro(selProv, [sinProvLabel].concat(_vinosBase.proveedores || []), fProveedor, 'Todos');
+  renderVinosFiltro(selCat, categorias, fCategoria, 'Todas');
   const btnLimpiar = document.getElementById('vinos-limpiar-filtros');
   if (btnLimpiar) btnLimpiar.style.display = (fProveedor || fCategoria) ? '' : 'none';
+
+  // Lo que se está mirando. Es lo que abren los KPIs, así que tiene que ser lo
+  // filtrado y no todo: el modal de "en quiebre" mostraría bebidas que la tabla
+  // de atrás no tiene.
+  const data = Object.assign({}, _vinosBase, { items, totales: totalesVinos(items) });
+  _vinosData = data;
 
   // El aviso de las botellas por copa sólo aparece cuando hay alguna: si estuviera
   // siempre, en dos semanas nadie lo lee.
@@ -14996,11 +15421,16 @@ function abrirPedMover(id) {
     `<b>${escapeHtml(p.proveedor)}</b>${p.detalle ? ' · ' + escapeHtml(p.detalle) : ''}<br>`
     + `<span style="color:var(--text-muted)">Estaba para el ${new Date(p.fecha + 'T12:00:00').toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}</span>`;
 
-  // Si la compra se paga en la puerta, su cuenta vence el día de la entrega y
-  // se mueve con ella. Se dice ANTES de confirmar: es una escritura en el libro
-  // y no puede ser una sorpresa.
+  // Si tiene una cuenta abierta en Movimientos, su vencimiento se mueve con la
+  // entrega. Se dice ANTES de confirmar: es una escritura en el libro y no puede
+  // ser una sorpresa.
+  //
+  // Dice "si ya tiene" y no "tiene" porque desde el 25/08/2026 un pedido que se
+  // paga al recibir NO escribe nada hasta que llega: los que tienen cuenta son
+  // los cargados antes de ese cambio. Qué pasó de verdad lo informa el aviso
+  // final, que sólo habla de la cuenta cuando había una.
   document.getElementById('ped-mover-aviso').innerHTML = p.pagoPrevisto === 'al-recibir'
-    ? '→ Como se paga al recibir, <b>su cuenta en Movimientos también pasa a vencer ese día</b>.'
+    ? '→ Si esta compra ya tiene su cuenta en Movimientos, <b>pasa a vencer ese día</b>.'
     : '';
 
   // Mañana primero: es el caso que se usa. Después los días de entrega que
@@ -15239,13 +15669,21 @@ function archivoRemito(input) {
   if (f) leerYSubirRemito(f);
 }
 
+// Un solo listener para los dos destinos posibles. Gana el pedido: si alguien
+// tocó "Pegar remito" en un pedido concreto, eso es lo último que pidió.
 document.addEventListener('paste', (ev) => {
-  if (!pedState.pegandoEn) return;
+  const aPedido = !!pedState.pegandoEn;
+  const aCompra = !aPedido && compraEsperaRemito();
+  if (!aPedido && !aCompra) return;
   const items = (ev.clipboardData && ev.clipboardData.items) || [];
   for (const it of items) {
     if (it.type && it.type.startsWith('image/')) {
       const f = it.getAsFile();
-      if (f) { ev.preventDefault(); leerYSubirRemito(f); return; }
+      if (f) {
+        ev.preventDefault();
+        if (aPedido) leerYSubirRemito(f); else leerRemitoCompra(f);
+        return;
+      }
     }
   }
 });
@@ -15428,7 +15866,9 @@ async function openPedRecibir(id, modo) {
   document.getElementById('ped-r-titulo').textContent = m.titulo;
   document.getElementById('ped-r-monto').value = p.costoEstimado || '';
   document.getElementById('ped-r-monto-label').textContent = m.montoLabel;
-  document.getElementById('ped-r-venc').value = p.fecha;
+  // El vencimiento que dijo la compra si lo hay: "queda a pagar" ya eligió uno,
+  // y ahora que la fila se escribe acá es el que corresponde. Si no, la entrega.
+  document.getElementById('ped-r-venc').value = p.vence || p.fecha;
   document.getElementById('ped-r-cabecera').innerHTML =
     `<b>${escapeHtml(p.proveedor)}</b>${p.detalle ? ' · ' + escapeHtml(p.detalle) : ''}<br>`
     + `Esperado para el ${new Date(p.fecha + 'T12:00:00').toLocaleDateString('es-AR')}`
@@ -15505,9 +15945,16 @@ function pedExplicar() {
       + 'y pasa a <b>Pagado</b>. No se agrega ninguna fila.',
     'vincular-fila': () => `→ Ya está cargada en Movimientos: la fila de ${fmt(f.monto)}${cuando}. `
       + '<b>No se escribe nada</b>, el pedido queda vinculado a ésa.',
-    'crear-pagado': () => '→ No hay ninguna fila cargada para esto, así que se agrega una nueva como <b>Pagado</b>.',
-    'crear-a-pagar': () => '→ No hay ninguna fila cargada para esto, así que se agrega una nueva como '
-      + '<b>A pagar</b> y aparece en la sección Pagos.',
+    // `deCompra` es el caso normal desde el 25/08/2026: la compra no escribió
+    // nada y es esta recepción la que mete el gasto en el libro. No es que
+    // "falte" una fila — es que todavía no había gasto.
+    'crear-pagado': () => plan.deCompra
+      ? '→ Ahora entra el gasto en Movimientos, como <b>Pagado</b>. Al cargar la compra no se escribió nada.'
+      : '→ No hay ninguna fila cargada para esto, así que se agrega una nueva como <b>Pagado</b>.',
+    'crear-a-pagar': () => plan.deCompra
+      ? '→ Ahora entra el gasto en Movimientos, como <b>A pagar</b>, y desde acá lo persigue la sección Pagos.'
+      : '→ No hay ninguna fila cargada para esto, así que se agrega una nueva como '
+        + '<b>A pagar</b> y aparece en la sección Pagos.',
   }[plan.accion];
 
   el.innerHTML = (texto ? texto() : '') + otras;

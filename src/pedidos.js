@@ -75,11 +75,20 @@ const HOJA = process.env.PEDIDOS_SHEET || 'Pedidos';
 const HOJA_SEMANAL = process.env.PEDIDOS_SEMANAL_SHEET || 'Pedidos Semanal';
 const TZ = 'America/Argentina/Buenos_Aires';
 
+// Categoria y Mes entraron el 25/08/2026 con el cambio de cuándo se escribe la
+// fila del libro. Antes la compra escribía la fila en el acto y los dos datos
+// iban directo a Movimientos; ahora la fila la escribe la RECEPCIÓN, y entre la
+// compra y la entrega pueden pasar días — si no viajan con el pedido, se
+// pierden y el gasto termina como "Mercaderia" del mes en que llegó.
+//
+// El Mes es una decisión de quien compra, no una consecuencia de la fecha de
+// entrega: es la misma regla por la que mover un pedido a otro día NO le cambia
+// el mes a su cuenta (ver POST /api/pedidos/:id/mover).
 const HEADER = ['ID', 'Fecha', 'Proveedor', 'Detalle', 'CostoEstimado', 'MedioPrevisto',
                 'Estado', 'RecibidoPor', 'RecibidoEl', 'Pago', 'MontoPagado', 'MedioPagoReal',
                 'RefMovimiento', 'Origen', 'Notas', 'Actualizado',
-                'PagoPrevisto', 'Vence'];
-const ULTIMA_COL = 'R';
+                'PagoPrevisto', 'Vence', 'Categoria', 'Mes'];
+const ULTIMA_COL = 'T';
 const HEADER_SEMANAL = ['ID', 'Dia', 'Orden', 'Tipo', 'Proveedor', 'Nota', 'MedioPrevisto',
                         'Activo', 'Actualizado'];
 const HOJA_ITEMS = process.env.PEDIDOS_ITEMS_SHEET || 'Pedidos Items';
@@ -390,6 +399,9 @@ async function _leerPedidos(api) {
       actualizado: _txt(r[15]),
       pagoPrevisto: normalizarPagoPrevisto(r[16]),
       vence: normalizarFecha(r[17]),
+      // Lo que decidió la compra y va a escribir la recepción.
+      categoria: _txt(r[18]),
+      mes: _txt(r[19]),
       rowIndex: i + 1,
     });
   }
@@ -606,7 +618,7 @@ function _aFila(p) {
   return [p.id, p.fecha, p.proveedor, p.detalle, p.costoEstimado || '', p.medioPrevisto,
           p.estado, p.recibidoPor, p.recibidoEl, p.pago, p.montoPagado || '', p.medioPagoReal,
           p.refMovimiento, p.origen, p.notas, p.actualizado,
-          p.pagoPrevisto || '', p.vence || ''];
+          p.pagoPrevisto || '', p.vence || '', p.categoria || '', p.mes || ''];
 }
 
 function _aFilaSemanal(s) {
@@ -858,6 +870,10 @@ async function crearPedido(datos = {}) {
     // Como se VA a pagar. Ver PAGOS_PREVISTOS: el default es vacio a proposito.
     pagoPrevisto: normalizarPagoPrevisto(datos.pagoPrevisto),
     vence: normalizarFecha(datos.vence),
+    // Con qué categoría y a qué mes va a entrar el gasto cuando se reciba. Los
+    // elige quien compra; sin esto, la recepción tendría que adivinarlos.
+    categoria: _txt(datos.categoria),
+    mes: _txt(datos.mes),
   };
 
   await api.spreadsheets.values.append({

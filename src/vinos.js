@@ -9,6 +9,7 @@
 //
 // Etapa 1: stock + valor + rotación. (La demanda por hora viene en la etapa 2.)
 
+const NodeCache = require('node-cache');
 const fudo = require('./fudo');
 const bebidasProveedor = require('./bebidas-proveedor');
 
@@ -72,16 +73,40 @@ function esVino(categoria) {
 //     proveedores: [...], categorias: [...] }
 const SIN_PROVEEDOR = '(sin asignar)';
 
-async function analizarVinos({ desde, hasta, soloVino = false, proveedor = '', categoria = '' } = {}) {
-  // 1) Inventario actual desde Fudo
-  const productos = await fudo.getProductosConStock();
-  const candidatos = productos.filter(p =>
-    p.active && esBebidaDeStock(p.categoria) && (!soloVino || esVino(p.categoria)));
+// ─── Lo caro se calcula una vez ────────────────────────────────────────────────
+//
+// Armar el detalle es leer Fudo, recorrer las ventas de la ventana y cruzar cada
+// bebida contra la hoja Compras para deducir el proveedor. Los FILTROS de la
+// pantalla no cambian nada de eso: se aplican al final, sobre la lista ya armada.
+// Recalcularlo entero cada vez que alguien elige un proveedor era pagar el
+// análisis completo para tirar filas.
+//
+// El TTL acompaña al del caché crudo de Fudo (5 min): más largo mostraría stock
+// viejo, más corto no ahorraría nada porque abajo se recalcula igual.
+const baseCache = new NodeCache({ stdTTL: 300 });
 
-  // 2) Ventana de ventas para velocidad de venta
+async function baseAnalisis({ desde, hasta } = {}) {
   const hoy = new Date();
   const hastaD = hasta || isoDia(hoy);
   const desdeD = desde || isoDia(new Date(hoy.getTime() - 27 * DIA_MS));
+  const key = 'base|' + desdeD + '|' + hastaD;
+  const cached = baseCache.get(key);
+  if (cached) return cached;
+  const base = await calcularBase({ desdeD, hastaD });
+  baseCache.set(key, base);
+  return base;
+}
+
+function clearCache() { baseCache.flushAll(); }
+
+async function calcularBase({ desdeD, hastaD }) {
+  // 1) Inventario actual desde Fudo. Se arma con TODAS las bebidas de stock: el
+  // switch "Solo vinos" es un filtro de la pantalla y se aplica más abajo, como
+  // el proveedor y la categoría.
+  const productos = await fudo.getProductosConStock();
+  const candidatos = productos.filter(p => p.active && esBebidaDeStock(p.categoria));
+
+  // 2) Ventana de ventas para velocidad de venta
   const ventanaDias = Math.max(1, Math.round((new Date(hastaD + 'T00:00:00') - new Date(desdeD + 'T00:00:00')) / DIA_MS) + 1);
 
   // `incluirDescargas: true` — las botellas que se abren para vender por copa se
@@ -175,17 +200,32 @@ async function analizarVinos({ desde, hasta, soloVino = false, proveedor = '', c
     };
   });
 
-  // Las listas de los dos desplegables salen de TODAS las bebidas, no de las que
-  // sobrevivieron al filtro: si se armaran después de filtrar, elegir un proveedor
-  // dejaría el desplegable con un solo nombre y sin forma de volver.
+  // La lista del desplegable de proveedores sale de TODAS las bebidas, no de las
+  // que sobrevivieron al filtro: si se armara después de filtrar, elegir un
+  // proveedor dejaría el desplegable con un solo nombre y sin forma de volver.
+  // Y son los proveedores DE BEBIDAS, no los 40 del bar (ver listaProveedores).
   const proveedores = await bebidasProveedor
     .listaProveedores(todos.map(it => it.proveedor))
     .catch(() => [...new Set(todos.map(it => it.proveedor).filter(Boolean))].sort());
-  const categorias = [...new Set(todos.map(it => it.categoria))].sort((a, b) => a.localeCompare(b, 'es'));
+
+  return { ventanaDias, desde: desdeD, hasta: hastaD, todos, proveedores };
+}
+
+// ─── Lo barato se aplica en cada pedido ────────────────────────────────────────
+async function analizarVinos({ desde, hasta, soloVino = false, proveedor = '', categoria = '' } = {}) {
+  const base = await baseAnalisis({ desde, hasta });
+  const { ventanaDias, todos, proveedores } = base;
+  const desdeD = base.desde, hastaD = base.hasta;
+
+  // El switch "Solo vinos" achica el universo, así que la lista de categorías
+  // sale de ahí: ofrecer "Sin Alcohol" con el switch prendido sería ofrecer un
+  // filtro que no deja nada.
+  const universo = soloVino ? todos.filter(it => it.esVino) : todos;
+  const categorias = [...new Set(universo.map(it => it.categoria))].sort((a, b) => a.localeCompare(b, 'es'));
 
   // Filtros de la pantalla (se aplican DESPUÉS de armar las listas y ANTES de los
   // totales, para que los KPIs hablen de lo mismo que la tabla).
-  const items = todos.filter(it =>
+  const items = universo.filter(it =>
     (!categoria || it.categoria === categoria) &&
     (!proveedor || (proveedor === SIN_PROVEEDOR ? !it.proveedor : it.proveedor === proveedor)));
 
@@ -243,4 +283,4 @@ async function analizarVinos({ desde, hasta, soloVino = false, proveedor = '', c
 function isoDia(d) { return d.toISOString().slice(0, 10); }
 function norm(s) { return (s || '').toString().normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' '); }
 
-module.exports = { analizarVinos, esAlcohol, esSinAlcohol, esBebidaDeStock, esVino, SIN_PROVEEDOR };
+module.exports = { analizarVinos, clearCache, esAlcohol, esSinAlcohol, esBebidaDeStock, esVino, SIN_PROVEEDOR };
