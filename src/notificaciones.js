@@ -14,6 +14,13 @@
 //   · EVENTO — "Charly anotó que se rompió el extractor". Pasó una vez, en un
 //     momento. Una vez que lo viste, ya lo viste.
 //
+// Casi todo acá se DERIVA: se leen los pagos, los pedidos y la checklist, y se
+// saca la conclusión cada vez. La excepción son los AVISOS (src/avisos.js), que
+// son hechos de un momento que la planilla no vuelve a guardar —"pagó $14.700
+// más de lo que decía la compra"— y que por eso hay que anotar cuando pasan.
+// Son la única fuente que llega escrita en vez de calculada, y la única que va
+// dirigida a personas concretas y no a un rol.
+//
 // De ahí la regla: **abrir la campanita apaga los eventos y no toca los
 // estados**. Si todo se apagara al abrir, un pago vencido dejaría de gritar
 // apenas mirás una vez; si nada se apagara, el número nunca bajaría y en dos
@@ -63,6 +70,11 @@ const VISIBLE_PARA = {
   mantenimiento: () => true,
   pedidos: () => true,
   cocina: () => true,
+  // Los avisos ya vienen filtrados por DESTINATARIO, que es más fino que el rol:
+  // los tres logins de admin tienen los mismos permisos y un aviso va a personas,
+  // no a un rol. Ver src/avisos.js. Volver a filtrar por rol acá sería aplicar
+  // dos reglas distintas a la misma pregunta.
+  avisos: () => true,
 };
 
 const nota = (o) => ({ clase: 'estado', severidad: 'media', cuando: null, ir: null, ...o });
@@ -228,6 +240,30 @@ function dePedidos({ dias, sinPago } = {}, { hoy, vistoHasta } = {}) {
   return out;
 }
 
+// ── Avisos dirigidos: eventos ───────────────────────────────────────────────
+//
+// La única fuente que no se DERIVA de nada: son hechos que alguien anotó en el
+// momento en que pasaron, porque después la planilla ya no los guarda (ver el
+// encabezado de src/avisos.js). Acá sólo se traducen a notificación.
+//
+// El filtro de quién los ve ya lo hizo `paraUsuario`, contra el destinatario
+// escrito en la fila. Uno por aviso y sin agrupar, por lo mismo que
+// Mantenimiento: el texto ES el dato — "se pagó $14.700 de más" no se puede
+// resumir en un número.
+function deAvisos(avisos, { usuario, vistoHasta, ahora } = {}) {
+  const { paraUsuario } = require('./avisos');
+  return paraUsuario(avisos, { usuario, vistoHasta, ahora }).map(a => nota({
+    id: `aviso-${a.id}`,
+    fuente: 'avisos',
+    clase: 'evento',
+    severidad: a.severidad || 'alta',
+    titulo: a.titulo,
+    detalle: a.detalle,
+    cuando: a.cuando,
+    ir: a.ir ? { tab: a.ir } : null,
+  }));
+}
+
 // ── Checklist de cocina sin cargar: estado ──────────────────────────────────
 // El servicio de anoche ya terminó y nadie cargó qué hay que producir. Es el
 // "se pasó de largo" más caro de los que la app puede ver, porque la cocina
@@ -256,13 +292,14 @@ function servicioAnteriorA(fechaServicioHoy) {
 }
 
 // El armado, puro: entra lo que ya leyeron otros módulos, sale la lista.
-function armar({ pagos, mantenimiento, pedidos, ultimoCierre },
-               { rol, vistoHasta, hoy, servicioAnterior, callados = new Set() } = {}) {
+function armar({ pagos, mantenimiento, pedidos, ultimoCierre, avisos },
+               { rol, usuario, vistoHasta, hoy, servicioAnterior, callados = new Set() } = {}) {
   const todas = [
     ...dePagos(pagos, { rol }),
     ...deMantenimiento(mantenimiento, { vistoHasta }),
     ...dePedidos(pedidos, { hoy, vistoHasta }),
     ...deCocina(ultimoCierre, { servicioAnterior }),
+    ...deAvisos(avisos, { usuario, vistoHasta }),
   ].filter(n => VISIBLE_PARA[n.fuente] ? VISIBLE_PARA[n.fuente](rol) : true)
    // Sólo se silencian ESTADOS. Un evento ya se apaga solo al abrir el panel, y
    // silenciarlo además sería apagar dos veces lo mismo.
@@ -435,7 +472,7 @@ async function getNotificaciones({ usuario, rol } = {}) {
   const esAdmin = rol === 'admin';
   const hoy = hoyAR();
 
-  const [marca, pagos, mantenimiento, pedidos, cocina] = await Promise.all([
+  const [marca, pagos, mantenimiento, pedidos, cocina, avisos] = await Promise.all([
     marcaDe(usuario),
     esAdmin ? seguro('pagos', async () => {
       const { getMovimientos, getComprasEnCuotas } = require('./sheets');
@@ -455,12 +492,13 @@ async function getNotificaciones({ usuario, rol } = {}) {
       const lista = await cc.listarCierres({ limite: 1 });
       return { ultimo: lista[0] || null, servicioHoy: cc.fechaServicioActual() };
     }, null),
+    seguro('avisos', async () => require('./avisos').listar(), []),
   ]);
 
   return armar(
-    { pagos, mantenimiento, pedidos, ultimoCierre: cocina && cocina.ultimo },
+    { pagos, mantenimiento, pedidos, ultimoCierre: cocina && cocina.ultimo, avisos },
     {
-      rol, hoy,
+      rol, usuario, hoy,
       vistoHasta: marca.vistoHasta,
       callados: silenciados(marca, hoy),
       servicioAnterior: cocina ? servicioAnteriorA(cocina.servicioHoy) : null,
@@ -473,6 +511,7 @@ function clearCache() { cache.flushAll(); }
 module.exports = {
   getNotificaciones, marcarVisto, limpiarTodas, vistoDe, marcaDe, clearCache,
   // Puras
-  armar, dePagos, deMantenimiento, dePedidos, dePedidosSinPago, deCocina, servicioAnteriorA, silenciados,
+  armar, dePagos, deMantenimiento, dePedidos, dePedidosSinPago, deCocina, deAvisos,
+  servicioAnteriorA, silenciados,
   HOJA, MAX_POR_FUENTE,
 };

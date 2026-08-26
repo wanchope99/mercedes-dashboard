@@ -35,6 +35,7 @@ const pedidos = require('./pedidos');
 const nomina = require('./nomina');
 const cierreCocina = require('./cierre-cocina');
 const notificaciones = require('./notificaciones');
+const avisos = require('./avisos');
 const stockBebidas = require('./stock-bebidas');
 const regimenFiscal = require('./regimen-fiscal');
 const fiscalProv = require('./fiscal-proveedores');
@@ -2858,6 +2859,13 @@ app.put('/api/pedidos/:id', authMiddleware, async (req, res) => {
 // única forma era borrarlo y volver a cargarlo — con lo cual se perdían sus
 // renglones y lo que ya se hubiera tildado.
 //
+// Y va para los dos lados: desde el 26/08/2026 un pedido que estaba para más
+// adelante se puede traer a HOY, que es el proveedor que se adelanta. La ruta
+// nunca miró si la fecha nueva era posterior a la vieja y no tiene por qué
+// hacerlo: lo que se está diciendo es cuándo llega la mercadería, y eso puede
+// correrse en cualquier dirección. Lo único que se rechaza es mover un pedido
+// ya recibido —eso ya pasó— y mover al día en que ya estaba.
+//
 // NO SE GUARDA POR QUÉ se movió. Misma razón que las omisiones del cuadro
 // semanal: con el proveedor avisando por teléfono, un campo más para llenar es
 // uno que nadie llena y que después nadie lee. El día contesta qué esperar, y
@@ -3201,6 +3209,95 @@ async function planificarAsiento({ pedido, modo, monto = 0 }) {
     ? { accion: 'vincular-fila', fila: resumen(f), otrasPendientes: aPagar.length }
     : { accion: 'crear-pagado', fila: null, otrasPendientes: aPagar.length };
 }
+// ═══════════════════════════════════════════════════════════════════════════
+// Cuando lo que se recibe no es lo que se había cargado
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Dos cosas que pasan en la puerta y que, si no se anotan EN EL MOMENTO, no
+// quedan en ningún lado. Las dos las pidió el dueño (26/08/2026) y las dos van
+// a `admin`, `pablo` y `tincho` — no a un rol: ver src/avisos.js.
+//
+//   1. SE PAGÓ MÁS DE LO QUE DECÍA. La compra se cargó por $47.300 y en la
+//      puerta se pagaron $62.000. Puede ser un aumento que el proveedor no
+//      avisó, un remito con renglones de más, o un error al tipear. Ninguna de
+//      las tres se puede ver después: al escribir la fila el monto viejo se
+//      pisa, y el pedido pasa a decir que siempre valió $62.000.
+//
+//   2. ESTABA MARCADO COMO PAGADO Y SE PAGÓ EN EFECTIVO. Al comprar alguien
+//      dijo "esto ya está pago" (transferencia, Mercado Libre, débito) y en la
+//      puerta el proveedor cobró igual. O la plata salió dos veces, o lo que se
+//      dijo al comprar no era cierto. Cualquiera de las dos es plata, y las dos
+//      las tiene que mirar alguien que no es el que recibió.
+//
+// POR QUÉ SE AVISA Y NO SE BLOQUEA: quien está en esa pantalla es un cocinero
+// con el proveedor en la puerta. La mercadería llegó y el proveedor cobró —
+// frenarlo ahí no deshace ninguna de las dos cosas, sólo deja el hecho sin
+// registrar, que es exactamente el problema que esto viene a resolver. Se
+// registra lo que pasó y se avisa a quien puede hacer algo al respecto.
+//
+// El umbral de $1.000 (decisión del dueño) es para el redondeo: pagar $200 de
+// más porque no había cambio no es una anomalía, y una campanita que suena por
+// eso deja de mirarse en una semana.
+const AVISO_DIFERENCIA_MIN = 1000;
+
+/**
+ * Qué avisos deja esta recepción. No decide nada de la planilla: sólo mira lo
+ * que ya pasó y lo cuenta. Devuelve la lista de resultados de `registrar`, para
+ * que la ruta pueda informar en pantalla si alguno no se pudo escribir.
+ *
+ * `montoDicho` es el que TIPEÓ quien recibe, no el que terminó en la fila. Es a
+ * propósito: cuando el plan engancha una fila que ya existía, el server usa el
+ * monto de esa fila y descarta el tipeado — y ese descarte es justamente el
+ * caso a avisar. Alguien dijo que pagó $62.000 contra una fila de $47.300; sin
+ * este aviso, esa afirmación no queda escrita en ningún lado.
+ */
+async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario }) {
+  const out = [];
+
+  // Contra qué se compara. Primero lo que decía el pedido —es lo que quien
+  // recibe tenía delante en la pantalla— y si no tenía monto, lo que dice la
+  // fila que el plan enganchó. Un pedido sin ninguna de las dos (los del cuadro
+  // semanal) no tiene con qué comparar y no avisa nada: no hay un "de más"
+  // sin un "de cuánto".
+  const esperado = Number(pedido.costoEstimado) || Number(plan && plan.fila && plan.fila.monto) || 0;
+  const diferencia = Math.round(montoDicho - esperado);
+  if (esperado > 0 && montoDicho > 0 && diferencia >= AVISO_DIFERENCIA_MIN) {
+    out.push(await avisos.registrar({
+      tipo: 'pedido-pago-de-mas',
+      severidad: 'alta',
+      quien: usuario,
+      ir: 'pedidos',
+      titulo: `Se pagó más de lo cargado: ${pedido.proveedor}`,
+      detalle: `Estaba cargado por ${fmtARS(esperado)} y al recibirlo se marcó `
+        + `${fmtARS(montoDicho)} — ${fmtARS(diferencia)} de más. `
+        + `Lo recibió ${usuario || 'alguien'} el ${fechaHoraAR()}.`
+        + (pedido.detalle ? ` Pedido: ${pedido.detalle}.` : ''),
+    }));
+  }
+
+  // El pedido nació diciendo que ya estaba pago, y en la puerta se pagó en
+  // efectivo. Se mira `pagoPrevisto` —la intención, escrita al comprar— y no
+  // `pago`, que es el hecho y que en este punto todavía era 'no' (la ruta
+  // rechaza cualquier pedido que ya tenga pago registrado).
+  if (pedido.pagoPrevisto === 'pagado' && modo === 'efectivo') {
+    out.push(await avisos.registrar({
+      tipo: 'pedido-pagado-cobrado-en-puerta',
+      severidad: 'alta',
+      quien: usuario,
+      ir: 'pedidos',
+      titulo: `Se pagó en efectivo algo que figuraba pago: ${pedido.proveedor}`,
+      detalle: `Al cargar la compra se dijo que ya estaba pagada`
+        + (pedido.medioPrevisto ? ` (${pedido.medioPrevisto})` : '')
+        + `, pero al recibirla se marcó pago en efectivo en la puerta`
+        + (montoDicho > 0 ? ` por ${fmtARS(montoDicho)}` : '')
+        + `. Hay que revisar si la plata salió dos veces. `
+        + `Lo recibió ${usuario || 'alguien'} el ${fechaHoraAR()}.`,
+    }));
+  }
+
+  return out;
+}
+
 /**
  * POST /api/pedidos/:id/recibir — llegó la mercadería.
  *
@@ -3250,6 +3347,10 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
     if (!modo) return res.status(400).json({ ok: false, error: 'Falta decir cómo se recibió.' });
     const { pago, medioFijo } = MODOS_RECIBIR[modo];
     let monto = Number(req.body.monto) || 0;
+    // Lo que TIPEÓ quien recibe, guardado antes de que `monto` lo pise con el
+    // de la fila enganchada. Es contra esto que se compara lo cargado al
+    // comprar — ver avisosDeRecepcion, que explica por qué el descarte importa.
+    const montoDicho = monto;
     const medioPago = medioFijo || (req.body.medioPago || '').toString();
 
     // Se decide contra qué fila va ANTES de tocar nada.
@@ -3341,7 +3442,21 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
     const data = await pedidos.marcarRecibido(pedido.id, {
       pago, monto, medioPago, ref, usuario: req.user.nombre,
     });
-    res.json({ ok: true, data, asiento });
+
+    // Los avisos van DESPUÉS y no pueden voltear nada: la mercadería llegó, la
+    // plata salió y el pedido ya quedó marcado. `avisos.registrar` no lanza (ver
+    // src/avisos.js) y esto va envuelto igual, porque una recepción que falla
+    // por no poder dejar una nota sería peor que la nota que se pierde.
+    let avisados = [];
+    try {
+      avisados = await avisosDeRecepcion({
+        pedido, modo, montoDicho, plan, usuario: req.user.nombre,
+      });
+    } catch (e) {
+      console.error(`Pedidos: no se pudieron emitir los avisos de la recepción (${e.message})`);
+    }
+
+    res.json({ ok: true, data, asiento, avisados });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 

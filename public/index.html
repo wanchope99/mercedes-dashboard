@@ -15377,7 +15377,7 @@ function accionesRecibir(p) {
   // ("no vino, viene mañana"), así que está siempre a la vista mientras no
   // haya llegado. Un pedido recibido no se mueve: llegó tal día y eso ya es un
   // hecho, con su fila en el libro.
-  const mover = `<button onclick="abrirPedMover('${id}')" title="No vino: pasarlo a otro día">📅 Otro día</button>`;
+  const mover = `<button onclick="abrirPedMover('${id}')" title="No vino, o se adelanta: pasarlo a otro día">📅 Otro día</button>`;
   const borrar = mover + (pedEsAdmin() ? `<button onclick="borrarPedido('${id}')">🗑️</button>` : '');
   const modoPpal = PP_A_MODO[p.pagoPrevisto];
 
@@ -15401,12 +15401,19 @@ function accionesRecibir(p) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// "No vino, pasalo a mañana"
+// "No vino, pasalo a mañana" — y también al revés
 // ═══════════════════════════════════════════════════════════════════════════
 //
 // Lo más común que le pasa a un pedido después de cargarlo. Hasta hoy la única
 // salida era borrarlo y volver a cargarlo, con lo que se perdían sus renglones
 // y lo que ya se hubiera tildado.
+//
+// Desde el 26/08/2026 va para los dos lados: un pedido que estaba para más
+// adelante se puede traer a HOY. Es el proveedor que avisa que pasa hoy en vez
+// del jueves, y hasta ahora obligaba a abrir el calendario para elegir el día
+// en el que uno está parado. Es el mismo botón y la misma ruta — mover es
+// mover, y el vencimiento de su cuenta viaja con la entrega en las dos
+// direcciones.
 //
 // No se pregunta POR QUÉ se movió — decisión del dueño, y la misma razón que
 // las omisiones del cuadro: con el proveedor avisando por teléfono, un campo
@@ -15433,21 +15440,44 @@ function abrirPedMover(id) {
     ? '→ Si esta compra ya tiene su cuenta en Movimientos, <b>pasa a vencer ese día</b>.'
     : '';
 
-  // Mañana primero: es el caso que se usa. Después los días de entrega que
-  // siguen — sin domingo ni lunes, que no entrega nadie (ver SIN_ENTREGA).
+  // Los atajos, en orden de calendario. Hoy sólo aparece si el pedido estaba
+  // para MÁS ADELANTE: es el pedido que se adelanta —el proveedor avisa que
+  // pasa hoy en vez del jueves— y sin este botón había que abrir el calendario
+  // para algo que es el día en que se está parado. Uno que ya era de hoy o de
+  // antes no lo ofrece, porque no hay nada que mover.
+  //
+  // Hoy NO pasa por el filtro de días sin entrega: domingo y lunes se saltean
+  // porque nadie entrega ESOS días de rutina, pero si el proveedor está en la
+  // puerta un lunes, ese lunes es el día y la rutina no tiene nada que opinar.
   const hoy = new Date();
+  const isoDe = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+    + '-' + String(d.getDate()).padStart(2, '0');
+  const isoHoy = isoDe(hoy);
+  const btn = (iso, et) =>
+    '<button type="button" class="btn" data-iso="' + iso + '" onclick="setMover(\'' + iso + '\')">' + et + '</button>';
+
   const atajos = [];
-  for (let n = 1; atajos.length < 4 && n < 14; n++) {
+  if (p.fecha > isoHoy) atajos.push(btn(isoHoy, 'Hoy'));
+
+  // Y después los días de entrega que siguen — sin domingo ni lunes, que no
+  // entrega nadie (ver SIN_ENTREGA). Mañana primero: sigue siendo el caso que
+  // más se usa, y por eso es el que queda elegido.
+  let porDefecto = '';
+  for (let n = 1; atajos.length < 5 && n < 14; n++) {
     const d = new Date(hoy); d.setDate(hoy.getDate() + n);
     if (SIN_ENTREGA.includes(d.getDay())) continue;
-    const iso = d.toISOString().split('T')[0];
+    const iso = isoDe(d);
     if (iso === p.fecha) continue;                    // ya está ahí
     const et = n === 1 ? 'Mañana'
       : DOW_CORTO[d.getDay()].charAt(0).toUpperCase() + DOW_CORTO[d.getDay()].slice(1);
-    atajos.push('<button type="button" class="btn" data-iso="' + iso + '" onclick="setMover(\'' + iso + '\')">' + et + '</button>');
+    atajos.push(btn(iso, et));
+    if (!porDefecto) porDefecto = iso;
   }
   document.getElementById('ped-mover-atajos').innerHTML = atajos.join('');
-  document.getElementById('ped-mover-fecha').value = (atajos[0] || '').match(/data-iso="([^"]+)"/) ? RegExp.$1 : p.fecha;
+  // Nunca arranca en "Hoy" aunque esté primero en la fila: adelantar un pedido
+  // es lo excepcional y tiene que ser un toque deliberado. Lo que se elige solo
+  // es el día siguiente de entrega, que es a lo que se entra a esta ventana.
+  document.getElementById('ped-mover-fecha').value = porDefecto || p.fecha;
   pintarAtajosMover();
   document.getElementById('ped-mover-overlay').classList.add('open');
 }
@@ -15992,7 +16022,7 @@ async function confirmarPedRecibir() {
   closePedRecibir();
   showToast('⏳ Actualizando planilla...');
   try {
-    const { asiento } = await api('/api/pedidos/' + encodeURIComponent(p.id) + '/recibir', {
+    const { asiento, avisados } = await api('/api/pedidos/' + encodeURIComponent(p.id) + '/recibir', {
       method: 'POST',
       body: JSON.stringify(cuerpo),
     });
@@ -16000,7 +16030,7 @@ async function confirmarPedRecibir() {
     showResultadoModal({
       ok: true,
       titulo: 'Pedido recibido',
-      detalle: `<b>${escapeHtml(p.proveedor)}</b><br>${pedQueHizo(asiento)}`,
+      detalle: `<b>${escapeHtml(p.proveedor)}</b><br>${pedQueHizo(asiento)}${pedAvisos(avisados)}`,
     });
   } catch (e) {
     showResultadoModal({
@@ -16039,6 +16069,34 @@ function pedQueHizo(a) {
     : '';
   return base + otras + caja;
 }
+// Si esta recepción disparó un aviso a los dueños, se dice acá y no en una
+// letra chica.
+//
+// No es una acusación ni un permiso que falta: el pedido quedó recibido igual.
+// Pero quien acaba de marcar que pagó $14.700 de más tiene que enterarse de que
+// eso se anotó y que lo van a mirar — descubrirlo después, cuando alguien
+// pregunta, es lo que hace que la próxima vez no se tipee el número real.
+//
+// Un aviso que NO se pudo escribir también se dice, y en naranja: es la única
+// forma de que alguien lo cuente de palabra en vez de darlo por avisado.
+function pedAvisos(avisados) {
+  const lista = avisados || [];
+  if (!lista.length) return '';
+  const ok = lista.filter(a => a && a.ok).length;
+  const fallados = lista.filter(a => a && !a.ok);
+  let out = '';
+  if (ok) {
+    out += `<br><span style="font-size:11px;color:var(--orange)">🔔 Esto no coincide con lo que `
+      + `estaba cargado, así que ${ok === 1 ? 'quedó un aviso' : `quedaron ${ok} avisos`} `
+      + `para los dueños. El pedido se registró igual.</span>`;
+  }
+  for (const f of fallados) {
+    out += `<br><span style="font-size:11px;color:var(--orange)">⚠ No se pudo dejar el aviso a los `
+      + `dueños (${escapeHtml(f.error || 'error desconocido')}). Avisales vos.</span>`;
+  }
+  return out;
+}
+
 function pedBuscar(id) {
   for (const d of (pedState.data?.dias || [])) {
     const p = d.pedidos.find(x => x.id === id);
