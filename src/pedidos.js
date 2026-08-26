@@ -92,9 +92,11 @@ const ULTIMA_COL = 'T';
 const HEADER_SEMANAL = ['ID', 'Dia', 'Orden', 'Tipo', 'Proveedor', 'Nota', 'MedioPrevisto',
                         'Activo', 'Actualizado'];
 const HOJA_ITEMS = process.env.PEDIDOS_ITEMS_SHEET || 'Pedidos Items';
+// Motivo (columna J, 26/08/2026) se agrega sola a las hojas que ya existen, igual
+// que Categoria y Mes en la hoja Pedidos: ver _ensureEncabezado.
 const HEADER_ITEMS = ['ID', 'PedidoID', 'Producto', 'Cantidad', 'Unidad', 'Estado',
-                      'Nota', 'Origen', 'Actualizado'];
-const ULTIMA_COL_ITEMS = 'I';
+                      'Nota', 'Origen', 'Actualizado', 'Motivo'];
+const ULTIMA_COL_ITEMS = 'J';
 const CACHE_ITEMS = 'pedidos_items';
 
 // Qué pasó con este renglón cuando llegó la entrega.
@@ -105,6 +107,24 @@ const CACHE_ITEMS = 'pedidos_items';
 // y no en 'ok'.
 const ESTADOS_ITEM = ['pendiente', 'ok', 'falta'];
 const ESTADO_ITEM_DEFAULT = 'pendiente';
+
+// Por qué este renglón no se aceptó (26/08/2026). Sólo tiene sentido con estado
+// 'falta'; en los demás queda vacío.
+//
+// Es una columna aparte y no la nota libre porque son dos cosas distintas: el
+// motivo se cuenta y se filtra ("¿cuántas veces le rechazamos mercadería a
+// Yerson por mal estado?"), la nota explica el caso ("los tomates de abajo").
+// Meter el motivo adentro de la nota sería tener el dato y no poder usarlo.
+//
+// Tres y no cuatro: "cobró un importe distinto del acordado" NO está acá porque
+// ese renglón SÍ llegó y se aceptó — lo que cambió es la plata, y eso se
+// resuelve con el monto y con un saldo (ver src/saldos.js).
+//
+// El default es VACÍO y no 'otros': un renglón marcado antes de que esto
+// existiera, o uno que sigue pendiente, no dijeron nada. Inventarles una
+// respuesta es la misma falla que ya está documentada para 'sinTocar' vs 'ok'.
+const MOTIVOS_ITEM = ['no-vino', 'mal-estado', 'otros'];
+const MOTIVO_ITEM_DEFAULT = '';
 
 const PRODUCTO_MAX = 200;
 const UNIDAD_MAX = 40;
@@ -263,6 +283,7 @@ function normalizarEstado(v) { return _deLista(v, ESTADOS, ESTADO_DEFAULT); }
 function normalizarPago(v) { return _deLista(v, PAGOS, PAGO_DEFAULT); }
 function normalizarPagoPrevisto(v) { return _deLista(v, PAGOS_PREVISTOS, PAGO_PREVISTO_DEFAULT); }
 function normalizarEstadoItem(v) { return _deLista(v, ESTADOS_ITEM, ESTADO_ITEM_DEFAULT); }
+function normalizarMotivoItem(v) { return _deLista(v, MOTIVOS_ITEM, MOTIVO_ITEM_DEFAULT); }
 function normalizarTipo(v) { return _deLista(v, TIPOS, TIPO_DEFAULT); }
 
 // El día se acepta con o sin tilde ("miercoles" tipeado a mano en la planilla
@@ -470,6 +491,7 @@ async function _leerItems(api) {
       nota: _txt(r[6]),
       origen: _txt(r[7]) || 'manual',
       actualizado: _txt(r[8]),
+      motivo: normalizarMotivoItem(r[9]),
       rowIndex: i + 1,
     });
   }
@@ -487,7 +509,7 @@ async function _loadItems() {
 
 function _aFilaItem(it) {
   return [it.id, it.pedidoId, it.producto, it.cantidad, it.unidad,
-          it.estado, it.nota, it.origen, it.actualizado];
+          it.estado, it.nota, it.origen, it.actualizado, it.motivo || ''];
 }
 
 /** Los items de un pedido, en el orden en que se cargaron. */
@@ -531,6 +553,7 @@ async function agregarItems(pedidoId, items = [], { origen = 'manual' } = {}) {
     estado: ESTADO_ITEM_DEFAULT,
     origen: _txt(origen) || 'manual',
     actualizado: ahora,
+    motivo: MOTIVO_ITEM_DEFAULT,
   }));
   await api.spreadsheets.values.append({
     spreadsheetId: SPREADSHEET_ID,
@@ -543,7 +566,11 @@ async function agregarItems(pedidoId, items = [], { origen = 'manual' } = {}) {
 }
 
 /**
- * Tildar renglones. `cambios` es [{ id, estado?, nota? }].
+ * Tildar renglones. `cambios` es [{ id, estado?, nota?, motivo? }].
+ *
+ * `motivo` (26/08/2026) contesta POR QUÉ no se aceptó, y se limpia solo cuando
+ * el renglón vuelve a 'ok' o a 'pendiente': un motivo de rechazo colgando de
+ * algo que sí llegó es peor que no tenerlo — dice que pasó algo que no pasó.
  *
  * Por lote y no de a uno: tildar doce productos con el proveedor esperando no
  * puede ser doce viajes al servidor. Se escribe con un `batchUpdate` sobre las
@@ -569,11 +596,24 @@ async function marcarItems(cambios = []) {
     const it = porId.get(_txt(c.id));
     if (!it) { faltantes.push(_txt(c.id)); continue; }
     const fila = it.rowIndex;
-    if (Object.prototype.hasOwnProperty.call(c, 'estado')) {
-      data.push({ range: `${HOJA_ITEMS}!F${fila}`, values: [[normalizarEstadoItem(c.estado)]] });
+    const tiene = k => Object.prototype.hasOwnProperty.call(c, k);
+    const estadoNuevo = tiene('estado') ? normalizarEstadoItem(c.estado) : it.estado;
+    if (tiene('estado')) {
+      data.push({ range: `${HOJA_ITEMS}!F${fila}`, values: [[estadoNuevo]] });
     }
-    if (Object.prototype.hasOwnProperty.call(c, 'nota')) {
+    if (tiene('nota')) {
       data.push({ range: `${HOJA_ITEMS}!G${fila}`, values: [[_txt(c.nota).slice(0, NOTAS_MAX)]] });
+    }
+    // El motivo sigue al estado. Si el renglón deja de estar en 'falta' se borra
+    // sin que nadie lo pida: quedaría diciendo "mal estado" sobre algo que sí se
+    // aceptó. Y si viene un motivo con un estado que no es 'falta', tampoco se
+    // escribe — no hay un porqué de un rechazo que no existe.
+    if (estadoNuevo !== 'falta') {
+      if (tiene('estado') || tiene('motivo')) {
+        data.push({ range: `${HOJA_ITEMS}!J${fila}`, values: [['']] });
+      }
+    } else if (tiene('motivo')) {
+      data.push({ range: `${HOJA_ITEMS}!J${fila}`, values: [[normalizarMotivoItem(c.motivo)]] });
     }
     data.push({ range: `${HOJA_ITEMS}!I${fila}`, values: [[ahora]] });
   }
@@ -788,6 +828,12 @@ function _conItems(pedidos, items) {
         ok: propios.filter(i => i.estado === 'ok').length,
         falta: propios.filter(i => i.estado === 'falta').length,
         pendientes: propios.filter(i => i.estado === 'pendiente').length,
+        // Por qué no se aceptaron, contado por motivo. Lo usa el modal de
+        // recibir para poner el monto más bajo en contexto ANTES de confirmar:
+        // "2 renglones no se aceptaron (mal estado)" explica por qué se paga
+        // menos que lo cargado, que si no parece un error de tipeo.
+        motivos: propios.filter(i => i.estado === 'falta' && i.motivo)
+          .reduce((acc, i) => { acc[i.motivo] = (acc[i.motivo] || 0) + 1; return acc; }, {}),
       },
     };
   });
@@ -1190,8 +1236,9 @@ module.exports = {
   itemsDe, agregarItems, marcarItems, borrarItem,
   // Puras, exportadas para poder ejercitarlas sin tocar Google.
   armarDias, estaAbierto, pagoSinDefinir, esOmision, diaSemanaDe, etiquetaDia, normalizarFecha, normalizarDia,
-  normalizarEstado, normalizarPago, normalizarTipo, normalizarPagoPrevisto, normalizarEstadoItem, sePagaEnPuerta, hoyAR,
+  normalizarEstado, normalizarPago, normalizarTipo, normalizarPagoPrevisto, normalizarEstadoItem,
+  normalizarMotivoItem, sePagaEnPuerta, hoyAR,
   nuevoId, clearCache,
-  DIAS, DIAS_CUADRO, ESTADOS, PAGOS, PAGOS_PREVISTOS, ESTADOS_ITEM, TIPOS,
+  DIAS, DIAS_CUADRO, ESTADOS, PAGOS, PAGOS_PREVISTOS, ESTADOS_ITEM, MOTIVOS_ITEM, TIPOS,
   HOJA, HOJA_SEMANAL, HOJA_ITEMS, DIAS_ADELANTE, ORIGEN_OMITIDO,
 };

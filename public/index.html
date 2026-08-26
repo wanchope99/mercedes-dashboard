@@ -748,6 +748,27 @@
     .ped-it-btn.activo-ok { background: var(--green-dim); border-color: var(--green); color: var(--green); }
     .ped-it-btn.activo-falta { background: var(--red-dim); border-color: var(--red); color: var(--red); }
     .ped-it-dudoso { font-size: 10px; color: var(--orange); }
+    /* El porqué de un renglón rechazado. Va debajo del renglón y sangrado, no
+       al lado: son tres botones más en una fila que ya tiene tres, y en un
+       teléfono eso se corta. Aparece sólo cuando el renglón está en falta. */
+    .ped-it-motivos { display: flex; gap: 5px; align-items: center; flex-wrap: wrap;
+                      padding: 0 0 8px 14px; margin-top: -2px; }
+    .ped-it-motivos > span { font-size: 11px; color: var(--text-muted); }
+    .ped-it-motivos .ped-it-btn { font-size: 11px; padding: 3px 8px; }
+    /* El saldo del proveedor, dondequiera que se muestre. Verde cuando nos deben,
+       naranja cuando debemos: la plata que se puede recuperar y la que hay que
+       pagar no son la misma noticia. */
+    .ped-saldo { font-size: 11.5px; border-radius: 8px; padding: 8px 10px; line-height: 1.5;
+                 border: 1px solid var(--border); background: var(--surface2); }
+    .ped-saldo.favor { border-color: rgba(76,175,130,0.4); }
+    .ped-saldo.contra { border-color: rgba(224,138,92,0.4); }
+    .ped-saldo b.favor { color: var(--green); }
+    .ped-saldo b.contra { color: var(--orange); }
+    .ped-saldo button { background: none; border: 1px solid var(--border); color: var(--text);
+                        cursor: pointer; border-radius: 7px; padding: 4px 10px; font-size: 11px;
+                        font-family: inherit; margin-left: 6px; }
+    .ped-saldo button:hover { background: var(--border); }
+    .ped-saldo button.puesto { background: var(--accent); border-color: var(--accent); color: #f0e6d3; }
     .ped-pegar { border: 1px dashed var(--border); border-radius: 10px; padding: 14px; text-align: center;
                  font-size: 12px; color: var(--text-muted); margin-top: 10px; }
     .ped-pegar.activo { border-color: var(--accent); background: var(--surface2); }
@@ -838,6 +859,22 @@
     .ped-bloque-menu { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
     .ped-bloque-menu:hover { color: var(--text); }
     .ped-col-vacia { color: var(--text-muted); font-size: 11px; font-style: italic; padding: 4px 2px; }
+
+    /* Los dos modales de saldos. Van por id y no por clase porque en esta app
+       NO existe un .modal-overlay genérico (ver la nota de abajo): una ventana
+       sin su regla propia no se esconde — se dibuja al final de la página, a la
+       vista, con todo su contenido. Pasó al agregar éstas.
+       Los dos salen de la sección Proveedores, donde no hay nada abierto
+       debajo, así que alcanza con quedar por encima del contenido normal. */
+    #saldo-hist-overlay, #saldo-alta-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 620;
+      align-items: center; justify-content: center; padding: 20px;
+    }
+    #saldo-hist-overlay.open, #saldo-alta-overlay.open { display: flex; }
+    #saldo-hist-overlay .modal, #saldo-alta-overlay .modal {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+      padding: 28px; width: 560px; max-width: 95vw; max-height: 90vh; overflow-y: auto;
+    }
 
     /* Los dos modales de esta pantalla. En el resto de la app cada overlay trae
        sus propias reglas por id — no existe un .modal-overlay genérico.
@@ -2072,6 +2109,31 @@
         <label>Cuándo se paga <span style="opacity:.6;font-weight:400">(opcional)</span></label>
         <input type="date" id="ped-r-venc" style="width:100%">
       </div>
+
+      <!-- Lo que el proveedor ya debía (o se le debía) antes de esta entrega. -->
+      <div id="ped-r-saldo-tiene" style="margin-bottom:12px"></div>
+
+      <!-- ¿La plata cerró?
+           No dice "a favor" ni "en contra": de qué lado es eso no se entiende
+           con el proveedor en la puerta, y leerlo al revés es plata. Dice quién
+           le pagó de más a quién, que no se puede malinterpretar.
+           Arranca en "cerró justo" porque es lo que pasa casi siempre: el que
+           recibe no tiene que tocar nada para el caso normal. -->
+      <div class="form-group full" id="ped-r-saldo-wrap" style="margin-bottom:12px">
+        <label>¿La plata cerró?</label>
+        <div class="pp-grupo" id="ped-r-saldo-tipo">
+          <button type="button" class="pp-btn activo" data-tipo="nada" onclick="setSaldoTipo('nada')">
+            Cerró justo</button>
+          <button type="button" class="pp-btn" data-tipo="demas" onclick="setSaldoTipo('demas')">
+            Le pagué de más<small>me lo debe</small></button>
+          <button type="button" class="pp-btn" data-tipo="debiendo" onclick="setSaldoTipo('debiendo')">
+            Le quedé debiendo<small>se lo debo</small></button>
+        </div>
+        <div id="ped-r-saldo-monto-wrap" style="display:none;margin-top:8px">
+          <input type="text" id="ped-r-saldo-monto" inputmode="numeric" placeholder="0" style="width:100%">
+          <div id="ped-r-saldo-ayuda" style="font-size:11px;color:var(--text-muted);margin-top:5px"></div>
+        </div>
+      </div>
       <div id="ped-r-que-hace" style="font-size:11.5px;color:var(--text-muted);line-height:1.6;margin-bottom:12px"></div>
     </div>
 
@@ -2314,6 +2376,59 @@
   </main>
 </div>
 
+<!-- Modal: la historia de un saldo, y el alta suelta -->
+<div class="modal-overlay" id="saldo-hist-overlay">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-title" id="saldo-hist-titulo">Saldo</div>
+    <div id="saldo-hist-cuerpo"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="document.getElementById('saldo-hist-overlay').classList.remove('open')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="saldo-alta-overlay">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-title">Anotar un saldo</div>
+    <!-- El aviso NO es decorativo: es la diferencia entre esta pantalla y una
+         que mueve plata. Acá sólo se cambia lo que el bar dice que le deben. -->
+    <div style="font-size:12px;color:var(--orange);background:var(--surface2);border:1px solid var(--border);
+                border-radius:8px;padding:10px 12px;line-height:1.5;margin-bottom:14px">
+      ⚠ Esto <b>no mueve ninguna caja</b>. Si el proveedor te devolvió plata de verdad, esa entrada
+      se carga aparte: acá sólo cambia lo que figura que se deben.
+    </div>
+    <div class="form-grid" style="grid-template-columns:1fr">
+      <div class="form-group full">
+        <label>Proveedor</label>
+        <input type="text" id="saldo-a-prov" list="saldo-a-prov-list" placeholder="Yerson" />
+        <datalist id="saldo-a-prov-list"></datalist>
+      </div>
+      <div class="form-group full">
+        <label>¿De qué lado?</label>
+        <div class="pp-grupo" id="saldo-a-tipo">
+          <button type="button" class="pp-btn activo" data-tipo="favor" onclick="setSaldoAltaTipo('favor')">
+            Me lo debe<small>a favor del bar</small></button>
+          <button type="button" class="pp-btn" data-tipo="contra" onclick="setSaldoAltaTipo('contra')">
+            Se lo debo<small>en contra del bar</small></button>
+        </div>
+      </div>
+      <div class="form-group full">
+        <label>Cuánto</label>
+        <input type="text" id="saldo-a-monto" inputmode="numeric" placeholder="0" />
+      </div>
+      <div class="form-group full">
+        <label>Por qué</label>
+        <input type="text" id="saldo-a-detalle" maxlength="300" placeholder="Ej: me devolvió el vuelto del jueves" />
+      </div>
+    </div>
+    <div id="saldo-a-error" style="color:var(--red);font-size:13px;margin-bottom:10px;text-align:center"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="document.getElementById('saldo-alta-overlay').classList.remove('open')">Cancelar</button>
+      <button class="btn btn-accent" onclick="guardarSaldoManual()">Guardar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal: editar un arreglo ya anotado (solo admin) -->
 <div class="modal-overlay" id="mant-edit-overlay">
   <div class="modal" style="max-width:520px">
@@ -2370,6 +2485,17 @@
   </div>
 
   <main>
+    <!-- Saldos: lo que quedó a favor o en contra por pagar distinto de lo
+         acordado. NO es lo que se debe por facturas — eso vive en Movimientos y
+         lo persigue Pagos. Ver src/saldos.js. -->
+    <div class="card">
+      <div class="card-title">Saldos con proveedores
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· vueltos y diferencias, no facturas</span>
+        <button class="btn" style="float:right;font-size:12px;padding:5px 12px" onclick="abrirSaldoManual()">+ Anotar saldo</button>
+      </div>
+      <div id="saldos-lista"><div class="loading"><div class="spinner"></div> Cargando...</div></div>
+    </div>
+
     <div class="card">
       <div class="card-title">Evolución del precio unitario
         <span id="prov-serie-sub" style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· una línea por proveedor</span>
@@ -10354,7 +10480,126 @@ async function refreshServicios() {
 const PROV_COLORS = ['#4caf82','#5c8fe0','#e08a5c','#a05ce0','#e0c95c','#e05c5c','#5ce0d0','#c95ce0','#8ae05c','#e05c9b'];
 let _provInit = false;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Saldos con proveedores
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Lo que quedó a favor o en contra por pagar distinto de lo acordado. NO es la
+// cuenta corriente de facturas: eso vive en Movimientos y lo persigue Pagos.
+// Ver src/saldos.js, que es donde está la convención de signo.
+//
+// Los que dan cero no se listan: un saldo cancelado no tiene nada pendiente y
+// llenaría la lista de renglones que no piden nada. Su historia sigue entera en
+// la planilla.
+async function loadSaldos() {
+  const cont = document.getElementById('saldos-lista');
+  if (!cont) return;
+  try {
+    const r = await api('/api/saldos');
+    if (!r.configurado) {
+      cont.innerHTML = '<div class="prov-empty">Los saldos no están configurados en el servidor '
+        + '(falta <code>PROVEEDORES_SHEET_ID</code>). Hasta que esté, no se anota ninguno.</div>';
+      return;
+    }
+    const lista = r.data || [];
+    if (!lista.length) {
+      cont.innerHTML = '<div class="prov-empty">Nadie te debe nada y no le debés nada a nadie. '
+        + 'Acá aparecen los vueltos y las diferencias que se anotan al recibir un pedido.</div>';
+      return;
+    }
+    const aFavor = lista.filter(s => s.saldo > 0).reduce((a, s) => a + s.saldo, 0);
+    const enContra = lista.filter(s => s.saldo < 0).reduce((a, s) => a + Math.abs(s.saldo), 0);
+    cont.innerHTML = `<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+        ${aFavor ? `<b style="color:var(--green)">${fmt(aFavor)}</b> te deben` : ''}
+        ${aFavor && enContra ? ' · ' : ''}
+        ${enContra ? `<b style="color:var(--orange)">${fmt(enContra)}</b> debés` : ''}
+      </div>`
+      + lista.map(s => `<div class="ped-saldo ${s.saldo > 0 ? 'favor' : 'contra'}"
+            style="margin-bottom:8px;cursor:pointer" onclick="verHistoriaSaldo(${JSON.stringify(s.proveedor).replace(/"/g, '&quot;')})">
+          <b class="${s.saldo > 0 ? 'favor' : 'contra'}">${escapeHtml(s.proveedor)}</b>
+          · ${s.saldo > 0 ? `te debe ${fmt(s.saldo)}` : `le debés ${fmt(Math.abs(s.saldo))}`}
+          <span style="color:var(--text-muted)"> · ${s.movimientos} movimiento${s.movimientos !== 1 ? 's' : ''}
+          ${s.ultimo ? '· último ' + escapeHtml(s.ultimo) : ''}</span>
+        </div>`).join('');
+  } catch (e) {
+    cont.innerHTML = '<div class="prov-empty" style="color:var(--red)">No se pudieron cargar los saldos: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+// De dónde salió cada peso. Es la pregunta que se hace tres semanas después y la
+// razón por la que esto es una lista de movimientos y no un número guardado.
+async function verHistoriaSaldo(proveedor) {
+  const ov = document.getElementById('saldo-hist-overlay');
+  document.getElementById('saldo-hist-titulo').textContent = 'Saldo · ' + proveedor;
+  document.getElementById('saldo-hist-cuerpo').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  ov.classList.add('open');
+  try {
+    const { data } = await api('/api/saldos/' + encodeURIComponent(proveedor));
+    const movs = data.movimientos || [];
+    document.getElementById('saldo-hist-cuerpo').innerHTML =
+      `<div class="ped-saldo ${data.saldo > 0 ? 'favor' : 'contra'}" style="margin-bottom:14px">
+        ${data.saldo > 0 ? `<b class="favor">Te debe ${fmt(data.saldo)}</b>`
+          : data.saldo < 0 ? `<b class="contra">Le debés ${fmt(Math.abs(data.saldo))}</b>`
+          : '<b>Saldo en cero</b>'}
+      </div>`
+      + (movs.length
+        ? `<div style="max-height:50vh;overflow-y:auto">${movs.map(m => `
+            <div style="border-bottom:1px solid var(--border);padding:8px 0;font-size:12px;line-height:1.5">
+              <b style="color:${m.monto > 0 ? 'var(--green)' : 'var(--orange)'}">
+                ${m.monto > 0 ? '+' : '−'}${fmt(Math.abs(m.monto))}</b>
+              <span style="color:var(--text-muted)"> · ${escapeHtml(m.fecha)} · ${escapeHtml(m.motivo)}
+              ${m.usuario ? '· ' + escapeHtml(m.usuario) : ''}</span>
+              ${m.detalle ? `<div style="color:var(--text-muted)">${escapeHtml(m.detalle)}</div>` : ''}
+            </div>`).join('')}</div>`
+        : '<div class="prov-empty">Sin movimientos.</div>');
+  } catch (e) {
+    document.getElementById('saldo-hist-cuerpo').innerHTML =
+      '<div class="prov-empty" style="color:var(--red)">No se pudo cargar: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+let _saldoAltaTipo = 'favor';
+function setSaldoAltaTipo(t) {
+  _saldoAltaTipo = t;
+  document.querySelectorAll('#saldo-a-tipo .pp-btn').forEach(b => b.classList.toggle('activo', b.dataset.tipo === t));
+}
+
+async function abrirSaldoManual() {
+  document.getElementById('saldo-a-prov').value = '';
+  document.getElementById('saldo-a-monto').value = '';
+  document.getElementById('saldo-a-detalle').value = '';
+  document.getElementById('saldo-a-error').textContent = '';
+  setSaldoAltaTipo('favor');
+  document.getElementById('saldo-alta-overlay').classList.add('open');
+  await ensureSugerencias();
+  document.getElementById('saldo-a-prov-list').innerHTML =
+    (state.provSugerencias || []).map(s => `<option value="${escapeHtml(s.nombre)}"></option>`).join('');
+}
+
+async function guardarSaldoManual() {
+  const err = document.getElementById('saldo-a-error');
+  const proveedor = document.getElementById('saldo-a-prov').value.trim();
+  const monto = pedNumero(document.getElementById('saldo-a-monto').value);
+  if (!proveedor) { err.textContent = 'Poné el proveedor.'; return; }
+  if (!monto) { err.textContent = 'Poné cuánto.'; return; }
+  try {
+    await api('/api/saldos', {
+      method: 'POST',
+      body: JSON.stringify({
+        proveedor,
+        monto: _saldoAltaTipo === 'favor' ? Math.abs(monto) : -Math.abs(monto),
+        motivo: 'ajuste',
+        detalle: document.getElementById('saldo-a-detalle').value.trim(),
+      }),
+    });
+    document.getElementById('saldo-alta-overlay').classList.remove('open');
+    await loadSaldos();
+    showToast('Saldo anotado');
+  } catch (e) { err.textContent = e.message; }
+}
+
 async function loadProveedores() {
+  loadSaldos();
   if (!_provInit) {
     try {
       const { data } = await api('/api/proveedores/productos');
@@ -15098,6 +15343,10 @@ const pedState = {
   recibiendo: null,       // el pedido que está en el modal
   modo: null,             // cuál de los dos botones lo abrió: ver PED_MODOS
   plan: null,             // qué dijo el server que va a hacer: ver pedCargarPlan
+  saldos: [],             // lo que cada proveedor debe o se le debe: ver src/saldos.js
+  saldosConfigurados: false,
+  saldoTipo: 'nada',      // 'nada' | 'demas' | 'debiendo' — cómo cerró la plata hoy
+  saldoUsar: 0,           // cuánto del saldo viejo se está descontando
   editandoSem: null,
   arrastrando: null,
 };
@@ -15162,10 +15411,36 @@ function pedNumero(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// Los saldos van en su propia llamada y NO bloquean la pantalla de Pedidos: son
+// un dato de contexto, y un pedido se tiene que poder recibir aunque la planilla
+// de proveedores esté caída. Si falla, quedan en cero y no se muestra nada — de
+// menos y nunca de más, que es la regla de siempre para lo que se degrada.
+async function cargarSaldos() {
+  try {
+    const r = await api('/api/saldos');
+    pedState.saldos = r.data || [];
+    pedState.saldosConfigurados = !!r.configurado;
+  } catch (e) {
+    pedState.saldos = [];
+    pedState.saldosConfigurados = false;
+  }
+}
+
+// El saldo de un proveedor, con la misma normalización que usa el server para
+// machearlo (minúsculas, sin tildes): "El Jumillano" y "el jumillano" son uno.
+function pedSaldoDe(proveedor) {
+  const norm = v => (v == null ? '' : String(v)).trim().toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
+  const clave = norm(proveedor);
+  if (!clave) return 0;
+  const hit = (pedState.saldos || []).find(s => norm(s.proveedor) === clave);
+  return hit ? hit.saldo : 0;
+}
+
 async function loadPedidos(btn) {
   if (btn) btn.classList.add('spinning');
   try {
-    const { data } = await api('/api/pedidos');
+    const [{ data }] = await Promise.all([api('/api/pedidos'), cargarSaldos()]);
     pedState.data = data;
     poblarPedidosSelects();
     renderPedidosDias();
@@ -15354,6 +15629,18 @@ function chipPagoPrevisto(p) {
   return '';
 }
 
+// Lo que este proveedor debe o se le debe, de antes de este pedido. Sólo
+// mientras no esté resuelto: en un pedido ya recibido el chip diría el saldo de
+// HOY al lado de un hecho de ayer, y eso se lee como si fuera de ese pedido.
+function chipSaldo(p) {
+  if (p.pago !== 'no') return '';
+  const s = pedSaldoDe(p.proveedor);
+  if (!s) return '';
+  return s > 0
+    ? `<span class="ped-chip pagado">↩ te debe ${fmt(s)}</span>`
+    : `<span class="ped-chip apagar">↪ le debés ${fmt(Math.abs(s))}</span>`;
+}
+
 function itemPedido(p) {
   const id = escapeHtml(p.id);
   const recibido = p.estado === 'recibido';
@@ -15375,6 +15662,10 @@ function itemPedido(p) {
     // campanita una vez por día — pero acá tiene que decirlo, porque acá es
     // donde se arregla: cualquiera de los dos botones la cierra.
     recibido && p.pago === 'no' ? '<span class="ped-chip sinpago">falta registrar el pago</span>' : '',
+    // Lo que el proveedor debe (o se le debe) de antes. Va en el renglón y no
+    // sólo adentro del modal: si hay que descontarle $3.000 a Yerson, eso se
+    // tiene que ver ANTES de decidir con qué botón se recibe.
+    chipSaldo(p),
   ].filter(Boolean).join('');
 
   // Un pedido con el pago ya registrado no ofrece volver atrás: la fila del
@@ -15652,6 +15943,19 @@ function bloqueItems(p) {
       </div>` : ''}</div>`;
 }
 
+// Por qué no se aceptó un renglón. Tres y no cuatro: "cobró un importe distinto"
+// no va acá porque ese renglón SÍ llegó — eso se arregla con el monto y con un
+// saldo. Ver MOTIVOS_ITEM en src/pedidos.js, que es el que manda.
+//
+// El texto es lo que diría el cocinero, no el valor que se guarda: "no lo
+// trajeron" y no "no-vino".
+const PED_MOTIVOS = [
+  ['no-vino', 'no lo trajeron'],
+  ['mal-estado', 'mal estado'],
+  ['otros', 'otro'],
+];
+const PED_MOTIVO_TXT = Object.fromEntries(PED_MOTIVOS);
+
 function filaItem(it, editable) {
   const id = escapeHtml(it.id);
   const clase = ['ped-it', it.estado === 'ok' ? 'ok' : '', it.estado === 'falta' ? 'falta' : ''].filter(Boolean).join(' ');
@@ -15663,11 +15967,30 @@ function filaItem(it, editable) {
       ${pedEsAdmin() ? `<button class="ped-it-btn" title="Sacar este renglón"
         onclick="borrarItemPedido('${id}')">🗑️</button>` : ''}`
     : '';
+
+  // El porqué aparece SÓLO cuando el renglón está marcado como que no llegó, y
+  // recién ahí: preguntarlo antes es preguntar por algo que no pasó. Se pide en
+  // el momento porque después nadie se acuerda si fue que no lo trajeron o que
+  // vino podrido, y esas dos cosas se le reclaman distinto al proveedor.
+  const motivos = (editable && it.estado === 'falta')
+    ? `<div class="ped-it-motivos">
+        <span>¿por qué?</span>
+        ${PED_MOTIVOS.map(([v, txt]) =>
+          `<button class="ped-it-btn ${it.motivo === v ? 'activo-falta' : ''}"
+            onclick="motivoItem('${id}','${v}')">${txt}</button>`).join('')}
+      </div>`
+    : '';
+
+  // Ya recibido: el motivo se lee al lado del producto. Es lo que hace que dos
+  // semanas después se pueda contestar por qué ese pedido se pagó menos.
+  const motivoLeido = (!editable && it.estado === 'falta' && it.motivo)
+    ? ` <span class="ped-it-dudoso">· ${escapeHtml(PED_MOTIVO_TXT[it.motivo] || it.motivo)}</span>` : '';
+
   return `<div class="${clase}">
-    <span class="ped-it-nom">${escapeHtml(it.producto)}${it.nota ? ` <span class="ped-it-dudoso">· ${escapeHtml(it.nota)}</span>` : ''}</span>
+    <span class="ped-it-nom">${escapeHtml(it.producto)}${motivoLeido}${it.nota ? ` <span class="ped-it-dudoso">· ${escapeHtml(it.nota)}</span>` : ''}</span>
     <span class="ped-it-cant">${it.cantidad} ${escapeHtml(it.unidad)}</span>
     ${botones}
-  </div>`;
+  </div>${motivos}`;
 }
 
 function toggleItems(pedidoId) {
@@ -15688,9 +16011,32 @@ function toggleItems(pedidoId) {
 async function tildarItem(itemId, estado) {
   const p = (pedState.data.dias || []).flatMap(d => d.pedidos).find(x => (x.items || []).some(i => i.id === itemId));
   const it = p && (p.items || []).find(i => i.id === itemId);
-  if (it) { it.estado = estado; recalcularResumen(p); refrescarPedDia(); }
+  // Salir de 'falta' borra el motivo, acá y en la planilla (lo hace marcarItems):
+  // "mal estado" colgando de algo que sí llegó dice que pasó algo que no pasó.
+  if (it) { it.estado = estado; if (estado !== 'falta') it.motivo = ''; recalcularResumen(p); refrescarPedDia(); }
   try {
     await api('/api/pedidos-items', { method: 'PUT', body: JSON.stringify({ cambios: [{ id: itemId, estado }] }) });
+  } catch (e) {
+    showToast('No se pudo guardar: ' + e.message, 4000);
+  }
+  await loadPedidos();
+}
+
+// El porqué de un renglón rechazado. Mismo pintado optimista que el tilde: se
+// toca con el proveedor en la puerta y esperar al servidor por cada toque es lo
+// que hace que la pantalla se sienta rota.
+async function motivoItem(itemId, motivo) {
+  const p = (pedState.data.dias || []).flatMap(d => d.pedidos).find(x => (x.items || []).some(i => i.id === itemId));
+  const it = p && (p.items || []).find(i => i.id === itemId);
+  // Volver a tocar el que ya estaba lo saca: es la única forma de corregir un
+  // motivo puesto por error sin tener que des-marcar y volver a marcar el ítem.
+  const nuevo = (it && it.motivo === motivo) ? '' : motivo;
+  if (it) { it.motivo = nuevo; recalcularResumen(p); refrescarPedDia(); }
+  try {
+    await api('/api/pedidos-items', {
+      method: 'PUT',
+      body: JSON.stringify({ cambios: [{ id: itemId, estado: 'falta', motivo: nuevo }] }),
+    });
   } catch (e) {
     showToast('No se pudo guardar: ' + e.message, 4000);
   }
@@ -15706,6 +16052,8 @@ function recalcularResumen(p) {
     ok: its.filter(i => i.estado === 'ok').length,
     falta: its.filter(i => i.estado === 'falta').length,
     pendientes: its.filter(i => i.estado === 'pendiente').length,
+    motivos: its.filter(i => i.estado === 'falta' && i.motivo)
+      .reduce((acc, i) => { acc[i.motivo] = (acc[i.motivo] || 0) + 1; return acc; }, {}),
   };
 }
 
@@ -15962,7 +16310,8 @@ async function openPedRecibir(id, modo) {
   document.getElementById('ped-r-cabecera').innerHTML =
     `<b>${escapeHtml(p.proveedor)}</b>${p.detalle ? ' · ' + escapeHtml(p.detalle) : ''}<br>`
     + `Esperado para el ${new Date(p.fecha + 'T12:00:00').toLocaleDateString('es-AR')}`
-    + (p.costoEstimado ? ` · estimado ${fmt(p.costoEstimado)}` : '');
+    + (p.costoEstimado ? ` · estimado ${fmt(p.costoEstimado)}` : '')
+    + pedRechazados(p);
 
   // La fecha sólo cuando nadie pagó: es lo único que puede generar una deuda
   // con vencimiento. Es opcional — vacía, la fila vence el día de la entrega.
@@ -15981,9 +16330,109 @@ async function openPedRecibir(id, modo) {
         + `cancelá y usá <b>Llegó y no lo pagué</b>.`
       : '';
 
+  // La plata arranca cerrando justo, que es lo que pasa casi siempre: para el
+  // caso normal no hay nada que tocar.
+  pedState.saldoTipo = 'nada';
+  pedState.saldoUsar = 0;
+  document.getElementById('ped-r-saldo-monto').value = '';
+  setSaldoTipo('nada');
+  pintarSaldoDelProveedor();
+
   document.getElementById('ped-recibir-overlay').classList.add('open');
   pedPlanCargando();
   await pedCargarPlan();
+}
+
+// Lo que no se aceptó, dicho en el modal ANTES de confirmar.
+//
+// El monto que se va a pagar es más bajo que lo cargado y eso, sin explicación,
+// se lee como un error de tipeo — es lo que dispara la duda de "¿está bien este
+// número?" justo cuando no hay tiempo para revisarlo. Acá el número más chico
+// llega con su motivo puesto.
+function pedRechazados(p) {
+  const r = p.itemsResumen;
+  if (!r || !r.falta) return '';
+  const porMotivo = Object.entries(r.motivos || {})
+    .map(([m, n]) => `${n} ${PED_MOTIVO_TXT[m] || m}`).join(', ');
+  return `<br><span style="color:var(--red)">✕ ${r.falta} renglón${r.falta !== 1 ? 'es' : ''} `
+    + `sin aceptar${porMotivo ? ` — ${escapeHtml(porMotivo)}` : ''}</span>`;
+}
+
+// ─── El saldo del proveedor, dentro del modal ───────────────────────────────
+
+// Lo que ya debía antes de esta entrega, con el botón para descontarlo. Es lo
+// que hace que un saldo no se quede dando vueltas seis meses: aparece justo
+// cuando se puede usar, que es con el proveedor en la puerta.
+function pintarSaldoDelProveedor() {
+  const el = document.getElementById('ped-r-saldo-tiene');
+  const p = pedState.recibiendo;
+  const saldo = p ? pedSaldoDe(p.proveedor) : 0;
+  if (!p || !saldo) { el.innerHTML = ''; return; }
+
+  const favor = saldo > 0;
+  const puesto = pedState.saldoUsar !== 0;
+  el.innerHTML = `<div class="ped-saldo ${favor ? 'favor' : 'contra'}">
+    ${favor
+      ? `💡 <b class="favor">${escapeHtml(p.proveedor)} te debe ${fmt(saldo)}</b> de antes.`
+      : `💡 <b class="contra">Le debés ${fmt(Math.abs(saldo))}</b> a ${escapeHtml(p.proveedor)} de antes.`}
+    <button type="button" class="${puesto ? 'puesto' : ''}" onclick="toggleUsarSaldo()">
+      ${puesto ? '✓ descontado' : (favor ? 'Descontarlo' : 'Pagarlo ahora')}</button>
+    <div style="color:var(--text-muted);margin-top:4px">${
+      puesto
+        ? (favor ? `Se paga ${fmt(saldo)} menos y el saldo queda en cero.`
+                 : `Se paga ${fmt(Math.abs(saldo))} de más y el saldo queda en cero.`)
+        : 'Si no lo descontás ahora, queda para la próxima.'}</div>
+  </div>`;
+}
+
+// Usar el saldo cambia el MONTO, que es lo que va a Movimientos. No hay ninguna
+// magia atrás: se paga menos (o más) de verdad, y el renglón que cancela el
+// saldo lo escribe el server al confirmar.
+function toggleUsarSaldo() {
+  const p = pedState.recibiendo;
+  if (!p) return;
+  const saldo = pedSaldoDe(p.proveedor);
+  const campo = document.getElementById('ped-r-monto');
+  const monto = pedNumero(campo.value);
+
+  if (pedState.saldoUsar) {
+    campo.value = Math.round(monto + pedState.saldoUsar) || '';
+    pedState.saldoUsar = 0;
+  } else {
+    // No se puede descontar más de lo que hay que pagar: si el saldo es más
+    // grande que el pedido, se usa lo que entra y el resto queda para la próxima.
+    const usar = saldo > 0 ? Math.min(saldo, monto) : saldo;
+    if (!usar) return;
+    pedState.saldoUsar = usar;
+    campo.value = Math.round(monto - usar) || '';
+  }
+  pintarSaldoDelProveedor();
+  onPedMontoChange();
+}
+
+// Cómo cerró la plata HOY. Es independiente del saldo viejo: se puede descontar
+// lo de antes y además pagar de más porque no había cambio.
+function setSaldoTipo(tipo) {
+  pedState.saldoTipo = tipo;
+  document.querySelectorAll('#ped-r-saldo-tipo .pp-btn').forEach(b => {
+    b.classList.toggle('activo', b.dataset.tipo === tipo);
+  });
+  document.getElementById('ped-r-saldo-monto-wrap').style.display = tipo === 'nada' ? 'none' : '';
+  document.getElementById('ped-r-saldo-ayuda').textContent = tipo === 'demas'
+    ? 'Cuánto de más. Queda anotado a tu favor contra este proveedor.'
+    : tipo === 'debiendo'
+      ? 'Cuánto quedó sin pagar. Queda anotado como que se lo debés.'
+      : '';
+  if (tipo === 'nada') document.getElementById('ped-r-saldo-monto').value = '';
+}
+
+// El saldo que deja esta recepción, con el signo de src/saldos.js: positivo es
+// a favor del bar. Lo arma la pantalla en un solo lugar para que el body y el
+// aviso previo no puedan discrepar.
+function pedSaldoNuevo() {
+  const monto = pedNumero(document.getElementById('ped-r-saldo-monto').value);
+  if (!monto || pedState.saldoTipo === 'nada') return 0;
+  return pedState.saldoTipo === 'demas' ? Math.abs(monto) : -Math.abs(monto);
 }
 
 // El monto cambia qué fila matchea (el monto exacto manda sobre la fecha), así
@@ -16077,6 +16526,8 @@ function closePedRecibir() {
   pedState.recibiendo = null;
   pedState.modo = null;
   pedState.plan = null;
+  pedState.saldoTipo = 'nada';
+  pedState.saldoUsar = 0;
 }
 
 async function confirmarPedRecibir() {
@@ -16100,19 +16551,26 @@ async function confirmarPedRecibir() {
     modo: pedState.modo,
     monto,
     vencimiento: document.getElementById('ped-r-venc').value,
+    // Con signo: positivo es a favor del bar. Ver src/saldos.js — el server
+    // vuelve a leer el saldo real antes de descontar `saldoUsado`, así que lo
+    // que mande esta pantalla es una intención, no una orden.
+    saldoNuevo: pedSaldoNuevo(),
+    saldoUsado: pedState.saldoUsar,
   };
   closePedRecibir();
   showToast('⏳ Actualizando planilla...');
   try {
-    const { asiento, avisados } = await api('/api/pedidos/' + encodeURIComponent(p.id) + '/recibir', {
-      method: 'POST',
-      body: JSON.stringify(cuerpo),
-    });
+    const { asiento, avisados, saldos: saldosEscritos } = await api(
+      '/api/pedidos/' + encodeURIComponent(p.id) + '/recibir', {
+        method: 'POST',
+        body: JSON.stringify(cuerpo),
+      });
     await loadPedidos();
     showResultadoModal({
       ok: true,
       titulo: 'Pedido recibido',
-      detalle: `<b>${escapeHtml(p.proveedor)}</b><br>${pedQueHizo(asiento)}${pedAvisos(avisados)}`,
+      detalle: `<b>${escapeHtml(p.proveedor)}</b><br>${pedQueHizo(asiento)}`
+        + pedSaldosQueHizo(saldosEscritos, p) + pedAvisos(avisados),
     });
   } catch (e) {
     showResultadoModal({
@@ -16162,6 +16620,36 @@ function pedQueHizo(a) {
     : '';
   return base + otras + caja + yaPaga;
 }
+// Qué quedó anotado contra el proveedor. Se informa siempre que se haya escrito
+// algo: un saldo que nadie sabe que existe no sirve para nada, y el que acaba de
+// recibir es el único que puede corregirlo si salió mal.
+//
+// Un saldo que NO se pudo escribir se dice en naranja, porque ahí la plata quedó
+// sin registrar en ningún lado y alguien tiene que anotarla a mano.
+function pedSaldosQueHizo(escritos, p) {
+  const lista = escritos || [];
+  if (!lista.length) return '';
+  let out = '';
+  for (const r of lista) {
+    if (r && r.ok && r.movimiento) {
+      const m = r.movimiento;
+      const total = r.saldo || 0;
+      out += `<br><span style="font-size:11px">🧾 ${m.monto > 0
+        ? `Quedan ${fmt(m.monto)} a tu favor`
+        : `Quedan ${fmt(Math.abs(m.monto))} que le debés`} con `
+        + `<b>${escapeHtml(p.proveedor)}</b>. `
+        + (total
+            ? `Su saldo ahora es ${fmt(Math.abs(total))} ${total > 0 ? 'a tu favor' : 'en contra'}.`
+            : 'Su saldo quedó en cero.')
+        + '</span>';
+    } else if (r) {
+      out += `<br><span style="font-size:11px;color:var(--orange)">⚠ No se pudo anotar el saldo `
+        + `(${escapeHtml(r.error || 'error desconocido')}). Esa plata no quedó registrada en ningún lado.</span>`;
+    }
+  }
+  return out;
+}
+
 // Si esta recepción disparó un aviso a los dueños, se dice acá y no en una
 // letra chica.
 //

@@ -36,6 +36,7 @@ const nomina = require('./nomina');
 const cierreCocina = require('./cierre-cocina');
 const notificaciones = require('./notificaciones');
 const avisos = require('./avisos');
+const saldos = require('./saldos');
 const stockBebidas = require('./stock-bebidas');
 const regimenFiscal = require('./regimen-fiscal');
 const fiscalProv = require('./fiscal-proveedores');
@@ -3349,7 +3350,7 @@ const AVISO_DIFERENCIA_MIN = 1000;
  * caso a avisar. Alguien dijo que pagó $62.000 contra una fila de $47.300; sin
  * este aviso, esa afirmación no queda escrita en ningún lado.
  */
-async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario }) {
+async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario, saldoNuevo = 0 }) {
   const out = [];
 
   // Contra qué se compara. Primero lo que decía el pedido —es lo que quien
@@ -3358,7 +3359,17 @@ async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario }) {
   // semanal) no tiene con qué comparar y no avisa nada: no hay un "de más"
   // sin un "de cuánto".
   const esperado = Number(pedido.costoEstimado) || Number(plan && plan.fila && plan.fila.monto) || 0;
-  const diferencia = Math.round(montoDicho - esperado);
+
+  // Lo que ya está explicado no se avisa (26/08/2026). Un vuelto —se pagaron
+  // $120.000 de un pedido de $117.000 porque no había cambio— es exactamente
+  // "pagó más de lo cargado", y sin esto dispararía el aviso en su caso más
+  // común, que es como una campanita deja de mirarse. Si quien recibe declaró
+  // que esos $3.000 quedan a favor, ya dijo por qué la plata no cierra.
+  //
+  // Sólo descuenta el saldo POSITIVO: uno negativo (le quedamos debiendo)
+  // significa que se pagó de MENOS, que no es lo que esta comparación mira.
+  const explicado = Math.max(0, Math.round(Number(saldoNuevo) || 0));
+  const diferencia = Math.round(montoDicho - esperado - explicado);
   if (esperado > 0 && montoDicho > 0 && diferencia >= AVISO_DIFERENCIA_MIN) {
     out.push(await avisos.registrar({
       tipo: 'pedido-pago-de-mas',
@@ -3367,7 +3378,11 @@ async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario }) {
       ir: 'pedidos',
       titulo: `Se pagó más de lo cargado: ${pedido.proveedor}`,
       detalle: `Estaba cargado por ${fmtARS(esperado)} y al recibirlo se marcó `
-        + `${fmtARS(montoDicho)} — ${fmtARS(diferencia)} de más. `
+        + `${fmtARS(montoDicho)}`
+        + (explicado > 0
+            ? `, de los cuales ${fmtARS(explicado)} quedaron anotados a favor. Sobran `
+              + `${fmtARS(diferencia)} sin explicar. `
+            : ` — ${fmtARS(diferencia)} de más. `)
         + `Lo recibió ${usuario || 'alguien'} el ${fechaHoraAR()}.`
         + (pedido.detalle ? ` Pedido: ${pedido.detalle}.` : ''),
     }));
@@ -3390,6 +3405,73 @@ async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario }) {
         + (montoDicho > 0 ? ` por ${fmtARS(montoDicho)}` : '')
         + `. Hay que revisar si la plata salió dos veces. `
         + `Lo recibió ${usuario || 'alguien'} el ${fechaHoraAR()}.`,
+    }));
+  }
+
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Los saldos que deja una recepción
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Dos cosas independientes que pueden pasar en la misma entrega, y por eso son
+// dos parámetros y no uno:
+//
+//   · `saldoNuevo` — la plata de HOY no cerró. Con signo, según la convención
+//     de src/saldos.js: positivo = nos lo debe (se pagó de más, el vuelto que
+//     no había), negativo = le quedamos debiendo.
+//   · `saldoUsado` — se descontó un saldo que YA existía. El renglón que se
+//     escribe es el opuesto, porque lo cancela: usar $3.000 que nos debían
+//     escribe −$3.000 y el saldo queda en cero.
+//
+// LO QUE ESTO NO HACE: tocar `Movimientos`. La fila del libro lleva SIEMPRE la
+// plata que se movió —los $120.000 que salieron de la caja, no los $117.000 que
+// vale la mercadería— y de esa invariante dependen el arqueo (server.js, la
+// columna O) y la fila de ajuste que escribe `registrarCaja` al cerrar, que
+// asume que cada gasto de la sesión tiene su fila. Ver src/saldos.js.
+//
+// `saldoUsado` NO se cree lo que dice el cliente: se relee el saldo real y se
+// recorta contra él. Un navegador con la pantalla vieja podría descontar un
+// saldo que ya se usó, y eso es plata.
+async function saldosDeRecepcion({ pedido, saldoNuevo = 0, saldoUsado = 0, motivo, detalle, usuario }) {
+  const out = [];
+  const nuevo = Math.round(Number(saldoNuevo) || 0);
+  const usado = Math.round(Number(saldoUsado) || 0);
+
+  if (usado) {
+    const actual = Math.round(await saldos.saldoDe(pedido.proveedor));
+    // Sólo se puede usar lo que hay, y para el mismo lado: con $3.000 a favor
+    // se pueden descontar hasta $3.000, nunca $5.000 ni un monto en contra.
+    const permitido = actual === 0 || Math.sign(usado) !== Math.sign(actual)
+      ? 0
+      : Math.sign(actual) * Math.min(Math.abs(usado), Math.abs(actual));
+    if (permitido) {
+      out.push(await saldos.registrar({
+        proveedor: pedido.proveedor,
+        monto: -permitido,
+        motivo: 'uso',
+        detalle: permitido > 0
+          ? `Se descontaron ${fmtARS(permitido)} que el proveedor debía, del pago de esta entrega.`
+          : `Se pagaron ${fmtARS(Math.abs(permitido))} de más para saldar lo que se le debía.`,
+        pedidoId: pedido.id,
+        usuario,
+      }));
+    } else {
+      out.push({ ok: false, error: `El saldo de ${pedido.proveedor} ya no era ${fmtARS(usado)}: no se descontó nada.` });
+    }
+  }
+
+  if (nuevo) {
+    out.push(await saldos.registrar({
+      proveedor: pedido.proveedor,
+      monto: nuevo,
+      motivo: motivo || 'vuelto',
+      detalle: detalle || (nuevo > 0
+        ? `Se le pagó ${fmtARS(nuevo)} de más al recibir. Nos lo debe.`
+        : `Quedaron ${fmtARS(Math.abs(nuevo))} sin pagar al recibir. Se le deben.`),
+      pedidoId: pedido.id,
+      usuario,
     }));
   }
 
@@ -3550,20 +3632,36 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
       pago: pagoSegunPlan(plan), monto, medioPago, ref, usuario: req.user.nombre,
     });
 
-    // Los avisos van DESPUÉS y no pueden voltear nada: la mercadería llegó, la
-    // plata salió y el pedido ya quedó marcado. `avisos.registrar` no lanza (ver
-    // src/avisos.js) y esto va envuelto igual, porque una recepción que falla
-    // por no poder dejar una nota sería peor que la nota que se pierde.
+    // Los saldos y los avisos van DESPUÉS y no pueden voltear nada: la
+    // mercadería llegó, la plata salió y el pedido ya quedó marcado. Ni
+    // `saldos.registrar` ni `avisos.registrar` lanzan, y esto va envuelto igual
+    // — una recepción que falla por no poder dejar una nota sería peor que la
+    // nota que se pierde. Lo que no se pudo escribir se informa en pantalla.
+    let saldosEscritos = [];
+    try {
+      saldosEscritos = await saldosDeRecepcion({
+        pedido,
+        saldoNuevo: req.body.saldoNuevo,
+        saldoUsado: req.body.saldoUsado,
+        motivo: req.body.saldoMotivo,
+        detalle: req.body.saldoDetalle,
+        usuario: req.user.nombre,
+      });
+    } catch (e) {
+      console.error(`Pedidos: no se pudieron anotar los saldos de la recepción (${e.message})`);
+    }
+
     let avisados = [];
     try {
       avisados = await avisosDeRecepcion({
         pedido, modo, montoDicho, plan, usuario: req.user.nombre,
+        saldoNuevo: req.body.saldoNuevo,
       });
     } catch (e) {
       console.error(`Pedidos: no se pudieron emitir los avisos de la recepción (${e.message})`);
     }
 
-    res.json({ ok: true, data, asiento, avisados });
+    res.json({ ok: true, data, asiento, avisados, saldos: saldosEscritos });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
@@ -3726,6 +3824,52 @@ app.post('/api/pedidos/:id/items/imagen', authMiddleware, async (req, res) => {
 // ─── El cuadro semanal ──────────────────────────────────────────────────────
 // La rutina fija ("los jueves entrega Barracas"). No crea filas de pedido: se
 // muestra dentro de cada día como previsto. Ver el encabezado de pedidos.js.
+// ═══════════════════════════════════════════════════════════════════════════
+// Saldos de proveedores
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// El resumen lo puede LEER cualquiera que reciba pedidos: el cocinero necesita
+// saber que Yerson debe $3.000 justo cuando lo tiene en la puerta, que es el
+// único momento en que ese dato sirve. Es la misma razón por la que el
+// encargado puede cerrar un pago desde Pedidos.
+//
+// Escribir a mano es admin: un renglón suelto no lo justifica ninguna entrega y
+// cambia lo que el bar dice que le deben.
+app.get('/api/saldos', authMiddleware, async (req, res) => {
+  try {
+    res.json({
+      ok: true,
+      configurado: saldos.configurada(),
+      data: await saldos.listarResumen(),
+    });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get('/api/saldos/:proveedor', authMiddleware, async (req, res) => {
+  try { res.json({ ok: true, data: await saldos.historiaDe(req.params.proveedor) }); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// El alta suelta: corregir un saldo, o anotar "me devolvió la plata".
+//
+// OJO CON LO QUE ESTO NO HACE, y la pantalla lo dice con todas las letras: NO
+// mueve ninguna caja. Si el proveedor devolvió efectivo de verdad, esa entrada
+// se carga aparte como corresponde. Un renglón acá sólo cambia lo que el bar
+// dice que le deben o que le deben a él.
+app.post('/api/saldos', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const r = await saldos.registrar({
+      proveedor: req.body.proveedor,
+      monto: req.body.monto,
+      motivo: req.body.motivo || 'ajuste',
+      detalle: req.body.detalle,
+      usuario: req.user.nombre,
+    });
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.error });
+    res.json({ ok: true, data: r });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
 app.get('/api/pedidos/semanal', authMiddleware, async (req, res) => {
   try { res.json({ ok: true, data: await pedidos.listSemanal() }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
