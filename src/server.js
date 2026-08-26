@@ -2980,11 +2980,65 @@ app.delete('/api/pedidos/:id', authMiddleware, adminOnly, async (req, res) => {
 // en el pedido y con qué medio— se decide acá, porque es lo que termina en la
 // planilla. `medioFijo` es el que no se pregunta: pagar en la puerta es siempre
 // en efectivo del local.
+// ═══════════════════════════════════════════════════════════════════════════
+// Recibir son DOS botones (26/08/2026): "lo pagué" y "no lo pagué"
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Eran tres: efectivo, "pago a cuenta" y "pago aparte". Los dos últimos hacían
+// la misma pregunta a quien recibe —¿pagaste vos, en la puerta?— y la contestan
+// igual: no. En lo que se diferenciaban es en lo que pasa DESPUÉS en el libro
+// (uno deja una deuda, el otro no), y eso no es algo que el cocinero sepa: lo
+// decidió quien compró y ya está escrito en `pagoPrevisto` y en la fila.
+//
+// Es la misma regla que le sacó al usuario la elección de la fila el 19/08:
+// **preguntar sólo lo que quien está en la puerta puede contestar**, y resolver
+// el resto acá. Pedirle que distinga "queda a cuenta" de "ya estaba pago" era
+// pedirle que adivine el estado de la planilla.
+//
+//   pague    → la plata salió de la caja del bar, ahora, en la puerta. Siempre
+//              Efectivo Local: es el único medio que se usa en una entrega.
+//   no-pague → quien recibe no pagó nada. Qué significa en el libro son dos
+//              cosas distintas y las separa `yaEstabaPago`, abajo.
+//
+// El `pago` que queda en el pedido YA NO SALE DE ACÁ: lo dice la fila del libro
+// (ver `pagoSegunPlan`). Cuando el botón lo decidía, "no pagué" sobre un pedido
+// de Mercado Libre —cuya fila ya está Pagada— dejaba el pedido diciendo
+// "a pagar" sin que nadie debiera nada.
 const MODOS_RECIBIR = {
-  efectivo: { pago: 'pagado', medioFijo: 'Efectivo Local' },
-  cuenta:   { pago: 'a pagar' },
-  aparte:   { pago: 'pagado' },
+  'pague':    { medioFijo: 'Efectivo Local' },
+  'no-pague': {},
 };
+
+// Un navegador con la pantalla vieja abierta sigue mandando los tres nombres de
+// antes. Se traducen en vez de rechazarse: la mercadería está en la puerta y
+// una pestaña cacheada no puede ser el motivo por el que no se pueda recibir.
+//
+// 'aparte' cae en 'no-pague', que es lo que significaba desde la puerta. Si ese
+// pedido no decía "ya está pago" al comprarse, ahora deja una fila "A pagar"
+// donde antes dejaba una "Pagado" — se ve en Pagos y se corrige ahí, y es
+// preferible a un cocinero trabado. La ventana es de minutos: hasta que esa
+// pestaña recargue.
+const MODOS_VIEJOS = { efectivo: 'pague', cuenta: 'no-pague', aparte: 'no-pague' };
+
+function normalizarModoRecibir(m) {
+  const v = String(m == null ? '' : m).trim();
+  if (MODOS_RECIBIR[v]) return v;
+  return MODOS_VIEJOS[v] || null;
+}
+
+/**
+ * En qué queda el pedido, según lo que se hizo con la fila del libro.
+ *
+ * No lo decide el botón: lo decide la plata. Un pedido está "pagado" si su fila
+ * quedó Pagada —porque se cerró, porque se escribió así, o porque ya lo estaba—
+ * y "a pagar" si quedó abierta. Así el pedido y el libro no se pueden
+ * contradecir, que es lo único que hace creíble a la columna J.
+ */
+function pagoSegunPlan(plan) {
+  if (plan.accion === 'crear-a-pagar') return 'a pagar';
+  if (plan.accion === 'crear-pagado' || plan.accion === 'cerrar-fila') return 'pagado';
+  return plan.fila && plan.fila.pagado ? 'pagado' : 'a pagar';   // vincular-fila
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Qué fila de Movimientos le corresponde a un pedido que acaba de llegar
@@ -3124,9 +3178,29 @@ async function planificarAsiento({ pedido, modo, monto = 0 }) {
     vencimiento: f.vencimiento || '',
     descripcion: f.descripcion || '',
     medioPago: f.medioPago || '',
+    // Lo mira `pagoSegunPlan` para saber en qué queda el pedido cuando la fila
+    // se vincula sin tocarla.
+    pagado: !!f.pagado,
   });
 
   const pistas = { monto, fechaRef, pedidoId: pedido.id, detalle: pedido.detalle || '' };
+
+  // ─── "No pagué" son dos cosas, y la diferencia ya estaba escrita ──────────
+  //
+  // Quien recibe contesta una sola pregunta: si la plata salió de la caja en la
+  // puerta. Cuando dice que no, hay dos mundos distintos y ninguno de los dos
+  // lo tiene que contestar él:
+  //
+  //   · la compra dijo "esto ya está pago" (Mercado Libre, una transferencia
+  //     hecha al comprar) → la plata ya salió, no se debe nada. Es lo que hasta
+  //     el 26/08/2026 era el botón "pago aparte".
+  //   · cualquier otra cosa → queda a cuenta y hay que perseguirlo desde Pagos.
+  //     Es lo que era "pago a cuenta".
+  //
+  // Se mira `pagoPrevisto`, que es lo que dijo quien compró, y no el medio ni el
+  // monto: es la única fuente que afirma algo sobre la plata ANTES de la
+  // entrega, y afirmarlo era justamente su trabajo.
+  const yaEstabaPago = modo === 'no-pague' && pedido.pagoPrevisto === 'pagado';
 
   // ─── El atajo: este pedido YA sabe cuál es su fila ────────────────────────
   //
@@ -3144,13 +3218,13 @@ async function planificarAsiento({ pedido, modo, monto = 0 }) {
   // el pedido quedaba pagado con la fila del libro abierta.
   //
   // Qué hacer con ella sí depende del modo, y son dos casos:
-  //   - ya está Pagada, o el modo dice que queda a cuenta → sólo se vincula.
-  //   - está A pagar y la plata salió (efectivo en la puerta, o pago aparte por
-  //     transferencia) → se cierra.
+  //   - ya está Pagada, o quien recibe no pagó → sólo se vincula. Que quede
+  //     abierta o cerrada no lo cambia esta recepción: nadie puso plata.
+  //   - está A pagar y la plata salió en la puerta → se cierra.
   const propia = delProveedor.find(m => (m.cuotaId || '') === pedido.id);
   if (propia) {
     const otras = aPagar.filter(m => m.rowIndex !== propia.rowIndex).length;
-    return (propia.pagado || modo === 'cuenta')
+    return (propia.pagado || modo === 'no-pague')
       ? { accion: 'vincular-fila', fila: resumen(propia), otrasPendientes: otras }
       : { accion: 'cerrar-fila', fila: resumen(propia), otrasPendientes: otras };
   }
@@ -3172,33 +3246,57 @@ async function planificarAsiento({ pedido, modo, monto = 0 }) {
   // que en "pago aparte": si hay que cancelarlas, se hace desde Pagos.
   if (pedido.origen === 'compra') {
     return {
-      accion: modo === 'cuenta' ? 'crear-a-pagar' : 'crear-pagado',
+      // Sólo queda deuda si nadie pagó Y la compra no había dicho que ya estaba
+      // pagada. Los otros dos caminos —se pagó en la puerta, o ya se había
+      // pagado antes— escriben la fila como Pagado.
+      accion: (modo === 'no-pague' && !yaEstabaPago) ? 'crear-a-pagar' : 'crear-pagado',
       fila: null,
       otrasPendientes: aPagar.length,
       deCompra: true,
+      yaEstabaPago,
     };
   }
 
-  if (modo === 'efectivo') {
+  if (modo === 'pague') {
     const f = _elegirCandidata(aPagar, pistas);
     return f
       ? { accion: 'cerrar-fila', fila: resumen(f), otrasPendientes: aPagar.length - 1 }
       : { accion: 'crear-pagado', fila: null, otrasPendientes: 0 };
   }
 
-  if (modo === 'cuenta') {
+  if (!yaEstabaPago) {
     // La fila propia vale aunque esté fuera de la ventana: si este pedido ya
     // escribió su "A pagar", ésa es su fila y la fecha no tiene nada que decir.
     const cands = enVentana(aPagar).concat(aPagar.filter(m => (m.cuotaId || '') === pedido.id));
     const f = _elegirCandidata(cands, pistas);
-    return f
-      ? { accion: 'vincular-fila', fila: resumen(f), otrasPendientes: aPagar.length - 1 }
-      : { accion: 'crear-a-pagar', fila: null, otrasPendientes: aPagar.length };
+    if (f) return { accion: 'vincular-fila', fila: resumen(f), otrasPendientes: aPagar.length - 1 };
+
+    // ─── Se escribe la deuda, pero puede que esto ya esté pago ──────────────
+    //
+    // Al sacar el botón "pago aparte" (26/08/2026) se perdió la única forma de
+    // decir "esto ya estaba pagado" para un pedido que NO nació de una compra:
+    // los del cuadro semanal, que no dicen nada sobre la plata. Con la factura
+    // ya entrada por el bot como Pagada, "no lo pagué" escribe acá una deuda
+    // que no se debe.
+    //
+    // Se escribe igual, y es a propósito: las dos salidas son malas y ésta es
+    // la visible. Una deuda de más aparece en Pagos, alguien la persigue y se
+    // descubre; engancharse a una fila Pagada por si acaso dejaría el gasto de
+    // esta entrega sin escribir nunca, en silencio. Lo que sí se hace es
+    // decirlo — la fila candidata va en el informe y decide una persona, que es
+    // lo único honesto que se puede hacer con una ambigüedad real.
+    const yaPagada = _elegirCandidata(enVentana(delProveedor.filter(m => m.pagado)), pistas);
+    return {
+      accion: 'crear-a-pagar',
+      fila: null,
+      otrasPendientes: aPagar.length,
+      pagadaCercana: resumen(yaPagada) || null,
+    };
   }
 
-  // aparte: la fila que corresponde ya está Pagada. Ojo con lo que NO se hace
-  // acá: si el proveedor tiene una "A pagar" abierta, no se la toca ni se la
-  // cierra. Puede ser una deuda vieja que no tiene nada que ver con esta
+  // `yaEstabaPago`: la fila que corresponde ya está Pagada. Ojo con lo que NO
+  // se hace acá: si el proveedor tiene una "A pagar" abierta, no se la toca ni
+  // se la cierra. Puede ser una deuda vieja que no tiene nada que ver con esta
   // entrega, y cerrarla sería dar por pagado algo que nadie pagó. Se avisa en
   // el informe y decide una persona, que es lo único honesto que se puede hacer
   // con una ambigüedad real.
@@ -3206,8 +3304,8 @@ async function planificarAsiento({ pedido, modo, monto = 0 }) {
   const pagadas = enVentana(soloPagadas).concat(soloPagadas.filter(m => (m.cuotaId || '') === pedido.id));
   const f = _elegirCandidata(pagadas, pistas);
   return f
-    ? { accion: 'vincular-fila', fila: resumen(f), otrasPendientes: aPagar.length }
-    : { accion: 'crear-pagado', fila: null, otrasPendientes: aPagar.length };
+    ? { accion: 'vincular-fila', fila: resumen(f), otrasPendientes: aPagar.length, yaEstabaPago }
+    : { accion: 'crear-pagado', fila: null, otrasPendientes: aPagar.length, yaEstabaPago };
 }
 // ═══════════════════════════════════════════════════════════════════════════
 // Cuando lo que se recibe no es lo que se había cargado
@@ -3279,7 +3377,7 @@ async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario }) {
   // efectivo. Se mira `pagoPrevisto` —la intención, escrita al comprar— y no
   // `pago`, que es el hecho y que en este punto todavía era 'no' (la ruta
   // rechaza cualquier pedido que ya tenga pago registrado).
-  if (pedido.pagoPrevisto === 'pagado' && modo === 'efectivo') {
+  if (pedido.pagoPrevisto === 'pagado' && modo === 'pague') {
     out.push(await avisos.registrar({
       tipo: 'pedido-pagado-cobrado-en-puerta',
       severidad: 'alta',
@@ -3301,10 +3399,11 @@ async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario }) {
 /**
  * POST /api/pedidos/:id/recibir — llegó la mercadería.
  *
- * `modo` es uno de los tres botones de la pantalla: 'efectivo', 'cuenta' o
- * 'aparte'. Contra qué fila de Movimientos va NO lo decide el cliente: lo
- * decide `planificarAsiento` acá adentro. Ver su comentario, que es donde está
- * la regla; esta ruta sólo ejecuta lo que aquél resolvió y cuenta qué pasó.
+ * `modo` es uno de los DOS botones de la pantalla: 'pague' o 'no-pague'. Contra
+ * qué fila de Movimientos va NO lo decide el cliente, y desde el 26/08/2026
+ * tampoco decide en qué queda el pedido: las dos cosas las resuelve
+ * `planificarAsiento` acá adentro, y `pagoSegunPlan` lee el resultado. Ver sus
+ * comentarios, que es donde está la regla; esta ruta ejecuta y cuenta qué pasó.
  *
  * El orden es LIBRO PRIMERO, hoja Pedidos después, y el pedido sólo se marca si
  * el asiento salió bien. Al revés, un fallo de Sheets en el medio dejaría un
@@ -3343,15 +3442,21 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
       return res.status(400).json({ ok: false, error: `Este pedido ya figura como "${pedido.pago}".` });
     }
 
-    const modo = MODOS_RECIBIR[req.body.modo] ? req.body.modo : null;
-    if (!modo) return res.status(400).json({ ok: false, error: 'Falta decir cómo se recibió.' });
-    const { pago, medioFijo } = MODOS_RECIBIR[modo];
+    const modo = normalizarModoRecibir(req.body.modo);
+    if (!modo) return res.status(400).json({ ok: false, error: 'Falta decir si se pagó o no.' });
     let monto = Number(req.body.monto) || 0;
     // Lo que TIPEÓ quien recibe, guardado antes de que `monto` lo pise con el
     // de la fila enganchada. Es contra esto que se compara lo cargado al
     // comprar — ver avisosDeRecepcion, que explica por qué el descarte importa.
     const montoDicho = monto;
-    const medioPago = medioFijo || (req.body.medioPago || '').toString();
+
+    // El medio tampoco se pregunta más (26/08/2026). En la puerta es siempre
+    // Efectivo Local, y cuando nadie pagó, el medio que corresponde es el que
+    // dijo la compra: si queda a cuenta, es por dónde se va a pagar; si ya
+    // estaba pagada, es por dónde salió. Un selector de seis opciones para que
+    // el cocinero repita el dato que ya está cargado es un paso de más en el
+    // peor momento. Vacío no rompe nada: Pagos cae en la ficha del proveedor.
+    const medioPago = MODOS_RECIBIR[modo].medioFijo || (pedido.medioPrevisto || '');
 
     // Se decide contra qué fila va ANTES de tocar nada.
     let plan = await planificarAsiento({ pedido, modo, monto });
@@ -3439,8 +3544,10 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
       ref = pedido.id;
       asiento = { ...plan, escribio: !r.yaExistia, yaEstaba: !!r.yaExistia, registradoEnSesion: r.registradoEnSesion };
     }
+    // En qué queda el pedido lo dice la fila del libro, no el botón que se
+    // apretó. Ver `pagoSegunPlan`.
     const data = await pedidos.marcarRecibido(pedido.id, {
-      pago, monto, medioPago, ref, usuario: req.user.nombre,
+      pago: pagoSegunPlan(plan), monto, medioPago, ref, usuario: req.user.nombre,
     });
 
     // Los avisos van DESPUÉS y no pueden voltear nada: la mercadería llegó, la
@@ -3474,7 +3581,7 @@ app.get('/api/pedidos/:id/plan', authMiddleware, async (req, res) => {
   try {
     const pedido = await pedidos.getPedido(req.params.id);
     if (!pedido) return res.status(404).json({ ok: false, error: 'No se encontró ese pedido' });
-    const modo = MODOS_RECIBIR[req.query.modo] ? req.query.modo : 'efectivo';
+    const modo = normalizarModoRecibir(req.query.modo) || 'pague';
     const plan = await planificarAsiento({ pedido, modo, monto: Number(req.query.monto) || 0 });
     res.json({ ok: true, data: plan });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
