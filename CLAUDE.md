@@ -380,6 +380,21 @@ The money that does not add up when a delivery is paid. The order is $117.000, t
 
 **`Movimientos` always carries the money that moved, not the value of the goods** — $120.000, not $117.000. This is the invariant the whole design rests on, and it is why the balances live entirely outside the ledger. `estadoCaja.gastosSesion` is filled with exactly the amount written to `Movimientos`, and it feeds **two** things: the arqueo's expected cash (column O) and, at close, `registrarCaja`'s adjustment row — which explicitly assumes every session expense has its own ledger row. Push a difference into `gastosSesion` with no row and the `Cajas` sheet ends up above reality; omit it and the close writes a *"delta efectivo (faltante)"* line, i.e. the system claims money was lost rather than owed. The accepted cost: while a balance is outstanding the month's goods figure is off by that much, and it corrects itself when the balance is used, because that payment is smaller by the same amount.
 
+**"Pagué de menos" means two opposite things, and the reason is the only thing separating them.** The single most important decision in the reception modal:
+
+| Motivo | Qué significa | Saldo |
+|---|---|---|
+| `pago-parcial` (default) | llegó todo y se pagó de menos | la diferencia **se debe** → saldo negativo |
+| `reduccion` (needs free text) | no se aceptó parte de la mercadería | la diferencia **no se debe** → ningún saldo |
+
+Confusing them would leave the bar owing money for goods it sent back. That is why the default is `pago-parcial` — the one that *does* leave a debt — and letting the debt go requires picking the other option **and writing why**: releasing a debt has to be deliberate, not the path of least resistance. `SALDO_DEJA_DEUDA` in `server.js` is that table, kept out of the function so it can be read at a glance.
+
+**The screen sends the TOTAL PAID and the reason; the server does the subtraction.** Never the difference: asking for a subtraction with the supplier at the door gets it wrong, and the same arithmetic in two places drifts apart the day one is touched. The server compares against `costoEstimado − saldoUsado` — without subtracting the applied balance, using $3.000 would read as "paid $3.000 less" and the same money would be recorded twice. **If the sign does not match the button** (says "de más" but typed less), nothing is recorded: better to lose the balance than to book it on the wrong side, and the unexplained difference makes the owners' aviso fire anyway. The browser guards the same contradiction before sending, so it never becomes a silent server-side no-op.
+
+**The three buttons only show when there is something to compare against** — `modo === 'pague'` and `costoEstimado > 0`. A weekly-grid delivery carries no expected amount, so "de más" and "de menos" mean nothing there and the modal just asks the amount. "Pagué lo esperado" hides the amount field entirely: a field that fills itself with the number three lines above is one step too many.
+
+**A vuelto is routine and stays silent; a hand-written reason rings.** `excepcional` in `avisosDeRecepcion` is a deliberate back door — `sin-cambio` suppresses the overpayment aviso, any other reason does not, and the aviso carries the typed explanation. Being recorded is not the same as nobody needing to look.
+
 **`registrar()` never throws**, same rule as `avisos.js` — a reception cannot fail because a note could not be left; it returns `{ok:false}` and the receiving screen says the money went unrecorded. **`saldoUsado` is never trusted from the client**: the server re-reads the real balance and clamps to it, in sign and in size. A stale tab could otherwise spend a balance twice, and that is money. Applying a balance changes the amount paid — and therefore the ledger row — with no magic behind it.
 
 **A declared balance suppresses the overpayment aviso.** `avisosDeRecepcion` subtracts the positive `saldoNuevo` before comparing against `AVISO_DIFERENCIA_MIN`: a $3.000 vuelto *is* "paid more than loaded", and without this the aviso built the same day would fire on its most common case. Only the positive side is subtracted — a negative balance means they paid *less*, which this comparison does not look at.

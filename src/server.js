@@ -3350,7 +3350,8 @@ const AVISO_DIFERENCIA_MIN = 1000;
  * caso a avisar. Alguien dijo que pagó $62.000 contra una fila de $47.300; sin
  * este aviso, esa afirmación no queda escrita en ningún lado.
  */
-async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario, saldoNuevo = 0 }) {
+async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario,
+                                   saldoNuevo = 0, excepcional = false, detalleExcepcional = '' }) {
   const out = [];
 
   // Contra qué se compara. Primero lo que decía el pedido —es lo que quien
@@ -3368,7 +3369,12 @@ async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario, sald
   //
   // Sólo descuenta el saldo POSITIVO: uno negativo (le quedamos debiendo)
   // significa que se pagó de MENOS, que no es lo que esta comparación mira.
-  const explicado = Math.max(0, Math.round(Number(saldoNuevo) || 0));
+  //
+  // `excepcional` es la puerta de atrás a propósito: "no había cambio" es
+  // rutina y se descuenta, pero un "pagué de más" con un motivo escrito a mano
+  // vuelve a sonar aunque esté declarado — es el caso raro por definición, y
+  // que esté anotado no quiere decir que nadie tenga que mirarlo.
+  const explicado = excepcional ? 0 : Math.max(0, Math.round(Number(saldoNuevo) || 0));
   const diferencia = Math.round(montoDicho - esperado - explicado);
   if (esperado > 0 && montoDicho > 0 && diferencia >= AVISO_DIFERENCIA_MIN) {
     out.push(await avisos.registrar({
@@ -3384,6 +3390,9 @@ async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario, sald
               + `${fmtARS(diferencia)} sin explicar. `
             : ` — ${fmtARS(diferencia)} de más. `)
         + `Lo recibió ${usuario || 'alguien'} el ${fechaHoraAR()}.`
+        + (excepcional
+            ? ` Dijo que pagó de más${detalleExcepcional ? `: "${String(detalleExcepcional).slice(0, 200)}"` : ', sin decir por qué'}.`
+            : '')
         + (pedido.detalle ? ` Pedido: ${pedido.detalle}.` : ''),
     }));
   }
@@ -3418,12 +3427,25 @@ async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario, sald
 // Dos cosas independientes que pueden pasar en la misma entrega, y por eso son
 // dos parámetros y no uno:
 //
-//   · `saldoNuevo` — la plata de HOY no cerró. Con signo, según la convención
-//     de src/saldos.js: positivo = nos lo debe (se pagó de más, el vuelto que
-//     no había), negativo = le quedamos debiendo.
+//   · `pagoTipo` + `pagoMotivo` — cómo cerró la plata de HOY. La pantalla manda
+//     el TOTAL pagado y estos dos; **la diferencia la saca acá**, contra lo que
+//     dijo la compra. Que la reste el navegador sería tener la misma cuenta en
+//     dos lugares, y acá la cuenta es plata.
 //   · `saldoUsado` — se descontó un saldo que YA existía. El renglón que se
 //     escribe es el opuesto, porque lo cancela: usar $3.000 que nos debían
 //     escribe −$3.000 y el saldo queda en cero.
+//
+// ─── "Pagué de menos" son DOS cosas opuestas, y las separa el motivo ────────
+//
+//   pago-parcial → llegó todo y se pagó de menos. La diferencia SE DEBE: nace
+//                  un saldo a favor del proveedor (negativo).
+//   reduccion    → no se aceptó parte de la mercadería (los langostinos
+//                  estaban podridos). La diferencia NO se debe: el pedido valía
+//                  menos. No nace ningún saldo.
+//
+// Confundirlas dejaría al bar debiendo plata por mercadería que devolvió. Por
+// eso el default de la pantalla es `pago-parcial` —el que sí deja deuda— y
+// soltar la deuda exige elegir la otra opción y escribir por qué.
 //
 // LO QUE ESTO NO HACE: tocar `Movimientos`. La fila del libro lleva SIEMPRE la
 // plata que se movió —los $120.000 que salieron de la caja, no los $117.000 que
@@ -3434,10 +3456,19 @@ async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario, sald
 // `saldoUsado` NO se cree lo que dice el cliente: se relee el saldo real y se
 // recorta contra él. Un navegador con la pantalla vieja podría descontar un
 // saldo que ya se usó, y eso es plata.
-async function saldosDeRecepcion({ pedido, saldoNuevo = 0, saldoUsado = 0, motivo, detalle, usuario }) {
+// Qué motivo, de cada lado, deja deuda. Fuera de la función para poder mirarlo
+// de un vistazo: es la tabla de la que depende que el bar no quede debiendo
+// plata por mercadería que devolvió.
+const SALDO_DEJA_DEUDA = {
+  demas: () => true,                     // el vuelto se debe, sea cual sea el porqué
+  menos: (motivo) => motivo !== 'reduccion',
+};
+
+async function saldosDeRecepcion({ pedido, monto = 0, pagoTipo, pagoMotivo, pagoDetalle,
+                                   saldoUsado = 0, usuario }) {
   const out = [];
-  const nuevo = Math.round(Number(saldoNuevo) || 0);
   const usado = Math.round(Number(saldoUsado) || 0);
+  let usadoReal = 0;
 
   if (usado) {
     const actual = Math.round(await saldos.saldoDe(pedido.proveedor));
@@ -3447,6 +3478,7 @@ async function saldosDeRecepcion({ pedido, saldoNuevo = 0, saldoUsado = 0, motiv
       ? 0
       : Math.sign(actual) * Math.min(Math.abs(usado), Math.abs(actual));
     if (permitido) {
+      usadoReal = permitido;
       out.push(await saldos.registrar({
         proveedor: pedido.proveedor,
         monto: -permitido,
@@ -3462,20 +3494,44 @@ async function saldosDeRecepcion({ pedido, saldoNuevo = 0, saldoUsado = 0, motiv
     }
   }
 
+  // ─── La diferencia, sacada acá y no en el navegador ───────────────────────
+  //
+  // Lo que correspondía pagar HOY es lo que dijo la compra MENOS lo que se
+  // descontó de saldo. Sin restar `usadoReal`, descontar $3.000 se leería como
+  // "pagó $3.000 de menos" y se anotaría dos veces la misma plata.
+  const esperado = Math.round(Number(pedido.costoEstimado) || 0);
+  const aPagar = esperado - usadoReal;
+  const diferencia = Math.round((Number(monto) || 0) - aPagar);
+  const tipo = pagoTipo === 'demas' || pagoTipo === 'menos' ? pagoTipo : null;
+
+  // El signo tiene que coincidir con lo que dijo el botón. Si no coincide, no se
+  // anota nada: es mejor perder el saldo que anotarlo del lado equivocado, y el
+  // aviso a los dueños igual va a saltar por la diferencia sin explicar.
+  const coincide = tipo === 'demas' ? diferencia > 0 : tipo === 'menos' ? diferencia < 0 : false;
+  const dejaDeuda = tipo && SALDO_DEJA_DEUDA[tipo](pagoMotivo);
+  const nuevo = (esperado > 0 && coincide && dejaDeuda) ? diferencia : 0;
+
   if (nuevo) {
+    const texto = (pagoDetalle || '').toString().trim();
     out.push(await saldos.registrar({
       proveedor: pedido.proveedor,
       monto: nuevo,
-      motivo: motivo || 'vuelto',
-      detalle: detalle || (nuevo > 0
-        ? `Se le pagó ${fmtARS(nuevo)} de más al recibir. Nos lo debe.`
-        : `Quedaron ${fmtARS(Math.abs(nuevo))} sin pagar al recibir. Se le deben.`),
+      motivo: pagoMotivo === 'sin-cambio' ? 'vuelto' : (pagoMotivo || 'otros'),
+      detalle: (nuevo > 0
+        ? `Se pagaron ${fmtARS(monto)} de un pedido de ${fmtARS(aPagar)}: ${fmtARS(nuevo)} de más. Nos lo debe.`
+        : `Se pagaron ${fmtARS(monto)} de un pedido de ${fmtARS(aPagar)}: quedaron ${fmtARS(Math.abs(nuevo))} sin pagar. Se le deben.`)
+        + (texto ? ` ${texto}` : ''),
       pedidoId: pedido.id,
       usuario,
     }));
   }
 
-  return out;
+  // `saldoNuevo` sale de acá para que el aviso a los dueños mire exactamente lo
+  // mismo que se anotó, y no lo que el navegador dijo que iba a anotar.
+  // `reduccion` devuelve la diferencia igual aunque no genere saldo: el pedido
+  // valió menos y eso también es una explicación válida de por qué la plata no
+  // coincide con la compra.
+  return { movimientos: out, saldoNuevo: nuevo, diferencia: coincide ? diferencia : 0, usado: usadoReal };
 }
 
 /**
@@ -3637,16 +3693,18 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
     // `saldos.registrar` ni `avisos.registrar` lanzan, y esto va envuelto igual
     // — una recepción que falla por no poder dejar una nota sería peor que la
     // nota que se pierde. Lo que no se pudo escribir se informa en pantalla.
-    let saldosEscritos = [];
+    let saldosEscritos = [], saldoResuelto = { saldoNuevo: 0, diferencia: 0 };
     try {
-      saldosEscritos = await saldosDeRecepcion({
+      saldoResuelto = await saldosDeRecepcion({
         pedido,
-        saldoNuevo: req.body.saldoNuevo,
+        monto: montoDicho,
+        pagoTipo: req.body.pagoTipo,
+        pagoMotivo: req.body.pagoMotivo,
+        pagoDetalle: req.body.pagoDetalle,
         saldoUsado: req.body.saldoUsado,
-        motivo: req.body.saldoMotivo,
-        detalle: req.body.saldoDetalle,
         usuario: req.user.nombre,
       });
+      saldosEscritos = saldoResuelto.movimientos;
     } catch (e) {
       console.error(`Pedidos: no se pudieron anotar los saldos de la recepción (${e.message})`);
     }
@@ -3655,7 +3713,15 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
     try {
       avisados = await avisosDeRecepcion({
         pedido, modo, montoDicho, plan, usuario: req.user.nombre,
-        saldoNuevo: req.body.saldoNuevo,
+        // Lo que quedó EXPLICADO, no lo que se anotó: "se redujo el pedido" no
+        // deja saldo y sin embargo explica perfectamente por qué se pagó otra
+        // cosa. Se pasa la diferencia declarada, que es la que cuadra.
+        saldoNuevo: saldoResuelto.diferencia,
+        // Un vuelto por falta de cambio es rutina y no tiene que sonar. Un
+        // "pagué de más" con un motivo escrito a mano es, por definición, el
+        // caso raro — y ése es justamente el que los dueños quieren mirar.
+        excepcional: req.body.pagoTipo === 'demas' && req.body.pagoMotivo !== 'sin-cambio',
+        detalleExcepcional: req.body.pagoDetalle,
       });
     } catch (e) {
       console.error(`Pedidos: no se pudieron emitir los avisos de la recepción (${e.message})`);

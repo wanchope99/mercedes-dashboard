@@ -2096,12 +2096,45 @@
     <div id="ped-r-ojo" style="font-size:12px;color:var(--orange);line-height:1.6;margin-bottom:14px"></div>
 
     <div>
-      <div class="form-group full" style="margin-bottom:12px">
+      <!-- Lo que el proveedor ya debía (o se le debía) antes de esta entrega. -->
+      <div id="ped-r-saldo-tiene" style="margin-bottom:12px"></div>
+
+      <!-- ¿Cómo pagaste? Sólo aparece cuando hay un monto esperado contra el
+           cual comparar: sin eso, "de más" y "de menos" no significan nada y lo
+           único que se puede preguntar es cuánto se pagó. -->
+      <div class="form-group full" id="ped-r-pago-wrap" style="display:none;margin-bottom:12px">
+        <label>¿Cómo pagaste?</label>
+        <div class="pp-grupo" id="ped-r-pago-tipo">
+          <button type="button" class="pp-btn activo" data-tipo="esperado" onclick="setPagoTipo('esperado')">
+            Pagué lo esperado</button>
+          <button type="button" class="pp-btn" data-tipo="demas" onclick="setPagoTipo('demas')">
+            Pagué de más</button>
+          <button type="button" class="pp-btn" data-tipo="menos" onclick="setPagoTipo('menos')">
+            Pagué de menos</button>
+        </div>
+        <div id="ped-r-pago-resumen" style="font-size:11.5px;color:var(--text-muted);margin-top:6px"></div>
+      </div>
+
+      <div class="form-group full" id="ped-r-monto-wrap" style="margin-bottom:12px">
         <label id="ped-r-monto-label">Cuánto se pagó</label>
-        <!-- El monto decide qué fila matchea (el monto exacto manda sobre la
-             fecha), así que al tipearlo se vuelve a preguntar el plan. -->
+        <!-- SIEMPRE el total pagado, nunca la diferencia: la diferencia la saca
+             el server contra lo que decía la compra. Pedirla tipeada sería pedir
+             una resta con el proveedor en la puerta, y una resta mal hecha acá
+             es plata que se anota mal.
+             El monto además decide qué fila matchea (el monto exacto manda sobre
+             la fecha), así que al tipearlo se vuelve a preguntar el plan. -->
         <input type="text" id="ped-r-monto" inputmode="numeric" placeholder="0"
                oninput="onPedMontoChange()" style="width:100%">
+      </div>
+
+      <!-- El porqué. En "de más" no cambia la plata: el vuelto se debe igual.
+           En "de menos" SÍ la cambia, y es la decisión más importante de esta
+           ventana — ver setPagoTipo. -->
+      <div class="form-group full" id="ped-r-motivo-wrap" style="display:none;margin-bottom:12px">
+        <label id="ped-r-motivo-label">¿Por qué?</label>
+        <div class="pp-grupo" id="ped-r-motivo-opts"></div>
+        <input type="text" id="ped-r-motivo-texto" maxlength="200" style="display:none;width:100%;margin-top:8px"
+               placeholder="Ej: los langostinos estaban podridos">
       </div>
       <!-- Sólo cuando nadie pagó, y opcional: vacío significa el día de la
            entrega. El medio ya no se pregunta — lo dijo la compra. -->
@@ -2110,30 +2143,6 @@
         <input type="date" id="ped-r-venc" style="width:100%">
       </div>
 
-      <!-- Lo que el proveedor ya debía (o se le debía) antes de esta entrega. -->
-      <div id="ped-r-saldo-tiene" style="margin-bottom:12px"></div>
-
-      <!-- ¿La plata cerró?
-           No dice "a favor" ni "en contra": de qué lado es eso no se entiende
-           con el proveedor en la puerta, y leerlo al revés es plata. Dice quién
-           le pagó de más a quién, que no se puede malinterpretar.
-           Arranca en "cerró justo" porque es lo que pasa casi siempre: el que
-           recibe no tiene que tocar nada para el caso normal. -->
-      <div class="form-group full" id="ped-r-saldo-wrap" style="margin-bottom:12px">
-        <label>¿La plata cerró?</label>
-        <div class="pp-grupo" id="ped-r-saldo-tipo">
-          <button type="button" class="pp-btn activo" data-tipo="nada" onclick="setSaldoTipo('nada')">
-            Cerró justo</button>
-          <button type="button" class="pp-btn" data-tipo="demas" onclick="setSaldoTipo('demas')">
-            Le pagué de más<small>me lo debe</small></button>
-          <button type="button" class="pp-btn" data-tipo="debiendo" onclick="setSaldoTipo('debiendo')">
-            Le quedé debiendo<small>se lo debo</small></button>
-        </div>
-        <div id="ped-r-saldo-monto-wrap" style="display:none;margin-top:8px">
-          <input type="text" id="ped-r-saldo-monto" inputmode="numeric" placeholder="0" style="width:100%">
-          <div id="ped-r-saldo-ayuda" style="font-size:11px;color:var(--text-muted);margin-top:5px"></div>
-        </div>
-      </div>
       <div id="ped-r-que-hace" style="font-size:11.5px;color:var(--text-muted);line-height:1.6;margin-bottom:12px"></div>
     </div>
 
@@ -15345,7 +15354,8 @@ const pedState = {
   plan: null,             // qué dijo el server que va a hacer: ver pedCargarPlan
   saldos: [],             // lo que cada proveedor debe o se le debe: ver src/saldos.js
   saldosConfigurados: false,
-  saldoTipo: 'nada',      // 'nada' | 'demas' | 'debiendo' — cómo cerró la plata hoy
+  pagoTipo: 'esperado',   // 'esperado' | 'demas' | 'menos' — cómo se pagó hoy
+  pagoMotivo: '',         // por qué, y en "de menos" decide si nace un saldo
   saldoUsar: 0,           // cuánto del saldo viejo se está descontando
   editandoSem: null,
   arrastrando: null,
@@ -16330,12 +16340,25 @@ async function openPedRecibir(id, modo) {
         + `cancelá y usá <b>Llegó y no lo pagué</b>.`
       : '';
 
-  // La plata arranca cerrando justo, que es lo que pasa casi siempre: para el
-  // caso normal no hay nada que tocar.
-  pedState.saldoTipo = 'nada';
+  // Los tres botones de cómo se pagó sólo tienen sentido con un monto esperado
+  // contra el cual comparar, y sólo cuando la plata la puso quien recibe: en
+  // "no lo pagué" no hay un "de más" posible.
+  //
+  // Arranca en "lo esperado", que es lo que pasa casi siempre: para el caso
+  // normal no hay nada que tocar.
   pedState.saldoUsar = 0;
-  document.getElementById('ped-r-saldo-monto').value = '';
-  setSaldoTipo('nada');
+  pedState.pagoMotivo = '';
+  document.getElementById('ped-r-motivo-texto').value = '';
+  const comparable = pedState.modo === 'pague' && pedEsperado() > 0;
+  document.getElementById('ped-r-pago-wrap').style.display = comparable ? '' : 'none';
+  if (comparable) {
+    setPagoTipo('esperado');
+  } else {
+    pedState.pagoTipo = 'esperado';
+    document.getElementById('ped-r-monto-wrap').style.display = '';
+    document.getElementById('ped-r-monto-label').textContent = m.montoLabel;
+    document.getElementById('ped-r-motivo-wrap').style.display = 'none';
+  }
   pintarSaldoDelProveedor();
 
   document.getElementById('ped-recibir-overlay').classList.add('open');
@@ -16410,29 +16433,139 @@ function toggleUsarSaldo() {
   onPedMontoChange();
 }
 
-// Cómo cerró la plata HOY. Es independiente del saldo viejo: se puede descontar
-// lo de antes y además pagar de más porque no había cambio.
-function setSaldoTipo(tipo) {
-  pedState.saldoTipo = tipo;
-  document.querySelectorAll('#ped-r-saldo-tipo .pp-btn').forEach(b => {
-    b.classList.toggle('activo', b.dataset.tipo === tipo);
-  });
-  document.getElementById('ped-r-saldo-monto-wrap').style.display = tipo === 'nada' ? 'none' : '';
-  document.getElementById('ped-r-saldo-ayuda').textContent = tipo === 'demas'
-    ? 'Cuánto de más. Queda anotado a tu favor contra este proveedor.'
-    : tipo === 'debiendo'
-      ? 'Cuánto quedó sin pagar. Queda anotado como que se lo debés.'
-      : '';
-  if (tipo === 'nada') document.getElementById('ped-r-saldo-monto').value = '';
+// ═══════════════════════════════════════════════════════════════════════════
+// Cómo se pagó, y el porqué que decide si nace un saldo
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// El campo del monto es SIEMPRE el total pagado. La diferencia contra lo que
+// decía la compra la saca el server: pedirla tipeada es pedir una resta con el
+// proveedor en la puerta, y una resta mal hecha acá se anota como plata.
+//
+// "PAGUÉ DE MENOS" SIGNIFICA DOS COSAS OPUESTAS y el motivo es lo único que las
+// separa. Es la decisión más importante de esta ventana:
+//
+//   · pago-parcial → llegó todo y se pagó de menos. La diferencia SE DEBE:
+//     nace un saldo a favor del proveedor.
+//   · reduccion    → no se aceptó parte de la mercadería (los langostinos
+//     estaban podridos). La diferencia NO se debe: el pedido valía menos y
+//     listo. No nace ningún saldo.
+//
+// Si esto se confundiera, el bar quedaría debiendo plata por mercadería que
+// devolvió. Por eso el default es `pago-parcial` —el caso que sí deja deuda— y
+// la alternativa exige escribir por qué: soltar la deuda tiene que ser un acto
+// deliberado, no el camino de menor resistencia.
+//
+// En "pagué de más" el motivo no cambia la plata (el vuelto se debe igual),
+// pero sí cambia a quién se le avisa: ver `pedPagoMotivoEsExcepcional`.
+const PED_PAGO_MOTIVOS = {
+  demas: [
+    ['sin-cambio', 'No había cambio', '', false],
+    ['otros', 'Otro motivo', 'contá cuál', true],
+  ],
+  menos: [
+    ['pago-parcial', 'Pago parcial', 'llegó todo, queda debiendo', false],
+    ['reduccion', 'Se redujo el pedido', 'no se debe la diferencia', true],
+  ],
+};
+
+// El motivo con texto libre es, por definición, el caso raro. En "pagué de más"
+// eso es justamente lo que los dueños quieren mirar: "no había cambio" es
+// rutina y no suena, cualquier otra cosa sí.
+function pedPagoMotivoEsExcepcional() {
+  return pedState.pagoTipo === 'demas' && pedState.pagoMotivo === 'otros';
 }
 
-// El saldo que deja esta recepción, con el signo de src/saldos.js: positivo es
-// a favor del bar. Lo arma la pantalla en un solo lugar para que el body y el
-// aviso previo no puedan discrepar.
-function pedSaldoNuevo() {
-  const monto = pedNumero(document.getElementById('ped-r-saldo-monto').value);
-  if (!monto || pedState.saldoTipo === 'nada') return 0;
-  return pedState.saldoTipo === 'demas' ? Math.abs(monto) : -Math.abs(monto);
+function setPagoTipo(tipo) {
+  pedState.pagoTipo = tipo;
+  document.querySelectorAll('#ped-r-pago-tipo .pp-btn').forEach(b => {
+    b.classList.toggle('activo', b.dataset.tipo === tipo);
+  });
+
+  const p = pedState.recibiendo;
+  const esperado = pedEsperado();
+  const campo = document.getElementById('ped-r-monto');
+
+  // "Lo esperado" no pregunta el monto: ya se sabe. Un campo que se llena solo
+  // con el número que está tres renglones más arriba es un paso de más.
+  document.getElementById('ped-r-monto-wrap').style.display = tipo === 'esperado' ? 'none' : '';
+  document.getElementById('ped-r-monto-label').textContent = '¿Cuánto pagaste?';
+
+  if (tipo === 'esperado') {
+    campo.value = Math.round(esperado - pedState.saldoUsar) || '';
+    pedState.pagoMotivo = '';
+    document.getElementById('ped-r-motivo-wrap').style.display = 'none';
+  } else {
+    // Arranca con lo esperado puesto para que sea corregir un número, no
+    // escribirlo de cero.
+    if (!pedNumero(campo.value)) campo.value = Math.round(esperado - pedState.saldoUsar) || '';
+    pedState.pagoMotivo = PED_PAGO_MOTIVOS[tipo][0][0];   // el default, ya elegido
+    pintarMotivosPago();
+    document.getElementById('ped-r-motivo-wrap').style.display = '';
+    document.getElementById('ped-r-motivo-label').textContent =
+      tipo === 'demas' ? '¿Por qué de más?' : '¿Por qué de menos?';
+  }
+  pintarResumenPago();
+  onPedMontoChange();
+}
+
+function pintarMotivosPago() {
+  const tipo = pedState.pagoTipo;
+  const opciones = PED_PAGO_MOTIVOS[tipo] || [];
+  document.getElementById('ped-r-motivo-opts').innerHTML = opciones.map(([v, txt, sub]) =>
+    `<button type="button" class="pp-btn ${pedState.pagoMotivo === v ? 'activo' : ''}"
+      data-motivo="${escAttr2(v)}" onclick="setPagoMotivo('${v}')">${escapeHtml(txt)}${
+        sub ? `<small>${escapeHtml(sub)}</small>` : ''}</button>`).join('');
+  const conTexto = (opciones.find(o => o[0] === pedState.pagoMotivo) || [])[3];
+  const caja = document.getElementById('ped-r-motivo-texto');
+  caja.style.display = conTexto ? '' : 'none';
+  caja.placeholder = tipo === 'menos'
+    ? 'Ej: los langostinos estaban podridos'
+    : 'Ej: le adelanté plata del pedido que viene';
+  if (!conTexto) caja.value = '';
+}
+
+function setPagoMotivo(m) {
+  pedState.pagoMotivo = m;
+  pintarMotivosPago();
+  pintarResumenPago();
+}
+
+// Lo que decía la compra. Es la única referencia contra la que "de más" y "de
+// menos" significan algo; sin ella los tres botones no se muestran.
+function pedEsperado() {
+  const p = pedState.recibiendo;
+  return p ? (Number(p.costoEstimado) || 0) : 0;
+}
+
+// Qué va a pasar con la plata, en un renglón. No es decorativo: es lo que hace
+// que una diferencia mal tipeada se vea antes de escribirla.
+function pintarResumenPago() {
+  const el = document.getElementById('ped-r-pago-resumen');
+  if (!el) return;
+  const esperado = pedEsperado();
+  const aPagar = esperado - pedState.saldoUsar;
+  const pagado = pedState.pagoTipo === 'esperado'
+    ? aPagar : pedNumero(document.getElementById('ped-r-monto').value);
+  const dif = Math.round(pagado - aPagar);
+
+  if (pedState.pagoTipo === 'esperado') {
+    el.innerHTML = `Se pagan <b>${fmt(aPagar)}</b>`
+      + (pedState.saldoUsar ? ` · ${fmt(esperado)} menos el saldo descontado` : '');
+    return;
+  }
+  if (!dif) { el.innerHTML = `Ese es justo lo esperado: no queda ninguna diferencia.`; return; }
+
+  if (pedState.pagoTipo === 'demas') {
+    el.innerHTML = dif > 0
+      ? `→ Quedan <b style="color:var(--green)">${fmt(dif)}</b> a tu favor con este proveedor.`
+      : `<span style="color:var(--orange)">Ese monto es MENOR que lo esperado (${fmt(aPagar)}).</span>`;
+    return;
+  }
+  el.innerHTML = dif < 0
+    ? (pedState.pagoMotivo === 'pago-parcial'
+        ? `→ Quedan <b style="color:var(--orange)">${fmt(Math.abs(dif))}</b> que le debés a este proveedor.`
+        : `→ El pedido valió ${fmt(pagado)}. <b>No queda deuda</b>: la diferencia no se debe.`)
+    : `<span style="color:var(--orange)">Ese monto es MAYOR que lo esperado (${fmt(aPagar)}).</span>`;
 }
 
 // El monto cambia qué fila matchea (el monto exacto manda sobre la fecha), así
@@ -16440,6 +16573,9 @@ function pedSaldoNuevo() {
 // tecla.
 let _pedPlanTimer = null;
 function onPedMontoChange() {
+  // El renglón de qué va a pasar con la plata se repinta en el acto: es lo que
+  // hace que un cero de más se vea mientras se tipea, no después de confirmar.
+  pintarResumenPago();
   clearTimeout(_pedPlanTimer);
   pedPlanCargando();
   _pedPlanTimer = setTimeout(pedCargarPlan, 500);
@@ -16505,14 +16641,13 @@ function pedExplicar() {
       + (f.pagado ? '<b>ya pagada</b>' : '<b>a pagar</b>') + '. '
       + '<b>No se escribe nada</b>, el pedido queda vinculado a ésa'
       + (f.pagado ? ' y no queda deuda.' : ' y la sigue persiguiendo Pagos.'),
-    // `deCompra` es el caso normal desde el 25/08/2026: la compra no escribió
-    // nada y es esta recepción la que mete el gasto en el libro. No es que
-    // "falte" una fila — es que todavía no había gasto.
-    'crear-pagado': () => plan.deCompra
-      ? '→ Ahora entra el gasto en Movimientos, como <b>Pagado</b>. Al cargar la compra no se escribió nada.'
+    // `deCompra` es el caso NORMAL desde el 25/08/2026 —la compra no escribió
+    // nada y es esta recepción la que mete el gasto en el libro— y por eso no
+    // dice nada: un cartel que aparece siempre deja de leerse y le saca lugar a
+    // los que sí avisan de algo. Lo que hizo se informa igual al confirmar.
+    'crear-pagado': () => plan.deCompra ? ''
       : '→ No hay ninguna fila cargada para esto, así que se agrega una nueva como <b>Pagado</b>.',
-    'crear-a-pagar': () => plan.deCompra
-      ? '→ Ahora entra el gasto en Movimientos, como <b>A pagar</b>, y desde acá lo persigue la sección Pagos.'
+    'crear-a-pagar': () => plan.deCompra ? ''
       : '→ No hay ninguna fila cargada para esto, así que se agrega una nueva como '
         + '<b>A pagar</b> y aparece en la sección Pagos.',
   }[plan.accion];
@@ -16526,7 +16661,8 @@ function closePedRecibir() {
   pedState.recibiendo = null;
   pedState.modo = null;
   pedState.plan = null;
-  pedState.saldoTipo = 'nada';
+  pedState.pagoTipo = 'esperado';
+  pedState.pagoMotivo = '';
   pedState.saldoUsar = 0;
 }
 
@@ -16542,6 +16678,17 @@ async function confirmarPedRecibir() {
   const vaAEscribir = !pedState.plan || pedState.plan.accion.startsWith('crear');
   if (vaAEscribir && monto <= 0) { err.textContent = 'Poné el monto.'; return; }
 
+  // El botón dice una cosa y el número dice otra. No se puede dejar pasar: el
+  // server sacaría la diferencia con el signo al revés y anotaría el saldo del
+  // lado equivocado, que es la peor forma de fallar acá.
+  const dif = Math.round(monto - (pedEsperado() - pedState.saldoUsar));
+  if (pedState.pagoTipo === 'demas' && dif <= 0) {
+    err.textContent = 'Dijiste que pagaste de más, pero ese monto no supera lo esperado.'; return;
+  }
+  if (pedState.pagoTipo === 'menos' && dif >= 0) {
+    err.textContent = 'Dijiste que pagaste de menos, pero ese monto no es menor que lo esperado.'; return;
+  }
+
   // Todo lo que hace falta se lee ANTES de cerrar: closePedRecibir limpia el
   // modo y el plan, y el body se arma después.
   // El medio no viaja: lo decide el server (Efectivo Local en la puerta, y el
@@ -16551,10 +16698,13 @@ async function confirmarPedRecibir() {
     modo: pedState.modo,
     monto,
     vencimiento: document.getElementById('ped-r-venc').value,
-    // Con signo: positivo es a favor del bar. Ver src/saldos.js — el server
-    // vuelve a leer el saldo real antes de descontar `saldoUsado`, así que lo
-    // que mande esta pantalla es una intención, no una orden.
-    saldoNuevo: pedSaldoNuevo(),
+    // La pantalla NO calcula el saldo: manda cómo se pagó y por qué, y el
+    // server saca la diferencia contra lo que decía la compra. Dos lugares
+    // haciendo la misma resta discrepan el día que una se toca, y acá la resta
+    // es plata. Ver saldosDeRecepcion en src/server.js.
+    pagoTipo: pedState.pagoTipo,
+    pagoMotivo: pedState.pagoMotivo,
+    pagoDetalle: document.getElementById('ped-r-motivo-texto').value.trim(),
     saldoUsado: pedState.saldoUsar,
   };
   closePedRecibir();
