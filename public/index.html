@@ -799,13 +799,22 @@
       .ped-modal { max-width: none; max-height: 100vh; border-radius: 0; border: none; }
       .ped-modal-head, .ped-modal-body, .ped-modal-foot { padding-left: 14px; padding-right: 14px; }
 
-      /* "Lo pagué" se lleva el ancho entero: es el que se toca con el pulgar
-         sin mirar. Abajo, la opción chica a la izquierda y los que sacan el
-         pedido del día a la derecha — lejos del recorrido del pulgar que
-         acaba de venir del botón grande. */
-      .ped-acciones { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; }
-      .ped-acc-ppal { grid-column: 1 / -1; text-align: center; }
-      .ped-acc-menores { justify-self: end; }
+      /* En el teléfono las acciones se apilan, y el orden ES la jerarquía:
+         cada renglón vale menos que el de arriba.
+
+           1. Llegó y lo pagué   ancho entero, alto entero, verde
+           2. Llegó y no lo pagué ancho entero, LA MITAD DE ALTO, naranja
+           3. Otro día · 🗑️      renglón propio, chiquitos y apagados
+
+         El tercero va afuera del botón naranja y no al lado: con esos dos el
+         pedido se va a otra fecha o se borra, que es lo contrario de recibirlo.
+         Compartir renglón con una opción de recibir los hacía parecer parte de
+         lo mismo. Van a la derecha, lejos del recorrido del pulgar que viene
+         de los dos botones de arriba. */
+      .ped-acciones { display: grid; grid-template-columns: 1fr; gap: 6px; align-items: center; }
+      .ped-acc-ppal { text-align: center; }
+      .ped-acc-sec { text-align: center; padding: 4px 10px !important; }
+      .ped-acc-menores { justify-self: end; border-left: none; padding-left: 0; margin-left: 0; }
 
       /* El renglón de un producto: el nombre se queda con lo que sobra y los
          botones no se estiran. Sin esto "Agua sin gas 500ml" salía en dos
@@ -916,7 +925,17 @@
 
     @media (max-width: 900px) {
       .ped-item { grid-template-columns: 1fr; }
-      .ped-acciones { justify-content: flex-start; }
+      /* La tarjeta pasa a ser una columna, así que el orden del DOM es el orden
+         que se ve — y ahí "6 productos / Pegar remito" tiene que ir ANTES de
+         los botones de recibir. Son acciones sobre el pedido (mirar qué trae,
+         cargar el remito) y se hacen primero; recibir es lo que cierra. En
+         pantalla grande no hace falta: las acciones van en su propia columna y
+         los renglones ya quedan abajo.
+         Se ordena con `order` y no moviendo el HTML, justamente para no tocar
+         esa otra disposición. */
+      .ped-item-cab { order: 1; }
+      .ped-item-items { order: 2; }
+      .ped-acciones { order: 3; justify-content: flex-start; }
       /* El drag nativo de HTML5 no existe en el teléfono: el cuadro pasa a ser
          una lista y cada bloque se mueve con el botón "⋮". */
       .ped-semana { grid-template-columns: 1fr; }
