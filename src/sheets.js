@@ -1,6 +1,7 @@
 const { google } = require('googleapis');
 const NodeCache = require('node-cache');
 const { normalizarMedio } = require('./medios-pago');
+const { parseMonto } = require('./monto');
 
 const cache = new NodeCache({ stdTTL: 120 });
 
@@ -120,34 +121,10 @@ async function getSheetRows(sheetName, columnas = 'A:P', { crudo = false } = {})
 const TC_MINIMO_CREIBLE = Number(process.env.TC_MINIMO_CREIBLE || 100);
 const tcCreible = v => (Number.isFinite(v) && v >= TC_MINIMO_CREIBLE ? v : 0);
 
-function parseAmount(val) {
-  if (!val || val === '' || val === '-') return 0;
-  const str = String(val).trim();
-  const noSign = str.replace(/[$\s]/g, '');
-  const commaIdx = noSign.lastIndexOf(',');
-  const dotIdx = noSign.lastIndexOf('.');
-  let cleaned;
-  if (commaIdx !== -1 && dotIdx === -1) {
-    const afterComma = noSign.slice(commaIdx + 1);
-    cleaned = afterComma.length === 3
-      ? noSign.replace(/,/g, '')
-      : noSign.replace(',', '.');
-  } else if (dotIdx !== -1 && commaIdx === -1) {
-    const afterDot = noSign.slice(dotIdx + 1);
-    cleaned = afterDot.length === 3
-      ? noSign.replace(/\./g, '')
-      : noSign;
-  } else if (commaIdx !== -1 && dotIdx !== -1) {
-    // Ambos separadores: el que está más a la derecha es el decimal
-    cleaned = commaIdx > dotIdx
-      ? noSign.replace(/\./g, '').replace(',', '.')   // 93.926,67
-      : noSign.replace(/,/g, '');                      // 93,926.67
-  } else {
-    cleaned = noSign.replace(/[,.]/g, '');
-  }
-  const num = parseFloat(cleaned);
-  return isNaN(num) ? 0 : num;
-}
+// Leer un importe de la planilla y leer un importe tipeado en la app son el
+// mismo problema, así que son la misma función: `src/monto.js`. Acá quedaba una
+// segunda copia de la regla, y las copias se separan.
+const parseAmount = parseMonto;
 
 function parseDate(val) {
   if (!val) return null;

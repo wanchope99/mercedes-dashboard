@@ -42,6 +42,12 @@ const regimenFiscal = require('./regimen-fiscal');
 const fiscalProv = require('./fiscal-proveedores');
 const { iniciarCron } = require('./cron');
 const { cargarEstadoCaja, guardarEstadoCaja } = require('./estado-caja');
+// `leerMonto()` es el único lector de importes que entran por el body. NUNCA
+// usar Number() para un importe tipeado: Number("200000,93") es NaN y
+// Number("$200000.93") también, así que los centavos entraban como cero sin que
+// nadie se enterara. Se llama así y no `monto` porque medio archivo tiene una
+// variable local con ese nombre.
+const { parseMonto: leerMonto, centavos } = require('./monto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -449,7 +455,10 @@ async function leerSaldoCalculado(sheets, nombreCaja) {
     valueRenderOption: 'UNFORMATTED_VALUE',
   });
   const v = r.data.values?.[0]?.[0];
-  const n = typeof v === 'number' ? v : (parseFloat(String(v ?? '0').replace(/[^0-9.-]/g, '')) || 0);
+  // Normalmente llega un número (UNFORMATTED_VALUE). Si la celda vuelve como
+  // texto, se lee con la regla de siempre: el limpiador anterior borraba la
+  // coma y convertía "$41.250,50" en cuarenta y un millones.
+  const n = leerMonto(v);
   // Redondear a 2 decimales acá, en la fuente. El SUMIFS de la planilla arrastra
   // el error de punto flotante y devuelve cosas como 1356999,9999999999981: eso
   // se mostraba crudo en la pantalla de apertura y, peor, se guardaba así en las
@@ -523,11 +532,7 @@ app.get('/api/arqueo/historial', authMiddleware, adminOnly, async (req, res) => 
       range: 'Arqueo de Cajas!A:Z',
     });
     const rows = r.data.values || [];
-    const num = v => {
-      if (v == null || v === '') return 0;
-      const n = parseFloat(String(v).replace(/[^0-9.,-]/g, '').replace(/\.(?=\d{3}\b)/g, '').replace(',', '.'));
-      return Number.isFinite(n) ? n : 0;
-    };
+    const num = leerMonto;
     const opt = v => (v == null || v === '') ? null : num(v);
     let start = 0;
     if (rows.length && String(rows[0][0] || '').trim().toLowerCase() === 'fecha') start = 1;
@@ -622,13 +627,20 @@ app.post('/api/arqueo/abrir', authMiddleware, async (req, res) => {
     return res.status(400).json({ ok: false, error: 'La caja ya está abierta' });
   }
   // efectivo/mercadoPago = saldo REAL contado; mpEsperado = saldo del sheet
-  const { efectivo, mercadoPago, mpEsperado } = req.body;
-  if (efectivo === undefined || mercadoPago === undefined) {
+  //
+  // Se leen con `leerMonto` apenas entran y se sigue trabajando con los números:
+  // así los centavos de un conteo ("$41.250,50") sobreviven, y el resto del
+  // handler puede seguir haciendo Number() sobre algo que ya es número.
+  const { efectivo: efectivoRaw, mercadoPago: mercadoPagoRaw, mpEsperado: mpEsperadoRaw } = req.body;
+  if (efectivoRaw === undefined || mercadoPagoRaw === undefined) {
     return res.status(400).json({ ok: false, error: 'Faltan valores de saldo inicial' });
   }
+  const efectivo = leerMonto(efectivoRaw);
+  const mercadoPago = leerMonto(mercadoPagoRaw);
+  const mpEsperado = leerMonto(mpEsperadoRaw);
 
-  const contado = Number(efectivo);
-  let esperadoEfectivo = Number(req.body.efectivoEsperado || 0);
+  const contado = efectivo;
+  let esperadoEfectivo = leerMonto(req.body.efectivoEsperado);
   let ajuste = null;
   let avisoAjuste = null;
 
@@ -688,11 +700,28 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
   // galiciaNeto      = campo VIEJO, ya no se pide: sólo llega desde una pestaña
   //                    cargada antes del deploy (ver el rescate más abajo).
   // fudo = ingresos del día según Fudo { encontrado, efectivo, mercadoPago, galicia }
-  const { efectivo, mercadoPago, galicia, galiciaCostos, galiciaImpuestos, galiciaNeto, fudo, nota, facturacionConfirmada } = req.body;
-  if (efectivo === undefined || mercadoPago === undefined || galicia === undefined) {
+  //
+  // Los cinco importes se leen con `leerMonto` acá arriba (ver el comentario del
+  // mismo cambio en /api/arqueo/abrir) y de ahí para abajo ya son números.
+  const {
+    efectivo: efectivoRaw, mercadoPago: mercadoPagoRaw, galicia: galiciaRaw,
+    galiciaCostos: galiciaCostosRaw, galiciaImpuestos: galiciaImpuestosRaw,
+    galiciaNeto: galiciaNetoRaw, fudo, nota, facturacionConfirmada,
+  } = req.body;
+  if (efectivoRaw === undefined || mercadoPagoRaw === undefined || galiciaRaw === undefined) {
     estadoCaja.cerrando = false;
     return res.status(400).json({ ok: false, error: 'Faltan valores de saldo final' });
   }
+  const efectivo = leerMonto(efectivoRaw);
+  const mercadoPago = leerMonto(mercadoPagoRaw);
+  const galicia = leerMonto(galiciaRaw);
+  // Los tres de Galicia conservan la AUSENCIA: el rescate de la pantalla vieja
+  // (más abajo) distingue "no mandó el campo" de "mandó cero", y convertir un
+  // undefined en 0 apagaría ese rescate sin que se note.
+  const presente = v => (v === undefined || v === null ? v : leerMonto(v));
+  const galiciaCostos = presente(galiciaCostosRaw);
+  const galiciaImpuestos = presente(galiciaImpuestosRaw);
+  const galiciaNeto = presente(galiciaNetoRaw);
 
   // Control de facturación: el cierre no se escribe sin la confirmación explícita.
   // La regla vive ACÁ y no sólo en el botón deshabilitado del navegador porque un
@@ -982,7 +1011,8 @@ app.post('/api/arqueo/cerrar', authMiddleware, async (req, res) => {
 // sesión para descontarlo del esperado en el cierre.
 app.post('/api/gastos-rapidos', authMiddleware, async (req, res) => {
   try {
-    const { fecha, mes, proveedor, categoria, monto, descripcion, estado } = req.body;
+    const { fecha, mes, proveedor, categoria, descripcion, estado } = req.body;
+    const monto = leerMonto(req.body.monto);
     const medioPago = normalizarMedio(req.body.medioPago);
     if (!fecha || !proveedor || !monto) {
       return res.status(400).json({ ok: false, error: 'Fecha, proveedor y monto son obligatorios' });
@@ -1074,7 +1104,11 @@ function construirFilaGasto({
   facturaId, fecha, proveedor, categoria, monto, descripcion,
   medioPago, estado, vencimiento, mes: mesPedido,
 } = {}) {
-  const montoNum = Number(monto);
+  // `leerMonto` y no Number(): por esta puerta entran el bot de facturas, la
+  // compra nueva y el recibido de Pedidos, y cualquiera de los tres puede traer
+  // el importe como texto tipeado. Lo ilegible sigue dando 0 y lo rechaza el
+  // mismo guard de siempre.
+  const montoNum = centavos(leerMonto(monto));
   if (!Number.isFinite(montoNum) || montoNum <= 0) {
     return { ok: false, motivo: 'monto', error: 'El total del gasto tiene que ser un número mayor que cero.' };
   }
@@ -1540,7 +1574,7 @@ app.get('/api/cambios', authMiddleware, adminOnly, async (req, res) => {
 app.post('/api/cambios', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { fecha, mes, origen, destino, nota } = req.body || {};
-    const montoOrigen = Number(req.body?.montoOrigen);
+    const montoOrigen = centavos(leerMonto(req.body?.montoOrigen));
     const montoDestinoRaw = req.body?.montoDestino;
 
     if (!fecha) return res.status(400).json({ ok: false, error: 'Falta la fecha' });
@@ -1570,12 +1604,12 @@ app.post('/api/cambios', authMiddleware, adminOnly, async (req, res) => {
     // plata que nadie movió.
     let montoDestino;
     if (cruzaMonedas) {
-      montoDestino = Number(montoDestinoRaw);
+      montoDestino = centavos(leerMonto(montoDestinoRaw));
       if (!Number.isFinite(montoDestino) || montoDestino <= 0) {
         return res.status(400).json({ ok: false, error: `El cambio va de ${monedaOrigen} a ${monedaDestino}: indicá también cuánto entra en ${cDestino.caja}` });
       }
     } else {
-      montoDestino = (montoDestinoRaw == null || montoDestinoRaw === '') ? montoOrigen : Number(montoDestinoRaw);
+      montoDestino = (montoDestinoRaw == null || montoDestinoRaw === '') ? montoOrigen : centavos(leerMonto(montoDestinoRaw));
       if (Math.round(montoDestino * 100) !== Math.round(montoOrigen * 100)) {
         return res.status(400).json({ ok: false, error: `Las dos cajas están en ${monedaOrigen}: tiene que entrar lo mismo que sale` });
       }
@@ -1864,7 +1898,7 @@ app.post('/api/pagos', authMiddleware, async (req, res) => {
       // Compra en cuotas: fila madre (importe total, sin medio de pago → no toca cajas,
       // computa completa en el estado de resultados del mes de compra) + una fila por cuota.
       if (!vencimiento) return res.status(400).json({ ok: false, error: 'Para cuotas indicá el vencimiento de la primera cuota' });
-      const total = Number(salidaARS) || 0;
+      const total = centavos(leerMonto(salidaARS));
       const montoCuota = Math.round(total / nCuotas);  // cuotas enteras (ARS)
       const cuotaId = `${proveedor}-${fecha}`.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '');
       const descBase = descripcion || proveedor;
@@ -1879,7 +1913,10 @@ app.post('/api/pagos', authMiddleware, async (req, res) => {
       for (let i = 1; i <= nCuotas; i++) {
         const venc = addMonthsDDMM(vencimiento, i - 1);
         // Ajuste última cuota para que la suma cierre exacta con el total
-        const monto = i === nCuotas ? total - montoCuota * (nCuotas - 1) : montoCuota;
+        // Los centavos del total viven enteros en la última cuota, y pasan por
+        // `centavos` porque la resta arrastra el ruido del punto flotante:
+        // 200000,93 en tres cuotas daba una última de 66666,929999999999.
+        const monto = i === nCuotas ? centavos(total - montoCuota * (nCuotas - 1)) : montoCuota;
         // Medio de pago vacío hasta que se pague (las fórmulas de Cajas suman por medio):
         // al marcarla Pagado se completa el medio. El mes NO se toca al pagar.
         values.push([venc, mesCompra, 'Gasto', 'A pagar', venc, `${i}/${nCuotas}`, '', cuotaId, proveedor, categoria||'', `${descBase} — Cuota ${i}/${nCuotas}${medioPago ? ' ('+medioPago+')' : ''}`, '', '', '', monto, '']);
@@ -1947,7 +1984,7 @@ app.post('/api/pagos', authMiddleware, async (req, res) => {
     // la fila no se escribe hoy, esa validación no corre, y un pedido sin monto
     // llega a la puerta sin poder recibirse ("poné cuánto es") justo cuando no
     // hay tiempo. Se rechaza acá, que es donde se puede corregir.
-    if (!escribeAhora && !(Number(salidaARS) > 0)) {
+    if (!escribeAhora && !(leerMonto(salidaARS) > 0)) {
       return res.status(400).json({
         ok: false,
         error: 'Poné el monto de la compra: es lo que se va a registrar cuando llegue el pedido.',
@@ -1986,7 +2023,7 @@ app.post('/api/pagos', authMiddleware, async (req, res) => {
           fecha: entregaFecha,
           proveedor,
           detalle: descripcion || '',
-          costoEstimado: Number(salidaARS) || 0,
+          costoEstimado: centavos(leerMonto(salidaARS)),
           // Con qué categoría y a qué mes entra el gasto cuando llegue. Se
           // deciden acá y viajan con el pedido: entre la compra y la entrega
           // pueden pasar días, y la recepción no tiene de dónde sacarlos.
@@ -2404,7 +2441,7 @@ async function leerVariables() {
       id: r[0],
       nombre: r[1] || 'Sin nombre',
       tipo: (r[2] || 'gasto').toLowerCase() === 'ingreso' ? 'ingreso' : 'gasto',
-      monto: parseFloat(String(r[3] || '0').replace(/[^0-9.-]/g, '')) || 0,
+      monto: leerMonto(r[3]),
       meses: (r[4] || '').split(',').map(s => s.trim()).filter(Boolean),
       repite: String(r[5] || '').toUpperCase() === 'TRUE',
       creado: r[6] || '',
@@ -2450,7 +2487,7 @@ app.post('/api/proyecciones/variables', authMiddleware, adminOnly, async (req, r
     const id = `v${Date.now()}`;
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID, range: `${VAR_SHEET}!A:G`, valueInputOption: 'RAW',
-      requestBody: { values: [[id, nombre, tipo === 'ingreso' ? 'ingreso' : 'gasto', Number(monto), meses.join(','), repite ? 'TRUE' : 'FALSE', new Date().toISOString()]] },
+      requestBody: { values: [[id, nombre, tipo === 'ingreso' ? 'ingreso' : 'gasto', centavos(leerMonto(monto)), meses.join(','), repite ? 'TRUE' : 'FALSE', new Date().toISOString()]] },
     });
     res.json({ ok: true, id, message: 'Variable agregada' });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
@@ -3359,7 +3396,7 @@ async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario,
   // fila que el plan enganchó. Un pedido sin ninguna de las dos (los del cuadro
   // semanal) no tiene con qué comparar y no avisa nada: no hay un "de más"
   // sin un "de cuánto".
-  const esperado = Number(pedido.costoEstimado) || Number(plan && plan.fila && plan.fila.monto) || 0;
+  const esperado = leerMonto(pedido.costoEstimado) || leerMonto(plan && plan.fila && plan.fila.monto) || 0;
 
   // Lo que ya está explicado no se avisa (26/08/2026). Un vuelto —se pagaron
   // $120.000 de un pedido de $117.000 porque no había cambio— es exactamente
@@ -3374,8 +3411,8 @@ async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario,
   // rutina y se descuenta, pero un "pagué de más" con un motivo escrito a mano
   // vuelve a sonar aunque esté declarado — es el caso raro por definición, y
   // que esté anotado no quiere decir que nadie tenga que mirarlo.
-  const explicado = excepcional ? 0 : Math.max(0, Math.round(Number(saldoNuevo) || 0));
-  const diferencia = Math.round(montoDicho - esperado - explicado);
+  const explicado = excepcional ? 0 : Math.max(0, centavos(leerMonto(saldoNuevo)));
+  const diferencia = centavos(montoDicho - esperado - explicado);
   if (esperado > 0 && montoDicho > 0 && diferencia >= AVISO_DIFERENCIA_MIN) {
     out.push(await avisos.registrar({
       tipo: 'pedido-pago-de-mas',
@@ -3467,11 +3504,11 @@ const SALDO_DEJA_DEUDA = {
 async function saldosDeRecepcion({ pedido, monto = 0, pagoTipo, pagoMotivo, pagoDetalle,
                                    saldoUsado = 0, usuario }) {
   const out = [];
-  const usado = Math.round(Number(saldoUsado) || 0);
+  const usado = centavos(leerMonto(saldoUsado));
   let usadoReal = 0;
 
   if (usado) {
-    const actual = Math.round(await saldos.saldoDe(pedido.proveedor));
+    const actual = centavos(await saldos.saldoDe(pedido.proveedor));
     // Sólo se puede usar lo que hay, y para el mismo lado: con $3.000 a favor
     // se pueden descontar hasta $3.000, nunca $5.000 ni un monto en contra.
     const permitido = actual === 0 || Math.sign(usado) !== Math.sign(actual)
@@ -3499,9 +3536,9 @@ async function saldosDeRecepcion({ pedido, monto = 0, pagoTipo, pagoMotivo, pago
   // Lo que correspondía pagar HOY es lo que dijo la compra MENOS lo que se
   // descontó de saldo. Sin restar `usadoReal`, descontar $3.000 se leería como
   // "pagó $3.000 de menos" y se anotaría dos veces la misma plata.
-  const esperado = Math.round(Number(pedido.costoEstimado) || 0);
-  const aPagar = esperado - usadoReal;
-  const diferencia = Math.round((Number(monto) || 0) - aPagar);
+  const esperado = centavos(leerMonto(pedido.costoEstimado));
+  const aPagar = centavos(esperado - usadoReal);
+  const diferencia = centavos(leerMonto(monto) - aPagar);
   const tipo = pagoTipo === 'demas' || pagoTipo === 'menos' ? pagoTipo : null;
 
   // El signo tiene que coincidir con lo que dijo el botón. Si no coincide, no se
@@ -3582,7 +3619,7 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
 
     const modo = normalizarModoRecibir(req.body.modo);
     if (!modo) return res.status(400).json({ ok: false, error: 'Falta decir si se pagó o no.' });
-    let monto = Number(req.body.monto) || 0;
+    let monto = centavos(leerMonto(req.body.monto));
     // Lo que TIPEÓ quien recibe, guardado antes de que `monto` lo pise con el
     // de la fila enganchada. Es contra esto que se compara lo cargado al
     // comprar — ver avisosDeRecepcion, que explica por qué el descarte importa.
@@ -4106,7 +4143,7 @@ app.put('/api/finanzas/config', authMiddleware, adminOnly, async (req, res) => {
 app.put('/api/finanzas/aportes', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { mes, monto, notas } = req.body;
-    const m = (monto === '' || monto == null) ? null : Number(monto);
+    const m = (monto === '' || monto == null) ? null : centavos(leerMonto(monto));
     if (m != null && !(Number.isFinite(m) && m >= 0)) {
       return res.status(400).json({ ok: false, error: 'Monto inválido' });
     }

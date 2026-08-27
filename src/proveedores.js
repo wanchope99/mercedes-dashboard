@@ -14,6 +14,7 @@ const { google } = require('googleapis');
 const NodeCache = require('node-cache');
 const cats = require('./proveedores-categorias');
 const unidades = require('./unidades');
+const { parseMonto } = require('./monto');
 let provCfg = null; try { provCfg = require('./proveedores-config'); } catch (e) {}
 
 const cache = new NodeCache({ stdTTL: 120 });
@@ -58,24 +59,14 @@ function sheetsClient() {
 }
 
 // ─── Parse de montos y fechas ───────────────────────────────────────────────────
+// La regla de lectura es la de `monto.js` (una sola en todo el sistema), pero
+// acá la ausencia devuelve NULL y no cero: en esta hoja una celda vacía
+// significa "no se cargó" y un 0 significa "sale cero", y hay columnas —el
+// descuento, el IVA— donde la diferencia cambia la cuenta.
 function parseNum(val) {
   if (val === null || val === undefined || val === '' || val === '-') return null;
-  const str = String(val).trim().replace(/[$\s]/g, '');
-  if (!str) return null;
-  // Argentino: "1.234,56" o "1234.56" o "1234"
-  const commaIdx = str.lastIndexOf(','), dotIdx = str.lastIndexOf('.');
-  let cleaned;
-  if (commaIdx !== -1 && dotIdx !== -1) {
-    cleaned = commaIdx > dotIdx ? str.replace(/\./g, '').replace(',', '.') : str.replace(/,/g, '');
-  } else if (commaIdx !== -1) {
-    const dec = str.slice(commaIdx + 1);
-    cleaned = dec.length === 3 ? str.replace(/,/g, '') : str.replace(',', '.');
-  } else if (dotIdx !== -1) {
-    const dec = str.slice(dotIdx + 1);
-    cleaned = dec.length === 3 ? str.replace(/\./g, '') : str;
-  } else cleaned = str;
-  const n = parseFloat(cleaned);
-  return Number.isFinite(n) ? n : null;
+  if (!String(val).trim().replace(/[$\s]/g, '')) return null;
+  return parseMonto(val);
 }
 
 // Fecha → 'YYYY-MM-DD'. Acepta ya-ISO o dd/mm/yyyy.

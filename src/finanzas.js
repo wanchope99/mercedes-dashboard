@@ -58,6 +58,7 @@
 
 const { google } = require('googleapis');
 const NodeCache = require('node-cache');
+const { parseMonto, centavos } = require('./monto');
 
 const cache = new NodeCache({ stdTTL: 300 });
 const CACHE_KEY = 'finanzas';
@@ -154,23 +155,10 @@ function _numCfg(v) {
 
 // Número tolerante a "$ 1.234,56", "1,9%" y a los puntos de miles de es-AR.
 // Para MONTOS cargados a mano, donde "1.234" significa mil doscientos treinta y
-// cuatro. No usar para ratios de config (ver _numCfg).
-function _num(v) {
-  if (v == null || v === '') return 0;
-  if (typeof v === 'number') return v;
-  let s = String(v).trim().replace(/[$\s%]/g, '');
-  const coma = s.lastIndexOf(','), punto = s.lastIndexOf('.');
-  if (coma !== -1 && punto !== -1) {
-    s = coma > punto ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
-  } else if (coma !== -1) {
-    s = s.slice(coma + 1).length === 3 && s.length - coma - 1 === 3 && /^\d{1,3}(,\d{3})+$/.test(s)
-      ? s.replace(/,/g, '') : s.replace(',', '.');
-  } else if (punto !== -1 && /^\d{1,3}(\.\d{3})+$/.test(s)) {
-    s = s.replace(/\./g, '');
-  }
-  const n = parseFloat(s);
-  return isNaN(n) ? 0 : n;
-}
+// cuatro. No usar para ratios de config (ver _numCfg), que es justamente por lo
+// que esta regla y la de `monto.js` son dos y no una sola: acá conviven las dos
+// lecturas del punto y hay que elegir por campo.
+const _num = parseMonto;
 
 // Claves que son montos en pesos y no ratios.
 const CLAVES_MONTO = ['capitalInicialARS'];
@@ -220,7 +208,7 @@ async function _leerAportes(api) {
     if (!/^\d{4}-\d{2}$/.test(mes)) continue;
     out.push({
       mes,
-      monto: Math.round(_num(r[1])),
+      monto: centavos(_num(r[1])),
       notas: (r[2] || '').toString().trim(),
       actualizado: (r[3] || '').toString().trim(),
       rowIndex: i + 1,
@@ -249,7 +237,7 @@ async function _leerMovimientos(api) {
       tipo: (r[2] || 'colocacion').toString().trim(),
       balde,
       esLegacy: BALDES_LEGACY.includes(balde),
-      monto: Math.round(_num(r[4])),
+      monto: centavos(_num(r[4])),
       instrumento: (r[5] || '').toString().trim(),
       comprobante: (r[6] || '').toString().trim(),
       mesRecupero: (r[7] || '').toString().trim(),    // "YYYY-MM" que originó la plata
@@ -703,7 +691,7 @@ async function guardarAporte(mesISO, monto, notas) {
     cache.del(CACHE_KEY);
     return null;
   }
-  const fila = [mesISO, Math.max(0, Math.round(_num(monto))), (notas || '').toString().trim(), new Date().toISOString()];
+  const fila = [mesISO, Math.max(0, centavos(_num(monto))), (notas || '').toString().trim(), new Date().toISOString()];
   const data = [{ range: `${HOJA_APORTES}!A1:D1`, values: [HEADER_APORTES] }];
   if (existente) {
     data.push({ range: `${HOJA_APORTES}!A${existente.rowIndex}:D${existente.rowIndex}`, values: [fila] });
@@ -732,7 +720,7 @@ async function guardarMovimiento(mov) {
   // Si no se especifica, sigue siendo la de pesos — así ningún cliente viejo
   // cambia de comportamiento por el solo hecho de que exista el segundo.
   const balde = (mov.balde || BALDE_MP).toString().trim().toLowerCase();
-  const monto = Math.round(_num(mov.monto));
+  const monto = centavos(_num(mov.monto));
   if (!TIPOS.includes(tipo)) throw new Error(`Tipo inválido (${TIPOS.join(' | ')})`);
   if (!BALDES.includes(balde)) {
     throw new Error(`Destino inválido. Los vigentes son: ${BALDES.join(' | ')}`);

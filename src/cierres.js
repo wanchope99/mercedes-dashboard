@@ -27,6 +27,7 @@
 // se ajusta el TC. Ver roi.js para la agregación de recupero.
 
 const { google } = require('googleapis');
+const { parseMonto } = require('./monto');
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const CIERRES_SHEET = process.env.CIERRES_SHEET || 'Cierres';
@@ -51,10 +52,10 @@ function _norm(s) {
   return (s || '').toString().normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
 }
 
-function _num(val) {
-  if (val == null || val === '') return 0;
-  return parseFloat(String(val).replace(/[$\s]/g, '').replace(/\.(?=\d{3}\b)/g, '').replace(',', '.')) || 0;
-}
+// Los importes de esta hoja se guardan en pesos enteros (es un cierre mensual,
+// no una fila de caja), pero se LEEN con la regla de siempre: una celda editada
+// a mano puede traer "$1.234.567,89" y esa coma no puede cortar el número.
+const _num = parseMonto;
 
 async function _ensureSheet(api) {
   try {

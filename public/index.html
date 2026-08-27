@@ -2142,7 +2142,7 @@
              es plata que se anota mal.
              El monto además decide qué fila matchea (el monto exacto manda sobre
              la fecha), así que al tipearlo se vuelve a preguntar el plan. -->
-        <input type="text" id="ped-r-monto" inputmode="numeric" placeholder="0"
+        <input type="text" id="ped-r-monto" inputmode="decimal" placeholder="0"
                oninput="onPedMontoChange()" style="width:100%">
       </div>
 
@@ -2442,7 +2442,7 @@
       </div>
       <div class="form-group full">
         <label>Cuánto</label>
-        <input type="text" id="saldo-a-monto" inputmode="numeric" placeholder="0" />
+        <input type="text" id="saldo-a-monto" inputmode="decimal" placeholder="0" />
       </div>
       <div class="form-group full">
         <label>Por qué</label>
@@ -2748,7 +2748,7 @@
             <option value="ajuste">Ajuste</option>
           </select></div>
           <div class="form-group"><label>Destino</label><input id="fmv-destino" value="Mercado Pago Pablo" disabled style="opacity:.6" title="Estrategia única: el 100% del recupero va acá"></div>
-          <div class="form-group"><label>Monto ARS</label><input type="number" id="fmv-monto" min="0" placeholder="0"></div>
+          <div class="form-group"><label>Monto ARS</label><input type="text" inputmode="decimal" id="fmv-monto" placeholder="0"></div>
           <div class="form-group"><label>Comprobante / N° operación</label><input id="fmv-comprobante" placeholder="Ej: transferencia Galicia → MP 4471820"></div>
           <div class="form-group"><label>Sale del recupero del mes</label><select id="fmv-mesrec" title="De qué mes salió esta plata: el mes cuyo recupero estás colocando. Vacío = capital propio, no sale del recupero de ningún cierre."></select></div>
         </div>
@@ -2786,7 +2786,7 @@
         <div class="proy-form-grid">
           <div class="form-group"><label>TNA Mercado Pago %</label><input type="number" step="0.1" id="fpa-tna-mp" onchange="saveFinParam('tnaMercadoPago', this.value/100)" title="Tasa nominal anual de la cuenta remunerada. Cambia seguido: verificala en la app de Mercado Pago."></div>
           <div class="form-group"><label>Inflación mensual %</label><input type="number" step="0.01" id="fpa-inflacion" onchange="saveFinParam('inflacionMensual', this.value/100)"></div>
-          <div class="form-group"><label>Capital ya colocado (ARS)</label><input type="number" step="1000" id="fpa-capital" onchange="saveFinParam('capitalInicialARS', this.value)" title="Plata que ya está en Mercado Pago Pablo al arrancar la proyección, sin contar los aportes mensuales."></div>
+          <div class="form-group"><label>Capital ya colocado (ARS)</label><input type="text" inputmode="decimal" id="fpa-capital" onchange="saveFinParam('capitalInicialARS', montoDe('fpa-capital'))" title="Plata que ya está en Mercado Pago Pablo al arrancar la proyección, sin contar los aportes mensuales."></div>
           <div class="form-group"><label>Horizonte (meses)</label><input type="number" min="1" id="fpa-horizonte" onchange="saveFinParam('horizonteMeses', this.value)"></div>
         </div>
         <div id="fin-obsoletas-aviso" style="display:none;font-size:12px;color:var(--text-muted);line-height:1.6;background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:10px 12px;margin-top:14px"></div>
@@ -2838,7 +2838,7 @@
             <option value="gasto">Gasto fijo mensual</option>
             <option value="ingreso">Ingreso mensual</option>
           </select></div>
-          <div class="form-group"><label>Monto ARS (por mes)</label><input type="number" id="pvf-monto" min="0" placeholder="0"></div>
+          <div class="form-group"><label>Monto ARS (por mes)</label><input type="text" inputmode="decimal" id="pvf-monto" placeholder="0"></div>
           <div class="form-group"><label>Frecuencia</label><select id="pvf-repite">
             <option value="true">🔁 Se repite cada año</option>
             <option value="false">1️⃣ Una sola vez</option>
@@ -2893,7 +2893,7 @@
         <div class="proy-form-grid">
           <div class="form-group"><label>Nombre</label><input id="plf-nombre" placeholder="Ej: Aires acondicionados"></div>
           <div class="form-group"><label>Categoría</label><input id="plf-categoria" list="plf-cat-list" placeholder="Ej: Clima"><datalist id="plf-cat-list"><option>Clima</option><option>Extracción</option><option>Pintura</option><option>Equipamiento</option><option>Mobiliario</option><option>Extraordinarios</option></datalist></div>
-          <div class="form-group"><label>Costo estimado ARS</label><input type="number" id="plf-costo" min="0" placeholder="0"></div>
+          <div class="form-group"><label>Costo estimado ARS</label><input type="text" inputmode="decimal" id="plf-costo" placeholder="0"></div>
           <div class="form-group"><label>Prioridad (1 = primero)</label><input type="number" id="plf-prioridad" min="1" placeholder="opcional"></div>
           <div class="form-group"><label>Mes objetivo</label><select id="plf-mes"></select></div>
         </div>
@@ -2963,7 +2963,7 @@
         </div>
         <div class="form-group">
           <label>Ingreso por noche (ARS)</label>
-          <input type="number" id="calc-ingreso-noche" oninput="recalcCalc()"
+          <input type="text" inputmode="decimal" id="calc-ingreso-noche" oninput="recalcCalc()"
             title="Ingreso promedio, en pesos, que genera un servicio/noche. Ingreso mensual = Servicios por mes × Ingreso por noche.">
         </div>
         <div class="form-group">
@@ -2973,23 +2973,23 @@
         </div>
         <div class="form-group">
           <label>Costo personal (ARS/mes)</label>
-          <input type="number" id="calc-personal" oninput="recalcCalc()"
+          <input type="text" inputmode="decimal" id="calc-personal" oninput="recalcCalc()"
             title="Costo total mensual de personal: sueldos, cargas sociales y afines, en pesos.">
         </div>
         <div class="form-group">
           <label>Costos Fijos (ARS/mes)</label>
-          <input type="number" id="calc-fijos" oninput="recalcCalc()"
+          <input type="text" inputmode="decimal" id="calc-fijos" oninput="recalcCalc()"
             title="Costos fijos mensuales combinados: alquiler + electricidad, gas, agua, ABL, internet, contaduría y software. (Próximamente se podrán desglosar línea por línea.)">
         </div>
         <div class="form-group">
           <label>Costos extraordinarios (ARS/mes)</label>
-          <input type="number" id="calc-extra" oninput="recalcCalc()"
+          <input type="text" inputmode="decimal" id="calc-extra" oninput="recalcCalc()"
             title="Gastos no recurrentes o excepcionales del mes: reparaciones puntuales, compras extraordinarias, etc., en pesos.">
         </div>
         <div class="form-group">
           <label>Costos financieros (ARS o %)</label>
           <div style="display:flex;gap:6px">
-            <input type="number" id="calc-fin-ars" oninput="recalcCalc('calc-fin-ars')" style="flex:1;min-width:0" placeholder="ARS/mes"
+            <input type="text" inputmode="decimal" id="calc-fin-ars" oninput="recalcCalc('calc-fin-ars')" style="flex:1;min-width:0" placeholder="ARS/mes"
               title="Intereses, comisiones bancarias y otros costos financieros del mes, en pesos. Completá este campo o el de % de al lado: se calculan entre sí automáticamente.">
             <input type="number" id="calc-fin-pct" step="0.01" oninput="recalcCalc('calc-fin-pct')" style="flex:0 0 90px;min-width:0;width:90px" placeholder="%"
               title="Costos financieros como % del ingreso mensual. Completá este campo o el de ARS de al lado: se calculan entre sí automáticamente.">
@@ -2998,7 +2998,7 @@
         <div class="form-group">
           <label>Costos fiscales (ARS o %)</label>
           <div style="display:flex;gap:6px">
-            <input type="number" id="calc-fiscal-ars" oninput="recalcCalc('calc-fiscal-ars')" style="flex:1;min-width:0" placeholder="ARS/mes"
+            <input type="text" inputmode="decimal" id="calc-fiscal-ars" oninput="recalcCalc('calc-fiscal-ars')" style="flex:1;min-width:0" placeholder="ARS/mes"
               title="Impuestos y costos fiscales del mes, en pesos. Completá este campo o el de % de al lado: se calculan entre sí automáticamente.">
             <input type="number" id="calc-fiscal-pct" step="0.01" oninput="recalcCalc('calc-fiscal-pct')" style="flex:0 0 90px;min-width:0;width:90px" placeholder="%"
               title="Costos fiscales como % del ingreso mensual. Completá este campo o el de ARS de al lado: se calculan entre sí automáticamente.">
@@ -3006,7 +3006,7 @@
         </div>
         <div class="form-group">
           <label>Inversion total (ARS)</label>
-          <input type="number" id="calc-inversion" oninput="recalcCalc()"
+          <input type="text" inputmode="decimal" id="calc-inversion" oninput="recalcCalc()"
             title="Inversión total realizada, en pesos, para el local/proyecto. Se usa para calcular el payback (meses para recuperarla con el resultado neto mensual).">
         </div>
       </div>
@@ -3290,7 +3290,7 @@
           </div>
           <div>
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Saldo real contado</div>
-            <input type="number" id="ap-efectivo" placeholder="0" min="0" />
+            <input type="text" inputmode="decimal" id="ap-efectivo" placeholder="0" />
           </div>
         </div>
       </div>
@@ -3305,7 +3305,7 @@
           </div>
           <div>
             <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Saldo real contado</div>
-            <input type="number" id="ap-mp" placeholder="0" min="0" />
+            <input type="text" inputmode="decimal" id="ap-mp" placeholder="0" />
           </div>
         </div>
       </div>
@@ -3340,27 +3340,27 @@
     <div class="arqueo-field">
       <label>💵 Efectivo Local final</label>
       <div id="ci-efectivo-hint" style="font-size:11px;color:var(--text-muted);margin-bottom:6px"></div>
-      <input type="number" id="ci-efectivo" placeholder="0" min="0" />
+      <input type="text" inputmode="decimal" id="ci-efectivo" placeholder="0" />
     </div>
     <div class="arqueo-field">
       <label>📱 Mercado Pago Tincho final</label>
       <div id="ci-mp-hint" style="font-size:11px;color:var(--text-muted);margin-bottom:6px"></div>
-      <input type="number" id="ci-mp" placeholder="0" min="0" />
+      <input type="text" inputmode="decimal" id="ci-mp" placeholder="0" />
     </div>
     <div class="arqueo-field">
       <label>🏦 Galicia</label>
       <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Total Bruto — monto antes de costos e impuestos</div>
       <div id="ci-galicia-hint" style="font-size:11px;color:var(--text-muted);margin-bottom:6px"></div>
-      <input type="number" id="ci-galicia" placeholder="0" min="0" oninput="actualizarNetoGalicia()" title="Total bruto acreditado en Galicia, antes de costos e impuestos" />
+      <input type="text" inputmode="decimal" id="ci-galicia" placeholder="0" oninput="actualizarNetoGalicia()" title="Total bruto acreditado en Galicia, antes de costos e impuestos" />
       <div style="margin-top:10px;padding:12px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
         <label onclick="openAyudaDeduccionesGalicia()" title="Cómo se cargan estos dos campos"
                style="font-size:12px;color:var(--orange);display:inline-block;margin-bottom:10px;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">
           Lo que descuenta Nave ⓘ
         </label>
         <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Total costos</div>
-        <input type="number" id="ci-galicia-costos" placeholder="0" min="0" oninput="actualizarNetoGalicia()" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:6px;font-size:16px;font-family:inherit;outline:none;" />
+        <input type="text" inputmode="decimal" id="ci-galicia-costos" placeholder="0" oninput="actualizarNetoGalicia()" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:6px;font-size:16px;font-family:inherit;outline:none;" />
         <div style="font-size:11px;color:var(--text-muted);margin:10px 0 4px">Impuestos asociados</div>
-        <input type="number" id="ci-galicia-impuestos" placeholder="0" min="0" oninput="actualizarNetoGalicia()" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:6px;font-size:16px;font-family:inherit;outline:none;" />
+        <input type="text" inputmode="decimal" id="ci-galicia-impuestos" placeholder="0" oninput="actualizarNetoGalicia()" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:6px;font-size:16px;font-family:inherit;outline:none;" />
         <div id="ci-galicia-neto-calc" style="font-size:12px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);color:var(--text-muted)"></div>
       </div>
     </div>
@@ -3378,7 +3378,7 @@
     <h3 style="margin-bottom:4px">🧊 Ingresar hielo</h3>
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px">Revisá los valores y aceptá. Todo es editable por si pasó algo distinto.</p>
     <div class="arqueo-field"><label>Fecha</label><input type="date" id="hi-fecha" /></div>
-    <div class="arqueo-field"><label>Monto ARS</label><input type="number" id="hi-monto" min="0" /></div>
+    <div class="arqueo-field"><label>Monto ARS</label><input type="text" inputmode="decimal" id="hi-monto" placeholder="0" /></div>
     <div class="arqueo-field"><label>Proveedor</label><input type="text" id="hi-proveedor" /></div>
     <div class="arqueo-field"><label>Categoría</label><select id="hi-categoria" style="width:100%">
       <option value="Insumos">Insumos</option>
@@ -3434,7 +3434,7 @@
     </div>
     <div class="arqueo-field">
       <label id="cb-monto-origen-label">Monto que sale</label>
-      <input type="number" id="cb-monto-origen" min="0" step="0.01" oninput="onCambioChange()" />
+      <input type="text" inputmode="decimal" id="cb-monto-origen" placeholder="0" oninput="onCambioChange()" />
     </div>
     <div class="arqueo-field">
       <label>Entra en</label>
@@ -3442,7 +3442,7 @@
     </div>
     <div class="arqueo-field" id="cb-monto-destino-wrap" style="display:none">
       <label id="cb-monto-destino-label">Monto que entra</label>
-      <input type="number" id="cb-monto-destino" min="0" step="0.01" oninput="onCambioChange()" />
+      <input type="text" inputmode="decimal" id="cb-monto-destino" placeholder="0" oninput="onCambioChange()" />
     </div>
     <div id="cb-tc-hint" style="font-size:12px;color:var(--accent);margin-bottom:12px;line-height:1.6"></div>
     <div id="cb-nota-caja" style="font-size:12px;color:#e0c95c;margin-bottom:12px;display:none;line-height:1.6"></div>
@@ -3685,7 +3685,7 @@
         <div id="f-venc-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px"></div>
       </div>
 
-      <div class="form-group"><label>Monto ARS (total)</label><input type="number" id="f-monto" placeholder="0" min="0"></div>
+      <div class="form-group"><label>Monto ARS (total)</label><input type="text" inputmode="decimal" id="f-monto" placeholder="0"></div>
 
       <div class="form-group full">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-size:13px">
@@ -3996,7 +3996,70 @@ const fechaAR = (d = new Date(), opts = {}) => new Date(d).toLocaleDateString('e
 const horaAR = (d = new Date(), opts = {}) => new Date(d).toLocaleTimeString('es-AR', { timeZone: TZ_AR, ...opts });
 const fechaHoraAR = (d = new Date(), opts = {}) => new Date(d).toLocaleString('es-AR', { timeZone: TZ_AR, ...opts });
 
-const fmt = n => `$${Math.round(n).toLocaleString('es-AR')}`;
+// ─── Un solo lector de importes, el mismo que el server ──────────────────────
+//
+// Copia literal de la regla de `src/monto.js`. Son dos copias porque no hay
+// build step y el navegador no puede hacer require: si se toca una, hay que
+// tocar la otra. Lo que NO puede volver a pasar es que cada pantalla tenga su
+// propio criterio — de ahí venía que "$200000,93" entrara como cero (Number()
+// no sabe leer una coma ni un signo peso) y "200000.93" como veinte millones
+// (borrar todos los puntos por ser separador de miles).
+//
+// Con los dos separadores manda el de más a la derecha. Con uno solo es de
+// miles nada más que si TODO el número tiene forma de agrupado ("200.000",
+// "1.700.000", "1,234,567"); en cualquier otro caso es decimal ("200000,93",
+// "200000.93", "0,5").
+function parseMonto(valor) {
+  if (typeof valor === 'number') return Number.isFinite(valor) ? valor : 0;
+  if (valor == null) return 0;
+
+  const s = String(valor).trim().replace(/[^0-9.,-]/g, '');
+  if (!s || s === '-') return 0;
+
+  const coma = s.lastIndexOf(',');
+  const punto = s.lastIndexOf('.');
+  let decimal = null;
+
+  if (coma !== -1 && punto !== -1) {
+    decimal = coma > punto ? ',' : '.';
+  } else if (coma !== -1 || punto !== -1) {
+    const sep = coma !== -1 ? ',' : '.';
+    const agrupado = sep === ','
+      ? /^\d{1,3}(,\d{3})+$/.test(s.replace(/^-/, ''))
+      : /^\d{1,3}(\.\d{3})+$/.test(s.replace(/^-/, ''));
+    if (!agrupado) decimal = sep;
+  }
+
+  let limpio;
+  if (decimal) {
+    const corte = s.lastIndexOf(decimal);
+    limpio = s.slice(0, corte).replace(/[.,]/g, '') + '.' + s.slice(corte + 1).replace(/[.,]/g, '');
+  } else {
+    limpio = s.replace(/[.,]/g, '');
+  }
+
+  const n = parseFloat(limpio);
+  return Number.isFinite(n) ? n : 0;
+}
+
+const centavos = n => Math.round((Number(n) || 0) * 100) / 100;
+
+// Lo que vale un campo de importe de un formulario, ya redondeado a centavos.
+const montoDe = id => {
+  const el = document.getElementById(id);
+  return centavos(parseMonto(el ? el.value : 0));
+};
+
+// Los centavos se muestran SÓLO cuando existen. Un total de $1.234.567 no se
+// vuelve $1.234.567,00 —dos caracteres de ruido en cada número de la pantalla—
+// y uno de $200.000,93 deja de mentir por 93 centavos.
+const fmt = n => {
+  const v = centavos(n);
+  return '$' + v.toLocaleString('es-AR', {
+    minimumFractionDigits: Number.isInteger(v) ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+};
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 let _toastTimeout;
@@ -4703,8 +4766,8 @@ function renderEstadoArqueo(data) {
 }
 
 async function abrirCaja() {
-  const efectivo         = parseFloat(document.getElementById('ap-efectivo').value) || 0;
-  const mp               = parseFloat(document.getElementById('ap-mp').value) || 0;
+  const efectivo         = montoDe('ap-efectivo');
+  const mp               = montoDe('ap-mp');
   const efectivoEsperado = getEsperado('ap-efectivo-esperado');
   const mpEsperado       = getEsperado('ap-mp-esperado');
   const errEl = document.getElementById('arqueo-error');
@@ -4820,8 +4883,7 @@ function closeCierreModal() {
 function actualizarNetoGalicia() {
   const el = document.getElementById('ci-galicia-neto-calc');
   if (!el) return;
-  const n = id => parseFloat(document.getElementById(id).value) || 0;
-  const bruto = n('ci-galicia'), costos = n('ci-galicia-costos'), imp = n('ci-galicia-impuestos');
+  const bruto = montoDe('ci-galicia'), costos = montoDe('ci-galicia-costos'), imp = montoDe('ci-galicia-impuestos');
   if (!bruto && !costos && !imp) { el.innerHTML = 'Cargá los dos campos del resumen de Nave.'; return; }
   const neto = bruto - costos - imp;
   const mal = neto < 0 || (bruto > 0 && (costos + imp) > bruto * 0.5);
@@ -4886,7 +4948,7 @@ function closeHieloModal() { document.getElementById('hielo-modal-overlay').styl
 
 async function saveHielo() {
   const fechaISO = document.getElementById('hi-fecha').value;
-  const monto = parseFloat(document.getElementById('hi-monto').value) || 0;
+  const monto = montoDe('hi-monto');
   const proveedor = document.getElementById('hi-proveedor').value.trim();
   const errEl = document.getElementById('hi-error');
   if (!fechaISO || !proveedor || !monto) { errEl.textContent = 'Completá fecha, proveedor y monto.'; return; }
@@ -5138,11 +5200,11 @@ function openArqueoDetalle(i) {
   openDetalleModal('Arqueo del ' + escapeHtml(a.fecha), turno + efectivo + otrasCajas + auditoria + nota);
 }
 async function cerrarCaja() {
-  const efectivo    = parseFloat(document.getElementById('ci-efectivo').value) || 0;
-  const mp          = parseFloat(document.getElementById('ci-mp').value) || 0;
-  const galicia     = parseFloat(document.getElementById('ci-galicia').value) || 0;
-  const galiciaCostos    = parseFloat(document.getElementById('ci-galicia-costos').value) || 0;
-  const galiciaImpuestos = parseFloat(document.getElementById('ci-galicia-impuestos').value) || 0;
+  const efectivo    = montoDe('ci-efectivo');
+  const mp          = montoDe('ci-mp');
+  const galicia     = montoDe('ci-galicia');
+  const galiciaCostos    = montoDe('ci-galicia-costos');
+  const galiciaImpuestos = montoDe('ci-galicia-impuestos');
   const errEl = document.getElementById('cierre-error');
   errEl.textContent = '';
 
@@ -5602,7 +5664,7 @@ function renderCierreMes() {
       '<div id="cierre-asig-edit"></div>' +
       '<div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
         '<span style="font-size:12px;color:var(--text-muted)">Ajustar TC:</span>' +
-        '<input type="number" id="cierre-tc-input" value="' + tc + '" step="1" style="width:120px">' +
+        '<input type="text" inputmode="decimal" id="cierre-tc-input" value="' + tc + '" style="width:120px">' +
         '<button class="btn" onclick="ajustarTCCierre()">Recalcular USD</button>' +
         '<button class="btn" onclick="editarAsignacionCierre()">Editar asignación</button>' +
         '<button class="btn" onclick="cerrarMesActual(true)" title="Volver a tomar los totales actuales">Re-cerrar con datos actuales</button>' +
@@ -5616,17 +5678,17 @@ function renderCierreMes() {
       '</div>' +
       '<div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
         '<span style="font-size:12px;color:var(--text-muted)">TC USD del período:</span>' +
-        '<input type="number" id="cierre-tc-input" placeholder="cargando..." step="1" style="width:120px" oninput="cierreRecalcAlloc()">' +
+        '<input type="text" inputmode="decimal" id="cierre-tc-input" placeholder="cargando..." style="width:120px" oninput="cierreRecalcAlloc()">' +
         '<span id="cierre-tc-fuente" style="font-size:11px;color:var(--text-muted)"></span>' +
       '</div>' +
       '<div style="margin-top:14px;padding:12px;border:1px solid var(--border,#333);border-radius:8px">' +
         '<div style="font-size:12px;font-weight:600;margin-bottom:8px">¿Cómo se reparte el resultado del mes?</div>' +
         '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end">' +
           '<div><div style="font-size:11px;color:var(--text-muted)">Recupero de inversión (ARS)</div>' +
-            '<input type="number" id="cierre-recupero-input" step="1000" style="width:150px" oninput="cierreRecalcAlloc()">' +
+            '<input type="text" inputmode="decimal" id="cierre-recupero-input" style="width:150px" oninput="cierreRecalcAlloc()">' +
             '<div id="cierre-recupero-usd" style="font-size:11px;color:var(--green)"></div></div>' +
           '<div><div style="font-size:11px;color:var(--text-muted)">Fondo extraordinarias (ARS)</div>' +
-            '<input type="number" id="cierre-extra-input" step="1000" value="0" style="width:150px" oninput="cierreRecalcAlloc()">' +
+            '<input type="text" inputmode="decimal" id="cierre-extra-input" value="0" style="width:150px" oninput="cierreRecalcAlloc()">' +
             '<div id="cierre-extra-usd" style="font-size:11px;color:var(--text-muted)"></div></div>' +
           '<div><div style="font-size:11px;color:var(--text-muted)">Remanente</div><div id="cierre-remanente" style="font-weight:600"></div></div>' +
         '</div>' +
@@ -5666,9 +5728,9 @@ function renderCierreMes() {
 
 // Recalcula en vivo los USD del reparto y el remanente al tipear.
 function cierreRecalcAlloc() {
-  const tc = Number((document.getElementById('cierre-tc-input')||{}).value) || 0;
-  const rec = Number((document.getElementById('cierre-recupero-input')||{}).value) || 0;
-  const ext = Number((document.getElementById('cierre-extra-input')||{}).value) || 0;
+  const tc = parseMonto((document.getElementById('cierre-tc-input')||{}).value);
+  const rec = montoDe('cierre-recupero-input');
+  const ext = montoDe('cierre-extra-input');
   const recUsd = document.getElementById('cierre-recupero-usd');
   const extUsd = document.getElementById('cierre-extra-usd');
   const rem = document.getElementById('cierre-remanente');
@@ -5705,8 +5767,8 @@ async function editarAsignacionCierre() {
       '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Resultado cerrado del mes: <strong style="color:var(--green)">' + fmt(resCerrado) + ' · US$' + resUsd.toLocaleString('es-AR') + '</strong> (tope para repartir)</div>' +
       '<div style="font-size:11px;color:var(--accent);margin-bottom:8px">Sugerido de recupero (mínimo para recuperar la inversión en ' + mesesLimite + ' meses): <strong>' + fmt(sugARS) + ' · US$' + sugUSD.toLocaleString('es-AR') + '</strong></div>' +
       '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end">' +
-        '<div><div style="font-size:11px;color:var(--text-muted)">Recupero inversión (ARS)</div><input type="number" id="asig-recupero" value="' + prefill + '" step="1000" style="width:150px" oninput="asigRecalcExtra(' + resCerrado + ')"></div>' +
-        '<div><div style="font-size:11px;color:var(--text-muted)">Fondo extraordinarias (ARS)</div><input type="number" id="asig-extra" value="' + extraPrefill + '" step="1000" style="width:150px"></div>' +
+        '<div><div style="font-size:11px;color:var(--text-muted)">Recupero inversión (ARS)</div><input type="text" inputmode="decimal" id="asig-recupero" value="' + prefill + '" style="width:150px" oninput="asigRecalcExtra(' + resCerrado + ')"></div>' +
+        '<div><div style="font-size:11px;color:var(--text-muted)">Fondo extraordinarias (ARS)</div><input type="text" inputmode="decimal" id="asig-extra" value="' + extraPrefill + '" style="width:150px"></div>' +
         '<button class="btn" onclick="document.getElementById(\'asig-recupero\').value=' + sugARS + ';asigRecalcExtra(' + resCerrado + ')">Usar sugerido</button>' +
         '<button class="btn" onclick="document.getElementById(\'asig-recupero\').value=' + resCerrado + ';document.getElementById(\'asig-extra\').value=0">Todo a recupero</button>' +
         '<button class="btn btn-primary" onclick="guardarAsignacionCierre()">Guardar</button>' +
@@ -5716,14 +5778,14 @@ async function editarAsignacionCierre() {
 
 // Al cambiar el recupero, el resto del resultado cerrado va sugerido a extraordinarias.
 function asigRecalcExtra(resCerrado) {
-  const rec = Number((document.getElementById('asig-recupero')||{}).value) || 0;
+  const rec = montoDe('asig-recupero');
   const ext = document.getElementById('asig-extra');
   if (ext) ext.value = Math.max(0, Math.round(resCerrado - rec));
 }
 
 async function guardarAsignacionCierre() {
-  const rec = Number((document.getElementById('asig-recupero')||{}).value) || 0;
-  const ext = Number((document.getElementById('asig-extra')||{}).value) || 0;
+  const rec = montoDe('asig-recupero');
+  const ext = montoDe('asig-extra');
   try {
     await api('/api/cierres/recupero', { method: 'PUT', body: JSON.stringify({ mes: state.mes, recuperoARS: rec, extraordinariaARS: ext }) });
     await loadCierres();
@@ -5736,15 +5798,15 @@ function normMes(s) { return (s||'').toString().normalize('NFD').replace(/[\u030
 
 async function cerrarMesActual(reCerrar) {
   const el = document.getElementById('cierre-tc-input');
-  const tc = el ? Number(el.value) : 0;
+  const tc = el ? parseMonto(el.value) : 0;
   if (!tc || tc <= 0) { alert('Cargá un tipo de cambio válido'); return; }
   // Si estamos en el panel de un mes ya cerrado (re-cerrar), no hay inputs de
   // reparto: preservamos la asignación ya guardada.
   let rec, ext;
   const recEl = document.getElementById('cierre-recupero-input');
   if (recEl) {
-    rec = Number(recEl.value) || 0;
-    ext = Number((document.getElementById('cierre-extra-input')||{}).value) || 0;
+    rec = montoDe('cierre-recupero-input');
+    ext = montoDe('cierre-extra-input');
   } else {
     const yc = _cierresCache.find(c => normMes(c.mes) === normMes(state.mes));
     rec = yc ? (yc.recuperoARS||0) : 0;
@@ -5760,7 +5822,7 @@ async function cerrarMesActual(reCerrar) {
 
 async function ajustarTCCierre() {
   const el = document.getElementById('cierre-tc-input');
-  const tc = el ? Number(el.value) : 0;
+  const tc = el ? parseMonto(el.value) : 0;
   if (!tc || tc <= 0) { alert('TC inválido'); return; }
   try {
     await api('/api/cierres/tc', { method: 'PUT', body: JSON.stringify({ mes: state.mes, tcUsd: tc }) });
@@ -6290,8 +6352,8 @@ function onCambioChange() {
   document.getElementById('cb-monto-destino-label').textContent = `Monto que entra (${mDestino})`;
   document.getElementById('cb-monto-destino-wrap').style.display = cruza ? '' : 'none';
 
-  const montoO = parseFloat(document.getElementById('cb-monto-origen').value) || 0;
-  const montoD = parseFloat(document.getElementById('cb-monto-destino').value) || 0;
+  const montoO = montoDe('cb-monto-origen');
+  const montoD = montoDe('cb-monto-destino');
   const hint = document.getElementById('cb-tc-hint');
   if (origen && destino && origen === destino) {
     hint.style.color = 'var(--red)';
@@ -6328,8 +6390,8 @@ async function saveCambio() {
   const fechaISO = document.getElementById('cb-fecha').value;
   const origen = document.getElementById('cb-origen').value;
   const destino = document.getElementById('cb-destino').value;
-  const montoOrigen = parseFloat(document.getElementById('cb-monto-origen').value) || 0;
-  const montoDestinoInput = parseFloat(document.getElementById('cb-monto-destino').value) || 0;
+  const montoOrigen = montoDe('cb-monto-origen');
+  const montoDestinoInput = montoDe('cb-monto-destino');
   const cruza = monedaCaja(origen) !== monedaCaja(destino);
 
   if (!fechaISO) { errEl.textContent = 'Elegí la fecha.'; return; }
@@ -6486,7 +6548,7 @@ function editorTC(ctx, fila, usd, tcVigente, sinConfirmar) {
   return `<div class="mov-tc-editor" id="tc-ed-${k}" style="display:none">
       <div class="tc-fila">
         <span style="font-size:12px;color:var(--text-muted)">USD ${usd.toLocaleString('es-AR')} a</span>
-        <input type="number" inputmode="decimal" id="tc-in-${k}" value="${tcVigente}"
+        <input type="text" inputmode="decimal" id="tc-in-${k}" value="${tcVigente}"
                oninput="previewTC('${ctx}', ${fila}, ${usd})"
                onkeydown="if(event.key==='Enter')guardarTC('${ctx}', ${fila}, ${usd})">
         <span style="font-size:12px;color:var(--text-muted)">$/USD</span>
@@ -6528,7 +6590,7 @@ function previewTC(ctx, fila, usd) {
   const inp = document.getElementById(`tc-in-${ctx}-${fila}`);
   const eq = document.getElementById(`tc-eq-${ctx}-${fila}`);
   if (!inp || !eq) return;
-  const tc = Number(inp.value);
+  const tc = parseMonto(inp.value);
   eq.textContent = (Number.isFinite(tc) && tc > 0)
     ? `USD ${usd.toLocaleString('es-AR')} × $${tc.toLocaleString('es-AR')} = ${fmt(usd * tc)}`
     : '';
@@ -6540,7 +6602,7 @@ function previewTC(ctx, fila, usd) {
 async function guardarTC(ctx, fila, usd) {
   const inp = document.getElementById(`tc-in-${ctx}-${fila}`);
   const err = document.getElementById(`tc-err-${ctx}-${fila}`);
-  const tc = Number(inp.value);
+  const tc = parseMonto(inp.value);
   err.style.display = 'none';
   if (!Number.isFinite(tc) || tc <= 0) {
     err.textContent = 'Poné un tipo de cambio mayor que cero.';
@@ -7244,7 +7306,7 @@ function toggleVarForm() {
 async function saveProyVar() {
   const nombre = document.getElementById('pvf-nombre').value.trim();
   const tipo = document.getElementById('pvf-tipo').value;
-  const monto = parseFloat(document.getElementById('pvf-monto').value) || 0;
+  const monto = montoDe('pvf-monto');
   const repite = document.getElementById('pvf-repite').value === 'true';
   const meses = [...document.querySelectorAll('#pvf-meses input:checked')].map(c => c.value);
   const st = document.getElementById('pvf-status');
@@ -7397,7 +7459,7 @@ function renderRoi() {
       '<button class="btn" style="font-size:12px;padding:6px 12px" onclick="toggleRoiParams()">⚙️ Ajustar parámetros</button>' +
     '</div>' +
     '<div id="roi-params" style="display:none;margin-top:10px;gap:14px;flex-wrap:wrap;align-items:flex-end">' +
-      '<div><div style="font-size:11px;color:var(--text-muted)">Inversión (USD)</div><input type="number" id="roi-inv" value="' + r.inversionUSD + '" step="1000" style="width:120px"></div>' +
+      '<div><div style="font-size:11px;color:var(--text-muted)">Inversión (USD)</div><input type="text" inputmode="decimal" id="roi-inv" value="' + r.inversionUSD + '" style="width:120px"></div>' +
       '<div><div style="font-size:11px;color:var(--text-muted)">Meta (meses)</div><input type="number" id="roi-target" value="' + r.mesesTarget + '" step="1" style="width:80px"></div>' +
       '<div><div style="font-size:11px;color:var(--text-muted)">Límite (meses)</div><input type="number" id="roi-limite" value="' + r.mesesLimite + '" step="1" style="width:80px"></div>' +
       '<div><div style="font-size:11px;color:var(--text-muted)">Mes inicio (YYYY-MM)</div><input type="text" id="roi-inicio" value="' + (r.mesInicio || '') + '" placeholder="2026-01" style="width:110px"></div>' +
@@ -7429,7 +7491,7 @@ function toggleRoiParams() {
 
 async function saveRoiConfig() {
   const pairs = [
-    ['roiInversionUSD', Number((document.getElementById('roi-inv')||{}).value) || 0],
+    ['roiInversionUSD', montoDe('roi-inv')],
     ['roiMesesTarget', Number((document.getElementById('roi-target')||{}).value) || 0],
     ['roiMesesLimite', Number((document.getElementById('roi-limite')||{}).value) || 0],
     ['roiMesInicio', (document.getElementById('roi-inicio')||{}).value || ''],
@@ -7685,7 +7747,7 @@ async function planEliminar(id) {
 function planEditarCostoInline(el, id) {
   const it = planItemById(id); if (!it) return;
   const td = el.parentElement;
-  td.innerHTML = `<input type="number" min="0" value="${it.costoEstimado || 0}"
+  td.innerHTML = `<input type="text" inputmode="decimal" value="${it.costoEstimado || 0}"
     style="width:130px;text-align:right;background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:5px 7px;border-radius:6px;font-size:13px;font-family:inherit;outline:none"
     onkeydown="planCostoKey(event)" onblur="planGuardarCostoInline(this,'${id}')">`;
   const inp = td.querySelector('input');
@@ -7698,8 +7760,8 @@ function planCostoKey(ev) {
 async function planGuardarCostoInline(inp, id) {
   if (inp.dataset.cancel) return;
   const it = planItemById(id);
-  const v = Number(inp.value);
-  if (!it || inp.value === '' || !(v >= 0) || Math.round(v) === Math.round(it.costoEstimado)) {
+  const v = centavos(parseMonto(inp.value));
+  if (!it || inp.value === '' || !(v >= 0) || v === centavos(it.costoEstimado)) {
     renderPlanBacklog();
     return;
   }
@@ -9216,7 +9278,7 @@ function renderFinAportes() {
 function finEditarAporte(el, mes) {
   const a = (state.fin.aportes || []).find(x => x.mes === mes); if (!a) return;
   const td = el.parentElement;
-  td.innerHTML = `<input type="number" min="0" value="${a.monto || 0}"
+  td.innerHTML = `<input type="text" inputmode="decimal" value="${a.monto || 0}"
     style="width:130px;text-align:right;background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:5px 7px;border-radius:6px;font-size:13px;font-family:inherit;outline:none"
     onkeydown="finAporteKey(event)" onblur="finGuardarAporte(this,'${mes}')">`;
   const inp = td.querySelector('input'); inp.focus(); inp.select();
@@ -9228,8 +9290,8 @@ function finAporteKey(ev) {
 async function finGuardarAporte(inp, mes) {
   if (inp.dataset.cancel) return;
   const a = (state.fin.aportes || []).find(x => x.mes === mes);
-  const v = Number(inp.value);
-  if (!a || inp.value === '' || !(v >= 0) || Math.round(v) === Math.round(a.monto)) { renderFinAportes(); return; }
+  const v = centavos(parseMonto(inp.value));
+  if (!a || inp.value === '' || !(v >= 0) || v === centavos(a.monto)) { renderFinAportes(); return; }
   inp.disabled = true;
   try {
     await api('/api/finanzas/aportes', { method: 'PUT', body: JSON.stringify({ mes, monto: v }) });
@@ -9335,7 +9397,7 @@ async function saveFinMovimiento() {
   const val = id => document.getElementById(id).value;
   const body = {
     fecha: val('fmv-fecha'), tipo: val('fmv-tipo'), balde: 'mp',
-    monto: Number(val('fmv-monto')), instrumento: 'Mercado Pago Pablo',
+    monto: montoDe('fmv-monto'), instrumento: 'Mercado Pago Pablo',
     comprobante: val('fmv-comprobante').trim(), mesRecupero: val('fmv-mesrec'), notas: val('fmv-notas').trim(),
   };
   if (!(body.monto > 0)) { status.style.display = ''; status.style.color = 'var(--red)'; status.textContent = 'Ingresá un monto mayor a cero.'; return; }
@@ -9386,10 +9448,11 @@ function planEditarItem(id) {
 }
 async function savePlanItem() {
   const nombre = document.getElementById('plf-nombre').value.trim();
-  const costo = document.getElementById('plf-costo').value;
+  const costoRaw = document.getElementById('plf-costo').value;
+  const costo = montoDe('plf-costo');
   const status = document.getElementById('plf-status');
   if (!nombre) { status.style.display = ''; status.style.color = 'var(--red)'; status.textContent = 'El nombre es obligatorio.'; return; }
-  if (costo === '' || Number(costo) < 0) { status.style.display = ''; status.style.color = 'var(--red)'; status.textContent = 'Ingresá un costo estimado válido.'; return; }
+  if (costoRaw.trim() === '' || costo < 0) { status.style.display = ''; status.style.color = 'var(--red)'; status.textContent = 'Ingresá un costo estimado válido.'; return; }
   const id = document.getElementById('plf-id').value;
   const mes = document.getElementById('plf-mes').value;
   const prioridadRaw = document.getElementById('plf-prioridad').value;
@@ -9397,7 +9460,7 @@ async function savePlanItem() {
     id: id || undefined,
     nombre,
     categoria: document.getElementById('plf-categoria').value.trim(),
-    costoEstimado: Number(costo),
+    costoEstimado: costo,
     prioridad: prioridadRaw === '' ? undefined : Number(prioridadRaw),
     mesObjetivo: mes,
     estado: mes ? 'planificado' : 'backlog',
@@ -10022,7 +10085,7 @@ function datosDeCompra() {
     proveedor: document.getElementById('f-proveedor').value.trim(),
     categoria: document.getElementById('f-categoria').value,
     medioPago: document.getElementById('f-medio').value,
-    salidaARS: parseFloat(document.getElementById('f-monto').value) || 0,
+    salidaARS: montoDe('f-monto'),
     conCuotas,
     cuotas: conCuotas ? (parseInt(document.getElementById('f-cuotas').value) || 1) : 1,
     vencRaw: document.getElementById('f-vencimiento').value,
@@ -12162,7 +12225,9 @@ function resetCalc() {
   loadCalculadora();
 }
 async function recalcCalc(sourceId) {
-  const v = id => { const el = document.getElementById(id); const n = Number(el && el.value); return Number.isFinite(n) ? n : 0; };
+  // Misma regla que el resto: acá conviven pesos y porcentajes, y parseMonto
+  // lee bien los dos ('1.500.000' es millón y medio, '3,5' es tres y medio).
+  const v = id => { const el = document.getElementById(id); return el ? parseMonto(el.value) : 0; };
 
   if (sourceId === 'calc-fin-ars') _calcModo.fin = 'ars';
   if (sourceId === 'calc-fin-pct') _calcModo.fin = 'pct';
@@ -13568,12 +13633,11 @@ const propinasState = {
 };
 
 // Acepta "150.000", "150000", "150000,50" y "$150.000".
+// Mismo problema y misma solución que pedNumero: el punto no siempre separa
+// miles. "$41.250" son cuarenta y un mil, pero "41250.75" son setenta y cinco
+// centavos, y el saldo de una cuenta bancaria los tiene.
 function parsePropinaMonto(v) {
-  const s = String(v == null ? '' : v).replace(/[^0-9.,-]/g, '').trim();
-  if (!s) return 0;
-  // Formato argentino: el punto separa miles y la coma decimales.
-  const n = Number(s.replace(/\./g, '').replace(',', '.'));
-  return Number.isFinite(n) ? n : 0;
+  return centavos(parseMonto(v));
 }
 
 async function loadPropinas() {
@@ -15435,9 +15499,11 @@ function pedModo() { return PED_MODOS[pedState.modo] || PED_MODOS['pague']; }
 function pedEsAdmin() { return getRol() === 'admin'; }
 
 // Un número tipeado con puntos, comas o un "$" adelante.
+// Borraba TODOS los puntos por darlos por separadores de miles, así que
+// "200000.93" se leía como veinte millones. La regla vive en parseMonto; acá
+// queda el nombre con el que la llama la pantalla de Pedidos.
 function pedNumero(v) {
-  const n = Number(String(v ?? '').replace(/[^0-9,.-]/g, '').replace(/\./g, '').replace(',', '.'));
-  return Number.isFinite(n) ? n : 0;
+  return centavos(parseMonto(v));
 }
 
 // Los saldos van en su propia llamada y NO bloquean la pantalla de Pedidos: son

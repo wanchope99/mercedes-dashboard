@@ -118,6 +118,7 @@
 
 const { google } = require('googleapis');
 const NodeCache = require('node-cache');
+const { parseMonto } = require('./monto');
 
 // Sin fallback a SPREADSHEET_ID — ver punto 2 del encabezado.
 const SHEET_ID = process.env.NOMINA_SHEET_ID || null;
@@ -210,20 +211,12 @@ function parseFecha(valor) {
 const diaISO = d => (d ? `${d.getFullYear()}-${dosDigitos(d.getMonth() + 1)}-${dosDigitos(d.getDate())}` : null);
 
 // Los importes vienen como número cuando se pide UNFORMATTED_VALUE, pero una
-// celda tipeada a mano puede llegar como "$1.700.000". Se acepta cualquiera de
-// las dos: el formato argentino usa el punto como separador de miles.
-function parseImporte(valor) {
-  if (typeof valor === 'number') return Number.isFinite(valor) ? valor : 0;
-  const s = String(valor == null ? '' : valor).replace(/[$\s]/g, '');
-  if (!s) return 0;
-  const coma = s.lastIndexOf(','), punto = s.lastIndexOf('.');
-  let limpio;
-  if (coma !== -1 && punto !== -1) limpio = coma > punto ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
-  else if (coma !== -1) limpio = s.slice(coma + 1).length === 3 ? s.replace(/,/g, '') : s.replace(',', '.');
-  else limpio = s;
-  const n = parseFloat(limpio);
-  return Number.isFinite(n) ? n : 0;
-}
+// celda tipeada a mano puede llegar como "$1.700.000", y lo que edita la app
+// llega como texto del navegador. Una sola regla para las tres cosas.
+//
+// La copia que vivía acá leía "$1.700.000" como 1,7 — sólo miraba el separador
+// de más a la derecha y dejaba el resto para que `parseFloat` los cortara.
+const parseImporte = parseMonto;
 
 const norm = s => (s || '').toString().trim().toLowerCase();
 

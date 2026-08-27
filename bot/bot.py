@@ -30,6 +30,7 @@ mediante un token de servicio (PROVEEDORES_INGEST_TOKEN).
 """
 
 import os
+import re
 import base64
 import logging
 
@@ -166,6 +167,42 @@ CAMPO_LABEL = {
 # se vuelve a preguntar en vez de guardar basura. El total va acá porque es la
 # plata que entra al libro.
 CAMPOS_NUMERICOS = {"precio_unitario": "precioUnit", "totalGasto": "totalGasto"}
+
+
+def parse_monto(texto):
+    """Un importe tipeado, con la MISMA regla que src/monto.js y el navegador.
+
+    Con los dos separadores manda el de más a la derecha ("93.926,67" y
+    "93,926.67" son los mismos noventa y tres mil). Con uno solo es de miles
+    nada más que si todo el número tiene forma de agrupado ("124.500",
+    "1.700.000"); en cualquier otro caso es decimal ("124500,50",
+    "124500.50", "0,5").
+
+    Antes acá se borraban TODOS los puntos, así que "124500.50" entraba como
+    doce millones y medio. Es una tercera copia de la regla porque el bot es
+    Python y no puede importar el módulo de Node; si se toca una, van las tres.
+    """
+    s = re.sub(r"[^0-9.,-]", "", str(texto or "").strip())
+    if not s or s == "-":
+        raise ValueError("vacío")
+
+    coma, punto = s.rfind(","), s.rfind(".")
+    decimal = None
+    if coma != -1 and punto != -1:
+        decimal = "," if coma > punto else "."
+    elif coma != -1 or punto != -1:
+        sep = "," if coma != -1 else "."
+        patron = r"^\d{1,3}(,\d{3})+$" if sep == "," else r"^\d{1,3}(\.\d{3})+$"
+        if not re.match(patron, s.lstrip("-")):
+            decimal = sep
+
+    if decimal:
+        corte = s.rfind(decimal)
+        limpio = re.sub(r"[.,]", "", s[:corte]) + "." + re.sub(r"[.,]", "", s[corte + 1:])
+    else:
+        limpio = re.sub(r"[.,]", "", s)
+
+    return round(float(limpio), 2)
 
 # Índice especial para las dudas de FACTURA (medio de pago, IVA): -1.
 FACTURA_IDX = -1
@@ -603,9 +640,9 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # producto → texto; precio y total → número
         if campo in CAMPOS_NUMERICOS:
             try:
-                # "124.500", "124500" y "124.500,50" son todos válidos: la
-                # persona escribe como habla, no como una planilla.
-                valor_num = float(valor.replace("$", "").replace(" ", "").replace(".", "").replace(",", "."))
+                # "124.500", "124500", "124.500,50" y "124500.50" son todos
+                # válidos: la persona escribe como habla, no como una planilla.
+                valor_num = parse_monto(valor)
                 if valor_num <= 0:
                     raise ValueError("no positivo")
                 key = "factura" if item_idx == FACTURA_IDX else item_idx

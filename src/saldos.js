@@ -54,6 +54,7 @@
 
 const { google } = require('googleapis');
 const NodeCache = require('node-cache');
+const { parseMonto, centavos } = require('./monto');
 
 const cache = new NodeCache({ stdTTL: 60 });
 const CACHE_KEY = 'saldos';
@@ -103,16 +104,12 @@ const hoyAR = () => new Date().toLocaleDateString('en-CA', { timeZone: TZ });
 const norm = v => _txt(v).toLowerCase()
   .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
 
-/** Un número tipeado con puntos, comas o un "$" adelante, con su signo. */
-function _numero(v) {
-  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
-  const s = _txt(v).replace(/[^0-9,.-]/g, '');
-  if (!s) return 0;
-  const n = Number(s.replace(/\./g, '').replace(',', '.'));
-  return Number.isFinite(n) ? n : 0;
-}
+/** Un número tipeado con puntos, comas o un "$" adelante, con su signo.
+ *  La copia que vivía acá borraba TODOS los puntos, así que "$3.000,50" salía
+ *  bien y "$3000.50" salía 300050. Una sola regla, en `monto.js`. */
+const _numero = parseMonto;
 
-const _redondear = n => Math.round((Number(n) || 0) * 100) / 100;
+const _redondear = centavos;
 
 const normalizarMotivo = v => {
   const m = norm(v);
