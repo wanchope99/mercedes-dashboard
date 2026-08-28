@@ -958,7 +958,7 @@
                   padding: 12px 14px; margin-bottom: 10px; }
     .nl-cab { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 11px; }
     .nl-nombre { font-size: 14px; font-weight: 600; }
-    .nl-socio { font-size: 11px; color: var(--text-muted); font-weight: 400; }
+    .nl-cab-nota { font-size: 11px; color: var(--text-muted); font-weight: 400; }
     .nl-total { font-size: 18px; font-weight: 700; white-space: nowrap; }
     .nl-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; }
     .nl-campo { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
@@ -970,6 +970,24 @@
     /* Lo que se tocó y todavía no se guardó, igual que en el cierre de cocina: la
        diferencia entre "lo escribí" y "quedó guardado" no puede ser invisible. */
     .nl-campo.tocado input { border-color: var(--orange); }
+    /* Los consumos vienen PLEGADOS. Son el dato que menos se toca y el que más
+       ruido hace en una pantalla que se llena con el teléfono en la mano: el
+       importe ya se ve en el pie de la tarjeta, así que plegarlos no esconde
+       plata, sólo saca de encima dos campos vacíos por persona. */
+    .nl-consumos { grid-column: 1 / -1; }
+    .nl-consumos-btn { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
+                       background: none; border: none; padding: 4px 0; cursor: pointer;
+                       font-family: inherit; font-size: 11px; letter-spacing: .5px;
+                       text-transform: uppercase; color: var(--text-muted); }
+    .nl-consumos-btn:hover { color: var(--text); }
+    .nl-consumos-btn .nl-chev { display: inline-block; transition: transform .15s; font-size: 10px; }
+    .nl-consumos.abierto .nl-consumos-btn .nl-chev { transform: rotate(90deg); }
+    /* Lo que hay cargado se ve sin abrir: plegado no es lo mismo que oculto. */
+    .nl-consumos-res { text-transform: none; letter-spacing: 0; color: var(--text); font-size: 12px; }
+    .nl-consumos-res.tocado { color: var(--orange); }
+    .nl-consumos-campos { display: none; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+                          gap: 10px; margin-top: 8px; }
+    .nl-consumos.abierto .nl-consumos-campos { display: grid; }
     .nl-pie { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 11px; padding-top: 9px;
               border-top: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
     .nl-pie b { color: var(--text); font-size: 13px; }
@@ -15101,10 +15119,10 @@ function renderNomina() {
   const gente = (empleados || []).map(e => {
     const meses = e.ingresoISO ? mesesDesde(e.ingresoISO) : null;
     return fila(
-      `<b>${escapeHtml(e.nombre)}</b>${e.esSocio ? ' <span style="font-size:11px;color:var(--text-muted)">socio</span>' : ''}`
+      `<b>${escapeHtml(e.nombre)}</b>`
         + `<span style="display:block;font-size:11px;color:var(--text-muted)">`
         + (e.ingresoISO ? `desde ${fechaCorta(e.ingresoISO)}${meses != null ? ` · ${meses} ${meses === 1 ? 'mes' : 'meses'}` : ''}` : 'sin fecha de ingreso')
-        + (e.enBlancoNetoARS > 0 ? ` · ${fmt(e.enBlancoNetoARS)} en blanco` : e.esSocio ? '' : ' · sin parte registrada')
+        + (e.enBlancoNetoARS > 0 ? ` · ${fmt(e.enBlancoNetoARS)} por transferencia` : e.esSocio ? '' : ' · sin transferencia')
         + `</span>`,
       e.sueldoActualARS > 0 ? fmt(e.sueldoActualARS) : '<span style="color:var(--red,#c33)">falta</span>');
   }).join('');
@@ -15154,7 +15172,12 @@ function renderNomina() {
 // La cuenta se rehace en el navegador mientras se tipea —cambiar un feriado tiene
 // que mover el efectivo en el momento, no después de guardar— pero el número que
 // vale es el que devuelve el server: al guardar se recarga todo desde la planilla.
-const nomLiq = { mesId: null, data: null, cambios: new Map(), guardando: false };
+const nomLiq = {
+  mesId: null, data: null, cambios: new Map(), guardando: false,
+  // Quiénes tienen el bloque de consumos desplegado. Por nombre y no por índice
+  // porque la lista se redibuja: es "qué estoy mirando ahora", no se guarda.
+  consumosAbiertos: new Set(),
+};
 
 // AAAAMM ± n. El día 1 se usa a propósito: sumar meses sobre un 31 se va de mes.
 function nomLiqSuma(mesId, n) {
@@ -15256,12 +15279,12 @@ function nomLiqPersona(e, i) {
   // El aguinaldo aparece en junio y diciembre, y también fuera de esos meses si
   // la planilla ya tiene un importe escrito: esconderlo lo volvería ineditable.
   const muestraSAC = d.esMesDeSAC || (e.sacARS || 0) > 0 || (e.aguinaldoTransferenciaARS || 0) > 0;
+  const abierto = nomLiq.consumosAbiertos.has(e.nombre);
 
   return `<div class="nl-persona">
     <div class="nl-cab">
       <span class="nl-nombre">${escapeHtml(e.nombre)}
-        ${e.esSocio ? '<span class="nl-socio">· socio</span>' : ''}
-        ${!e.enPlanilla ? '<span class="nl-socio">· todavía no está en la hoja del mes</span>' : ''}
+        ${!e.enPlanilla ? '<span class="nl-cab-nota">· todavía no está en la hoja del mes</span>' : ''}
       </span>
       <span class="nl-total" id="nl-total-${i}"></span>
     </div>
@@ -15271,15 +15294,36 @@ function nomLiqPersona(e, i) {
       ${muestraSAC ? campo('sacARS', 'Aguinaldo', Math.round(e.sacARS)) : ''}
       ${campo('sueldoTransferenciaARS', 'Transferencia', Math.round(e.sueldoTransferenciaARS))}
       ${muestraSAC ? campo('aguinaldoTransferenciaARS', 'Transf. aguinaldo', Math.round(e.aguinaldoTransferenciaARS)) : ''}
-      ${campo('consumosARS', 'Consumos', Math.round(e.consumosARS))}
-      <div class="nl-campo ancho" id="nl-c-${i}-consumosNota">
-        <label>Qué consumió (opcional)</label>
-        <input type="text" maxlength="200" value="${escapeHtml(e.consumosNota || '')}"
-               placeholder="1 Coca + 1 copa Imperial" oninput="nomLiqEditar(${i},'consumosNota',this.value)">
+      <div class="nl-consumos${abierto ? ' abierto' : ''}" id="nl-consumos-${i}">
+        <button type="button" class="nl-consumos-btn" aria-expanded="${abierto}"
+                onclick="nomLiqToggleConsumos(${i})">
+          <span class="nl-chev">▸</span> Consumos <span class="nl-consumos-res" id="nl-cres-${i}"></span>
+        </button>
+        <div class="nl-consumos-campos">
+          ${campo('consumosARS', 'Cuánto', Math.round(e.consumosARS))}
+          <div class="nl-campo ancho" id="nl-c-${i}-consumosNota">
+            <label>Qué consumió (opcional)</label>
+            <input type="text" maxlength="200" value="${escapeHtml(e.consumosNota || '')}"
+                   placeholder="1 Coca + 1 copa Imperial" oninput="nomLiqEditar(${i},'consumosNota',this.value)">
+          </div>
+        </div>
       </div>
     </div>
     <div class="nl-pie" id="nl-pie-${i}"></div>
   </div>`;
+}
+
+function nomLiqToggleConsumos(i) {
+  const e = nomLiq.data.porEmpleado[i];
+  if (!e) return;
+  const abierto = !nomLiq.consumosAbiertos.has(e.nombre);
+  if (abierto) nomLiq.consumosAbiertos.add(e.nombre); else nomLiq.consumosAbiertos.delete(e.nombre);
+  const el = document.getElementById(`nl-consumos-${i}`);
+  if (!el) return;
+  el.classList.toggle('abierto', abierto);
+  const btn = el.querySelector('.nl-consumos-btn');
+  if (btn) btn.setAttribute('aria-expanded', String(abierto));
+  if (abierto) { const inp = el.querySelector('input'); if (inp) inp.focus(); }
 }
 
 // Escribir NO redibuja la lista: perdería el foco en cada tecla. Se repintan sólo
@@ -15314,6 +15358,16 @@ function nomLiqRepintar(i) {
   const c = nomLiqCuenta(e);
   const tot = document.getElementById(`nl-total-${i}`);
   if (tot) tot.textContent = fmt(c.total);
+  // Con el bloque plegado, esta línea es lo único que dice si hay consumos.
+  const res = document.getElementById(`nl-cres-${i}`);
+  if (res) {
+    const nota = nomLiqValor(e, 'consumosNota') || '';
+    res.textContent = c.consumos
+      ? `−${fmt(c.consumos)}${nota ? ' · ' + nota : ''}`
+      : (nota || 'sin consumos');
+    const camb = nomLiq.cambios.get(e.nombre) || {};
+    res.classList.toggle('tocado', camb.consumosARS != null || camb.consumosNota != null);
+  }
   const pie = document.getElementById(`nl-pie-${i}`);
   if (!pie) return;
   pie.innerHTML = [
