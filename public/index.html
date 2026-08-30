@@ -781,8 +781,10 @@
        donde había que leer cuál era cuál, y el que está apurado toca por
        posición. Ahora se distinguen de un vistazo, sin leer:
 
-         1. "Llegó y lo pagué"  → grande, en negrita, verde. El happy path.
-         2. "Llegó y no lo pagué" → mismo renglón, más chico y sin negrita.
+         1. el botón grande     → en negrita, verde. Lo que va a pasar casi
+            seguro con ESE pedido: "Llegó y lo pagué", o "Llegó y lo recibí" si
+            la compra ya estaba paga. Ver PED_BOTONES.
+         2. el otro de recibir  → mismo renglón, más chico y sin negrita.
          3. Otro día / 🗑️      → detrás de una línea, sin borde y apagados.  */
     .ped-acc-ppal { font-weight: 700 !important; padding: 9px 16px !important; }
     .ped-acc-sec { font-size: 11.5px !important; padding: 5px 10px !important; }
@@ -802,8 +804,8 @@
       /* En el teléfono las acciones se apilan, y el orden ES la jerarquía:
          cada renglón vale menos que el de arriba.
 
-           1. Llegó y lo pagué   ancho entero, alto entero, verde
-           2. Llegó y no lo pagué ancho entero, LA MITAD DE ALTO, naranja
+           1. el botón grande    ancho entero, alto entero, verde
+           2. el otro de recibir ancho entero, LA MITAD DE ALTO, naranja
            3. Otro día · 🗑️      renglón propio, chiquitos y apagados
 
          El tercero va afuera del botón naranja y no al lado: con esos dos el
@@ -15654,10 +15656,31 @@ const PED_MODOS = {
     titulo: 'Llegó y no lo pagué',
     montoLabel: 'Cuánto queda pendiente',
     pideVencimiento: true,
+    // MISMO MODO, OTRO SIGNIFICADO. "No lo pagué" quiere decir dos cosas y el
+    // server ya las distingue desde el 26/08/2026 (ver `yaEstabaPago` en
+    // planificarAsiento): si la compra dijo que esto ya estaba pago, no queda
+    // deuda ninguna — sólo se recibe. La pantalla lo trataba igual que al que
+    // sí deja deuda, y le pedía "cuánto queda pendiente" por algo que no debe
+    // nada. Desde el 30/08/2026 el mismo modo cambia de nombre y de campos.
+    yaPago: {
+      titulo: 'Llegó y lo recibí',
+      montoLabel: 'Lo que ya se pagó',
+      pideVencimiento: false,
+    },
   },
 };
 
-function pedModo() { return PED_MODOS[pedState.modo] || PED_MODOS['pague']; }
+// Lo que afirmó quien compró: esta entrega ya está paga. Es la misma fuente que
+// mira el server para no escribir una deuda, y no el medio ni el monto.
+const pedYaPago = p => !!p && p.pagoPrevisto === 'pagado';
+
+// El modo, resuelto contra el pedido que se está recibiendo: 'no-pague' sobre
+// algo ya pagado es "lo recibí", que no es lo mismo.
+function pedModo(p) {
+  const base = PED_MODOS[pedState.modo] || PED_MODOS['pague'];
+  const ped = p === undefined ? pedState.recibiendo : p;
+  return (base.yaPago && pedYaPago(ped)) ? { ...base, ...base.yaPago } : base;
+}
 
 function pedEsAdmin() { return getRol() === 'admin'; }
 
@@ -15974,17 +15997,27 @@ function togglePedido(pedidoId) {
 // — hasta el 26/08/2026 eran tres botones, y dos de ellos preguntaban esto
 // mismo para contestarlo igual.
 //
-// LA JERARQUÍA ES FIJA y no depende de lo que se dijo al comprar. "Lo pagué"
-// es el botón grande siempre: es lo que pasa en la mayoría de las entregas, y
-// un botón que cambia de tamaño según el pedido obliga a leer antes de tocar,
-// que es lo que no se puede pedir con el proveedor esperando.
+// EL BOTÓN GRANDE ES SIEMPRE LO QUE MÁS PROBABLEMENTE PASE CON ESE PEDIDO, y
+// eso son dos cosas distintas según la compra:
 //
-// Lo que se dijo al comprar no se pierde: está en el chip del renglón, y si el
-// botón grande contradice a la compra el modal lo dice antes de confirmar (ver
-// `ped-r-ojo`) y queda un aviso para los dueños.
+//   · lo normal            → "Llegó y lo pagué". La plata sale en la puerta.
+//   · la compra ya está paga → "Llegó y lo recibí". No hay nada que pagar.
+//
+// Hasta el 30/08/2026 la jerarquía era FIJA, con el argumento de que un botón
+// que cambia de tamaño obliga a leer antes de tocar. El argumento era bueno y
+// el resultado igual estaba mal: a un pedido de Mercado Libre pagado al
+// comprarlo le ofrecía "lo pagué" en grande, que es justo lo que no pasó, y la
+// otra opción le pedía "cuánto queda pendiente" por una deuda inexistente.
+//
+// Lo que hace que el cambio no reintroduzca el problema viejo es que los dos
+// botones grandes NO son el mismo botón con otro tamaño: dicen cosas distintas
+// ("lo pagué" contra "lo recibí"), y el renglón ya viene marcado con el chip
+// "✓ ya está pago". No hay que leer para distinguirlos, y el que igual pagó de
+// su bolsillo tiene el otro botón al lado.
 const PED_BOTONES = {
-  'pague':    { clase: 'plata',  txt: '💵 Llegó y lo pagué' },
-  'no-pague': { clase: 'cuenta', txt: 'Llegó y no lo pagué' },
+  'pague':    { modo: 'pague',    txt: '💵 Llegó y lo pagué' },
+  'no-pague': { modo: 'no-pague', txt: 'Llegó y no lo pagué' },
+  'recibi':   { modo: 'no-pague', txt: '📦 Llegó y lo recibí' },
 };
 
 // Mover de día y borrar NO son parte de recibir, y por eso se ven distinto.
@@ -16005,9 +16038,20 @@ function accionesMenores(p) {
 
 function accionesRecibir(p) {
   const id = escapeHtml(p.id);
-  return `<button class="plata ped-acc-ppal" onclick="openPedRecibir('${id}','pague')">${PED_BOTONES['pague'].txt}</button>
-    <button class="cuenta ped-acc-sec" onclick="openPedRecibir('${id}','no-pague')">${PED_BOTONES['no-pague'].txt}</button>
-    ${accionesMenores(p)}`;
+  // Ya pago: se recibe y nada más, y poner plata pasa a ser la excepción.
+  const orden = pedYaPago(p) ? ['recibi', 'pague'] : ['pague', 'no-pague'];
+  // El COLOR va con la posición y no con el botón: verde es lo que va a pasar
+  // casi seguro con este pedido y naranja la excepción. Así "lo pagué" es verde
+  // en una entrega normal y naranja en una que la compra ya dejó paga, que es
+  // exactamente lo que significa en cada caso — y es el mismo naranja que ya
+  // usaba "no lo pagué", el botón que puede escribir algo inesperado.
+  const boton = (clave, cls, color) => {
+    const b = PED_BOTONES[clave];
+    return `<button class="${color} ${cls}" onclick="openPedRecibir('${id}','${b.modo}')">${b.txt}</button>`;
+  };
+  return boton(orden[0], 'ped-acc-ppal', 'plata')
+    + boton(orden[1], 'ped-acc-sec', 'cuenta')
+    + accionesMenores(p);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -16552,14 +16596,14 @@ async function openPedRecibir(id, modo) {
   pedState.recibiendo = p;
   pedState.modo = PED_MODOS[modo] ? modo : 'pague';
   pedState.plan = null;
-  const m = pedModo();
+  const m = pedModo(p);
 
   document.getElementById('ped-r-error').textContent = '';
   document.getElementById('ped-r-titulo').textContent = m.titulo;
   // Lo que se cargó al comprar, ya puesto: en "no lo pagué" es lo que queda
-  // pendiente, y en "lo pagué" es lo que se esperaba pagar. En los dos casos es
-  // el número que quien recibe tiene delante, y tipearlo de nuevo sólo agrega
-  // formas de equivocarse.
+  // pendiente, en "lo pagué" lo que se esperaba pagar, y en "lo recibí" lo que
+  // ya se pagó al comprar. En los tres casos es el número que quien recibe
+  // tiene delante, y tipearlo de nuevo sólo agrega formas de equivocarse.
   document.getElementById('ped-r-monto').value = p.costoEstimado || '';
   document.getElementById('ped-r-monto-label').textContent = m.montoLabel;
   // El vencimiento que dijo la compra si lo hay: "queda a pagar" ya eligió uno,
@@ -16584,8 +16628,8 @@ async function openPedRecibir(id, modo) {
       ? `⚠ Esta compra ya figuraba <b>pagada</b>`
         + (p.medioPrevisto ? ` por ${escapeHtml(p.medioPrevisto)}` : '')
         + `. Si el proveedor te la cobró igual en la puerta, confirmá: se les avisa `
-        + `a los dueños para que revisen si la plata salió dos veces. Si no la pagaste vos, `
-        + `cancelá y usá <b>Llegó y no lo pagué</b>.`
+        + `a los dueños para que revisen si la plata salió dos veces. Si sólo la recibiste, `
+        + `cancelá y usá <b>Llegó y lo recibí</b>.`
       : '';
 
   // Los tres botones de cómo se pagó sólo tienen sentido con un monto esperado
