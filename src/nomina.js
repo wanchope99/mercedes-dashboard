@@ -194,12 +194,15 @@ const COL_MES = {
 // fórmula. `Consumos ARS` es el monto que J nunca fue. `Actualizado` dice quién
 // guardó y cuándo, que es lo único que después contesta "¿esto lo tocó alguien
 // o quedó de la vez pasada?".
-// `Servicios` es la cuenta que hacía la hoja 202605 a mano en su columna
-// "Días trabajados": cuántos días de los que el bar abre trabajó la persona ese
-// mes. Sólo se aparta de los del mes cuando alguien entró (o se fue) empezado el
-// mes, y es editable porque el calendario no puede saber de una apertura
-// extraordinaria — mayo 2026 tiene una: los cinco cuentan un día más que los
-// martes-a-sábado, que es el feriado lunes que el bar abrió.
+// `Servicios` es cuántos días de los que el bar abre trabajó la persona ese mes.
+// Sólo se aparta de los del mes cuando alguien entró (o se fue) empezado el mes.
+//
+// Es EDITABLE, y hace falta que lo sea: el calendario de `calendario.js` dice
+// martes a sábado, y eso recién es verdad desde agosto de 2026. En junio el bar
+// abría domingos y lunes y cerraba martes y miércoles (7 días fuera del patrón y
+// 7 martes-a-sábado cerrados, medido contra Fudo el 30/08/2026); en julio quedó
+// una sola excepción. Cualquier mes con una apertura o un cierre fuera de lo
+// habitual necesita que este número se corrija a mano.
 const COLS_APP_MES = {
   servicios: 'Servicios', feriados: 'Feriados', consumos: 'Consumos ARS', actualizado: 'Actualizado',
 };
@@ -420,16 +423,21 @@ function costoDeEmpleado(empleado, { factorCostoLaboral = FACTOR_COSTO_LABORAL, 
 // no el día calendario: un alta un lunes y la misma alta un martes no valen lo
 // mismo, porque el lunes el bar está cerrado.
 //
-// LA REGLA SALE DE LA HOJA 202605, que fue el primer mes de todos y fue partido:
+// LA FORMA de la cuenta sale de la hoja 202605, que fue el primer mes de todos y
+// fue partido:
 //
 //   H "Sueldo Total" = 'Nómina'!C / 22 * D    ·    D "Días trabajados", a mano
 //
-// Con UNA corrección deliberada: ese 22 está escrito fijo en la fórmula y acá el
-// divisor son los servicios REALES del mes. Mayo 2026 tiene exactamente 22, así
-// que en esa hoja las dos lecturas dan lo mismo y no se puede distinguir cuál
-// era; agosto tiene 21, y ahí sí. Con el 22 fijo, quien trabaja un agosto
-// completo cobraría 21/22 del sueldo — el error no se veía en mayo porque nadie
-// trabajó el mes entero. Decidido con Gonzalo el 30/08/2026.
+// Pero SÓLO la forma, y conviene saber por qué. Ese 22 está escrito fijo en la
+// fórmula, y su D tampoco eran días de servicio: en mayo de 2026 el bar abrió
+// nada más que 10 días —del 18 en adelante, de jueves a lunes— y sin embargo la
+// hoja dice 14 y 11. Es una cuenta de días calendario desde que abrió el local,
+// hecha a mano en un mes que no se parecía a ninguno de los que vinieron después.
+//
+// Acá la unidad es el SERVICIO y el divisor son los servicios REALES del mes, que
+// es lo que pidió Gonzalo el 30/08/2026. Con un divisor fijo en 22, quien trabaje
+// un agosto completo (21 servicios) cobraría 21/22 del sueldo; el error no se veía
+// en mayo porque nadie trabajó el mes entero.
 //
 // El feriado NO se prorratea: es un importe por día trabajado, va aparte en su
 // columna y ya se cuenta de a uno.
