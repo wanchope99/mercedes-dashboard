@@ -79,9 +79,14 @@
 // se gana todo el año y se paga dos veces, así que cada mes tiene que cargar su
 // parte. Si sólo pesara en junio y diciembre, en junio ya sería tarde.
 //
-// El socio es el caso especial y sale solo del mismo modelo: con "en blanco
-// neto" en 0 no hay parte registrada, así que no hay cargas ni provisiones y su
-// sueldo pasa entero al costo del mes. Confirmado por el dueño el 17/8/2026.
+// Con "en blanco neto" en 0 no hay parte registrada, así que no hay cargas ni
+// provisiones y el sueldo pasa entero al costo del mes. Confirmado por el dueño
+// el 17/8/2026 para el socio, y desde el 30/08/2026 vale también para quien está
+// en período de prueba y todavía cobra todo en efectivo.
+//
+// Que eso NO alcanza para saber quién es socio es la corrección del 30/08/2026:
+// ver SOCIOS. El socio no cobra feriado ni aguinaldo; el de período de prueba
+// sí, aunque hoy los dos tengan la misma fila.
 //
 // Hojas mensuales `AAAAMM` — la liquidación de ese mes:
 //   A Trabajador · B Sueldo · C Feriado · D Sueldo Total · E Aguinaldo Total
@@ -111,14 +116,21 @@
 // guarda el monto en una columna propia y lo mete en la fórmula de K: el número
 // que se ve es el número que se resta.
 //
-// EL LAYOUT NO ES ESTABLE: la primera hoja (202605) tiene otras columnas —
-// prorratea por días trabajados porque fue un mes partido. Cuando el encabezado
-// no es el conocido se devuelve `null` en vez de adivinar, y esa hoja se lee
-// solamente con los ojos.
+// EL LAYOUT NO ES ESTABLE: la primera hoja (202605) tiene otras columnas.
+// Cuando el encabezado no es el conocido se devuelve `null` en vez de adivinar,
+// y esa hoja se lee solamente con los ojos.
+//
+// Pero SU REGLA sí está acá: 202605 fue el primer mes de todos y fue partido, y
+// prorratea el sueldo por "Días trabajados" (columna D, tipeada a mano) sobre un
+// 22 escrito fijo en la fórmula. Desde el 30/08/2026 la app hace esa misma
+// cuenta para cualquier mes incompleto —el caso que la trajo de vuelta es un
+// alta el 11/08— con el divisor corregido a los servicios reales del mes. Ver
+// `serviciosDelMes` y `sueldoDelMes`.
 
 const { google } = require('googleapis');
 const NodeCache = require('node-cache');
 const { parseMonto } = require('./monto');
+const { diasDeServicioEntre } = require('./calendario');
 
 // Sin fallback a SPREADSHEET_ID — ver punto 2 del encabezado.
 const SHEET_ID = process.env.NOMINA_SHEET_ID || null;
@@ -137,6 +149,27 @@ const MESES_AGUINALDO = 12;    // un sueldo al año → F/12 por mes
 const DIAS_LABORABLES_MES = 25;  // divisor del feriado en las hojas mensuales
 const DIAS_SEMESTRE = 180;
 const MESES_SAC = [6, 12];
+
+// ─── Quiénes son socios ─────────────────────────────────────────────────────
+//
+// SE DICE, NO SE DEDUCE. Hasta el 30/08/2026 esto salía de una inferencia —"no
+// tiene parte registrada, entonces es socio"— y esa inferencia es falsa: alguien
+// en período de prueba también cobra todo en efectivo y no es socio. El caso
+// real es Priscila Olmos, que entró el 11/08/2026, y la inferencia le sacaba el
+// feriado y el aguinaldo, que le corresponden.
+//
+// Ser socio y no tener parte registrada son dos cosas distintas y se usan para
+// dos cosas distintas: de la primera depende si la persona cobra feriado y SAC;
+// de la segunda, si hay cargas y provisiones. Se separan.
+//
+// Por variable de entorno y no en el código porque es un hecho del negocio que
+// cambia sin que cambie nada más. Al 30/08/2026 los socios son Pablo y Tincho;
+// acá va sólo Pablo porque Tincho no hace trabajo operativo y no está en la
+// nómina. Cuando entre —en septiembre, cuando empiece a hacer servicios— hay
+// que agregar su nombre EXACTO como figure en la hoja `Nómina`, con
+// NOMINA_SOCIOS="Pablo Vergani, <su nombre>".
+const SOCIOS = (process.env.NOMINA_SOCIOS || 'Pablo Vergani')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
                'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
@@ -161,7 +194,15 @@ const COL_MES = {
 // fórmula. `Consumos ARS` es el monto que J nunca fue. `Actualizado` dice quién
 // guardó y cuándo, que es lo único que después contesta "¿esto lo tocó alguien
 // o quedó de la vez pasada?".
-const COLS_APP_MES = { feriados: 'Feriados', consumos: 'Consumos ARS', actualizado: 'Actualizado' };
+// `Servicios` es la cuenta que hacía la hoja 202605 a mano en su columna
+// "Días trabajados": cuántos días de los que el bar abre trabajó la persona ese
+// mes. Sólo se aparta de los del mes cuando alguien entró (o se fue) empezado el
+// mes, y es editable porque el calendario no puede saber de una apertura
+// extraordinaria — mayo 2026 tiene una: los cinco cuentan un día más que los
+// martes-a-sábado, que es el feriado lunes que el bar abrió.
+const COLS_APP_MES = {
+  servicios: 'Servicios', feriados: 'Feriados', consumos: 'Consumos ARS', actualizado: 'Actualizado',
+};
 
 // ─── Puras: fechas y claves de mes ──────────────────────────────────────────
 const dosDigitos = n => String(n).padStart(2, '0');
@@ -220,6 +261,14 @@ const parseImporte = parseMonto;
 
 const norm = s => (s || '').toString().trim().toLowerCase();
 
+// La fila de `Costos laborales` de alguien, o null si no existe o está a medias.
+// Todo el módulo pregunta por acá: la planilla manda, pero una fila sin terminar
+// no es lo que la planilla dice, es lo que a la planilla le falta.
+const costoDe = (porCosto, nombre) => {
+  const c = porCosto.get(norm(nombre));
+  return c && c.completo ? c : null;
+};
+
 // Un cero ESCRITO no es lo mismo que una celda vacía, y en esta planilla la
 // diferencia es plata: en junio la transferencia de dos personas dice 0 a
 // propósito, y leer ese 0 como "no hay dato" haría que el default les invente
@@ -265,8 +314,9 @@ function parsearEmpleados(filas) {
       ingresoISO: diaISO(ingreso),
       sueldoActualARS: sueldoActual,
       enBlancoNetoARS: enBlancoNeto,
-      // Sin parte registrada no hay cargas ni provisiones: es el caso del socio.
-      esSocio: sueldoActual > 0 && enBlancoNeto === 0,
+      // Por la lista, no por la hoja: ver SOCIOS. Que no tenga parte registrada
+      // se lee de `enBlancoNetoARS` y decide otra cosa (las cargas), no ésta.
+      esSocio: SOCIOS.includes(norm(nombre)),
       completo: faltan.length === 0,
       leFalta: faltan,
     });
@@ -287,6 +337,18 @@ function parsearCostos(filas) {
     if (!nombre || /^total$/i.test(nombre)) continue;
     out.push({
       nombre,
+      // Una fila a medias NO es un costo de cero, y la diferencia son millones.
+      // El caso real (30/08/2026): Priscila Olmos tiene su fila con el sueldo en
+      // C y las derivadas vacías, porque las fórmulas todavía no se arrastraron.
+      // `parseImporte` devuelve 0 para una celda vacía igual que para un 0
+      // escrito, así que su costo total se leía como CERO y su sueldo entero
+      // desaparecía del costo laboral y del punto de equilibrio, en silencio.
+      //
+      // La celda que decide es la última, "Costo total mensual": si está vacía
+      // la fila no está terminada y se usa la regla en su lugar. Un 0 ESCRITO sí
+      // se respeta — es el caso de las columnas de Pablo, que valen cero de
+      // verdad.
+      completo: f[8] != null && f[8] !== '',
       netoRemunerativoARS: parseImporte(f[1]),
       netoNoRemunerativoARS: parseImporte(f[2]),
       brutoPorReciboARS: parseImporte(f[3]),
@@ -312,7 +374,10 @@ function costoDeEmpleado(empleado, { factorCostoLaboral = FACTOR_COSTO_LABORAL, 
 
   if (empleado.esSocio || remunerativo === 0) {
     // Sin parte registrada no hay recibo, ni cargas, ni vacaciones, ni SAC: el
-    // sueldo pasa entero al costo del mes.
+    // sueldo pasa entero al costo del mes. Son DOS casos y no uno: el socio, y
+    // quien todavía cobra todo en efectivo (un período de prueba). Acá dan lo
+    // mismo —lo que se paga a ARCA es cero en los dos— y en el feriado y el
+    // aguinaldo no: eso lo decide `esSocio`, que ya no se deduce de esta fila.
     return {
       nombre: empleado.nombre,
       netoRemunerativoARS: 0, netoNoRemunerativoARS: neto,
@@ -348,13 +413,67 @@ function costoDeEmpleado(empleado, { factorCostoLaboral = FACTOR_COSTO_LABORAL, 
   };
 }
 
+// ─── El mes incompleto ──────────────────────────────────────────────────────
+//
+// Quien entra el 11 no trabajó el mes entero y no cobra el mes entero. La unidad
+// es el SERVICIO —un día que el bar abre, martes a sábado; ver calendario.js— y
+// no el día calendario: un alta un lunes y la misma alta un martes no valen lo
+// mismo, porque el lunes el bar está cerrado.
+//
+// LA REGLA SALE DE LA HOJA 202605, que fue el primer mes de todos y fue partido:
+//
+//   H "Sueldo Total" = 'Nómina'!C / 22 * D    ·    D "Días trabajados", a mano
+//
+// Con UNA corrección deliberada: ese 22 está escrito fijo en la fórmula y acá el
+// divisor son los servicios REALES del mes. Mayo 2026 tiene exactamente 22, así
+// que en esa hoja las dos lecturas dan lo mismo y no se puede distinguir cuál
+// era; agosto tiene 21, y ahí sí. Con el 22 fijo, quien trabaja un agosto
+// completo cobraría 21/22 del sueldo — el error no se veía en mayo porque nadie
+// trabajó el mes entero. Decidido con Gonzalo el 30/08/2026.
+//
+// El feriado NO se prorratea: es un importe por día trabajado, va aparte en su
+// columna y ya se cuenta de a uno.
+function serviciosDelMes(mesId) {
+  const { anio, mes } = parseMesId(mesId);
+  return diasDeServicioEntre(new Date(anio, mes - 1, 1), new Date(anio, mes, 0));
+}
+
+// Los servicios que le tocan a una persona en ese mes. Sin fecha de ingreso se
+// devuelven los del mes entero: no saber cuándo entró no es lo mismo que saber
+// que entró tarde, y descontarle plata por un dato que falta sería inventar en
+// contra de la persona. La fila ya viaja marcada como incompleta.
+function serviciosTrabajados(empleado, mesId) {
+  const { anio, mes } = parseMesId(mesId);
+  const inicio = new Date(anio, mes - 1, 1);
+  const fin = new Date(anio, mes, 0);
+  const ingreso = empleado && empleado.ingreso;
+  if (!ingreso || ingreso <= inicio) return diasDeServicioEntre(inicio, fin);
+  if (ingreso > fin) return 0;
+  return diasDeServicioEntre(ingreso, fin);
+}
+
+// El sueldo del mes. El mes completo cobra el sueldo completo SIN pasar por la
+// división: `base * (21/21)` no siempre da `base` exacto en punto flotante, y
+// una diferencia de centavos en el sueldo de todos los meses de todo el mundo
+// sería un ruido que nadie puede explicar.
+function sueldoDelMes(empleado, mesId, { servicios = null } = {}) {
+  const base = (empleado && empleado.sueldoActualARS) || 0;
+  const total = serviciosDelMes(mesId);
+  const trabajados = servicios != null ? servicios : serviciosTrabajados(empleado, mesId);
+  if (!total || trabajados >= total) return base;
+  if (trabajados <= 0) return 0;
+  return base * (trabajados / total);
+}
+
 // Feriado trabajado: un día de sueldo sobre 25 días laborables, por feriado.
 //
 // Dos detalles que salen de comparar contra las hojas mensuales reales:
 //
 // · El socio NO cobra feriado. En las tres hojas mensuales su columna Feriado
 //   está en cero, y es coherente con el resto de su trato: cobra su sueldo y
-//   nada más.
+//   nada más. Quien no está registrado pero TAMPOCO es socio sí lo cobra: la
+//   base es su sueldo de la hoja Nómina, porque no tiene fila en Costos
+//   laborales — ver el aviso que devuelve `guardarLiquidacion`.
 // · La base es el neto de la HOJA DE COSTOS (remunerativo + no remunerativo),
 //   no el "sueldo actual" de la hoja Nómina. Normalmente son el mismo número
 //   —uno se deriva del otro— pero cuando alguien pisa a mano el neto
@@ -431,6 +550,7 @@ function calcularMes({ empleados, mesId, feriados = 0, costos = null } = {}) {
   if (!esMesIdValido(mesId)) throw new Error(`Mes inválido: ${mesId} (se espera AAAAMM)`);
   const { anio, mes } = parseMesId(mesId);
   const finDeMes = new Date(anio, mes, 0);
+  const serviciosMes = serviciosDelMes(mesId);
 
   const porCosto = new Map((costos || []).map(c => [norm(c.nombre), c]));
 
@@ -441,25 +561,36 @@ function calcularMes({ empleados, mesId, feriados = 0, costos = null } = {}) {
       // son la verdad de hoy. La regla se calcula igual, para poder mostrar
       // dónde dejaron de coincidir.
       const regla = costoDeEmpleado(e);
-      const cargado = porCosto.get(norm(e.nombre)) || null;
+      const cargado = costoDe(porCosto, e.nombre);
       const feriadoARS = importeFeriado(e, feriados, { costo: cargado });
-      const sueldoTotalARS = (e.sueldoActualARS || 0) + feriadoARS;
-      const sacARS = e.esSocio ? 0 : sacDelMes(e, mesId, { sueldoTotalARS });
-      const costoBase = cargado ? cargado.costoTotalMensualARS : regla.costoTotalMensualARS;
+      // El mes en que alguien entra cuesta lo que trabajó, no un mes entero. La
+      // proporción es la misma para el sueldo y para el costo con cargas: las
+      // cargas y las provisiones se devengan sobre lo que se paga.
+      const servicios = serviciosTrabajados(e, mesId);
+      const parte = serviciosMes > 0 ? Math.min(1, servicios / serviciosMes) : 1;
+      const sueldoARS = sueldoDelMes(e, mesId, { servicios });
+      // El SAC se calcula sobre el sueldo COMPLETO a propósito. `sacDelMes` ya
+      // prorratea por los días del semestre —que es donde entra que la persona
+      // haya entrado tarde— y prorratear también la base contaría el mes partido
+      // dos veces, dejando el aguinaldo por debajo.
+      const sacBaseARS = (e.sueldoActualARS || 0) + feriadoARS;
+      const sacARS = e.esSocio ? 0 : sacDelMes(e, mesId, { sueldoTotalARS: sacBaseARS });
+      const costoBase = (cargado ? cargado.costoTotalMensualARS : regla.costoTotalMensualARS) * parte;
       return {
         id: e.id, nombre: e.nombre, esSocio: e.esSocio,
-        sueldoARS: e.sueldoActualARS,
+        sueldoARS,
+        servicios, serviciosMes, mesIncompleto: servicios < serviciosMes,
         feriadoARS,
-        sueldoTotalARS,
+        sueldoTotalARS: sueldoARS + feriadoARS,
         sacARS,
         // Lo que la persona cobra en la mano ese mes.
-        aCobrarARS: sueldoTotalARS + sacARS,
+        aCobrarARS: sueldoARS + feriadoARS + sacARS,
         // Lo que le cuesta al bar ese mes, con cargas y provisiones.
         costoTotalARS: costoBase + feriadoARS,
-        cargasARS: cargado ? cargado.costoLaboralARS - cargado.netoRemunerativoARS : regla.cargasARS,
-        provisionesARS: cargado
+        cargasARS: (cargado ? cargado.costoLaboralARS - cargado.netoRemunerativoARS : regla.cargasARS) * parte,
+        provisionesARS: (cargado
           ? cargado.prorrateoVacacionesARS + cargado.prorrateoAguinaldoARS
-          : regla.prorrateoVacacionesARS + regla.prorrateoAguinaldoARS,
+          : regla.prorrateoVacacionesARS + regla.prorrateoAguinaldoARS) * parte,
         origen: cargado ? 'planilla' : 'regla',
         difContraLaReglaARS: cargado ? cargado.costoTotalMensualARS - regla.costoTotalMensualARS : 0,
       };
@@ -470,6 +601,7 @@ function calcularMes({ empleados, mesId, feriados = 0, costos = null } = {}) {
 
   return {
     mesId, anio, mes: MESES[mes - 1], esMesDeSAC: MESES_SAC.includes(mes), feriados,
+    serviciosMes,
     porEmpleado,
     totales: {
       dotacion: porEmpleado.length,
@@ -534,9 +666,15 @@ function resumenCostoLaboral({ empleados, costos } = {}) {
 
   let neto = 0, cargas = 0, provisiones = 0, aguinaldo = 0, total = 0;
   const detalle = [];
+  // Quiénes tienen fila en 'Costos laborales' pero sin terminar. Su costo sale
+  // de la regla y no de la planilla, que es lo correcto pero no es lo mismo: la
+  // regla no conoce los valores pisados a mano. Se nombran.
+  const aMedias = [];
   for (const e of completos) {
     const regla = costoDeEmpleado(e);
-    const cargado = porCosto.get(norm(e.nombre));
+    const cargado = costoDe(porCosto, e.nombre);
+    const enLaHoja = porCosto.get(norm(e.nombre));
+    if (enLaHoja && !cargado) aMedias.push(e.nombre);
     const fuente = cargado || regla;
     const c = {
       netoARS: fuente.netoRemunerativoARS + fuente.netoNoRemunerativoARS,
@@ -577,6 +715,7 @@ function resumenCostoLaboral({ empleados, costos } = {}) {
     sacDevengadoMensualARS: aguinaldo,
     detalle,
     incompletos,
+    costosAMedias: aMedias,
   };
 }
 
@@ -591,6 +730,7 @@ function parsearMesPlanilla(filas) {
 
   const colDe = nombre => cab.findIndex(c => norm(c) === norm(nombre));
   const cols = {
+    servicios: colDe(COLS_APP_MES.servicios),
     feriados: colDe(COLS_APP_MES.feriados),
     consumos: colDe(COLS_APP_MES.consumos),
     actualizado: colDe(COLS_APP_MES.actualizado),
@@ -619,6 +759,7 @@ function parsearMesPlanilla(filas) {
       aguinaldoTransferenciaARS: importeONull(f[COL_MES.aguinaldoTransf]),
       efectivoPlanillaARS: importeONull(f[COL_MES.efectivo]),
       consumosNota: notaDeJ,
+      servicios: cols.servicios >= 0 ? enteroONull(f[cols.servicios]) : null,
       feriados: cols.feriados >= 0 ? enteroONull(f[cols.feriados]) : null,
       consumosARS: cols.consumos >= 0 ? importeONull(f[cols.consumos]) : (consumosDeJ || null),
       actualizado: cols.actualizado >= 0 ? String(f[cols.actualizado] || '').trim() : '',
@@ -647,6 +788,7 @@ function liquidacionDelMes({ empleados, costos, mesId, planilla = null } = {}) {
   if (!esMesIdValido(mesId)) throw new Error(`Mes inválido: ${mesId} (se espera AAAAMM)`);
   const { anio, mes } = parseMesId(mesId);
   const finDeMes = new Date(anio, mes, 0);
+  const serviciosMes = serviciosDelMes(mesId);
 
   const porCosto = new Map((costos || []).map(c => [norm(c.nombre), c]));
   const porFila = new Map(((planilla && planilla.filas) || []).map(f => [norm(f.nombre), f]));
@@ -655,12 +797,23 @@ function liquidacionDelMes({ empleados, costos, mesId, planilla = null } = {}) {
     .filter(e => e.completo && vigenteEn(e, finDeMes))
     .map(e => {
       const fila = porFila.get(norm(e.nombre)) || null;
-      const costo = porCosto.get(norm(e.nombre)) || null;
+      const costo = costoDe(porCosto, e.nombre);
       // Lo que vale UN feriado para esta persona. Es la unidad con la que se
       // multiplica y también con la que se deduce la cantidad de un importe viejo.
       const feriadoUnitarioARS = importeFeriado(e, 1, { costo });
 
-      const sueldoARS = fila && fila.sueldoARS != null ? fila.sueldoARS : (e.sueldoActualARS || 0);
+      // Cuántos servicios trabajó. Manda la columna de la app; si no está, sale
+      // del calendario y de la fecha de ingreso. Es editable porque el
+      // calendario no sabe de una apertura extraordinaria ni de una ausencia.
+      const serviciosSugeridos = serviciosTrabajados(e, mesId);
+      const servicios = fila && fila.servicios != null ? fila.servicios : serviciosSugeridos;
+      const mesIncompleto = servicios < serviciosMes;
+      // Lo que le corresponde por esos servicios. No pisa a la planilla —acá
+      // manda lo escrito, como en todo lo demás— pero viaja al lado para que la
+      // pantalla pueda mostrar que no coinciden en vez de corregir en silencio.
+      const sueldoSugeridoARS = sueldoDelMes(e, mesId, { servicios });
+
+      const sueldoARS = fila && fila.sueldoARS != null ? fila.sueldoARS : sueldoSugeridoARS;
 
       // Cuántos feriados se trabajaron. Manda la columna de la app; si todavía no
       // existe se deduce del importe que ya tiene la planilla, y si no divide
@@ -684,9 +837,15 @@ function liquidacionDelMes({ empleados, costos, mesId, planilla = null } = {}) {
       const sueldoTotalARS = sueldoARS + feriadoARS;
       // El SAC calculado usa el sueldo total de ESTE mes, que es como lo hace la
       // planilla: en junio los cuatro importes dan al peso.
+      //
+      // Con una excepción: la base es el sueldo COMPLETO, no el prorrateado.
+      // `sacDelMes` ya prorratea por los días del semestre —ahí es donde entra
+      // que la persona haya entrado tarde— y prorratear también la base contaría
+      // el mes partido dos veces y dejaría el aguinaldo por debajo.
+      const sacBaseARS = (e.sueldoActualARS || 0) + feriadoARS;
       const sacARS = fila && fila.aguinaldoARS != null
         ? fila.aguinaldoARS
-        : (e.esSocio ? 0 : sacDelMes(e, mesId, { sueldoTotalARS }));
+        : (e.esSocio ? 0 : sacDelMes(e, mesId, { sueldoTotalARS: sacBaseARS }));
       const totalARS = sueldoTotalARS + sacARS;
 
       // Lo que va por banco. El default es el "en blanco neto" de la hoja Nómina,
@@ -705,6 +864,17 @@ function liquidacionDelMes({ empleados, costos, mesId, planilla = null } = {}) {
       return {
         id: e.id, nombre: e.nombre, esSocio: e.esSocio,
         sueldoARS,
+        // El sueldo entero de la hoja Nómina, que es la base del prorrateo. La
+        // pantalla lo necesita para rehacer la cuenta cuando se edita la
+        // cantidad de servicios.
+        sueldoBaseARS: e.sueldoActualARS || 0,
+        servicios, serviciosSugeridos, serviciosMes, mesIncompleto,
+        sueldoSugeridoARS,
+        ingresoISO: e.ingresoISO,
+        // Cuánto se despega el sueldo escrito del que sale de los servicios. En
+        // la fila de alguien que entró a mitad de mes y quedó cargado con el mes
+        // entero, es exactamente lo que está de más. No se corrige solo.
+        difSueldoARS: sueldoARS - sueldoSugeridoARS,
         feriados, feriadoUnitarioARS, feriadoARS,
         sueldoTotalARS,
         sacARS,
@@ -734,6 +904,7 @@ function liquidacionDelMes({ empleados, costos, mesId, planilla = null } = {}) {
   return {
     mesId, anio, mes: MESES[mes - 1],
     esMesDeSAC: MESES_SAC.includes(mes),
+    serviciosMes,
     hayPlanilla: Boolean(planilla),
     porEmpleado,
     totales: {
@@ -937,6 +1108,13 @@ async function guardarLiquidacion({ mesId, cambios = [] } = {}, { usuario } = {}
     // El cambio se aplica ARRIBA de lo que ya vale: mandar sólo el campo que se
     // tocó no puede borrar los otros cuatro.
     const num = (v, x) => (v == null || v === '' ? x : parseImporte(v));
+    // Los servicios se escriben pero NO recalculan el sueldo acá: el sueldo
+    // viene resuelto del navegador, que es donde se vio y se confirmó el número.
+    // Recalcularlo de este lado podría cambiar un importe que la persona no
+    // mandó — y el que manda es el que se estaba mirando en la pantalla.
+    const servicios = c.servicios == null || c.servicios === ''
+      ? (base.servicios == null ? null : base.servicios)
+      : Math.max(0, enteroONull(c.servicios) || 0);
     const sueldoARS = num(c.sueldoARS, base.sueldoARS);
     const feriados = c.feriados == null || c.feriados === '' ? (base.feriados || 0) : Math.max(0, enteroONull(c.feriados) || 0);
     const feriadoARS = (base.feriadoUnitarioARS || 0) * feriados;
@@ -964,13 +1142,14 @@ async function guardarLiquidacion({ mesId, cambios = [] } = {}, { usuario } = {}
     // Acá está el arreglo del bug de la planilla: el efectivo resta la columna
     // del monto de consumos en vez de un número tipeado adentro de la fórmula.
     cel(COL_MES.efectivo, `=D${r}+E${r}-G${r}-H${r}-${colLetra(cols.consumos)}${r}`);
+    cel(cols.servicios, servicios == null ? '' : servicios);
     cel(cols.feriados, feriados);
     cel(cols.consumos, consumosARS);
     cel(cols.actualizado, `${usuario} · ${ahora}`);
 
     escritas.push({
       nombre: base.nombre, fila: r, esNueva: !fila,
-      sueldoARS, feriados, feriadoARS, sacARS,
+      sueldoARS, servicios, feriados, feriadoARS, sacARS,
       totalARS: sueldoARS + feriadoARS + sacARS,
       transferenciaARS: sueldoTransferenciaARS + aguinaldoTransferenciaARS,
       consumosARS,
@@ -1015,7 +1194,7 @@ function _resolverColumnasMes(filas, yaExisten) {
   }
   libre = Math.max(libre, HEADER_MENSUAL.length);
   const out = {};
-  for (const clave of ['feriados', 'consumos', 'actualizado']) {
+  for (const clave of ['servicios', 'feriados', 'consumos', 'actualizado']) {
     out[clave] = yaExisten[clave] >= 0 ? yaExisten[clave] : libre++;
   }
   return out;
@@ -1116,6 +1295,7 @@ module.exports = {
   parsearMesPlanilla, liquidacionDelMes, colLetra, importeONull, enteroONull,
   HEADER_MENSUAL, COL_MES, COLS_APP_MES,
   resumenCostoLaboral, importeFeriado, sacDelMes, diasEnElSemestre,
+  serviciosDelMes, serviciosTrabajados, sueldoDelMes,
   dotacionEn, vigenteEn, cambiosDeDotacion,
   mesIdDe, parseMesId, mesIdSuma, nombreMesDe, esMesIdValido, parseFecha, parseImporte,
   // Constantes

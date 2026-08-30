@@ -960,6 +960,12 @@
     .nl-nombre { font-size: 14px; font-weight: 600; }
     .nl-cab-nota { font-size: 11px; color: var(--text-muted); font-weight: 400; }
     .nl-total { font-size: 18px; font-weight: 700; white-space: nowrap; }
+    /* El mes incompleto se avisa ARRIBA de los campos y no en el pie: es lo que
+       explica por qué el sueldo de esa persona no es el de la hoja Nómina, y
+       leerlo después de haber leído el número llega tarde. */
+    .nl-aviso { font-size: 12px; line-height: 1.6; color: var(--text-muted); margin: -4px 0 10px; }
+    .nl-aviso.corregir { color: var(--orange); }
+    .nl-aviso .nl-usar { margin-left: 8px; }
     .nl-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; }
     .nl-campo { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
     .nl-campo.ancho { grid-column: 1 / -1; }
@@ -15110,11 +15116,21 @@ function renderNomina() {
   // Lo que falta cargar va PRIMERO y no escondido al final: si falta alguien, el
   // costo total está bajo y con él el punto de equilibrio, y eso hay que verlo
   // sin tener que hacer la cuenta.
-  const alerta = (resumen.incompletos || []).length
+  const alerta = ((resumen.incompletos || []).length
     ? `<div class="prop-error" style="margin-bottom:12px">
          Falta cargar en la planilla: ${resumen.incompletos.map(i => `<b>${escapeHtml(i.nombre)}</b> (${escapeHtml(i.leFalta.join(' y '))})`).join(' · ')}.
          Hasta que estén, el costo laboral y el punto de equilibrio quedan por debajo de lo real.
-       </div>` : '';
+       </div>` : '')
+    // Fila de 'Costos laborales' empezada y sin terminar. No baja el total —el
+    // costo sale de la regla— pero sí quiere decir que ese número es una
+    // estimación: la regla no conoce los valores pisados a mano de esa hoja.
+    + ((resumen.costosAMedias || []).length
+    ? `<div class="cc-aviso" style="margin-bottom:12px">
+         En <b>Costos laborales</b> hay ${resumen.costosAMedias.length === 1 ? 'una fila empezada y sin terminar' : 'filas empezadas y sin terminar'}:
+         ${resumen.costosAMedias.map(nom => `<b>${escapeHtml(nom)}</b>`).join(' · ')}.
+         Su costo de acá sale de la fórmula y no de la planilla. Arrastrando las fórmulas de esa
+         hoja hasta esa fila, este número deja de ser una estimación.
+       </div>` : '');
 
   const gente = (empleados || []).map(e => {
     const meses = e.ingresoISO ? mesesDesde(e.ingresoISO) : null;
@@ -15193,6 +15209,20 @@ function nomLiqValor(e, campo) {
   return c && c[campo] != null ? c[campo] : e[campo];
 }
 
+// Lo que le corresponde de sueldo por N servicios. Es la copia navegador de
+// `sueldoDelMes` del server, y por la misma razón que el resto de las cuentas de
+// esta pantalla: cambiar los servicios tiene que mover el sueldo mientras se
+// tipea. El mes completo devuelve la base SIN dividir, para que un mes entero no
+// pierda un centavo por el punto flotante.
+function nomLiqSueldoPorServicios(e, servicios) {
+  const base = e.sueldoBaseARS || 0;
+  const total = e.serviciosMes || 0;
+  const n = servicios == null ? total : servicios;
+  if (!total || n >= total) return base;
+  if (n <= 0) return 0;
+  return Math.round(base * (n / total));
+}
+
 // La misma cuenta que hace el server, para poder mostrarla mientras se tipea.
 // Si las dos dejaran de coincidir, la que manda es la del server: después de
 // guardar, la pantalla se redibuja con lo que devolvió la planilla.
@@ -15203,8 +15233,14 @@ function nomLiqCuenta(e) {
   const sac = nomLiqValor(e, 'sacARS') || 0;
   const transf = (nomLiqValor(e, 'sueldoTransferenciaARS') || 0) + (nomLiqValor(e, 'aguinaldoTransferenciaARS') || 0);
   const consumos = nomLiqValor(e, 'consumosARS') || 0;
+  const servicios = nomLiqValor(e, 'servicios');
+  const sugerido = nomLiqSueldoPorServicios(e, servicios);
   const total = sueldo + feriado + sac;
-  return { sueldo, feriados, feriado, sac, transf, consumos, total, efectivo: total - transf - consumos };
+  return {
+    sueldo, feriados, feriado, sac, transf, consumos, total,
+    servicios, sugerido, difSueldo: sueldo - sugerido,
+    efectivo: total - transf - consumos,
+  };
 }
 
 async function loadLiquidacion(btn) {
@@ -15256,8 +15292,12 @@ function renderLiquidacion() {
     + d.porEmpleado.map(nomLiqPersona).join('')
     + `<div class="nl-nota">
          Se escribe en la hoja <b>${escapeHtml(d.hoja)}</b> de la planilla de nómina, la misma que venías
-         llenando a mano. El sueldo, los feriados, el aguinaldo, lo que va por transferencia y los
-         consumos se escriben; el resto son cuentas y salen solas.
+         llenando a mano. El sueldo, los servicios, los feriados, el aguinaldo, lo que va por
+         transferencia y los consumos se escriben; el resto son cuentas y salen solas.
+         <br>Este mes tiene <b>${d.serviciosMes}</b> servicios (los días que el bar abre). A quien entró
+         empezado el mes se le prorratea el sueldo por los que trabajó, y la cantidad se puede
+         corregir si abrió un día fuera de lo habitual o si faltó. El feriado no se prorratea: va
+         aparte, por día trabajado.
          ${d.esMesDeSAC ? '<br><b>Es mes de aguinaldo:</b> el SAC viene calculado (medio sueldo del mes por los días del semestre) y se puede pisar.' : ''}
        </div>`;
   nomLiqRepintarTodo();
@@ -15280,6 +15320,12 @@ function nomLiqPersona(e, i) {
   // la planilla ya tiene un importe escrito: esconderlo lo volvería ineditable.
   const muestraSAC = d.esMesDeSAC || (e.sacARS || 0) > 0 || (e.aguinaldoTransferenciaARS || 0) > 0;
   const abierto = nomLiq.consumosAbiertos.has(e.nombre);
+  // Los servicios se ofrecen sólo cuando la persona NO trabajó el mes entero:
+  // para los otros cinco sería un campo que dice "21 de 21" en cada tarjeta, y
+  // esta pantalla ya se limpió una vez de campos que no aportan. Quien necesite
+  // descontar una ausencia de alguien que sí estuvo todo el mes edita el sueldo
+  // a mano, que es lo que se hacía hasta hoy.
+  const muestraServicios = Boolean(e.mesIncompleto);
 
   return `<div class="nl-persona">
     <div class="nl-cab">
@@ -15288,8 +15334,10 @@ function nomLiqPersona(e, i) {
       </span>
       <span class="nl-total" id="nl-total-${i}"></span>
     </div>
+    <div class="nl-aviso" id="nl-aviso-${i}"></div>
     <div class="nl-campos">
       ${campo('sueldoARS', 'Sueldo', Math.round(e.sueldoARS))}
+      ${muestraServicios ? campo('servicios', 'Servicios', e.servicios == null ? '' : e.servicios) : ''}
       ${cobraFeriado ? campo('feriados', 'Feriados', e.feriados == null ? '' : e.feriados) : ''}
       ${muestraSAC ? campo('sacARS', 'Aguinaldo', Math.round(e.sacARS)) : ''}
       ${campo('sueldoTransferenciaARS', 'Transferencia', Math.round(e.sueldoTransferenciaARS))}
@@ -15333,7 +15381,7 @@ function nomLiqEditar(i, clave, valor) {
   if (!e) return;
   const original = e[clave];
   const limpio = clave === 'consumosNota' ? valor
-    : clave === 'feriados' ? Math.max(0, Math.round(pedNumero(valor)))
+    : clave === 'feriados' || clave === 'servicios' ? Math.max(0, Math.round(pedNumero(valor)))
     : pedNumero(valor);
 
   const previo = nomLiq.cambios.get(e.nombre) || {};
@@ -15348,6 +15396,39 @@ function nomLiqEditar(i, clave, valor) {
 
   const cont = document.getElementById(`nl-c-${i}-${clave}`);
   if (cont) cont.classList.toggle('tocado', !igual);
+  // Cambiar los servicios cambia el sueldo: es la cuenta entera del mes
+  // incompleto. Se escribe el sueldo nuevo en los cambios Y en el campo, para
+  // que lo que se guarda sea exactamente lo que se está viendo.
+  if (clave === 'servicios') nomLiqPonerSueldo(i, nomLiqSueldoPorServicios(e, limpio));
+  nomLiqRepintar(i);
+  nomLiqRepintarTotales();
+  nomLiqBanner();
+}
+
+// Pisa el sueldo de una persona desde otro lado que no sea tipear en su campo:
+// mover los servicios, o el botón del aviso. Toca el input además del estado,
+// porque la lista no se redibuja mientras se edita.
+function nomLiqPonerSueldo(i, sueldo) {
+  const e = nomLiq.data.porEmpleado[i];
+  if (!e) return;
+  const previo = nomLiq.cambios.get(e.nombre) || {};
+  const igual = Math.abs(sueldo - (e.sueldoARS || 0)) < 0.005;
+  if (igual) delete previo.sueldoARS; else previo.sueldoARS = sueldo;
+  if (Object.keys(previo).length) nomLiq.cambios.set(e.nombre, previo);
+  else nomLiq.cambios.delete(e.nombre);
+
+  const cont = document.getElementById(`nl-c-${i}-sueldoARS`);
+  if (!cont) return;
+  cont.classList.toggle('tocado', !igual);
+  const inp = cont.querySelector('input');
+  if (inp) inp.value = Math.round(sueldo);
+}
+
+// El botón del aviso: poner el sueldo que sale de los servicios.
+function nomLiqUsarSugerido(i) {
+  const e = nomLiq.data.porEmpleado[i];
+  if (!e) return;
+  nomLiqPonerSueldo(i, nomLiqSueldoPorServicios(e, nomLiqValor(e, 'servicios')));
   nomLiqRepintar(i);
   nomLiqRepintarTotales();
   nomLiqBanner();
@@ -15358,6 +15439,34 @@ function nomLiqRepintar(i) {
   const c = nomLiqCuenta(e);
   const tot = document.getElementById(`nl-total-${i}`);
   if (tot) tot.textContent = fmt(c.total);
+  // El mes incompleto. Dos cosas distintas: cuántos servicios trabajó (siempre,
+  // porque explica el sueldo) y, sólo si no coinciden, que lo escrito no es lo
+  // que sale de esos servicios. Lo segundo NO se corrige solo: en la hoja de
+  // agosto Priscila está cargada con el mes entero, y pisarle el sueldo al abrir
+  // la app sería cambiar un sueldo sin que nadie lo haya pedido.
+  const av = document.getElementById(`nl-aviso-${i}`);
+  if (av) {
+    // Incompleto según lo que dice el campo AHORA, no según lo que traía el
+    // server: subir los servicios a los del mes tiene que hacer desaparecer el
+    // aviso en el momento, sin esperar a guardar.
+    const serv = c.servicios == null ? e.serviciosMes : c.servicios;
+    const incompleto = serv < e.serviciosMes;
+    // Y el reclamo, sólo si el mes es incompleto. En un mes entero un sueldo
+    // distinto al de la hoja Nómina es un valor pisado a propósito —un aumento
+    // todavía no cargado, por ejemplo— y la planilla manda: reclamarlo sería
+    // pedir que se deshaga algo que alguien decidió.
+    const corregir = incompleto && Math.abs(c.difSueldo) > 1;
+    av.className = 'nl-aviso' + (corregir ? ' corregir' : '');
+    av.innerHTML = !incompleto ? '' : [
+      e.ingresoISO ? `Entró el ${fechaCorta(e.ingresoISO)}` : '',
+      `trabajó <b>${serv}</b> de los <b>${e.serviciosMes}</b> servicios del mes`,
+      corregir
+        ? `le corresponden <b>${fmt(Math.round(c.sugerido))}</b> y el sueldo dice ${fmt(Math.round(c.sueldo))}`
+          + ` <button class="nota-btn nl-usar" onclick="nomLiqUsarSugerido(${i})">Poner ${fmt(Math.round(c.sugerido))}</button>`
+        : '',
+    ].filter(Boolean).join(' · ');
+  }
+
   // Con el bloque plegado, esta línea es lo único que dice si hay consumos.
   const res = document.getElementById(`nl-cres-${i}`);
   if (res) {
