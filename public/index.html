@@ -15662,6 +15662,10 @@ const PED_MODOS = {
     // deuda ninguna — sólo se recibe. La pantalla lo trataba igual que al que
     // sí deja deuda, y le pedía "cuánto queda pendiente" por algo que no debe
     // nada. Desde el 30/08/2026 el mismo modo cambia de nombre y de campos.
+    //
+    // Este camino es el RESPALDO: lo normal es recibirYaPago, que no abre
+    // ningún modal. Se llega acá sólo cuando falta el importe de la compra y
+    // por eso hay que preguntarlo.
     yaPago: {
       titulo: 'Llegó y lo recibí',
       montoLabel: 'Lo que ya se pagó',
@@ -16017,7 +16021,8 @@ function togglePedido(pedidoId) {
 const PED_BOTONES = {
   'pague':    { modo: 'pague',    txt: '💵 Llegó y lo pagué' },
   'no-pague': { modo: 'no-pague', txt: 'Llegó y no lo pagué' },
-  'recibi':   { modo: 'no-pague', txt: '📦 Llegó y lo recibí' },
+  // `directo`: no abre el modal. Ver recibirYaPago.
+  'recibi':   { modo: 'no-pague', txt: '📦 Llegó y lo recibí', directo: true },
 };
 
 // Mover de día y borrar NO son parte de recibir, y por eso se ven distinto.
@@ -16047,7 +16052,8 @@ function accionesRecibir(p) {
   // usaba "no lo pagué", el botón que puede escribir algo inesperado.
   const boton = (clave, cls, color) => {
     const b = PED_BOTONES[clave];
-    return `<button class="${color} ${cls}" onclick="openPedRecibir('${id}','${b.modo}')">${b.txt}</button>`;
+    const accion = b.directo ? `recibirYaPago('${id}')` : `openPedRecibir('${id}','${b.modo}')`;
+    return `<button class="${color} ${cls}" onclick="${accion}">${b.txt}</button>`;
   };
   return boton(orden[0], 'ped-acc-ppal', 'plata')
     + boton(orden[1], 'ped-acc-sec', 'cuenta')
@@ -17000,6 +17006,13 @@ async function confirmarPedRecibir() {
     saldoUsado: pedState.saldoUsar,
   };
   closePedRecibir();
+  await pedEnviarRecibir(p, cuerpo);
+}
+
+// La única llamada que recibe un pedido. La comparten los dos caminos —el modal
+// y el toque directo de "lo recibí"— para que el informe de qué pasó y el de
+// qué salió mal sean el mismo, y no dos que se van separando.
+async function pedEnviarRecibir(p, cuerpo) {
   showToast('⏳ Actualizando planilla...');
   try {
     const { asiento, avisados, saldos: saldosEscritos } = await api(
@@ -17021,6 +17034,38 @@ async function confirmarPedRecibir() {
       detalle: `${escapeHtml(e.message)}<br><span style="font-size:11px">El pedido quedó como estaba y no se escribió nada en la planilla.</span>`,
     });
   }
+}
+
+// ─── "Llegó y lo recibí": un toque y listo ──────────────────────────────────
+//
+// No abre el modal, y ésa es toda la idea. Ese modal existe para preguntar
+// plata —cuánto se pagó, cuándo vence, si se pagó de más o de menos— y en un
+// pedido que la compra ya dejó pagado no hay ninguna de esas preguntas: la
+// plata salió al comprarlo y la fila del libro ya está escrita. Abrirlo era
+// hacer confirmar dos veces que no pasa nada, con el proveedor en la puerta.
+//
+// Lo que pasó igual se informa: el mismo cartel de siempre, al terminar.
+//
+// El monto viaja aunque nadie lo tipee, y no es de adorno: si la fila de la
+// compra ya no estuviera, el server tiene que escribirla y necesita saber de
+// cuánto. Sale de lo que se cargó al comprar, que es el número correcto.
+async function recibirYaPago(id) {
+  const p = pedBuscar(id);
+  if (!p) return;
+  // Sin monto cargado esto no se puede resolver solo. No debería pasar —un
+  // pedido sólo queda "ya pago" viniendo de una compra, y una compra tiene su
+  // importe— pero si pasa, cae al modal de siempre, que sí lo pregunta.
+  if (!(p.costoEstimado > 0)) return openPedRecibir(id, 'no-pague');
+  await pedEnviarRecibir(p, {
+    modo: 'no-pague',
+    monto: p.costoEstimado,
+    // Ni vencimiento ni saldo: no hay deuda que fechar ni diferencia que saldar.
+    vencimiento: '',
+    pagoTipo: 'esperado',
+    pagoMotivo: '',
+    pagoDetalle: '',
+    saldoUsado: 0,
+  });
 }
 
 // El informe de lo que REALMENTE pasó. Es la contraparte de haberle sacado la
