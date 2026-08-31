@@ -2663,7 +2663,11 @@ app.get('/api/nomina', authMiddleware, adminOnly, async (req, res) => {
 app.get('/api/nomina/mes/:mesId', authMiddleware, adminOnly, async (req, res) => {
   try {
     const [empleados, costos] = await Promise.all([nomina.getEmpleados(), nomina.getCostos()]);
-    const feriados = Number(req.query.feriados) || 0;
+    // Sin `feriados` en la query manda el calendario (ver calendario.js): sólo se
+    // pagan los que caen en un día de servicio. El parámetro queda para poder
+    // preguntar "¿y si se trabajan dos?", no para tener que decirlo siempre.
+    const feriados = req.query.feriados == null || req.query.feriados === ''
+      ? null : Number(req.query.feriados) || 0;
     res.json({ ok: true, data: nomina.calcularMes({ empleados, costos, mesId: req.params.mesId, feriados }) });
   } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
 });
@@ -2706,6 +2710,33 @@ app.post('/api/nomina/liquidacion', authMiddleware, adminOnly, async (req, res) 
           + 'No se escribió nada.'
         : err.message,
       ignorados: err.ignorados || undefined,
+    });
+  }
+});
+
+// La nómina se carga y se corrige desde la app, igual que desde la planilla
+// (decisión del 31/8/2026 — ver el encabezado de `guardarEmpleados`). Escribe
+// las columnas A a D de la hoja `Nómina` y firma la fila con quién la tocó,
+// que sale del token y nunca del body: son sueldos de gente real.
+//
+// El 403 de Google se traduce igual que en la liquidación: es un permiso que
+// se da en Drive, y sin esta línea llega como "The caller does not have
+// permission", que no le dice a nadie qué hacer.
+app.post('/api/nomina/empleados', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const data = await nomina.guardarEmpleados(
+      { cambios: req.body.cambios },
+      { usuario: req.user.nombre });
+    res.json({ ok: true, data });
+  } catch (err) {
+    const sinPermiso = /permission|forbidden|403/i.test(err.message);
+    res.status(sinPermiso ? 403 : 400).json({
+      ok: false,
+      error: sinPermiso
+        ? 'Google no deja escribir en la planilla de nómina: la cuenta de servicio de la app '
+          + 'la puede leer pero no editar. Se arregla compartiéndosela como Editora desde Drive. '
+          + 'No se escribió nada.'
+        : err.message,
     });
   }
 });

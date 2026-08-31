@@ -882,6 +882,18 @@
       align-items: center; justify-content: center; padding: 20px;
     }
     #saldo-hist-overlay.open, #saldo-alta-overlay.open { display: flex; }
+    /* El modal de una persona de la nómina. Por id y con su propia regla, como
+       todos los de esta app: sin ella la ventana no se esconde y se dibuja al
+       final de la página, a la vista (ver la nota de arriba). */
+    #nom-persona-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 620;
+      align-items: center; justify-content: center; padding: 20px;
+    }
+    #nom-persona-overlay.open { display: flex; }
+    #nom-persona-overlay .modal {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+      padding: 28px; width: 460px; max-width: 95vw; max-height: 90vh; overflow-y: auto;
+    }
     #saldo-hist-overlay .modal, #saldo-alta-overlay .modal {
       background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
       padding: 28px; width: 560px; max-width: 95vw; max-height: 90vh; overflow-y: auto;
@@ -2479,6 +2491,48 @@
     <div class="modal-actions">
       <button class="btn" onclick="document.getElementById('saldo-alta-overlay').classList.remove('open')">Cancelar</button>
       <button class="btn btn-accent" onclick="guardarSaldoManual()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: una persona de la nómina (solo admin).
+     La nómina se carga desde acá o desde la planilla, indistinto — como Pagos.
+     Lo que se escribe son las cuatro columnas que la app entiende; el resto de
+     la hoja queda intacto. El nombre no se edita: es la clave que une esta hoja
+     con Costos laborales y con la de cada mes. -->
+<div class="modal-overlay" id="nom-persona-overlay">
+  <div class="modal">
+    <div class="modal-title" id="nom-p-titulo">Agregar a la nómina</div>
+    <div class="form-grid" style="grid-template-columns:1fr">
+      <div class="form-group full">
+        <label>Nombre</label>
+        <input type="text" id="nom-p-nombre" maxlength="80" placeholder="Nombre y apellido" />
+        <div id="nom-p-nombre-nota" style="font-size:11px;color:var(--text-muted);margin-top:4px;display:none">
+          El nombre no se cambia desde acá: es con lo que se la busca en Costos laborales y en la
+          hoja de cada mes. Si está mal escrito, se corrige en la planilla.
+        </div>
+      </div>
+      <div class="form-group full">
+        <label>Fecha de ingreso</label>
+        <input type="date" id="nom-p-ingreso" />
+      </div>
+      <div class="form-group full">
+        <label>Sueldo (lo que cobra en mano)</label>
+        <input type="text" id="nom-p-sueldo" inputmode="decimal" placeholder="0" />
+      </div>
+      <div class="form-group full">
+        <label>Cuánto va por transferencia</label>
+        <input type="text" id="nom-p-transf" inputmode="decimal" placeholder="0" />
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">
+          Es la parte registrada, y es la que decide si hay cargas, vacaciones y aguinaldo
+          prorrateado. Cero es "cobra todo en efectivo". Nunca más que el sueldo.
+        </div>
+      </div>
+    </div>
+    <div id="nom-p-error" style="color:var(--red);font-size:13px;margin-bottom:10px;text-align:center"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="document.getElementById('nom-persona-overlay').classList.remove('open')">Cancelar</button>
+      <button class="btn btn-accent" onclick="nomGuardarPersona(this)">Guardar</button>
     </div>
   </div>
 </div>
@@ -15108,6 +15162,81 @@ async function loadNomina(btn) {
   } finally { if (btn) btn.classList.remove('spinning'); }
 }
 
+// 'AAAAMM' → 'septiembre'. El año sólo cuando no es el corriente: en el aviso de
+// todos los días sobra, y en uno de otro año hace falta.
+function nomMesNombre(mesId) {
+  const m = String(mesId || '');
+  if (!/^[0-9]{6}$/.test(m)) return 'su mes de efectivización';
+  const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+                 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  const anio = Number(m.slice(0, 4));
+  const nombre = meses[Number(m.slice(4, 6)) - 1] || m;
+  return anio === new Date().getFullYear() ? nombre : `${nombre} de ${anio}`;
+}
+
+// ─── Cargar y corregir la nómina desde la app ───────────────────────────────
+//
+// Es la misma idea que en Pagos: se puede hacer desde acá o desde la planilla,
+// las dos son válidas y ninguna es "la copia". Lo que se escribe son las cuatro
+// columnas que la app entiende (nombre, ingreso, sueldo, transferencia); el
+// resto de la hoja no se toca, la fila queda firmada con quién la tocó, y el
+// número que vale es el que devuelve el server: al guardar se recarga todo.
+//
+// Lo que NO se hace desde acá, a propósito: renombrar (el nombre es la clave que
+// une esta hoja con Costos laborales y con la de cada mes) y dar de baja (se
+// borra la fila en la planilla). Las dos rompen historial en silencio.
+let nomEditando = null;
+
+function nomEditarPersona(i) {
+  const e = i == null ? null : ((nomState.data && nomState.data.empleados) || [])[i];
+  nomEditando = e ? e.nombre : null;
+  document.getElementById('nom-p-titulo').textContent = e ? e.nombre : 'Agregar a la nómina';
+  const nom = document.getElementById('nom-p-nombre');
+  nom.value = e ? e.nombre : '';
+  nom.disabled = Boolean(e);
+  document.getElementById('nom-p-nombre-nota').style.display = e ? '' : 'none';
+  document.getElementById('nom-p-ingreso').value = (e && e.ingresoISO) || '';
+  document.getElementById('nom-p-sueldo').value = e && e.sueldoActualARS > 0 ? Math.round(e.sueldoActualARS) : '';
+  document.getElementById('nom-p-transf').value = e ? Math.round(e.enBlancoNetoARS || 0) : '';
+  document.getElementById('nom-p-error').textContent = '';
+  document.getElementById('nom-persona-overlay').classList.add('open');
+  if (!e) setTimeout(() => nom.focus(), 50);
+}
+
+async function nomGuardarPersona(btn) {
+  const err = document.getElementById('nom-p-error');
+  const nombre = (document.getElementById('nom-p-nombre').value || '').trim();
+  const ingresoISO = document.getElementById('nom-p-ingreso').value || '';
+  const sueldo = pedNumero(document.getElementById('nom-p-sueldo').value);
+  const transf = pedNumero(document.getElementById('nom-p-transf').value);
+
+  // Lo mismo que valida el server. Acá es comodidad —contestar sin ida y
+  // vuelta—; el que decide es el de allá, que es el que escribe.
+  if (!nombre) { err.textContent = 'Falta el nombre.'; return; }
+  if (!nomEditando && !ingresoISO) { err.textContent = 'Falta la fecha de ingreso.'; return; }
+  if (!(sueldo > 0)) { err.textContent = 'El sueldo tiene que ser mayor que cero.'; return; }
+  if (transf > sueldo) { err.textContent = 'Lo que va por transferencia no puede ser mayor que el sueldo.'; return; }
+
+  err.textContent = '';
+  btn.disabled = true;
+  try {
+    const { data } = await api('/api/nomina/empleados', {
+      method: 'POST',
+      body: JSON.stringify({
+        cambios: [{ nombre, ingresoISO, sueldoActualARS: sueldo, enBlancoNetoARS: transf, alta: !nomEditando }],
+      }),
+    });
+    document.getElementById('nom-persona-overlay').classList.remove('open');
+    const alta = (data.escritas || []).find(x => x.esAlta);
+    if (alta && alta.aviso) showToast(`${alta.nombre}: ${alta.aviso}`);
+    loadNomina();
+  } catch (e) {
+    err.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function renderNomina() {
   const { empleados, resumen, mes } = nomState.data || {};
   if (!resumen) return;
@@ -15134,7 +15263,20 @@ function renderNomina() {
          hoja hasta esa fila, este número deja de ser una estimación.
        </div>` : '');
 
-  const gente = (empleados || []).map(e => {
+  // Quien ya está efectivizado y en la planilla todavía figura sin parte por
+  // transferencia. Su costo de acá incluye cargas y provisiones ESTIMADAS: hay
+  // que poder ver que ese número es el mejor disponible y no un dato.
+  const efectivizados = (resumen.detalle || []).filter(d => d.estimado);
+  const avisoEfectivos = efectivizados.length
+    ? `<div class="cc-aviso" style="margin-bottom:12px">
+         ${efectivizados.map(d => `<b>${escapeHtml(d.nombre)}</b> entra efectiva en ${nomMesNombre(d.efectivaDesdeMesId)}`).join(' · ')}.
+         Su costo ya incluye cargas, vacaciones y aguinaldo prorrateado, estimados con la misma parte
+         por transferencia que tiene el resto. En cuanto ese número esté en la planilla, manda el de
+         la planilla y esta estimación se apaga sola.
+       </div>`
+    : '';
+
+  const gente = (empleados || []).map((e, i) => {
     const meses = e.ingresoISO ? mesesDesde(e.ingresoISO) : null;
     return fila(
       `<b>${escapeHtml(e.nombre)}</b>`
@@ -15142,7 +15284,10 @@ function renderNomina() {
         + (e.ingresoISO ? `desde ${fechaCorta(e.ingresoISO)}${meses != null ? ` · ${meses} ${meses === 1 ? 'mes' : 'meses'}` : ''}` : 'sin fecha de ingreso')
         + (e.enBlancoNetoARS > 0 ? ` · ${fmt(e.enBlancoNetoARS)} por transferencia` : e.esSocio ? '' : ' · sin transferencia')
         + `</span>`,
-      e.sueldoActualARS > 0 ? fmt(e.sueldoActualARS) : '<span style="color:var(--red,#c33)">falta</span>');
+      e.sueldoActualARS > 0 ? fmt(e.sueldoActualARS) : '<span style="color:var(--red,#c33)">falta</span>',
+      // El sueldo se corrige acá o en la planilla, indistinto. El botón va en la
+      // fila de la persona porque es donde se está mirando el número que está mal.
+      ` <button class="nota-btn" onclick="nomEditarPersona(${i})">Editar</button>`);
   }).join('');
 
   // El detalle del costo del mes. `origen` dice si el número salió de la hoja de
@@ -15151,6 +15296,7 @@ function renderNomina() {
     `${escapeHtml(d.nombre)}<span style="display:block;font-size:11px;color:var(--text-muted)">`
       + `${fmt(d.netoARS)} en mano${d.cargasARS > 0 ? ` · ${fmt(d.cargasARS)} de cargas` : ''}`
       + `${d.provisionesARS > 0 ? ` · ${fmt(d.provisionesARS)} de vacaciones y aguinaldo` : ''}`
+      + `${d.estimado ? ` · <span title="La planilla todavía no tiene su parte por transferencia: se estima con la del resto">estimado, efectiva desde ${nomMesNombre(d.efectivaDesdeMesId)}</span>` : ''}`
       + `${Math.abs(d.difContraLaReglaARS) > 1 ? ` · <span title="La planilla tiene un valor puesto a mano que no sale de la fórmula">planilla ${d.difContraLaReglaARS > 0 ? '+' : ''}${fmt(d.difContraLaReglaARS)} vs la regla</span>` : ''}`
       + `</span>`,
     `<b>${fmt(d.totalARS)}</b>`)).join('');
@@ -15160,14 +15306,17 @@ function renderNomina() {
     fmt(m.totales.costoTotalARS),
     m.totales.sacARS > 0 ? `<span style="display:block;font-size:11px;color:var(--text-muted)">+ ${fmt(m.totales.sacARS)} de SAC a pagar</span>` : '')).join('');
 
-  cont.innerHTML = alerta
+  cont.innerHTML = alerta + avisoEfectivos
     + `<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:14px">
          <div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Costo del mes</div>
               <div style="font-size:22px;font-weight:700">${fmt(resumen.costoTotalMensualARS)}</div></div>
          <div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Personas</div>
               <div style="font-size:22px;font-weight:700">${resumen.dotacion}</div></div>
        </div>`
-    + `<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-top:8px">Quiénes están</div>${gente}`
+    + `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+         <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Quiénes están</div>
+         <button class="nota-btn" onclick="nomEditarPersona(null)">+ Agregar</button>
+       </div>${gente}`
     + `<div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-top:16px">Qué cuesta cada uno por mes</div>${detalle}`
     + fila('<b>Total</b>', `<b>${fmt(resumen.costoTotalMensualARS)}</b>`)
     + `<div style="font-size:12px;color:var(--text-muted);line-height:1.7;margin-top:10px">
@@ -15300,9 +15449,29 @@ function renderLiquidacion() {
          empezado el mes se le prorratea el sueldo por los que trabajó, y la cantidad se puede
          corregir si abrió un día fuera de lo habitual o si faltó. El feriado no se prorratea: va
          aparte, por día trabajado.
+         <br>${nomLiqNotaFeriados(d)}
          ${d.esMesDeSAC ? '<br><b>Es mes de aguinaldo:</b> el SAC viene calculado (medio sueldo del mes por los días del semestre) y se puede pisar.' : ''}
        </div>`;
   nomLiqRepintarTodo();
+}
+
+// Qué feriados tiene el mes y cuáles se pagan. Un mes sin adicional tiene que
+// poder explicar por qué: "el 17 cayó lunes" es la respuesta, un cero no.
+function nomLiqNotaFeriados(d) {
+  const fer = d.feriadosMes || [];
+  if (!fer.length) return 'Este mes <b>no tiene feriados</b>.';
+  const abren = fer.filter(f => f.servicio);
+  const lista = fer.map(f => {
+    // Un día suelto que rompe el cuadro semanal (un evento un lunes, un martes
+    // que no se abrió) se dice con su motivo: si no, la cantidad de feriados no
+    // coincide con el almanaque y nadie sabe por qué.
+    const exc = f.excepcion ? ` — <b>${escapeHtml(f.excepcion.motivo)}</b>` : (f.servicio ? '' : ' <b>cerrado</b>');
+    return `${fechaCorta(f.fecha)} ${f.dia} (${escapeHtml(f.nombre)})${exc}`;
+  }).join(' · ');
+  return `Feriados del mes: ${lista}. `
+    + (abren.length
+      ? `${abren.length === 1 ? 'Uno cae' : abren.length + ' caen'} en día de servicio: eso es lo que se paga como adicional.`
+      : 'Ninguno cae en un día de servicio, así que <b>no hay adicional que pagar</b>.');
 }
 
 function nomLiqPersona(e, i) {
@@ -15436,6 +15605,29 @@ function nomLiqUsarSugerido(i) {
   nomLiqBanner();
 }
 
+// El botón del aviso del feriado: poner la cantidad que dice el calendario.
+// Toca el input además del estado, porque la lista no se redibuja mientras se
+// edita — igual que `nomLiqPonerSueldo`.
+function nomLiqPonerFeriados(i, cantidad) {
+  const e = nomLiq.data.porEmpleado[i];
+  if (!e) return;
+  const previo = nomLiq.cambios.get(e.nombre) || {};
+  const igual = cantidad === (e.feriados || 0);
+  if (igual) delete previo.feriados; else previo.feriados = cantidad;
+  if (Object.keys(previo).length) nomLiq.cambios.set(e.nombre, previo);
+  else nomLiq.cambios.delete(e.nombre);
+
+  const cont = document.getElementById(`nl-c-${i}-feriados`);
+  if (cont) {
+    cont.classList.toggle('tocado', !igual);
+    const inp = cont.querySelector('input');
+    if (inp) inp.value = cantidad;
+  }
+  nomLiqRepintar(i);
+  nomLiqRepintarTotales();
+  nomLiqBanner();
+}
+
 function nomLiqRepintar(i) {
   const e = nomLiq.data.porEmpleado[i];
   const c = nomLiqCuenta(e);
@@ -15481,8 +15673,23 @@ function nomLiqRepintar(i) {
   }
   const pie = document.getElementById(`nl-pie-${i}`);
   if (!pie) return;
+  // El feriado contra el calendario. No se corrige solo: en la hoja de agosto de
+  // 2026 hay un feriado cobrado que cayó lunes, y pisarlo al abrir la app sería
+  // cambiar un sueldo sin que nadie lo haya pedido. Se dice y hay un botón.
+  // La cantidad desconocida —la hoja tiene un importe que no divide entero por
+  // el feriado unitario— no se reclama: no se sabe contra qué comparar, y el
+  // importe se respeta igual.
+  const cantidadDesconocida = e.feriados == null && (e.feriadoARS || 0) > 0;
+  const ferSug = e.feriadosSugeridos;
+  const difFer = ferSug != null && !cantidadDesconocida && (c.feriados || 0) !== ferSug;
   pie.innerHTML = [
     c.feriado ? `${c.feriados} feriado${c.feriados === 1 ? '' : 's'}: <b>${fmt(c.feriado)}</b>` : '',
+    difFer
+      ? `<span class="nl-dif">Tiene <b>${c.feriados || 0}</b> feriado${(c.feriados || 0) === 1 ? '' : 's'} y el calendario dice `
+        + `<b>${ferSug}</b>${ferSug === 0 ? ' (ninguno cayó en día de servicio)' : ''}. `
+        + `Si ese día se abrió igual, dejalo así. `
+        + `<button class="nota-btn nl-usar" onclick="nomLiqPonerFeriados(${i},${ferSug})">Poner ${ferSug}</button></span>`
+      : '',
     c.sac ? `Aguinaldo: <b>${fmt(c.sac)}</b>` : '',
     `Transferencia: <b>${fmt(c.transf)}</b>`,
     c.consumos ? `Consumos: <b>−${fmt(c.consumos)}</b>` : '',
