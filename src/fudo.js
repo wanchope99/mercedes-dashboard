@@ -766,6 +766,30 @@ async function getMesasPorDia({ desde, hasta } = {}) {
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
 }
 
+// ─── Cuánto gasta una mesa: los totales reales, uno por uno ─────────────────────
+//
+// Devuelve el total de CADA venta cerrada del rango, sin agrupar. Existe para
+// poder razonar sobre una mesa concreta y no sobre un promedio: la pregunta
+// "¿cuánto puedo descontar por pagar en efectivo?" se contesta distinto para una
+// mesa de $30.000 que para una de $200.000, y el promedio no describe a ninguna
+// de las dos.
+//
+// Sale de `sales` crudo y no del detalle diario porque el detalle viene
+// pre-agregado, y los días históricos se sirven del snapshot de `Fudo Historico`,
+// que se escribió sin los totales por mesa.
+async function getTotalesDeVentas({ desde, hasta } = {}) {
+  const { sales } = await loadRaw();
+  const out = [];
+  for (const s of sales) {
+    const a = s.attributes || {};
+    if (!ventaComputable(a)) continue;
+    const fecha = fechaServicio(a.closedAt);
+    if ((desde && fecha < desde) || (hasta && fecha > hasta)) continue;
+    out.push({ fecha, totalARS: Math.round(a.total || 0), pax: a.people || 0 });
+  }
+  return out.sort((x, y) => x.totalARS - y.totalARS);
+}
+
 // ─── Agregado de productos/categorías sobre un rango (multi-día) ─────────────────
 // Suma todas las ventas por categoría y por producto en el período, para responder
 // "¿se vendió más PARA COMER o PARA PICAR en general?" sin entrar día por día.
@@ -1114,7 +1138,7 @@ async function probeStockMovements() {
 module.exports = {
   getServicios, getServicioDetalle, getServicioDebug, resnapshotDia, resnapshotTodos,
   getDetallesTodos, getDetallesFrescos, getAgregadoProductos, getProductoDebug, getVentaDebugCrudo,
-  getMesasPorDia, TRAMOS_MESA, tramoDeMesa,
+  getMesasPorDia, getTotalesDeVentas, TRAMOS_MESA, tramoDeMesa,
   clearFudoCache, grupoDeCategoria, fechaServicio, fechaServicioHoy,
   probeStock, probeStockMovements, getProductosConStock, getVentasItems, getVentasConCosto,
 };

@@ -2407,7 +2407,10 @@
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px">
         <div class="form-group">
           <label>Figura</label>
-          <select id="fisc-figura" onchange="renderFiscal()">
+          <!-- La figura cambia la tasa marginal de Ganancias, que el descuento
+               calcula en el servidor: hay que volver a pedirlo, no basta con
+               redibujar. -->
+          <select id="fisc-figura" onchange="renderFiscal(); cargarDescuentoEfectivo()">
             <option value="personaHumana">Persona humana</option>
             <option value="sociedad">SRL / SA</option>
           </select>
@@ -2462,6 +2465,27 @@
       </div>
       <div class="table-wrap"><table id="fisc-bases"></table></div>
       <div class="fisc-nota" style="margin-top:10px" id="fisc-bases-pie"></div>
+    </div>
+
+    <!-- Descuento por pagar en efectivo. Va después del desglose por categoría
+         porque se apoya en él: la tasa marginal de Ganancias y el CMV son los
+         que deciden cuánto se puede resignar. -->
+    <div class="card">
+      <div class="card-title"><span>¿Cuánto podés descontar por pagar en efectivo?</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
+              id="fisc-desc-sub">sobre mesas reales del mes</span>
+      </div>
+      <div id="fisc-desc-kpi" class="fisc-kpi" style="margin-bottom:14px"></div>
+      <div class="table-wrap"><table id="fisc-descuento"></table></div>
+      <div class="fisc-nota" style="margin-top:12px" id="fisc-desc-pie"></div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div class="form-group" style="margin:0">
+          <label>Descuentos a comparar (%)</label>
+          <input type="text" id="fisc-desc-pcts" value="10, 15" onchange="cargarDescuentoEfectivo()"
+                 style="width:150px" title="Separados por coma. Se calcula cuánto te queda con cada uno.">
+        </div>
+        <button class="btn" onclick="cargarDescuentoEfectivo()">Recalcular</button>
+      </div>
     </div>
 
     <!-- Dónde se pierde crédito -->
@@ -12643,6 +12667,9 @@ async function recalcFiscal() {
         : 'promedio mensual de ' + ms.join(' y ');
     }
     renderFiscal();
+    // Va aparte y sin await: necesita Fudo, que es lento, y la pantalla no tiene
+    // por qué esperarlo. Si falla, esa tarjeta lo dice y el resto ya está.
+    cargarDescuentoEfectivo();
   } catch (e) {
     if (sub) sub.textContent = 'no se pudo calcular';
     showToast('Error régimen fiscal: ' + e.message);
@@ -13122,6 +13149,166 @@ function renderCategoriasFiscales(d, figura, iAum) {
           'proveedores dan factura A, la fila no está cerrada.'
         : '');
   }
+}
+
+// ─── Cuánto se puede descontar por cobrar en efectivo ────────────────────────
+//
+// La misma mesa deja plata distinta según cómo pague. Por Galicia se lleva
+// comisión de posnet, IVA débito, IIBB y Ganancias; en efectivo y sin declarar,
+// nada de eso. La diferencia es lo que se puede resignar como descuento sin
+// terminar peor — y da mucho más de lo que la intuición dice.
+//
+// Pega al servidor aparte de la simulación principal porque necesita las mesas
+// REALES del mes (Fudo), y cargar Fudo en la ruta principal haría más lenta la
+// pantalla entera para una tarjeta que no siempre se mira.
+let _fiscDesc = null;
+
+async function cargarDescuentoEfectivo() {
+  const tabla = document.getElementById('fisc-descuento');
+  if (!tabla) return;
+  const figura = (document.getElementById('fisc-figura') || {}).value || 'personaHumana';
+  const num = id => { const el = document.getElementById(id); const n = Number(el && el.value); return Number.isFinite(n) ? n : 0; };
+  const pcts = ((document.getElementById('fisc-desc-pcts') || {}).value || '10, 15')
+    .split(',').map(s => Number(String(s).replace('%', '').trim()))
+    .filter(n => Number.isFinite(n) && n > 0 && n < 100);
+
+  tabla.innerHTML = '<tbody><tr><td style="color:var(--text-muted)">Calculando sobre las mesas del mes…</td></tr></tbody>';
+  try {
+    const { data } = await api('/api/fiscal/descuento-efectivo', {
+      method: 'POST',
+      body: JSON.stringify({
+        // Un mes solo, el más reciente de los elegidos: el descuento se decide
+        // sobre mesas concretas y mezclar dos meses mezcla precios de carta.
+        mes: _fiscMesesSel.length ? _fiscMesesSel[_fiscMesesSel.length - 1] : undefined,
+        figura,
+        parametros: { iibbPct: num('fisc-iibb'), cuotaMonotributoMensual: num('fisc-cuota') },
+        descuentos: pcts.length ? pcts : [10, 15],
+      }),
+    });
+    _fiscDesc = data;
+    renderDescuentoEfectivo();
+  } catch (e) {
+    tabla.innerHTML = '<tbody><tr><td style="color:var(--text-muted)">No se pudo calcular: ' +
+      escapeHtml(e.message) + '</td></tr></tbody>';
+  }
+}
+
+function renderDescuentoEfectivo() {
+  const d = _fiscDesc;
+  const tabla = document.getElementById('fisc-descuento');
+  if (!d || !tabla) return;
+  if (!d.filas || !d.filas.length) {
+    tabla.innerHTML = '<tbody><tr><td style="color:var(--text-muted)">No hay mesas de ese mes en Fudo para analizar.</td></tr></tbody>';
+    return;
+  }
+
+  const s = d.supuestos, o = d.origen || {};
+  const pcts = d.filas[0].descuentos.map(x => x.pct);
+
+  const sub = document.getElementById('fisc-desc-sub');
+  if (sub) sub.textContent = o.mesasAnalizadas
+    ? o.mesasAnalizadas.toLocaleString('es-AR') + ' mesas reales de ' + d.mes +
+      ' · ticket promedio ' + fmt(o.ticketPromedioARS)
+    : 'sobre mesas reales de ' + d.mes;
+
+  // ── El titular: el descuento de equilibrio ────────────────────────────────
+  //
+  // Es prácticamente el mismo para todas las mesas, porque los cuatro costos son
+  // proporcionales a la venta. Se muestra el de la mesa típica y se dice que el
+  // resto está cerquísima, en vez de repetir cinco veces el mismo número.
+  const tipica = d.filas[Math.floor(d.filas.length / 2)];
+  const eqMin = Math.min(...d.filas.map(f => f.pctEquilibrio));
+  const eqMax = Math.max(...d.filas.map(f => f.pctEquilibrio));
+
+  const tarjeta = (tit, val, color, txt) =>
+    '<div class="fisc-kpi-card" style="border-left-color:' + color + '">' +
+      '<div class="tit">' + tit + '</div>' +
+      '<div class="val" style="color:' + color + '">' + val + '</div>' +
+      '<div class="sub">' + txt + '</div></div>';
+
+  const kpi = document.getElementById('fisc-desc-kpi');
+  if (kpi) {
+    kpi.innerHTML =
+      tarjeta('Podés descontar hasta', pct(tipica.pctEquilibrio), 'var(--green)',
+        'Ahí te da exactamente lo mismo cobrar en efectivo con descuento que cobrar por Galicia. ' +
+        'Por debajo ganás, por encima perdés. Va de ' + pct(eqMin) + ' a ' + pct(eqMax) +
+        ' según la mesa.') +
+      tarjeta('De cada $100 por Galicia', fmt(tipica.electronico.queda / tipica.ventaARS * 100),
+        'var(--orange)',
+        'te quedan, después de comisión, IVA, IIBB y Ganancias. El resto se va antes de que lo toques.') +
+      tarjeta('Hoy cobrás electrónico', o.pctElectronico != null ? pct(o.pctElectronico) : '—',
+        'var(--blue)',
+        o.pctElectronico != null
+          ? fmt(o.ventaGaliciaARS) + '/mes por Galicia. Eso es lo que está en juego si movés parte a efectivo.'
+          : 'sin dato de la proporción electrónica del mes.');
+  }
+
+  // ── La tabla ──────────────────────────────────────────────────────────────
+  const cols = pcts.map(p =>
+    thTip('Con −' + p + '%', 'Lo que cobrás en efectivo con ' + p + '% de descuento, y cuánto ganás o ' +
+      'perdés contra haber cobrado esa misma mesa por Galicia. En verde conviene el efectivo.'));
+
+  const filas = d.filas.map(f => {
+    const e = f.electronico;
+    return '<tr>' +
+      '<td style="text-align:left">' + escapeHtml(f.etiqueta || '') + '</td>' +
+      '<td style="font-weight:600">' + fmt(f.ventaARS) + '</td>' +
+      '<td style="color:var(--text-muted)">−' + fmt(e.comision) + '</td>' +
+      '<td style="color:var(--text-muted)">−' + fmt(e.ivaDebito) + '</td>' +
+      '<td style="color:var(--text-muted)">−' + fmt(e.iibb) + '</td>' +
+      '<td style="color:var(--text-muted)">−' + fmt(e.ganancias) + '</td>' +
+      '<td style="font-weight:600;color:var(--orange);white-space:nowrap">' + fmt(e.queda) +
+        ' <span class="val-accent" style="font-size:11px;font-weight:400">' + pct(e.pctQueda) + '</span></td>' +
+      f.descuentos.map(x =>
+        '<td style="white-space:nowrap">' + fmt(x.cobras) +
+        ' <span style="font-size:11px;font-weight:600;color:' +
+        (x.conviene ? 'var(--green)' : 'var(--red)') + '">' +
+        (x.ganasVsElectronico >= 0 ? '+' : '−') + fmt(Math.abs(x.ganasVsElectronico)) + '</span></td>').join('') +
+      '<td style="font-weight:600;color:var(--green)">' + pct(f.pctEquilibrio) + '</td></tr>';
+  }).join('');
+
+  tabla.innerHTML =
+    '<thead><tr>' +
+    thTip('Mesa', 'Cinco mesas reales del mes, elegidas por percentil de lo que gastaron: no son montos ' +
+      'redondos inventados. Los extremos de la distribución son una mesa de doce y una copa suelta, y ' +
+      'por eso se toman percentiles y no la más cara y la más barata.') +
+    thTip('Venta', 'Lo que paga el cliente hoy, con IVA adentro.') +
+    thTip('Comisión', 'Lo que se lleva Galicia por el posnet. Sale del libro: es el bruto menos el neto ' +
+      'acreditado del mes, que el cierre ya escribe como gasto Financieros. En efectivo es cero.') +
+    thTip('IVA', 'El IVA débito de esa venta. Lo cobrás al cliente y se lo entregás a ARCA. Sólo si la ' +
+      'declarás.') +
+    thTip('IIBB', 'Ingresos Brutos sobre el neto de esa venta. Sólo si la declarás.') +
+    thTip('Ganancias', 'El impuesto sobre la UTILIDAD de esa mesa —el neto menos lo que costó la ' +
+      'mercadería—, a la tasa marginal de la figura elegida arriba. Si la mesa diera pérdida no hay ' +
+      'impuesto, y por eso puede dar cero.') +
+    thTip('Te queda', 'Lo que realmente entra al bolsillo cobrando esa mesa por Galicia, y qué porcentaje ' +
+      'de la venta es. Todo lo demás se fue antes de que lo tocaras.') +
+    cols.join('') +
+    thTip('Equilibrio', 'El descuento que deja exactamente lo mismo por los dos caminos. Descontá menos ' +
+      'que esto y ganás; más, y perdés. Es casi igual para todas las mesas porque los cuatro costos son ' +
+      'proporcionales a la venta.') +
+    '</tr></thead><tbody>' + filas + '</tbody>';
+
+  // ── El pie ────────────────────────────────────────────────────────────────
+  const d10 = tipica.descuentos[0];
+  document.getElementById('fisc-desc-pie').innerHTML =
+    'Sobre la <strong>' + escapeHtml((tipica.etiqueta || '').toLowerCase()) + '</strong> de ' +
+    fmt(tipica.ventaARS) + ': cobrada por Galicia te quedan <strong>' + fmt(tipica.electronico.queda) +
+    '</strong>; con <strong>' + d10.pct + '% de descuento en efectivo</strong> cobrás ' + fmt(d10.cobras) +
+    ' y te quedás con <strong>' + fmt(d10.ganasVsElectronico) + ' más</strong> que por Galicia.' +
+    '<br><br>' +
+    'Supuestos: comisión de posnet <strong>' + pct(s.comisionPct) + '</strong> (' + escapeHtml(o.comisionDe || '') +
+    '), IVA <strong>' + pct(s.ivaVentasPct) + '</strong>, IIBB <strong>' + pct(s.iibbPct) +
+    '</strong>, CMV <strong>' + pct(s.cmvPct) + '</strong> (' + escapeHtml(o.cmvDe || '') +
+    ') y tasa marginal de Ganancias <strong>' + pct(s.tasaMarginalGananciasPct) + '</strong>. ' +
+    'El costo de la mercadería NO se resta de las dos columnas porque es el mismo plato se cobre como se ' +
+    'cobre: entra sólo donde de verdad cambia, que es la utilidad sobre la que corre Ganancias.' +
+    '<br><br>' +
+    '<strong>Lo que este número no dice.</strong> Como Responsable Inscripto hay que facturar todas las ' +
+    'ventas. Esto mide la consecuencia económica del supuesto que ya usa toda la pantalla —declarar sólo ' +
+    'lo que liquida Galicia—, no es una recomendación ni asesoramiento fiscal. Y hay dos costos que no ' +
+    'están en la tabla: el efectivo hay que contarlo, guardarlo y moverlo, y un descuento publicado es ' +
+    'difícil de sacar después.';
 }
 
 // ─── El mes entero como RI: el estado de resultados, concepto por concepto ───

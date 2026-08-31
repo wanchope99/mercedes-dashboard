@@ -998,6 +998,113 @@ function oportunidades({ credito, mesesAnalizados = 1 } = {}) {
     (b.perdidoAnualizado || b.enJuegoAnualizado || 0) - (a.perdidoAnualizado || a.enJuegoAnualizado || 0));
 }
 
+// ─── Cuánto se puede descontar por cobrar en efectivo ─────────────────────────
+//
+// La misma mesa deja plata distinta según cómo pague, y la diferencia no es
+// chica. Cobrada por Galicia se lleva comisión del posnet, IVA débito, IIBB y
+// Ganancias sobre la utilidad de esa venta. Cobrada en efectivo y no declarada
+// no se lleva nada de eso — y por eso se puede resignar parte del precio con un
+// descuento y TERMINAR IGUAL O MEJOR.
+//
+// ─── Lo que esto NO dice ──────────────────────────────────────────────────────
+//
+// Como Responsable Inscripto hay que facturar todas las ventas. Este cálculo
+// describe la consecuencia económica de una decisión que ya está tomada y
+// declarada en el resto del módulo (`baseVentas: 'galicia'`), no una
+// recomendación ni asesoramiento fiscal. Lo mismo que ya dice `simularMes` sobre
+// declarar sólo lo que liquida Galicia.
+//
+// ─── La cuenta ────────────────────────────────────────────────────────────────
+//
+// Sobre una venta de X (precio final, IVA adentro):
+//
+//   comisión      X × comisionPct                        (sólo electrónico)
+//   IVA débito    X − X/(1+a/100)                        (sólo si se declara)
+//   IIBB          neto × iibbPct                         (sólo si se declara)
+//   Ganancias     tasaMarginal × (neto − CMV)            (sólo si se declara)
+//
+// El COSTO DE LA MERCADERÍA no aparece como resta porque es el mismo plato en
+// los dos casos: se compró y se pagó igual, se cobre como se cobre. Entra sólo
+// donde de verdad cambia, que es la utilidad sobre la que corre Ganancias.
+//
+// El descuento de equilibrio es entonces lo que se va en todo eso, sobre X:
+// descontar exactamente eso deja lo mismo por los dos caminos, y descontar menos
+// deja más.
+function descuentoEfectivo({
+  ventas = [], parametros = {}, comisionPct = 0, cmvPct = 0,
+  tasaMarginalGanancias = 0, descuentos = [10, 15],
+} = {}) {
+  const P = { ...PARAMETROS, ...parametros };
+  const a = Number(P.ivaVentasPct) || 0;
+  const com = Math.max(0, Number(comisionPct) || 0) / 100;
+  const cmv = Math.max(0, Math.min(1, Number(cmvPct) || 0));
+  const tm = Math.max(0, Math.min(1, Number(tasaMarginalGanancias) || 0));
+  const iibbP = (Number(P.iibbPct) || 0) / 100;
+
+  const filas = (ventas || []).map(v => {
+    const X = Number(v && v.montoARS != null ? v.montoARS : v) || 0;
+    if (X <= 0) return null;
+
+    const comision = X * com;
+    const neto = netoDe(X, a);
+    const ivaDebito = X - neto;
+    const iibb = neto * iibbP;
+    const costoMercaderia = X * cmv;
+    // Ganancias grava la utilidad, no la venta. Si la mesa diera pérdida no hay
+    // impuesto que ahorrarse: el max(0) es la regla del impuesto, no un piso
+    // puesto para que el número quede lindo.
+    const utilidad = Math.max(0, neto - costoMercaderia);
+    const ganancias = utilidad * tm;
+
+    const seVa = comision + ivaDebito + iibb + ganancias;
+    const quedaElectronico = X - seVa;
+    // Descontar esto en efectivo deja exactamente lo mismo que cobrar por
+    // Galicia. Es el techo: por debajo se gana, por encima se pierde.
+    const pctEquilibrio = X > 0 ? (seVa / X) * 100 : 0;
+
+    return {
+      etiqueta: (v && v.etiqueta) || null,
+      ventaARS: round2(X),
+      electronico: {
+        comision: round2(comision),
+        ivaDebito: round2(ivaDebito),
+        iibb: round2(iibb),
+        ganancias: round2(ganancias),
+        seVa: round2(seVa),
+        queda: round2(quedaElectronico),
+        pctQueda: round2(X > 0 ? (quedaElectronico / X) * 100 : 0),
+      },
+      pctEquilibrio: round2(pctEquilibrio),
+      // El precio con descuento redondeado a $100 hacia abajo, que es como se
+      // dice en el salón. Se informa aparte para no ensuciar la cuenta.
+      descuentos: (descuentos || []).map(d => {
+        const pct = Math.max(0, Math.min(100, Number(d) || 0));
+        const cobras = X * (1 - pct / 100);
+        return {
+          pct,
+          cobras: round2(cobras),
+          cobrasRedondeado: Math.floor(cobras / 100) * 100,
+          resigna: round2(X - cobras),
+          // Contra el electrónico: positivo es que te conviene el efectivo.
+          ganasVsElectronico: round2(cobras - quedaElectronico),
+          conviene: cobras > quedaElectronico,
+        };
+      }),
+    };
+  }).filter(Boolean);
+
+  return {
+    filas,
+    supuestos: {
+      ivaVentasPct: a,
+      iibbPct: Number(P.iibbPct) || 0,
+      comisionPct: round2(com * 100),
+      cmvPct: round2(cmv * 100),
+      tasaMarginalGananciasPct: round2(tm * 100),
+    },
+  };
+}
+
 // ─── Punto de entrada: varios meses × varios escenarios ───────────────────────
 //
 // Devuelve además la comparación "declarado vs todo", que es la inconsistencia
@@ -1036,7 +1143,7 @@ function simular({ meses = [], movimientosPorMes = {}, padron = {}, calibracion 
 module.exports = {
   PARAMETROS,
   // Cálculo
-  estimarCreditoFiscal, simularMes, simular, oportunidades, impactoPorCategoria,
+  estimarCreditoFiscal, simularMes, simular, oportunidades, impactoPorCategoria, descuentoEfectivo,
   calibrarDesdeCompras, esMovimientoDeCaja,
   // Helpers exportados para poder ejercitarlos sin montar el módulo entero
   ivaContenido, netoDe, aplicarEscala, tasaMarginal, normNombre, normalizarAlicuota, ALICUOTAS_CONOCIDAS,

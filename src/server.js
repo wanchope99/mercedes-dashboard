@@ -4772,6 +4772,125 @@ app.get('/api/fiscal/defaults', authMiddleware, adminOnly, async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// ─── Descuento por pagar en efectivo ─────────────────────────────────────────
+//
+// Los cinco escenarios NO son montos redondos inventados: salen de las mesas
+// REALES del mes, por percentil. Una mesa de $30.000 y una de $200.000 no
+// admiten el mismo descuento, y un promedio no describe a ninguna de las dos.
+//
+// Percentiles y no "las cinco más grandes": los extremos de una distribución de
+// tickets son una mesa de doce y una copa suelta, y armar la tabla con eso
+// mostraría dos casos que casi no pasan.
+const PERCENTILES_MESA = [
+  { p: 10, etiqueta: 'Mesa chica (10% más baratas)' },
+  { p: 25, etiqueta: 'Mesa baja (1 de cada 4)' },
+  { p: 50, etiqueta: 'Mesa típica (la mediana)' },
+  { p: 75, etiqueta: 'Mesa alta (1 de cada 4)' },
+  { p: 90, etiqueta: 'Mesa grande (10% más caras)' },
+];
+
+function percentilDe(ordenados, p) {
+  if (!ordenados.length) return 0;
+  const i = Math.min(ordenados.length - 1, Math.max(0, Math.round((p / 100) * (ordenados.length - 1))));
+  return ordenados[i];
+}
+
+// El primer y el último día de un mes con nombre, en el AÑO EN CURSO. La columna
+// `Mes` es texto sin año (convención del repo) y Fudo pide fechas ISO.
+function rangoDelMes(nombreMes) {
+  const i = MESES_NOMBRES.indexOf(nombreMes);
+  if (i < 0) return null;
+  const anio = hoyAR().anio;
+  const dd = n => String(n).padStart(2, '0');
+  return {
+    desde: `${anio}-${dd(i + 1)}-01`,
+    hasta: `${anio}-${dd(i + 1)}-${dd(new Date(anio, i + 1, 0).getDate())}`,
+  };
+}
+
+app.post('/api/fiscal/descuento-efectivo', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { mes, figura = 'personaHumana', parametros = {}, descuentos = [10, 15] } = req.body || {};
+    const enCurso = mesEnCursoAR();
+    const [resumenes, movimientos, compras, padron, nom] = await Promise.all([
+      getResumenMensual({}),
+      getMovimientos(),
+      prov.getCompras().catch(() => []),
+      fiscalProv.leerPadron().catch(() => ({})),
+      personalDeducibleDesdeNomina(),
+    ]);
+
+    // El mes pedido, o el último cerrado. Es uno solo: el descuento se decide
+    // sobre mesas concretas, y promediar dos meses de tickets mezcla precios de
+    // carta distintos.
+    const elegido = (mes && resumenes.find(r => r.mes === mes))
+      || ultimosMesesCerrados(resumenes, 1)[0]
+      || resumenes.find(r => r.mes === enCurso);
+    if (!elegido) return res.json({ ok: true, data: { filas: [], motivo: 'no hay meses para analizar' } });
+
+    // ── La comisión real del posnet, del propio libro ──────────────────────────
+    // Bruto menos neto acreditado, que el cierre ya escribe como gasto
+    // `Financieros`. Sobre la venta de Galicia, que es la que la paga.
+    const financieros = Number((elegido.gastos || {}).Financieros) || 0;
+    const ventaGalicia = Number((elegido.ingresos || {}).Galicia) || 0;
+    const comisionPct = ventaGalicia > 0 ? (financieros / ventaGalicia) * 100 : 0;
+
+    // ── El CMV real, de la misma función que usa la calculadora ────────────────
+    const base = require('./proyecciones').calcularBaselines(movimientos, new Date(),
+      { nomina: await nomina.getNominaParaBaselines().catch(() => null) });
+    const cmvPct = Number(base && base.costosVariables && base.costosVariables.pct) || 0;
+
+    // ── La tasa marginal de Ganancias, del mismo simulador que la pantalla ─────
+    const params = { ...parametros };
+    if (nom && parametros.pctPersonalDeducible === undefined) params.pctPersonalDeducible = nom.pct;
+    const sim = regimenFiscal.simular({
+      meses: [elegido],
+      movimientosPorMes: { [elegido.mes]: movimientos.filter(m => m.mes === elegido.mes) },
+      padron,
+      calibracion: regimenFiscal.calibrarDesdeCompras(compras),
+      escenarios: [0],
+      parametros: params,
+    });
+    const tm = ((sim.meses[0] || {}).escenarios[0] || {}).declarado.tasaMarginalGanancias || {};
+
+    // ── Las mesas reales del mes ──────────────────────────────────────────────
+    const rango = rangoDelMes(elegido.mes);
+    // Fudo se destructura arriba (no hay un objeto `fudo`), así que esta función
+    // se pide por require directo — mismo patrón que el resto del archivo.
+    const tickets = rango
+      ? await require('./fudo').getTotalesDeVentas(rango).catch(() => [])
+      : [];
+    const ordenados = tickets.map(t => t.totalARS).sort((a, b) => a - b);
+    const ventas = PERCENTILES_MESA
+      .map(x => ({ etiqueta: x.etiqueta, montoARS: percentilDe(ordenados, x.p) }))
+      .filter(v => v.montoARS > 0);
+
+    const data = regimenFiscal.descuentoEfectivo({
+      ventas, parametros: params, comisionPct, cmvPct,
+      tasaMarginalGanancias: (Number(tm[figura]) || 0),
+      descuentos,
+    });
+    data.mes = elegido.mes;
+    data.figura = figura;
+    data.origen = {
+      mesasAnalizadas: ordenados.length,
+      ticketPromedioARS: ordenados.length
+        ? Math.round(ordenados.reduce((s, v) => s + v, 0) / ordenados.length) : 0,
+      comisionDe: ventaGalicia > 0 ? 'Financieros / ventas Galicia del mes' : 'sin dato: se asume 0',
+      cmvDe: 'baselines (mismo CMV que la calculadora)',
+      // Cuánto de la venta pasa hoy por medios electrónicos: es lo que está en
+      // juego. Sin esto el descuento parece una idea suelta y no una palanca.
+      pctElectronico: (Number(elegido.ingresos && elegido.ingresos.total) || 0) > 0
+        ? Math.round((ventaGalicia / elegido.ingresos.total) * 1000) / 10 : null,
+      ventaGaliciaARS: Math.round(ventaGalicia),
+    };
+    res.json({ ok: true, data });
+  } catch (err) {
+    console.error('Error /api/fiscal/descuento-efectivo:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── Padrón fiscal de proveedores ────────────────────────────────────────────
 // La cola viene ordenada por PLATA, no por nombre: con dieciséis proveedores
 // para relevar, el orden decide si se resuelve el 80% del gasto o se abandona.
