@@ -66,6 +66,38 @@ const PARAMETROS = {
     'Otros':             { min: 0,    esperado: 21,   max: 21 },
   },
 
+  // ─── Lo que el proveedor te cobra de más por empezar a facturar ─────────────
+  //
+  // Decisión de Gonzalo (31/08/2026), y es la que más cambia el resultado de
+  // todo este módulo. Hasta acá el cálculo asumía que el precio de hoy YA tiene
+  // el IVA adentro, así que al pasar a RI el crédito salía de adentro del mismo
+  // precio y aparecía como ahorro puro. Eso es cierto para el que ya te factura
+  // A. Para el que hoy no factura es falso: cuando le pidas factura no va a
+  // absorber el impuesto, te lo va a agregar al precio.
+  //
+  // Y cuando lo agrega, la cuenta se cierra sola:
+  //
+  //     pagás  G × (1 + p/100)      recuperás  G × p/100      te cuesta  G
+  //
+  // O sea NEUTRO: el crédito existe pero no es plata que ganás, es plata que
+  // pusiste antes. Sin este supuesto el modelo mostraba un ahorro de ~17% sobre
+  // todo el gasto sin relevar que no va a ocurrir.
+  //
+  // El aumento es la alícuota del proveedor, porque es literalmente el IVA que
+  // agrega. Por eso `pctReducido` para los de 10,5%: El Ekeko y las
+  // verdulerías/fruterías no pueden agregar 21 sobre algo que vende al 10,5.
+  aumentoAlFacturar: {
+    activo: true,
+    pctDefault: 21,
+    pctReducido: 10.5,
+    // Por nombre normalizado (sin acentos, minúsculas). Match exacto.
+    porProveedor: { 'el ekeko': 10.5 },
+    // Frutas y verduras, por cómo se escriben en la planilla. Es un patrón y no
+    // una lista de nombres porque el mismo proveedor aparece escrito de varias
+    // formas según quién cargó la fila.
+    patronesReducidos: ['verdul', 'frut', 'granja', 'huerta', 'quinta'],
+  },
+
   // Categorías que NO generan crédito fiscal por naturaleza, sin importar quién
   // sea el proveedor. No es que no se sepa: es que no hay IVA que recuperar.
   //   · Personal → los sueldos están fuera del objeto del impuesto.
@@ -209,6 +241,19 @@ function buscarEnPadron(padron, proveedor) {
   return padron[normNombre(proveedor)] || null;
 }
 
+// Cuánto sube el precio ESTE proveedor cuando empieza a facturar. Orden: lo que
+// se dijo de él por nombre, después el patrón (verdulerías y fruterías, que
+// venden al 10,5%), y si no, el default. Ver `aumentoAlFacturar` arriba.
+function pctAumentoDe(proveedor, cfg) {
+  if (!cfg || !cfg.activo) return 0;
+  const n = normNombre(proveedor);
+  if (n && cfg.porProveedor && cfg.porProveedor[n] != null) return Number(cfg.porProveedor[n]) || 0;
+  if (n && (cfg.patronesReducidos || []).some(p => n.includes(p))) {
+    return Number(cfg.pctReducido) || 0;
+  }
+  return Number(cfg.pctDefault) || 0;
+}
+
 // ─── Qué filas del libro NO son gasto ─────────────────────────────────────────
 //
 // `Movimientos` mezcla el gasto con la tesorería: los retiros de efectivo, los
@@ -334,6 +379,7 @@ function estimarCreditoFiscal({ movimientos = [], padron = {}, calibracion = {},
   const porCategoria = {};
   const porProveedor = {};
   let total = vacioRango();
+  let totalAumento = vacioRango();
   let gastoTotal = 0;
   let gastoClasificado = 0;   // filas donde SÍ se sabe si da factura A
   let gastoSinIvaPorNaturaleza = 0;
@@ -388,32 +434,54 @@ function estimarCreditoFiscal({ movimientos = [], padron = {}, calibracion = {},
       max: ivaContenido(monto, alicuotas.max),
     };
 
+    // Cuánto te cobraría de más este proveedor si empezara a facturar. Cero para
+    // el que YA factura A: su precio de hoy ya trae el IVA adentro, no hay nada
+    // que agregar. Ver `aumentoAlFacturar` en PARAMETROS.
+    const pctAum = pctAumentoDe(proveedor, P.aumentoAlFacturar);
+    const aumentaSiFactura = pctAum > 0 ? monto * (pctAum / 100) : 0;
+
     let rango;
+    let aumento;
     let confianza;
     if (emite === 'S') {
       gastoClasificado += monto;
       confianza = alicFija !== null ? 'dato' : 'alicuota-supuesta';
+      // Ya te factura: el precio de hoy ya tiene el IVA adentro y se saca de ahí.
+      // Éste es el único crédito que es ahorro de verdad.
       rango = {
         min: ivaContenido(monto, alicuotas.min),
         esperado: ivaContenido(monto, alicuotas.esperado),
         max: ivaContenido(monto, alicuotas.max),
       };
+      aumento = vacioRango();
     } else if (emite === 'N') {
       gastoClasificado += monto;
       confianza = 'dato';
       rango = vacioRango();   // paga el IVA y no lo recupera: ésa es la pérdida
+      aumento = vacioRango(); // y como no va a facturar, tampoco sube el precio
     } else {
       // Sin clasificar: es la incertidumbre real. El mínimo asume que no da A
       // (cero crédito) y el máximo que sí. El esperado NO parte al medio a ciegas:
       // usa la proporción de gasto ya clasificado que sí da factura A, que es la
       // mejor pista disponible. Se resuelve en la segunda pasada.
-      rango = { min: 0, esperado: 0, max: ivaContenido(monto, alicuotas.max) };
+      //
+      // Con el supuesto de aumento activo, el techo cambia de naturaleza: si
+      // empieza a facturar te cobra `monto × p/100` MÁS y ese mismo importe
+      // vuelve como crédito. Crédito y aumento son el mismo número, y por eso el
+      // costo neto no se mueve. Sin el supuesto, el techo es el IVA contenido en
+      // el precio de hoy, que es asumir que el proveedor absorbe el impuesto.
+      const techo = aumentaSiFactura > 0
+        ? aumentaSiFactura
+        : ivaContenido(monto, alicuotas.max);
+      rango = { min: 0, esperado: 0, max: techo };
+      aumento = { min: 0, esperado: 0, max: aumentaSiFactura };
       confianza = 'sin-clasificar';
     }
 
     total = sumarRango(total, rango);
-    acumular(porCategoria, categoria, monto, rango, confianza, teorico);
-    if (proveedor) acumular(porProveedor, proveedor, monto, rango, confianza, teorico, { emite, alicuota: alicFija });
+    totalAumento = sumarRango(totalAumento, aumento);
+    acumular(porCategoria, categoria, monto, rango, confianza, teorico, aumento);
+    if (proveedor) acumular(porProveedor, proveedor, monto, rango, confianza, teorico, aumento, { emite, alicuota: alicFija, pctAumento: pctAum });
   }
 
   // Segunda pasada: repartir el "esperado" de lo no clasificado usando la tasa
@@ -426,25 +494,35 @@ function estimarCreditoFiscal({ movimientos = [], padron = {}, calibracion = {},
   // tasa se estaba asumiendo, además, que todo lo sin relevar compra al 21%.
   const baseConocida = gastoClasificado - gastoSinIvaPorNaturaleza;
   const tasaA = baseConocida > 0 ? creditoRealizadoSobre(porProveedor, baseConocida) : null;
-  let esperadoExtra = 0;
+  const peso = tasaA !== null ? tasaA : 0.5;
+  let esperadoExtra = 0, aumentoExtra = 0;
   for (const grupo of [porCategoria, porProveedor]) {
     for (const e of Object.values(grupo)) {
       if (!e.sinClasificar) continue;
-      const extra = e.creditoEspSinClasificar * (tasaA !== null ? tasaA : 0.5);
+      const extra = e.creditoEspSinClasificar * peso;
+      const extraAum = e.aumentoMaxSinClasificar * peso;
       e.credito.esperado = round2(e.credito.esperado + extra);
-      if (grupo === porCategoria) esperadoExtra += extra;
+      e.aumento.esperado = round2(e.aumento.esperado + extraAum);
+      if (grupo === porCategoria) { esperadoExtra += extra; aumentoExtra += extraAum; }
     }
   }
   total.esperado += esperadoExtra;
+  totalAumento.esperado += aumentoExtra;
 
   const pctClasificado = gastoTotal > 0 ? (gastoClasificado / gastoTotal) * 100 : 100;
 
   return {
     total: redondearRango(total),
+    // Lo que los proveedores cobrarían de más por empezar a facturar. Es el
+    // contrapeso del crédito y hay que leerlos juntos: el neto de los dos es el
+    // ahorro real, y para el gasto sin relevar da cero.
+    aumentoProveedores: redondearRango(totalAumento),
     porCategoria: ordenarPorGasto(porCategoria),
     porProveedor: ordenarPorGasto(porProveedor),
     cobertura: {
       gastoTotal: round2(gastoTotal),
+      // El gasto que habría bajo RI: lo de hoy más lo que suben los proveedores.
+      gastoRI: round2(gastoTotal + totalAumento.esperado),
       gastoClasificado: round2(gastoClasificado),
       pctClasificado: round2(pctClasificado),
       gastoSinIvaPorNaturaleza: round2(gastoSinIvaPorNaturaleza),
@@ -455,11 +533,15 @@ function estimarCreditoFiscal({ movimientos = [], padron = {}, calibracion = {},
   };
 }
 
-function acumular(grupo, clave, monto, rango, confianza, teorico = vacioRango(), extra = {}) {
+function acumular(grupo, clave, monto, rango, confianza, teorico = vacioRango(), aumento = vacioRango(), extra = {}) {
   if (!grupo[clave]) {
     grupo[clave] = {
       nombre: clave, gasto: 0,
       credito: vacioRango(),
+      // Lo que el proveedor te cobraría de más por facturar. Va al lado del
+      // crédito porque sólo se leen juntos: un crédito de $100 conseguido
+      // pagando $100 de más no es un ahorro de $100, es un ahorro de cero.
+      aumento: vacioRango(),
       // El IVA que el grupo lleva adentro, se recupere o no. `credito` nunca lo
       // supera: la diferencia es la pérdida.
       ivaTeorico: vacioRango(),
@@ -475,17 +557,27 @@ function acumular(grupo, clave, monto, rango, confianza, teorico = vacioRango(),
       // que va de 10,5% a 21%, el esperado del crédito salía por encima del IVA
       // que la compra lleva adentro — más plata de vuelta de la que se pagó.
       creditoEspSinClasificar: 0,
+      // El aumento que aporta sólo la parte sin clasificar, para repartirlo en
+      // la segunda pasada con la MISMA tasa que el crédito: son el mismo evento
+      // (el proveedor empieza a facturar) y separarlos rompería la neutralidad.
+      aumentoMaxSinClasificar: 0,
       ...extra,
     };
   }
   const e = grupo[clave];
   e.gasto = round2(e.gasto + monto);
   e.credito = sumarRango(e.credito, rango);
+  e.aumento = sumarRango(e.aumento, aumento);
   e.ivaTeorico = sumarRango(e.ivaTeorico, teorico);
   if (confianza === 'sin-clasificar') {
     e.sinClasificar = round2(e.sinClasificar + monto);
     e.creditoMaxSinClasificar = round2(e.creditoMaxSinClasificar + rango.max);
-    e.creditoEspSinClasificar = round2(e.creditoEspSinClasificar + teorico.esperado);
+    // Con aumento activo el esperado del crédito ES el techo: si factura, cobra
+    // el aumento entero y ése es el crédito. Sin aumento, es el IVA contenido
+    // en el precio de hoy a la alícuota esperada.
+    e.creditoEspSinClasificar = round2(e.creditoEspSinClasificar +
+      (aumento.max > 0 ? aumento.max : teorico.esperado));
+    e.aumentoMaxSinClasificar = round2(e.aumentoMaxSinClasificar + aumento.max);
   } else {
     e.conDato = round2(e.conDato + monto);
   }
@@ -504,7 +596,12 @@ function creditoRealizadoSobre(porProveedor, baseConocida) {
 
 function ordenarPorGasto(grupo) {
   return Object.values(grupo)
-    .map(e => ({ ...e, credito: redondearRango(e.credito), ivaTeorico: redondearRango(e.ivaTeorico) }))
+    .map(e => ({
+      ...e,
+      credito: redondearRango(e.credito),
+      aumento: redondearRango(e.aumento),
+      ivaTeorico: redondearRango(e.ivaTeorico),
+    }))
     .sort((a, b) => b.gasto - a.gasto);
 }
 
@@ -564,9 +661,17 @@ function simularMes({ resumen, credito, escenarioPrecio = 0, parametros = {}, ba
   //   · Equipamiento: no es gasto del mes, se amortiza.
   // Y del resto hay que sacar el IVA que se recupera: si el crédito se computa,
   // el costo es el neto — deducirlo con IVA adentro sería contar dos veces.
+  // El gasto que hay que deducir es el de RI —el de hoy más lo que suben los
+  // proveedores al facturar—, no el de hoy. Deducir el precio viejo mientras se
+  // computa el crédito del precio nuevo es contar el aumento como si fuera
+  // gratis, y de ahí salía una utilidad más alta que la real.
   const porCat = {};
-  for (const c of (credito && credito.porCategoria) || []) porCat[c.nombre] = c.gasto;
-  const gastoTotal = (credito && credito.cobertura) ? credito.cobertura.gastoTotal : 0;
+  for (const c of (credito && credito.porCategoria) || []) {
+    porCat[c.nombre] = (Number(c.gasto) || 0) + ((c.aumento && c.aumento.esperado) || 0);
+  }
+  const gastoTotal = (credito && credito.cobertura)
+    ? (credito.cobertura.gastoRI != null ? credito.cobertura.gastoRI : credito.cobertura.gastoTotal)
+    : 0;
 
   const gastoPersonal = porCat['Personal'] || 0;
   const gastoEquip = (P.categoriasEquipamiento || [])
@@ -799,32 +904,46 @@ function impactoPorCategoria({ credito, parametros = {} } = {}) {
   return ((credito && credito.porCategoria) || []).map(c => {
     const gasto = Number(c.gasto) || 0;
     const rec = (c.credito && c.credito.esperado) || 0;
+    const aum = (c.aumento && c.aumento.esperado) || 0;
     const teorico = (c.ivaTeorico && c.ivaTeorico.esperado) || 0;
+    // Lo que se le paga al proveedor bajo RI: el precio de hoy más lo que sube
+    // por empezar a facturar. Todo lo que sigue se calcula sobre esto y no sobre
+    // el gasto de hoy — deducir un precio que ya no existe sería inventar.
+    const gastoRI = gasto + aum;
 
     let tratamiento, deducible, nota;
     if (sinCredito.has(c.nombre)) {
       tratamiento = 'sin-credito';
       // Personal es el único con parte no deducible; Fiscales se deduce entero.
-      deducible = c.nombre === 'Personal' ? gasto * pctBlanco : gasto;
+      deducible = c.nombre === 'Personal' ? gastoRI * pctBlanco : gastoRI;
       nota = c.nombre === 'Personal'
         ? 'Los sueldos no generan crédito de IVA, y sólo la parte por recibo se deduce en Ganancias.'
         : 'Un impuesto no genera crédito de otro impuesto.';
     } else if (equipamiento.has(c.nombre)) {
       tratamiento = 'amortiza';
-      deducible = (gasto - rec) / meses;
+      deducible = (gastoRI - rec) / meses;
       nota = 'El IVA vuelve entero este mes, pero el gasto se deduce en ' + P.amortizacionAnios + ' años.';
     } else {
       tratamiento = 'normal';
-      deducible = gasto - rec;
+      deducible = gastoRI - rec;
       nota = 'Genera crédito de IVA y se deduce neto en Ganancias.';
     }
 
     return {
       nombre: c.nombre,
       gasto: round2(gasto),
+      // Lo que suben los proveedores de esta categoría al empezar a facturar, y
+      // el precio que quedaría. Van al lado del crédito porque sólo se leen
+      // juntos: sin esto, el crédito parece ahorro y no lo es.
+      aumentoProveedores: round2(aum),
+      gastoRI: round2(gastoRI),
       // Lo que la categoría lleva de IVA adentro, y cuánto de eso vuelve.
       ivaPagado: round2(teorico),
       creditoRecuperado: round2(rec),
+      // El ahorro REAL de la categoría: lo que vuelve menos lo que te cobran de
+      // más por hacerlo volver. Para el gasto sin relevar da cero, y ése es todo
+      // el punto del supuesto.
+      ahorroNeto: round2(rec - aum),
       credito: c.credito,
       // Plata que sale por IVA y no vuelve. En `sin-credito` es cero por
       // definición y no por falta de dato — la tabla tiene que decir cuál es cuál.

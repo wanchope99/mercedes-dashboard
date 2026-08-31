@@ -12994,7 +12994,8 @@ function renderCategoriasFiscales(d, figura, iAum) {
 
   const n = d.meses.length;
   const acc = {};
-  const CAMPOS = ['gasto', 'ivaPagado', 'creditoRecuperado', 'ivaPerdido', 'sinRelevar', 'deducibleGanancias'];
+  const CAMPOS = ['gasto', 'aumentoProveedores', 'gastoRI', 'ivaPagado', 'creditoRecuperado',
+    'ahorroNeto', 'ivaPerdido', 'sinRelevar', 'deducibleGanancias'];
   for (const m of d.meses) {
     for (const c of (m.impactoCategorias || [])) {
       if (!acc[c.nombre]) {
@@ -13033,20 +13034,25 @@ function renderCategoriasFiscales(d, figura, iAum) {
   };
 
   const filas = cats.map(c => {
-    const ahorro = c.deducibleGanancias * tasa;
-    // El costo que la compra tiene DE VERDAD bajo RI: lo que se pagó, menos el
-    // IVA que vuelve, menos lo que se ahorra en Ganancias por deducirla.
-    const costoReal = c.gasto - c.creditoRecuperado - ahorro;
+    const ahorroGan = c.deducibleGanancias * tasa;
+    // El costo que la compra tiene DE VERDAD bajo RI: lo que se le paga al
+    // proveedor con el aumento incluido, menos el IVA que vuelve, menos lo que
+    // se ahorra en Ganancias por deducirla.
+    const costoReal = c.gastoRI - c.creditoRecuperado - ahorroGan;
     const et = ETIQUETA[c.tratamiento];
     return '<tr title="' + escapeHtml(c.nota || '') + '">' +
       '<td style="text-align:left">' + escapeHtml(c.nombre) +
         (et ? ' <span class="fisc-tag ' + et.cls + '">' + et.txt + '</span>' : '') + '</td>' +
       '<td>' + fmt(c.gasto) + '</td>' +
-      '<td>' + (c.ivaPagado > 0 ? fmt(c.ivaPagado) : '—') + '</td>' +
+      '<td style="color:' + (c.aumentoProveedores > 0 ? 'var(--red)' : 'var(--text-muted)') + '">' +
+        (c.aumentoProveedores > 0 ? '+' + fmt(c.aumentoProveedores) : '—') + '</td>' +
       '<td style="color:' + (c.creditoRecuperado > 0 ? 'var(--green)' : 'var(--text-muted)') + '">' +
         (c.creditoRecuperado > 0 ? '−' + fmt(c.creditoRecuperado) : '—') + '</td>' +
-      '<td style="color:' + (c.ivaPerdido > 0 ? 'var(--red)' : 'var(--text-muted)') + ';font-weight:' +
-        (c.ivaPerdido > 0 ? '600' : '400') + '">' + (c.ivaPerdido > 0 ? fmt(c.ivaPerdido) : '—') + '</td>' +
+      '<td style="font-weight:600;color:' +
+        (c.ahorroNeto > 1 ? 'var(--green)' : (c.ahorroNeto < -1 ? 'var(--red)' : 'var(--text-muted)')) + '">' +
+        (Math.abs(c.ahorroNeto) < 1 ? '—' : (c.ahorroNeto > 0 ? '−' : '+') + fmt(Math.abs(c.ahorroNeto))) + '</td>' +
+      '<td style="color:' + (c.ivaPerdido > 0 ? 'var(--red)' : 'var(--text-muted)') + '">' +
+        (c.ivaPerdido > 0 ? fmt(c.ivaPerdido) : '—') + '</td>' +
       '<td style="color:var(--text-muted)">' + (c.sinRelevar > 0 ? fmt(c.sinRelevar) : '—') + '</td>' +
       '<td>' + fmt(c.deducibleGanancias) + '</td>' +
       '<td style="font-weight:600">' + fmt(costoReal) + '</td></tr>';
@@ -13054,38 +13060,57 @@ function renderCategoriasFiscales(d, figura, iAum) {
 
   const tot = k => cats.reduce((s, c) => s + c[k], 0);
   const ahorroTot = tot('deducibleGanancias') * tasa;
+  const neto = tot('ahorroNeto');
   const filaTot = '<tr class="row-total"><td style="text-align:left">TOTAL</td>' +
-    '<td>' + fmt(tot('gasto')) + '</td><td>' + fmt(tot('ivaPagado')) + '</td>' +
+    '<td>' + fmt(tot('gasto')) + '</td>' +
+    '<td style="color:var(--red)">+' + fmt(tot('aumentoProveedores')) + '</td>' +
     '<td style="color:var(--green)">−' + fmt(tot('creditoRecuperado')) + '</td>' +
+    '<td style="color:' + (neto > 0 ? 'var(--green)' : 'var(--red)') + '">' +
+      (neto > 0 ? '−' : '+') + fmt(Math.abs(neto)) + '</td>' +
     '<td style="color:var(--red)">' + fmt(tot('ivaPerdido')) + '</td>' +
     '<td style="color:var(--text-muted)">' + fmt(tot('sinRelevar')) + '</td>' +
     '<td>' + fmt(tot('deducibleGanancias')) + '</td>' +
-    '<td>' + fmt(tot('gasto') - tot('creditoRecuperado') - ahorroTot) + '</td></tr>';
+    '<td>' + fmt(tot('gastoRI') - tot('creditoRecuperado') - ahorroTot) + '</td></tr>';
 
   tabla.innerHTML =
     '<thead><tr>' +
     thTip('Categoría', 'La columna J del libro. La etiqueta dice cómo trata el régimen a esa categoría: ' +
-      'recupera IVA, no genera crédito (sueldos e impuestos), o se amortiza en vez de deducirse entera.') +
-    thTip('Gasto/mes', 'Lo que se gastó, con impuestos adentro, promediado sobre los meses elegidos. ' +
+      'sin crédito (sueldos e impuestos) o amortizada en vez de deducirse entera. Sin etiqueta es el ' +
+      'tratamiento común.') +
+    thTip('Gasto/mes', 'Lo que se gastó HOY, con impuestos adentro, promediado sobre los meses elegidos. ' +
       'No incluye retiros, cambios entre cajas ni ajustes de arqueo: no son compras.') +
-    thTip('IVA adentro', 'El IVA que la compra ya lleva incluido. En sueldos e impuestos no hay ninguno ' +
-      '— no es que no se sepa, es que no existe.') +
-    thTip('Recuperás', 'El crédito fiscal que volvería como RI. Es el valor esperado del rango: depende de ' +
-      'qué proveedores emiten factura A, y por eso se angosta a medida que se releva el padrón.') +
-    thTip('Se pierde', 'IVA que pagás y no vuelve, porque el proveedor no factura A. Es la columna ' +
-      'accionable: se arregla negociando o cambiando de proveedor.') +
+    thTip('Sube el proveedor', 'Lo que te cobraría de más el proveedor que hoy no factura, cuando empiece ' +
+      'a hacerlo: no va a absorber el IVA, te lo va a agregar al precio. 21% en general, 10,5% para El ' +
+      'Ekeko y las verdulerías. El que YA te factura A no sube nada: su precio ya lo tiene adentro.') +
+    thTip('Recuperás', 'El crédito fiscal que volvería como RI. Es el valor esperado de un rango: depende ' +
+      'de qué proveedores emiten factura A, y se angosta a medida que se releva el padrón.') +
+    thTip('Ahorro real', 'Lo que recuperás MENOS lo que te cobran de más por recuperarlo. Es la única ' +
+      'columna que dice si el crédito es plata o es un espejismo: para el proveedor que empieza a ' +
+      'facturar da cero, porque el aumento y el crédito son el mismo número.') +
+    thTip('Se pierde', 'IVA que pagás y no vuelve, porque el proveedor no factura A. Se arregla ' +
+      'negociando o cambiando de proveedor.') +
     thTip('Sin relevar', 'Gasto de proveedores sobre los que todavía no se sabe si dan factura A. No es ' +
       'una pérdida: es la parte del número que se puede mejorar preguntando, y preguntar es gratis.') +
-    thTip('Deducible', 'Lo que se puede restar en Ganancias. Del sueldo, sólo la parte por recibo; del ' +
-      'equipamiento, la cuota de amortización del mes; del resto, el gasto neto de IVA.') +
-    thTip('Costo real', 'Lo que la compra te cuesta de verdad como RI: lo pagado, menos el IVA que ' +
-      'recuperás, menos lo que ahorrás en Ganancias por deducirla.') +
+    thTip('Deducible', 'Lo que se puede restar en Ganancias, sobre el precio CON el aumento. Del sueldo, ' +
+      'sólo la parte por recibo; del equipamiento, la cuota de amortización del mes; del resto, el gasto ' +
+      'neto de IVA.') +
+    thTip('Costo real', 'Lo que la compra te cuesta de verdad como RI: lo que le pagás al proveedor con ' +
+      'el aumento, menos el IVA que recuperás, menos lo que ahorrás en Ganancias por deducirla.') +
     '</tr></thead><tbody>' + filas + filaTot + '</tbody>';
 
   if (pie) {
     const perdido = tot('ivaPerdido');
     const enJuego = tot('sinRelevar');
+    const aum = tot('aumentoProveedores');
+    const cred = tot('creditoRecuperado');
     pie.innerHTML =
+      (aum > 0
+        ? '<strong>El crédito no es todo ganancia.</strong> De los ' + fmt(cred) + ' que volverían, ' +
+          fmt(aum) + ' se los lleva el aumento de los proveedores que hoy no facturan: cuando les pidas ' +
+          'factura no van a absorber el IVA, te lo van a agregar al precio (21%, o 10,5% para El Ekeko y ' +
+          'las verdulerías). El ahorro real es <strong>' + fmt(neto) + ' por mes</strong>, y sale casi ' +
+          'todo de los proveedores que YA te facturan. '
+        : '') +
       'El <strong>costo real</strong> usa una tasa marginal de Ganancias del <strong>' + pct(tasa * 100) +
       '</strong> (' + (figura === 'sociedad' ? 'SRL / SA' : 'persona humana') +
       ', sobre la utilidad de este escenario): es lo que se ahorra el próximo peso deducido, no la tasa promedio. ' +
@@ -13154,19 +13179,27 @@ function renderPylFiscal() {
   const debito = prom(m => e(m).iva.debito);
 
   // ── Costos por categoría ──────────────────────────────────────────────────
+  // El costo RI de una categoría es lo que le pagás al proveedor CON el aumento
+  // por empezar a facturar, menos el crédito que vuelve. Para el que hoy no
+  // factura los dos son el mismo número y la línea no se mueve — que es
+  // exactamente lo que el supuesto de aumento existe para mostrar.
   const acc = {};
   for (const m of d.meses) {
     for (const c of (m.impactoCategorias || [])) {
-      if (!acc[c.nombre]) acc[c.nombre] = { nombre: c.nombre, gasto: 0, credito: 0 };
+      if (!acc[c.nombre]) acc[c.nombre] = { nombre: c.nombre, gasto: 0, gastoRI: 0, credito: 0, aumento: 0 };
       acc[c.nombre].gasto += Number(c.gasto) || 0;
+      acc[c.nombre].gastoRI += Number(c.gastoRI) || 0;
       acc[c.nombre].credito += Number(c.creditoRecuperado) || 0;
+      acc[c.nombre].aumento += Number(c.aumentoProveedores) || 0;
     }
   }
   const cats = Object.values(acc)
-    .map(c => ({ nombre: c.nombre, hoy: c.gasto / n, ri: (c.gasto - c.credito) / n }))
+    .map(c => ({ nombre: c.nombre, hoy: c.gasto / n, ri: (c.gastoRI - c.credito) / n,
+                 aumento: c.aumento / n, credito: c.credito / n }))
     .sort((a, b) => b.hoy - a.hoy);
   const costoHoy = cats.reduce((s, c) => s + c.hoy, 0);
   const costoRI = cats.reduce((s, c) => s + c.ri, 0);
+  const aumentoTot = cats.reduce((s, c) => s + c.aumento, 0);
 
   // ── Impuestos ─────────────────────────────────────────────────────────────
   //
@@ -13182,7 +13215,7 @@ function renderPylFiscal() {
   // atar en vez de parecer que se contradicen.
   const cuota = prom(m => e(m).hoyMonotributo.cuota);
   const ivaPagar = prom(m => e(m).iva.aPagar.esperado);
-  const credito = costoHoy - costoRI;
+  const credito = cats.reduce((s, c) => s + c.credito, 0);
   const iibb = prom(m => e(m).iibb.sobreBaseDeclarada);
   const gan = prom(m => e(m).ganancias[figura].esperado);
   const impHoy = cuota;
@@ -13195,13 +13228,22 @@ function renderPylFiscal() {
 
   // ── La tabla ──────────────────────────────────────────────────────────────
   const money = v => (v < 0 ? '−' + fmt(-v) : fmt(v));
+  // El % sobre el ingreso, al lado de cada importe y chico — la misma lectura
+  // que la columna "% s/ing" del resumen mensual, que es donde ya se leen estos
+  // números. Cada columna se mide contra SU propio ingreso: comparar el costo RI
+  // contra la venta de hoy daría un porcentaje que no describe ningún mes.
+  const pctDe = (v, base) => (base > 0 ? pct(Math.abs(v / base) * 100) : '—');
+  const celda = (v, base) =>
+    '<td style="white-space:nowrap">' + money(v) +
+    ' <span class="val-accent" style="font-size:11px;font-weight:400">' + pctDe(v, base) + '</span></td>';
+
   const fila = (lbl, hoy, ri, cls, nota) => {
     const dif = ri - hoy;
     const col = Math.abs(dif) < 1 ? 'var(--text-muted)' : (dif > 0 ? 'var(--green)' : 'var(--red)');
     return '<tr class="' + (cls || '') + '">' +
       '<td>' + escapeHtml(lbl) + (nota ? ' <span style="color:var(--text-muted);font-size:11px">' + nota + '</span>' : '') + '</td>' +
-      '<td>' + money(hoy) + '</td>' +
-      '<td>' + money(ri) + '</td>' +
+      celda(hoy, ventaHoy) +
+      celda(ri, ventaRI) +
       '<td style="color:' + col + '">' + (Math.abs(dif) < 1 ? '—' : (dif > 0 ? '+' : '') + money(dif)) + '</td></tr>';
   };
   const seccion = txt => '<tr class="sec"><td colspan="4">' + txt + '</td></tr>';
@@ -13211,9 +13253,11 @@ function renderPylFiscal() {
     thTip('Concepto', 'Cada línea del mes, con el mismo criterio que el resto de la app: el gasto se ' +
       'agrupa por la columna J del libro y no incluye retiros, cambios entre cajas ni ajustes de arqueo.') +
     thTip('Hoy (monotributo)', 'Lo que efectivamente pasó: la plata que entró, la que salió con impuestos ' +
-      'adentro, y la cuota fija como único costo fiscal.') +
-    thTip('Como RI', 'El mismo mes bajo Responsable Inscripto: el IVA de las ventas deja de ser tuyo, el ' +
-      'de las compras vuelve como crédito, y aparecen IVA, IIBB y Ganancias en lugar de la cuota.') +
+      'adentro, y la cuota fija como único costo fiscal. El % chico al lado es sobre las ventas del mes, ' +
+      'igual que la columna "% s/ing" del resumen mensual.') +
+    thTip('Como RI', 'El mismo mes bajo Responsable Inscripto: el IVA de las ventas deja de ser tuyo, los ' +
+      'proveedores que hoy no facturan te suben el precio y ese IVA vuelve como crédito, y aparecen IVA, ' +
+      'IIBB y Ganancias en lugar de la cuota. El % chico es sobre las ventas de ESTA columna.') +
     thTip('Diferencia', 'Cuánto cambia cada línea. En verde lo que mejora el resultado, en rojo lo que lo ' +
       'empeora — no lo que sube o baja: un costo que baja es verde.') +
     '</tr></thead><tbody>' +
@@ -13222,8 +13266,9 @@ function renderPylFiscal() {
     fila('Ventas del mes', ventaHoy, ventaRI, 'tot',
       iAum > 0 ? '· la carta sube ' + iAum + '%' : '· la carta no se toca') +
 
-    seccion('Costos — en RI, ya netos del IVA que se recupera') +
-    cats.map(c => fila(c.nombre, -c.hoy, -c.ri, 'sub')).join('') +
+    seccion('Costos — en RI, con el aumento del proveedor y netos del IVA que vuelve') +
+    cats.map(c => fila(c.nombre, -c.hoy, -c.ri, 'sub',
+      c.aumento > 1 ? '· +' + fmt(c.aumento) + ' de aumento, −' + fmt(c.credito) + ' de crédito' : '')).join('') +
     fila('Total costos', -costoHoy, -costoRI, 'tot') +
 
     seccion('Resultado antes de impuestos') +
@@ -13260,6 +13305,13 @@ function renderPylFiscal() {
     '</strong>) baja el costo de cada categoría acá arriba, y el débito (<strong>' + fmt(debito) +
     '</strong>) va en la línea de impuestos. La resta de los dos es <strong>' + fmt(ivaPagar) +
     '</strong>, que es el IVA a pagar de la tarjeta de arriba: el mismo número, mostrado donde se siente.' +
+    (aumentoTot > 0
+      ? '<br><br>Los costos de la columna RI incluyen <strong>' + fmt(aumentoTot) + '</strong> de aumento ' +
+        'de los proveedores que hoy no facturan: cuando les pidas factura te van a agregar el IVA al ' +
+        'precio en vez de absorberlo (21%, y 10,5% El Ekeko y las verdulerías). Para esos proveedores el ' +
+        'crédito y el aumento son el mismo número, así que la línea no se mueve — el crédito existe pero ' +
+        'no es plata que ganás.'
+      : '') +
     (nom
       ? ' La línea de Ganancias deduce ' + fmt(nom.costoDeducibleARS) + ' de personal sobre ' +
         fmt(nom.costoTotalARS) + ' de costo laboral real: los ' + fmt(nom.sinRespaldoARS) +
