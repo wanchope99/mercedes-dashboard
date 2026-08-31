@@ -1361,6 +1361,20 @@
     .fisc-esc-card .val { font-size: 22px; font-weight: 700; margin-top: 6px; }
     .fisc-esc-card .sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.5; }
 
+    /* El bloque del slider dentro de la tarjeta del número grande, separado por
+       una línea: es un control, no una conclusión más. */
+    .fisc-carta { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+    .fisc-carta-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--text-muted); margin-bottom: 10px; }
+
+    /* Los meses del período. Multiselección, y el estado se ve sin abrir nada. */
+    .fisc-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .fisc-chip { padding: 7px 14px; border-radius: 999px; font-size: 13px; cursor: pointer;
+      background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); }
+    .fisc-chip.sel { background: var(--orange-dim); border-color: var(--orange); color: var(--orange); font-weight: 600; }
+    /* El mes en curso se ofrece igual, pero punteado: es elegible y no es lo mismo. */
+    .fisc-chip.encurso { border-style: dashed; }
+
     /* El slider del aumento de carta. El número va al lado y grande: el pulgar
        tapa el thumb justo cuando se está eligiendo. */
     .fisc-slider { display: flex; align-items: center; gap: 16px; }
@@ -2278,6 +2292,23 @@
       <div id="fisc-rango"><span class="num" style="color:var(--text-muted)">—</span></div>
       <div class="fisc-barra" id="fisc-barra"></div>
       <div class="fisc-nota" style="margin-top:10px" id="fisc-rango-pie"></div>
+
+      <!-- El slider vive ACÁ, pegado al número que mueve. Estaba dos tarjetas más
+           abajo, cambiando sólo sus propias tarjetas mientras el número grande se
+           quedaba fijo en el escenario de carta congelada: en el teléfono ni
+           siquiera se veían juntos, así que subir la carta parecía no hacer nada.
+           Los 21 escenarios (0% a 20%) vienen calculados de una en la misma
+           respuesta, así que arrastrarlo no pega al servidor. -->
+      <div class="fisc-carta">
+        <div class="fisc-carta-lbl">Si subís la carta…</div>
+        <div class="fisc-slider">
+          <input type="range" id="fisc-aumento" min="0" max="20" step="1" value="0"
+                 oninput="renderFiscal()" aria-label="Aumento de la carta en porcentaje">
+          <div class="fisc-slider-val" id="fisc-aumento-val">+0%</div>
+        </div>
+        <div class="fisc-slider-escala"><span>0%</span><span>10%</span><span>20%</span></div>
+      </div>
+
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-accent" onclick="abrirPadronFiscal()" id="fisc-btn-relevar">Relevar proveedores</button>
         <button class="btn" onclick="recalcFiscal()">Recalcular</button>
@@ -2290,12 +2321,17 @@
       <div class="card-title"><span>Supuestos</span>
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">confirmalos con tu contador — ninguno está fijo en el código</span>
       </div>
+      <!-- El período es multiselección y no un desplegable: julio y agosto son
+           dos meses distintos (agosto entró con la nómina completa) y la pregunta
+           real es cómo se ven los dos juntos. Como chips y no como un <select
+           multiple>, que en el teléfono se abre como una lista modal donde no se
+           ve qué está tildado. -->
+      <div class="form-group" style="margin-bottom:16px">
+        <label>Período — podés elegir más de un mes</label>
+        <div class="fisc-chips" id="fisc-meses-chips"></div>
+        <div class="fisc-nota" style="margin-top:8px" id="fisc-meses-nota"></div>
+      </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px">
-        <div class="form-group">
-          <label>Período</label>
-          <select id="fisc-mes" onchange="recalcFiscal()"
-                  title="Sólo meses cerrados: simular medio mes contra costos fijos de mes entero da un porcentaje que no significa nada."></select>
-        </div>
         <div class="form-group">
           <label>Figura</label>
           <select id="fisc-figura" onchange="renderFiscal()">
@@ -2316,28 +2352,34 @@
       <div class="fisc-nota" style="margin-top:12px" id="fisc-origen"></div>
     </div>
 
-    <!-- El aumento de la carta. Un slider y no tres tarjetas fijas: la pregunta
-         no es "cuál de estos tres escenarios", es "cuánto tengo que subir". Los
-         21 escenarios (0% a 20%) vienen calculados de una en la misma respuesta,
-         así que mover el slider no pega al servidor. -->
+    <!-- Quién paga el IVA con el aumento elegido arriba. -->
     <div class="card">
-      <div class="card-title"><span>Si subís la carta</span>
+      <div class="card-title"><span id="fisc-esc-tit">Con la carta congelada</span>
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">el IVA lo paga tu margen o lo paga el cliente</span>
       </div>
-      <div class="fisc-slider">
-        <input type="range" id="fisc-aumento" min="0" max="20" step="1" value="0"
-               oninput="renderFiscal()" aria-label="Aumento de la carta en porcentaje">
-        <div class="fisc-slider-val" id="fisc-aumento-val">+0%</div>
-      </div>
-      <div class="fisc-slider-escala"><span>0%</span><span>10%</span><span>20%</span></div>
-      <div class="fisc-esc" id="fisc-escenarios" style="margin-top:16px"></div>
+      <div class="fisc-esc" id="fisc-escenarios"></div>
       <div class="fisc-nota" style="margin-top:12px" id="fisc-aumento-pie"></div>
     </div>
 
     <!-- Mes a mes -->
     <div class="card">
-      <div class="card-title"><span>Mes a mes</span></div>
+      <div class="card-title"><span>Mes a mes</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
+              id="fisc-meses-sub"></span>
+      </div>
       <div class="table-wrap"><table id="fisc-meses"></table></div>
+    </div>
+
+    <!-- Qué le hace el régimen a cada categoría de compra. El total no dice
+         dónde duele: la mercadería, los sueldos y una heladera reciben tres
+         tratamientos distintos y viven todos dentro del mismo número. -->
+    <div class="card">
+      <div class="card-title"><span>Qué le hace a cada categoría de compra</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
+              id="fisc-cat-sub">no depende del aumento de carta: son compras ya hechas</span>
+      </div>
+      <div class="table-wrap"><table id="fisc-categorias"></table></div>
+      <div class="fisc-nota" style="margin-top:10px" id="fisc-cat-pie"></div>
     </div>
 
     <!-- Las tres bases de Ganancias -->
@@ -12367,10 +12409,18 @@ async function recalcCalc(sourceId) {
 // que se carga la angosta, y eso es lo que hace que valga la pena cargarlos.
 let _fiscData = null, _fiscCola = null, _fiscSiembra = null;
 
-// El mes con el que abre la pantalla. Es el último mes cerrado completo con el
-// bar operando a régimen, así que es el que mejor describe lo que viene; si
-// algún día deja de existir en la planilla se cae al último cerrado que haya.
-const FISCAL_MES_DEFAULT = 'Julio';
+// Los meses que ofrece el selector y cuáles están elegidos. Son varios a la vez:
+// julio fue el primer mes entero a régimen y agosto el primero con la nómina
+// completa, y la decisión se toma mirando los dos, no uno.
+let _fiscMesesDisp = [];      // [{ mes, enCurso }]
+let _fiscMesesSel = [];       // los tildados
+
+// Desde qué mes el gasto describe la operación y no la puesta en marcha. Mismo
+// corte que `FISCAL_PRIMER_MES` en el servidor, y por la misma razón: hasta junio
+// el gasto está dominado por fondo de comercio, habilitación, muebles y vajilla.
+// El corte es por POSICIÓN en la lista, no por número de mes — `Mes` es texto sin
+// año y comparar índices deja la lista vacía apenas empiece el año que viene.
+const FISCAL_PRIMER_MES = 'Julio';
 
 // Los aumentos de carta que ofrece el slider: 0% a 20%, de a un punto. Se piden
 // LOS 21 al servidor en la misma llamada y el slider sólo indexa la respuesta.
@@ -12399,31 +12449,80 @@ async function loadFiscal() {
     if (Number(data.parametros.ivaVentasPct) > 0) _fiscIvaVentas = Number(data.parametros.ivaVentasPct);
 
     // El selector de período se arma UNA vez: rearmarlo en cada recálculo
-    // perdería el mes que la persona eligió.
-    const sel = document.getElementById('fisc-mes');
-    if (sel && !sel.options.length) {
+    // perdería los meses que la persona eligió.
+    if (!_fiscMesesDisp.length) {
       const cerrados = data.mesesCerrados || data.mesesSugeridos || [];
-      sel.innerHTML =
-        '<option value="ultimos3">Últimos 3 meses cerrados</option>' +
-        cerrados.map(m => '<option value="' + escapeHtml(m) + '">' + escapeHtml(m) + '</option>').join('');
-      // Julio si está; si no, el último cerrado; si no hay ninguno, el promedio.
-      sel.value = cerrados.includes(FISCAL_MES_DEFAULT) ? FISCAL_MES_DEFAULT
-        : (cerrados.length ? cerrados[cerrados.length - 1] : 'ultimos3');
+      _fiscMesesDisp = cerrados.map(m => ({ mes: m, enCurso: false }));
+      // El mes en curso se ofrece igual, marcado. Esconderlo dejaba a agosto
+      // fuera de la pantalla el 31 de agosto, que es justo cuando ya no entra ni
+      // sale nada y el mes se puede mirar entero.
+      if (data.mesEnCurso) _fiscMesesDisp.push({ mes: data.mesEnCurso, enCurso: true });
+
+      // Arranca con todo lo que ya está a régimen (julio en adelante). El mes en
+      // curso entra solo si terminó: a mitad de mes son ingresos de medio mes
+      // contra costos fijos de mes entero, y ese porcentaje no significa nada.
+      const iCorte = _fiscMesesDisp.findIndex(o => o.mes === FISCAL_PRIMER_MES);
+      const desde = iCorte >= 0 ? _fiscMesesDisp.slice(iCorte) : _fiscMesesDisp;
+      _fiscMesesSel = desde
+        .filter(o => !o.enCurso || data.mesEnCursoCompleto === true)
+        .map(o => o.mes);
+      // Si el corte dejó todo afuera, el último disponible antes que ninguno.
+      if (!_fiscMesesSel.length && _fiscMesesDisp.length) {
+        _fiscMesesSel = [_fiscMesesDisp[_fiscMesesDisp.length - 1].mes];
+      }
+      renderChipsMeses();
     }
   } catch (e) { /* sin defaults se sigue con los del formulario */ }
   await recalcFiscal();
 }
 
+// Los chips del período. El orden es el de la planilla (cronológico), y el mes en
+// curso queda último y punteado.
+function renderChipsMeses() {
+  const cont = document.getElementById('fisc-meses-chips');
+  if (!cont) return;
+  // El mes viaja por `data-mes` y no dentro del onclick: el nombre sale de la
+  // planilla, y meterlo entre comillas dentro de un atributo entrecomillado es
+  // exactamente donde esto se rompe.
+  cont.innerHTML = _fiscMesesDisp.map(o =>
+    '<button type="button" class="fisc-chip' + (_fiscMesesSel.includes(o.mes) ? ' sel' : '') +
+    (o.enCurso ? ' encurso' : '') + '" data-mes="' + escapeHtml(o.mes) + '"' +
+    ' onclick="toggleMesFiscal(this.dataset.mes)"' +
+    ' aria-pressed="' + (_fiscMesesSel.includes(o.mes) ? 'true' : 'false') + '">' +
+    escapeHtml(o.mes) + (o.enCurso ? ' · en curso' : '') + '</button>').join('');
+
+  const nota = document.getElementById('fisc-meses-nota');
+  if (!nota) return;
+  const enCursoSel = _fiscMesesDisp.some(o => o.enCurso && _fiscMesesSel.includes(o.mes));
+  nota.innerHTML = !_fiscMesesSel.length
+    ? 'Elegí al menos un mes.'
+    : (_fiscMesesSel.length > 1
+        ? 'Con más de un mes, el número grande es el <strong>promedio mensual</strong> y la tabla de abajo muestra cada mes por separado. '
+        : '') +
+      (enCursoSel
+        ? 'Ojo: el mes en curso sólo tiene sentido si ya terminó. A mitad de mes son ingresos de medio mes contra costos fijos de mes entero.'
+        : '');
+}
+
+function toggleMesFiscal(mes) {
+  _fiscMesesSel = _fiscMesesSel.includes(mes)
+    ? _fiscMesesSel.filter(m => m !== mes)
+    : _fiscMesesDisp.filter(o => o.mes === mes || _fiscMesesSel.includes(o.mes)).map(o => o.mes);
+  renderChipsMeses();
+  // Sin meses no hay nada que pedirle al servidor, y mandar la lista vacía haría
+  // que tome los últimos tres cerrados por su cuenta — justo lo que nadie pidió.
+  if (_fiscMesesSel.length) recalcFiscal();
+}
+
 async function recalcFiscal() {
   const num = id => { const el = document.getElementById(id); const n = Number(el && el.value); return Number.isFinite(n) ? n : 0; };
   const sub = document.getElementById('fisc-subtitulo');
-  const mesSel = (document.getElementById('fisc-mes') || {}).value || '';
   try {
     const { data } = await api('/api/fiscal/simulacion', {
       method: 'POST',
       body: JSON.stringify({
         // Sin `meses` el servidor toma los últimos 3 cerrados por su cuenta.
-        meses: (mesSel && mesSel !== 'ultimos3') ? [mesSel] : undefined,
+        meses: _fiscMesesSel.length ? _fiscMesesSel : undefined,
         // Un escenario por cada punto de aumento de carta, 0% a 20%. El slider
         // después es puro índice en este array: no vuelve a pedir nada.
         escenarios: FISC_AUMENTOS.map(a => a / _fiscIvaVentas),
@@ -12437,8 +12536,8 @@ async function recalcFiscal() {
     if (sub) {
       const ms = data.origen.mesesSimulados;
       sub.textContent = !ms.length ? 'no hay meses cerrados para simular'
-        : ms.length === 1 ? 'sobre ' + ms[0] + ', ya cerrado'
-        : 'promedio de ' + ms.join(', ');
+        : ms.length === 1 ? 'sobre ' + ms[0]
+        : 'promedio mensual de ' + ms.join(' y ');
     }
     renderFiscal();
   } catch (e) {
@@ -12465,17 +12564,36 @@ function renderFiscal() {
   const ref = d.meses[d.meses.length - 1];
   const sufijoRef = n > 1 ? ' (' + ref.mes + ')' : '';
 
-  // ── El rango, sobre el escenario de carta congelada (el piso) ──────────────
-  const pMin = prom(m => escDe(m, 0).pctSobreIngresos[figura].min);
-  const pEsp = prom(m => escDe(m, 0).pctSobreIngresos[figura].esperado);
-  const pMax = prom(m => escDe(m, 0).pctSobreIngresos[figura].max);
-  const hoyPct = prom(m => escDe(m, 0).hoyMonotributo.pctSobreIngresos);
+  // ── El aumento de la carta, que manda sobre TODA la pantalla ───────────────
+  //
+  // El slider elige uno de los escenarios que ya vinieron calculados. El índice
+  // ES el aumento en puntos (escenario 7 = carta +7%), así que no hay que buscar
+  // nada; se acota igual al largo real de la respuesta por si el servidor
+  // devolviera otra cantidad.
+  //
+  // Se resuelve ACÁ ARRIBA porque el número grande, el mes a mes y las bases de
+  // Ganancias se calculan todos sobre él. Antes esos tres estaban clavados en el
+  // escenario 0 mientras el slider movía sólo sus propias tarjetas: subir la
+  // carta 10% dejaba el titular quieto, que es la pregunta que la pantalla
+  // existe para responder.
+  const slider = document.getElementById('fisc-aumento');
+  const iAum = Math.max(0, Math.min(ref.escenarios.length - 1, Math.round(Number(slider && slider.value) || 0)));
+  const aumento = iAum;
+  const lblAum = document.getElementById('fisc-aumento-val');
+  if (lblAum) lblAum.textContent = '+' + aumento + '%';
+
+  // ── El rango, sobre el aumento de carta elegido ────────────────────────────
+  const pMin = prom(m => escDe(m, iAum).pctSobreIngresos[figura].min);
+  const pEsp = prom(m => escDe(m, iAum).pctSobreIngresos[figura].esperado);
+  const pMax = prom(m => escDe(m, iAum).pctSobreIngresos[figura].max);
+  const hoyPct = prom(m => escDe(m, iAum).hoyMonotributo.pctSobreIngresos);
 
   document.getElementById('fisc-rango').innerHTML =
     '<span class="num" style="color:var(--orange)">' + pct(pMin) + '</span>' +
     '<span class="hasta">a</span>' +
     '<span class="num" style="color:var(--orange)">' + pct(pMax) + '</span>' +
-    '<span class="hasta">de lo que entra por caja · hoy pagás ' + pct(hoyPct) + '</span>';
+    '<span class="hasta">de lo que entra por caja · hoy pagás ' + pct(hoyPct) +
+    (aumento > 0 ? ' · con la carta +' + aumento + '%' : ' · con la carta congelada') + '</span>';
 
   // La barra dibuja el rango sobre una escala 0–25%, con una marca en el esperado.
   const esc = v => Math.max(0, Math.min(100, (v / 25) * 100));
@@ -12503,17 +12621,9 @@ function renderFiscal() {
     d.origen.renglonesDeCompras + ' renglones de Compras para calibrar',
   ].join(' · ');
 
-  // ── El aumento de la carta ────────────────────────────────────────────────
-  //
-  // El slider elige uno de los escenarios que ya vinieron calculados. El índice
-  // ES el aumento en puntos (escenario 7 = carta +7%), así que no hay que buscar
-  // nada; se acota igual al largo real de la respuesta por si el servidor
-  // devolviera otra cantidad.
-  const slider = document.getElementById('fisc-aumento');
-  const iAum = Math.max(0, Math.min(ref.escenarios.length - 1, Math.round(Number(slider && slider.value) || 0)));
-  const aumento = iAum;
-  const lblAum = document.getElementById('fisc-aumento-val');
-  if (lblAum) lblAum.textContent = '+' + aumento + '%';
+  // ── Quién paga el IVA con ese aumento ─────────────────────────────────────
+  const titEsc = document.getElementById('fisc-esc-tit');
+  if (titEsc) titEsc.textContent = aumento === 0 ? 'Con la carta congelada' : 'Con la carta +' + aumento + '%';
 
   const pAum = prom(m => escDe(m, iAum).pctSobreIngresos[figura].esperado);
   const totAum = prom(m => escDe(m, iAum).totalFiscal[figura].esperado);
@@ -12548,9 +12658,15 @@ function renderFiscal() {
         (faltan > 0 ? ', así que con +' + aumento + '% todavía absorbés ' + un(faltan) + ' puntos.' : '.');
   }
 
-  // ── Mes a mes, sobre el escenario de carta congelada ──────────────────────
+  // ── Mes a mes, sobre el mismo aumento que el número de arriba ─────────────
+  //
+  // Tiene que seguir al slider: con el titular en +10% y la tabla clavada en 0%
+  // la pantalla mostraría dos porcentajes distintos para la misma pregunta, y el
+  // que se cree es siempre el que está más cerca.
+  const subMeses = document.getElementById('fisc-meses-sub');
+  if (subMeses) subMeses.textContent = aumento === 0 ? 'con la carta congelada' : 'con la carta +' + aumento + '%';
   const filas = d.meses.map(m => {
-    const e = m.escenarios[0].declarado;
+    const e = m.escenarios[iAum].declarado;
     return '<tr><td>' + m.mes + '</td>' +
       '<td>' + fmt(e.ventas.cobradoHoy) + '</td>' +
       '<td>' + fmt(e.iva.debito) + '</td>' +
@@ -12566,8 +12682,10 @@ function renderFiscal() {
     '<th>IVA a pagar</th><th>IIBB</th><th>Ganancias</th><th>Total</th><th>% caja</th></tr></thead>' +
     '<tbody>' + filas + '</tbody>';
 
+  renderCategoriasFiscales(d, figura, iAum);
+
   // ── Las tres bases de Ganancias ───────────────────────────────────────────
-  const bases = ref.escenarios[0].declarado.ganancias.bases;
+  const bases = ref.escenarios[iAum].declarado.ganancias.bases;
   const orden = [['soloDeclarado', 'Sólo lo declarado'], ['proporcional', 'Proporcional'], ['todoDeclarado', 'Declarando todo']];
   // Cada encabezado explica qué es su columna. Son cuatro palabras que en un
   // impuesto significan algo muy distinto de lo que significan en la caja, y
@@ -12623,8 +12741,8 @@ function renderFiscal() {
     : '<tbody><tr><td style="color:var(--text-muted)">Nada que reclamar: todo el gasto está relevado.</td></tr></tbody>';
 
   // ── Advertencias ──────────────────────────────────────────────────────────
-  const advs = ref.escenarios[0].declarado.advertencias || [];
-  const decl = ref.escenarios[0].declarado.declaracion;
+  const advs = ref.escenarios[iAum].declarado.advertencias || [];
+  const decl = ref.escenarios[iAum].declarado.declaracion;
   const fijas = [
     { texto: 'Las alícuotas de IIBB y las escalas de Ganancias son un punto de partida para poder correr el modelo, no una afirmación sobre la ley vigente. Confirmalas con tu contador.', impactoARS: 0 },
     { texto: 'Las retenciones que Galicia ya te hace están contabilizadas enteras como comisión. Parte puede ser retención de IVA o IIBB, que es pago a cuenta y no costo. Eso sólo lo dice la liquidación de Galicia.', impactoARS: 0 },
@@ -12634,6 +12752,134 @@ function renderFiscal() {
   document.getElementById('fisc-advertencias').innerHTML =
     advs.concat(fijas).map(a => '<div class="fisc-adv">' + escapeHtml(a.texto) +
       (a.impactoARS ? ' <strong>' + fmt(a.impactoARS) + '/mes</strong>' : '') + '</div>').join('');
+}
+
+// ─── Qué le hace el régimen a cada categoría de compra ───────────────────────
+//
+// El total dice cuánto, no dónde. Pasar a RI no le hace lo mismo a la mercadería
+// que a los sueldos que a una heladera, y las tres viven dentro del mismo
+// número: la mercadería recupera IVA, el sueldo no tiene IVA que recuperar y la
+// heladera lo recupera entero pero se deduce en cinco años.
+//
+// Con varios meses elegidos se promedia: es una lista y no un número, así que no
+// alcanza con el `prom` de arriba — se suman las categorías mes a mes y se
+// divide por la cantidad de meses. Una categoría que aparece en julio y no en
+// agosto queda dividida por dos igual, que es lo correcto: el promedio mensual
+// de algo que se compró una sola vez en dos meses es la mitad.
+function renderCategoriasFiscales(d, figura, iAum) {
+  const tabla = document.getElementById('fisc-categorias');
+  const pie = document.getElementById('fisc-cat-pie');
+  if (!tabla) return;
+
+  const n = d.meses.length;
+  const acc = {};
+  const CAMPOS = ['gasto', 'ivaPagado', 'creditoRecuperado', 'ivaPerdido', 'sinRelevar', 'deducibleGanancias'];
+  for (const m of d.meses) {
+    for (const c of (m.impactoCategorias || [])) {
+      if (!acc[c.nombre]) {
+        acc[c.nombre] = { nombre: c.nombre, tratamiento: c.tratamiento, nota: c.nota };
+        for (const k of CAMPOS) acc[c.nombre][k] = 0;
+      }
+      for (const k of CAMPOS) acc[c.nombre][k] += Number(c[k]) || 0;
+    }
+  }
+  const cats = Object.values(acc)
+    .map(c => { for (const k of CAMPOS) c[k] = c[k] / n; return c; })
+    .sort((a, b) => b.gasto - a.gasto);
+
+  if (!cats.length) {
+    tabla.innerHTML = '<tbody><tr><td style="color:var(--text-muted)">No hay gasto para desglosar en estos meses.</td></tr></tbody>';
+    if (pie) pie.textContent = '';
+    return;
+  }
+
+  // Cuánto vale un peso deducido en este escenario. Es lo único de esta tabla que
+  // depende del aumento de carta —la carta mueve la utilidad y la utilidad puede
+  // cambiar de tramo— y por eso viaja por escenario y no por mes.
+  const tasa = d.meses.reduce((s, m) => {
+    const t = m.escenarios[iAum].declarado.tasaMarginalGanancias;
+    return s + ((t && Number(t[figura])) || 0);
+  }, 0) / n;
+
+  // Sólo se etiquetan las EXCEPCIONES. Una etiqueta en cada fila es ruido, y
+  // "recupera IVA" sobre Insumos —una categoría que sí genera crédito, pero cuyo
+  // proveedor no factura A— se lee como que se recuperó algo, con un cero en la
+  // columna de al lado. La fila sin etiqueta es el tratamiento común; lo que hay
+  // que marcar es dónde el régimen hace otra cosa.
+  const ETIQUETA = {
+    'sin-credito': { txt: 'sin crédito', cls: 'no' },
+    'amortiza':    { txt: 'amortiza', cls: 'dud' },
+  };
+
+  const thTip = (lbl, txt) =>
+    '<th class="th-tip">' + lbl + '<span class="th-i" tabindex="0" role="button" aria-label="' +
+    escapeHtml(txt) + '">?</span><span class="th-bub">' + escapeHtml(txt) + '</span></th>';
+
+  const filas = cats.map(c => {
+    const ahorro = c.deducibleGanancias * tasa;
+    // El costo que la compra tiene DE VERDAD bajo RI: lo que se pagó, menos el
+    // IVA que vuelve, menos lo que se ahorra en Ganancias por deducirla.
+    const costoReal = c.gasto - c.creditoRecuperado - ahorro;
+    const et = ETIQUETA[c.tratamiento];
+    return '<tr title="' + escapeHtml(c.nota || '') + '">' +
+      '<td style="text-align:left">' + escapeHtml(c.nombre) +
+        (et ? ' <span class="fisc-tag ' + et.cls + '">' + et.txt + '</span>' : '') + '</td>' +
+      '<td>' + fmt(c.gasto) + '</td>' +
+      '<td>' + (c.ivaPagado > 0 ? fmt(c.ivaPagado) : '—') + '</td>' +
+      '<td style="color:' + (c.creditoRecuperado > 0 ? 'var(--green)' : 'var(--text-muted)') + '">' +
+        (c.creditoRecuperado > 0 ? '−' + fmt(c.creditoRecuperado) : '—') + '</td>' +
+      '<td style="color:' + (c.ivaPerdido > 0 ? 'var(--red)' : 'var(--text-muted)') + ';font-weight:' +
+        (c.ivaPerdido > 0 ? '600' : '400') + '">' + (c.ivaPerdido > 0 ? fmt(c.ivaPerdido) : '—') + '</td>' +
+      '<td style="color:var(--text-muted)">' + (c.sinRelevar > 0 ? fmt(c.sinRelevar) : '—') + '</td>' +
+      '<td>' + fmt(c.deducibleGanancias) + '</td>' +
+      '<td style="font-weight:600">' + fmt(costoReal) + '</td></tr>';
+  }).join('');
+
+  const tot = k => cats.reduce((s, c) => s + c[k], 0);
+  const ahorroTot = tot('deducibleGanancias') * tasa;
+  const filaTot = '<tr class="row-total"><td style="text-align:left">TOTAL</td>' +
+    '<td>' + fmt(tot('gasto')) + '</td><td>' + fmt(tot('ivaPagado')) + '</td>' +
+    '<td style="color:var(--green)">−' + fmt(tot('creditoRecuperado')) + '</td>' +
+    '<td style="color:var(--red)">' + fmt(tot('ivaPerdido')) + '</td>' +
+    '<td style="color:var(--text-muted)">' + fmt(tot('sinRelevar')) + '</td>' +
+    '<td>' + fmt(tot('deducibleGanancias')) + '</td>' +
+    '<td>' + fmt(tot('gasto') - tot('creditoRecuperado') - ahorroTot) + '</td></tr>';
+
+  tabla.innerHTML =
+    '<thead><tr>' +
+    thTip('Categoría', 'La columna J del libro. La etiqueta dice cómo trata el régimen a esa categoría: ' +
+      'recupera IVA, no genera crédito (sueldos e impuestos), o se amortiza en vez de deducirse entera.') +
+    thTip('Gasto/mes', 'Lo que se gastó, con impuestos adentro, promediado sobre los meses elegidos. ' +
+      'No incluye retiros, cambios entre cajas ni ajustes de arqueo: no son compras.') +
+    thTip('IVA adentro', 'El IVA que la compra ya lleva incluido. En sueldos e impuestos no hay ninguno ' +
+      '— no es que no se sepa, es que no existe.') +
+    thTip('Recuperás', 'El crédito fiscal que volvería como RI. Es el valor esperado del rango: depende de ' +
+      'qué proveedores emiten factura A, y por eso se angosta a medida que se releva el padrón.') +
+    thTip('Se pierde', 'IVA que pagás y no vuelve, porque el proveedor no factura A. Es la columna ' +
+      'accionable: se arregla negociando o cambiando de proveedor.') +
+    thTip('Sin relevar', 'Gasto de proveedores sobre los que todavía no se sabe si dan factura A. No es ' +
+      'una pérdida: es la parte del número que se puede mejorar preguntando, y preguntar es gratis.') +
+    thTip('Deducible', 'Lo que se puede restar en Ganancias. Del sueldo, sólo la parte por recibo; del ' +
+      'equipamiento, la cuota de amortización del mes; del resto, el gasto neto de IVA.') +
+    thTip('Costo real', 'Lo que la compra te cuesta de verdad como RI: lo pagado, menos el IVA que ' +
+      'recuperás, menos lo que ahorrás en Ganancias por deducirla.') +
+    '</tr></thead><tbody>' + filas + filaTot + '</tbody>';
+
+  if (pie) {
+    const perdido = tot('ivaPerdido');
+    const enJuego = tot('sinRelevar');
+    pie.innerHTML =
+      'El <strong>costo real</strong> usa una tasa marginal de Ganancias del <strong>' + pct(tasa * 100) +
+      '</strong> (' + (figura === 'sociedad' ? 'SRL / SA' : 'persona humana') +
+      ', sobre la utilidad de este escenario): es lo que se ahorra el próximo peso deducido, no la tasa promedio. ' +
+      (perdido > 0
+        ? 'Se pierden <strong>' + fmt(perdido) + ' por mes</strong> de IVA que se paga y no vuelve. '
+        : '') +
+      (enJuego > 0
+        ? 'Y hay <strong>' + fmt(enJuego) + ' por mes</strong> de gasto sin relevar: hasta saber si esos ' +
+          'proveedores dan factura A, la fila no está cerrada.'
+        : '');
+  }
 }
 
 // ─── El padrón: cargar la condición fiscal de cada proveedor ─────────────────

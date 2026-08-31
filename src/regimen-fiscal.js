@@ -141,6 +141,19 @@ function aplicarEscala(base, tramos) {
   return tramo.fijo + (b - tramo.desde) * (tramo.pct / 100);
 }
 
+// Cuánto Ganancias se ahorra el PRÓXIMO peso deducible. Es la alícuota del tramo
+// donde cae la utilidad, no la efectiva: la pregunta que responde es "si deduzco
+// un peso más de esta categoría, cuánto menos pago", y ésa la contesta el tramo.
+// Con utilidad negativa o cero es 0 — no hay impuesto del que descontar.
+function tasaMarginal(base, tramos) {
+  const b = Number(base) || 0;
+  if (b <= 0) return 0;
+  const orden = [...(tramos || [])].sort((x, y) => x.desde - y.desde);
+  let tramo = orden[0];
+  for (const t of orden) if (b >= t.desde) tramo = t;
+  return tramo ? (Number(tramo.pct) || 0) / 100 : 0;
+}
+
 // Las únicas alícuotas de IVA que existen. Cualquier otra cosa que aparezca en
 // la planilla es ruido de formato o un error de carga, y se descarta en vez de
 // propagarse a un cálculo de plata.
@@ -342,8 +355,8 @@ function estimarCreditoFiscal({ movimientos = [], padron = {}, calibracion = {},
     if (sinCredito.has(categoria)) {
       gastoSinIvaPorNaturaleza += monto;
       gastoClasificado += monto;
-      acumular(porCategoria, categoria, monto, vacioRango(), 'naturaleza');
-      if (proveedor) acumular(porProveedor, proveedor, monto, vacioRango(), 'naturaleza');
+      acumular(porCategoria, categoria, monto, vacioRango(), 'naturaleza', vacioRango());
+      if (proveedor) acumular(porProveedor, proveedor, monto, vacioRango(), 'naturaleza', vacioRango());
       continue;
     }
 
@@ -363,6 +376,17 @@ function estimarCreditoFiscal({ movimientos = [], padron = {}, calibracion = {},
     const alicuotas = alicFija !== null
       ? { min: alicFija, esperado: alicFija, max: alicFija }
       : rangoCat;
+
+    // El IVA que la compra YA LLEVA ADENTRO, se recupere o no. Es lo que separa
+    // "no genera crédito por naturaleza" (un sueldo: no hay IVA que perder) de
+    // "lo pagaste y no te vuelve" (un proveedor que factura B). Sin este número
+    // la pérdida por categoría no se puede escribir: el crédito recuperado solo
+    // dice cuánto volvió, nunca cuánto había.
+    const teorico = {
+      min: ivaContenido(monto, alicuotas.min),
+      esperado: ivaContenido(monto, alicuotas.esperado),
+      max: ivaContenido(monto, alicuotas.max),
+    };
 
     let rango;
     let confianza;
@@ -388,21 +412,25 @@ function estimarCreditoFiscal({ movimientos = [], padron = {}, calibracion = {},
     }
 
     total = sumarRango(total, rango);
-    acumular(porCategoria, categoria, monto, rango, confianza);
-    if (proveedor) acumular(porProveedor, proveedor, monto, rango, confianza, { emite, alicuota: alicFija });
+    acumular(porCategoria, categoria, monto, rango, confianza, teorico);
+    if (proveedor) acumular(porProveedor, proveedor, monto, rango, confianza, teorico, { emite, alicuota: alicFija });
   }
 
   // Segunda pasada: repartir el "esperado" de lo no clasificado usando la tasa
   // observada en lo que sí se conoce. Si no se conoce nada todavía, se cae a la
   // mitad del rango, que es lo único honesto cuando no hay ninguna evidencia.
+  //
+  // Lo que se reparte es el crédito a la alícuota ESPERADA, no al techo. Son dos
+  // incertidumbres distintas —si el proveedor da factura A, y a qué alícuota
+  // compra— y la tasa sólo resuelve la primera. Multiplicando el techo por la
+  // tasa se estaba asumiendo, además, que todo lo sin relevar compra al 21%.
   const baseConocida = gastoClasificado - gastoSinIvaPorNaturaleza;
   const tasaA = baseConocida > 0 ? creditoRealizadoSobre(porProveedor, baseConocida) : null;
   let esperadoExtra = 0;
   for (const grupo of [porCategoria, porProveedor]) {
     for (const e of Object.values(grupo)) {
       if (!e.sinClasificar) continue;
-      const techo = e.creditoMaxSinClasificar;
-      const extra = techo * (tasaA !== null ? tasaA : 0.5);
+      const extra = e.creditoEspSinClasificar * (tasaA !== null ? tasaA : 0.5);
       e.credito.esperado = round2(e.credito.esperado + extra);
       if (grupo === porCategoria) esperadoExtra += extra;
     }
@@ -427,26 +455,37 @@ function estimarCreditoFiscal({ movimientos = [], padron = {}, calibracion = {},
   };
 }
 
-function acumular(grupo, clave, monto, rango, confianza, extra = {}) {
+function acumular(grupo, clave, monto, rango, confianza, teorico = vacioRango(), extra = {}) {
   if (!grupo[clave]) {
     grupo[clave] = {
       nombre: clave, gasto: 0,
       credito: vacioRango(),
+      // El IVA que el grupo lleva adentro, se recupere o no. `credito` nunca lo
+      // supera: la diferencia es la pérdida.
+      ivaTeorico: vacioRango(),
       sinClasificar: 0, conDato: 0,
       // El techo de crédito que aporta SÓLO la parte sin clasificar. Se lleva
       // aparte porque la segunda pasada reparte sobre eso y no sobre el máximo
       // del grupo entero: sumar el crédito ya confirmado de los proveedores
       // conocidos empujaba el esperado por encima del propio máximo.
       creditoMaxSinClasificar: 0,
+      // Y lo mismo a la alícuota ESPERADA, que es sobre lo que reparte la
+      // segunda pasada. Son dos preguntas distintas y usar el techo para las dos
+      // mezclaba "¿da factura A?" con "¿a qué alícuota compra?": en Mercaderia,
+      // que va de 10,5% a 21%, el esperado del crédito salía por encima del IVA
+      // que la compra lleva adentro — más plata de vuelta de la que se pagó.
+      creditoEspSinClasificar: 0,
       ...extra,
     };
   }
   const e = grupo[clave];
   e.gasto = round2(e.gasto + monto);
   e.credito = sumarRango(e.credito, rango);
+  e.ivaTeorico = sumarRango(e.ivaTeorico, teorico);
   if (confianza === 'sin-clasificar') {
     e.sinClasificar = round2(e.sinClasificar + monto);
     e.creditoMaxSinClasificar = round2(e.creditoMaxSinClasificar + rango.max);
+    e.creditoEspSinClasificar = round2(e.creditoEspSinClasificar + teorico.esperado);
   } else {
     e.conDato = round2(e.conDato + monto);
   }
@@ -465,7 +504,7 @@ function creditoRealizadoSobre(porProveedor, baseConocida) {
 
 function ordenarPorGasto(grupo) {
   return Object.values(grupo)
-    .map(e => ({ ...e, credito: redondearRango(e.credito) }))
+    .map(e => ({ ...e, credito: redondearRango(e.credito), ivaTeorico: redondearRango(e.ivaTeorico) }))
     .sort((a, b) => b.gasto - a.gasto);
 }
 
@@ -627,6 +666,16 @@ function simularMes({ resumen, credito, escenarioPrecio = 0, parametros = {}, ba
   const ph = porFigura(P.gananciasPersonaHumana);
   const soc = porFigura(P.gananciasSociedad);
 
+  // Cuánto vale en pesos un peso deducido, en este escenario. Es lo único del
+  // desglose por categoría que depende del aumento de carta (la carta mueve la
+  // utilidad y la utilidad puede cambiar de tramo), así que viaja por escenario
+  // en vez de repetir la tabla entera veintiún veces.
+  const utilidadKPI = basesDe(cred.esperado).proporcional.utilidad;
+  const tasaMarginalGanancias = {
+    personaHumana: tasaMarginal(utilidadKPI, P.gananciasPersonaHumana),
+    sociedad: tasaMarginal(utilidadKPI, P.gananciasSociedad),
+  };
+
   const ganancias = {
     personaHumana: ph.ganancias,
     sociedad: soc.ganancias,
@@ -685,6 +734,7 @@ function simularMes({ resumen, credito, escenarioPrecio = 0, parametros = {}, ba
       brechaAnualizadaARS: round2((ventaTotalHoy - cobrado) * 12),
     },
     advertencias,
+    tasaMarginalGanancias,
     totalFiscal: {
       personaHumana: redondearRango(totalFiscal.personaHumana),
       sociedad: redondearRango(totalFiscal.sociedad),
@@ -698,6 +748,76 @@ function simularMes({ resumen, credito, escenarioPrecio = 0, parametros = {}, ba
       pctSobreIngresos: round2(precioFinal > 0 ? (hoy / precioFinal) * 100 : 0),
     },
   };
+}
+
+// ─── Qué le hace el régimen a cada categoría de compra ────────────────────────
+//
+// El total no dice dónde duele. Pasar a RI no le hace lo mismo a la mercadería
+// que a los sueldos que a una heladera, y las tres cosas están en el mismo
+// número. Esta tabla las separa por la ÚNICA razón que las distingue: cómo se
+// trata cada peso.
+//
+//   · normal        → genera crédito de IVA y se deduce neto en Ganancias.
+//   · sin-credito   → Personal y Fiscales. No hay IVA que recuperar (no es que
+//                     no se sepa: los sueldos están fuera del objeto y un
+//                     impuesto no genera crédito de otro). Del sueldo, además,
+//                     sólo la parte por recibo se deduce.
+//   · amortiza      → equipamiento. El IVA se recupera entero en el mes, pero el
+//                     gasto se deduce en `amortizacionAnios`, así que en el mes
+//                     de la compra la deducción es una fracción chica.
+//
+// Todo lo que devuelve es INDEPENDIENTE del aumento de carta: son compras, y el
+// precio del menú no las toca. Lo único que depende del escenario es cuánto vale
+// en pesos un peso deducido, y eso viaja aparte como `tasaMarginalGanancias`.
+function impactoPorCategoria({ credito, parametros = {} } = {}) {
+  const P = { ...PARAMETROS, ...parametros };
+  const sinCredito = new Set(P.categoriasSinCredito || []);
+  const equipamiento = new Set(P.categoriasEquipamiento || []);
+  const pctBlanco = Math.max(0, Math.min(1, Number(P.pctPersonalDeducible)));
+  const meses = Math.max(1, Number(P.amortizacionAnios) || 5) * 12;
+
+  return ((credito && credito.porCategoria) || []).map(c => {
+    const gasto = Number(c.gasto) || 0;
+    const rec = (c.credito && c.credito.esperado) || 0;
+    const teorico = (c.ivaTeorico && c.ivaTeorico.esperado) || 0;
+
+    let tratamiento, deducible, nota;
+    if (sinCredito.has(c.nombre)) {
+      tratamiento = 'sin-credito';
+      // Personal es el único con parte no deducible; Fiscales se deduce entero.
+      deducible = c.nombre === 'Personal' ? gasto * pctBlanco : gasto;
+      nota = c.nombre === 'Personal'
+        ? 'Los sueldos no generan crédito de IVA, y sólo la parte por recibo se deduce en Ganancias.'
+        : 'Un impuesto no genera crédito de otro impuesto.';
+    } else if (equipamiento.has(c.nombre)) {
+      tratamiento = 'amortiza';
+      deducible = (gasto - rec) / meses;
+      nota = 'El IVA vuelve entero este mes, pero el gasto se deduce en ' + P.amortizacionAnios + ' años.';
+    } else {
+      tratamiento = 'normal';
+      deducible = gasto - rec;
+      nota = 'Genera crédito de IVA y se deduce neto en Ganancias.';
+    }
+
+    return {
+      nombre: c.nombre,
+      gasto: round2(gasto),
+      // Lo que la categoría lleva de IVA adentro, y cuánto de eso vuelve.
+      ivaPagado: round2(teorico),
+      creditoRecuperado: round2(rec),
+      credito: c.credito,
+      // Plata que sale por IVA y no vuelve. En `sin-credito` es cero por
+      // definición y no por falta de dato — la tabla tiene que decir cuál es cuál.
+      ivaPerdido: round2(Math.max(0, teorico - rec)),
+      // Cuánto de ese gasto todavía no tiene proveedor relevado: es la parte del
+      // número que se puede mejorar preguntando, y es gratis.
+      sinRelevar: round2(Number(c.sinClasificar) || 0),
+      enJuego: round2(((c.credito && c.credito.max) || 0) - ((c.credito && c.credito.min) || 0)),
+      deducibleGanancias: round2(Math.max(0, deducible)),
+      tratamiento,
+      nota,
+    };
+  }).sort((a, b) => b.gasto - a.gasto);
 }
 
 // ─── Dónde se está perdiendo crédito fiscal ───────────────────────────────────
@@ -758,6 +878,10 @@ function simular({ meses = [], movimientosPorMes = {}, padron = {}, calibracion 
     salida.push({
       mes: resumen.mes,
       credito,
+      // El desglose por categoría de compra. Va al nivel del MES y no del
+      // escenario porque describe lo que se compró, y el precio de la carta no
+      // cambia una factura ya pagada.
+      impactoCategorias: impactoPorCategoria({ credito, parametros: P }),
       escenarios: escenarios.map(t => ({
         traslado: t,
         declarado: simularMes({ resumen, credito, escenarioPrecio: t, parametros: P, baseVentas: 'galicia' }),
@@ -773,8 +897,8 @@ function simular({ meses = [], movimientosPorMes = {}, padron = {}, calibracion 
 module.exports = {
   PARAMETROS,
   // Cálculo
-  estimarCreditoFiscal, simularMes, simular, oportunidades,
+  estimarCreditoFiscal, simularMes, simular, oportunidades, impactoPorCategoria,
   calibrarDesdeCompras, esMovimientoDeCaja,
   // Helpers exportados para poder ejercitarlos sin montar el módulo entero
-  ivaContenido, netoDe, aplicarEscala, normNombre, normalizarAlicuota, ALICUOTAS_CONOCIDAS,
+  ivaContenido, netoDe, aplicarEscala, tasaMarginal, normNombre, normalizarAlicuota, ALICUOTAS_CONOCIDAS,
 };

@@ -4574,13 +4574,40 @@ app.get('/api/calculadora/defaults', authMiddleware, adminOnly, async (req, res)
 // El cálculo entero vive en `regimen-fiscal.js` y es puro; acá sólo se leen las
 // fuentes y se le pasan. Mismo patrón que /api/calculadora.
 
+// Hoy en Argentina, como {anio, mes, dia}. `new Date().getMonth()` es la hora
+// del proceso, y Railway corre en UTC: a las 21:00 del 31/08 en Buenos Aires,
+// UTC ya está en septiembre y agosto pasaría a contar como cerrado tres horas
+// antes de terminar. Toda esta pantalla decide qué mes está cerrado, así que el
+// desfasaje se ve directamente en el selector.
+function hoyAR() {
+  const p = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ_AR, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const v = t => Number(p.find(x => x.type === t).value);
+  return { anio: v('year'), mes: v('month'), dia: v('day') };
+}
+
+// El mes que todavía está corriendo, con el nombre que usa la columna `Mes`.
+function mesEnCursoAR() {
+  return MESES_NOMBRES[hoyAR().mes - 1];
+}
+
+// ¿Ya terminó? El último día del mes no queda nada por entrar ni por salir, así
+// que el mes describe la operación entera y simularlo significa algo. Es la
+// diferencia entre "Agosto al día 12" —medio mes de ingresos contra costos fijos
+// de mes entero, un porcentaje que no dice nada— y "Agosto, ya está".
+function mesEnCursoCompleto() {
+  const { anio, mes, dia } = hoyAR();
+  return dia === new Date(anio, mes, 0).getDate();
+}
+
 // Los últimos N meses CERRADOS. El mes en curso queda afuera: simular medio mes
 // contra costos fijos de mes entero da un costo fiscal que no significa nada.
 // La columna `Mes` es texto sin año (convención del repo), así que el orden sale
 // de cómo aparecen en la planilla, que es cronológico. `MESES_NOMBRES` ya está
 // declarada más arriba en este archivo.
 function ultimosMesesCerrados(resumenes, n = 3) {
-  const mesActual = MESES_NOMBRES[new Date().getMonth()];
+  const mesActual = mesEnCursoAR();
   return resumenes.filter(r => r.mes && r.mes !== mesActual).slice(-n);
 }
 
@@ -4670,6 +4697,7 @@ app.post('/api/fiscal/simulacion', authMiddleware, adminOnly, async (req, res) =
 app.get('/api/fiscal/defaults', authMiddleware, adminOnly, async (req, res) => {
   try {
     const [resumenes, pctBlanco] = await Promise.all([getResumenMensual({}), pctPersonalDeducible()]);
+    const enCurso = mesEnCursoAR();
     res.json({
       ok: true,
       data: {
@@ -4681,6 +4709,13 @@ app.get('/api/fiscal/defaults', authMiddleware, adminOnly, async (req, res) => {
         // significa nada, y ofrecerlo es invitar a leerlo mal.
         mesesCerrados: ultimosMesesCerrados(resumenes, 999).map(r => r.mes),
         mesesSugeridos: ultimosMesesCerrados(resumenes, 3).map(r => r.mes),
+        // El mes en curso se OFRECE, marcado como tal, en vez de esconderse. El
+        // último día del mes ya no entra ni sale nada y es un mes tan simulable
+        // como cualquier otro; el resto del mes se puede elegir igual, pero la
+        // pantalla dice que está a medio hacer. Esconderlo dejaba a agosto fuera
+        // el 31 de agosto sin manera de mirarlo.
+        mesEnCurso: resumenes.some(r => r.mes === enCurso) ? enCurso : null,
+        mesEnCursoCompleto: mesEnCursoCompleto(),
         condiciones: fiscalProv.CONDICIONES,
         comprobantes: fiscalProv.COMPROBANTES,
       },
