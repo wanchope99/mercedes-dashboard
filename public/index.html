@@ -1350,6 +1350,11 @@
     #fisc-rango { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
     #fisc-rango .num { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
     #fisc-rango .hasta { font-size: 15px; color: var(--text-muted); }
+    /* La plata va abajo del porcentaje y más chica: el porcentaje es lo que se
+       compara contra el monotributo de hoy, los pesos son lo que se siente. */
+    #fisc-rango-ars { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+    #fisc-rango-ars .ars { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
+    #fisc-rango-ars .lbl { font-size: 12px; color: var(--text-muted); }
     .fisc-barra { position: relative; height: 10px; background: var(--surface2); border: 1px solid var(--border);
       border-radius: 6px; margin-top: 12px; overflow: hidden; }
     .fisc-barra .tramo { position: absolute; top: 0; bottom: 0; background: var(--orange); opacity: 0.85; }
@@ -1405,6 +1410,23 @@
     th.th-tip:first-child .th-bub { right: auto; left: 8px; }
     th.th-tip:hover .th-bub, th.th-tip:focus-within .th-bub { display: block; }
     th.th-tip:focus-within .th-i, th.th-tip:hover .th-i { border-color: var(--orange); color: var(--orange); }
+
+    /* En el teléfono la burbuja se despega del encabezado y se pega abajo de la
+       pantalla. Colgada del `th` no se puede leer: son 250px anclados al borde
+       derecho de una celda angosta dentro de una tabla que scrollea, así que en
+       "Mes a mes" —nueve columnas— seis de las nueve burbujas quedaban cortadas
+       por el borde izquierdo. El `th` se ve y se toca, y lo que explica la
+       columna no se lee: lo peor de los dos mundos.
+       `position: fixed` escapa el overflow de .table-wrap porque no hay ningún
+       transform ni filter en la cadena de padres (verificado). El z-index queda
+       por debajo del overlay del padrón (320) a propósito: con un modal abierto
+       la tabla ni siquiera se puede enfocar. */
+    @media (max-width: 640px) {
+      th.th-tip .th-bub, th.th-tip:first-child .th-bub {
+        position: fixed; left: 12px; right: 12px; top: auto; bottom: 12px;
+        width: auto; z-index: 300; box-shadow: 0 -6px 30px rgba(0,0,0,0.6);
+      }
+    }
 
     /* La base inválida se muestra TACHADA en vez de esconderse: está justamente
        para que se vea por qué no sirve declarar sólo una parte de las ventas y
@@ -2290,6 +2312,10 @@
               id="fisc-subtitulo">recalculando meses ya cerrados…</span>
       </div>
       <div id="fisc-rango"><span class="num" style="color:var(--text-muted)">—</span></div>
+      <!-- El mismo rango en plata. Un porcentaje solo no se puede comparar contra
+           nada: "12%" no dice si son cien mil o dos millones por mes, y la
+           decisión se toma en pesos. -->
+      <div id="fisc-rango-ars"></div>
       <div class="fisc-barra" id="fisc-barra"></div>
       <div class="fisc-nota" style="margin-top:10px" id="fisc-rango-pie"></div>
 
@@ -12434,6 +12460,17 @@ const FISC_AUMENTOS = Array.from({ length: FISC_AUMENTO_MAX + 1 }, (_, i) => i);
 // El servidor lo confirma en `parametros.ivaVentasPct`; 21 es el arranque.
 let _fiscIvaVentas = 21;
 
+// Un encabezado de tabla que explica qué es su columna. Se abre con el mouse Y
+// con el foco, así que en el teléfono se toca el `?` y se lee — un `title` ahí
+// no existe. Está acá arriba y no dentro de cada render porque las tres tablas
+// de esta pantalla lo usan: "Débito", "Crédito" o "Utilidad" significan en un
+// impuesto algo muy distinto de lo que significan en la caja, y sin la burbuja
+// hay que saber de antemano qué se está mirando.
+function thTip(lbl, txt) {
+  return '<th class="th-tip">' + lbl + '<span class="th-i" tabindex="0" role="button" aria-label="' +
+    escapeHtml(txt) + '">?</span><span class="th-bub">' + escapeHtml(txt) + '</span></th>';
+}
+
 async function loadFiscal() {
   const sub = document.getElementById('fisc-subtitulo');
   if (sub) sub.textContent = 'recalculando…';
@@ -12595,6 +12632,22 @@ function renderFiscal() {
     '<span class="hasta">de lo que entra por caja · hoy pagás ' + pct(hoyPct) +
     (aumento > 0 ? ' · con la carta +' + aumento + '%' : ' · con la carta congelada') + '</span>';
 
+  // El mismo rango en plata. Un porcentaje no se compara contra nada solo: "12%"
+  // no dice si son cien mil o dos millones, y lo que se decide se decide en
+  // pesos. Sale de `totalFiscal`, que es el mismo número del que salió el
+  // porcentaje —no se reconstruye multiplicando, que daría distinto por el
+  // redondeo— y con varios meses elegidos es el promedio POR MES, igual que
+  // todo lo demás de esta tarjeta.
+  const aMin = prom(m => escDe(m, iAum).totalFiscal[figura].min);
+  const aMax = prom(m => escDe(m, iAum).totalFiscal[figura].max);
+  const hoyARS = prom(m => escDe(m, iAum).hoyMonotributo.cuota);
+  document.getElementById('fisc-rango-ars').innerHTML =
+    '<span class="ars" style="color:var(--orange)">' + fmt(aMin) + '</span>' +
+    '<span class="lbl">a</span>' +
+    '<span class="ars" style="color:var(--orange)">' + fmt(aMax) + '</span>' +
+    '<span class="lbl">por mes' + (n > 1 ? ' (promedio de ' + d.meses.map(m => m.mes).join(' y ') + ')' : '') +
+    ' · hoy pagás ' + fmt(hoyARS) + '</span>';
+
   // La barra dibuja el rango sobre una escala 0–25%, con una marca en el esperado.
   const esc = v => Math.max(0, Math.min(100, (v / 25) * 100));
   document.getElementById('fisc-barra').innerHTML =
@@ -12677,10 +12730,34 @@ function renderFiscal() {
       '<td style="font-weight:600">' + fmt(e.totalFiscal[figura].esperado) + '</td>' +
       '<td style="color:var(--orange);font-weight:600">' + pct(e.pctSobreIngresos[figura].esperado) + '</td></tr>';
   }).join('');
+  // Cada encabezado explica su columna. "Débito" y "Crédito" son las dos que más
+  // se leen al revés: no son plata que entra y sale, son el IVA de las ventas y
+  // el de las compras, y el que se paga es la resta.
   document.getElementById('fisc-meses').innerHTML =
-    '<thead><tr><th>Mes</th><th>Ventas Galicia</th><th>Débito</th><th>Crédito</th>' +
-    '<th>IVA a pagar</th><th>IIBB</th><th>Ganancias</th><th>Total</th><th>% caja</th></tr></thead>' +
-    '<tbody>' + filas + '</tbody>';
+    '<thead><tr>' +
+    thTip('Mes', 'El mes al que la operación PERTENECE (columna Mes del libro), no el día en que se ' +
+      'pagó. Una compra en cuotas es gasto del mes en que se compró, aunque se termine de pagar tres ' +
+      'meses después.') +
+    thTip('Ventas Galicia', 'Lo que liquida Galicia: tarjeta de crédito, débito y QR. Es la base que ' +
+      'elegiste declarar, no todo lo que vende el bar — la diferencia está al pie de la pantalla.') +
+    thTip('Débito', 'El IVA de tus VENTAS. No es plata tuya: la cobrás al cliente por cuenta de ARCA y ' +
+      'la tenés que entregar. Sube si subís la carta, porque el cliente paga más.') +
+    thTip('Crédito', 'El IVA de tus COMPRAS, que se resta del débito. Sólo se computa el que viene en ' +
+      'factura A: lo que te facturan B o C no se recupera. Es el valor esperado de un rango, porque ' +
+      'depende de proveedores que todavía no están relevados.') +
+    thTip('IVA a pagar', 'Débito menos crédito: lo que efectivamente se deposita. Si el crédito fuera ' +
+      'mayor no te devuelven la diferencia — queda como saldo técnico a favor y se arrastra al mes ' +
+      'siguiente.') +
+    thTip('IIBB', 'Ingresos Brutos de CABA sobre el ingreso neto declarado. Se paga por VENDER, haya ' +
+      'ganancia o no: es el impuesto que no perdona un mes malo.') +
+    thTip('Ganancias', 'El impuesto sobre la utilidad, con la escala de la figura elegida arriba ' +
+      '(persona humana o SRL). Usa la base proporcional: ingresos declarados contra gastos prorrateados ' +
+      'al mismo porcentaje.') +
+    thTip('Total', 'IVA + IIBB + Ganancias del mes. Es el número contra el que se compara la cuota de ' +
+      'monotributo que pagás hoy.') +
+    thTip('% caja', 'El total dividido por lo que el cliente paga. El denominador es la plata que pasa ' +
+      'por la caja y no el neto, porque ésa es la que se siente — aunque de esa plata el IVA no sea tuyo.') +
+    '</tr></thead><tbody>' + filas + '</tbody>';
 
   renderCategoriasFiscales(d, figura, iAum);
 
@@ -12690,10 +12767,6 @@ function renderFiscal() {
   // Cada encabezado explica qué es su columna. Son cuatro palabras que en un
   // impuesto significan algo muy distinto de lo que significan en la caja, y
   // esta tabla es justamente la que decide sobre qué se paga Ganancias.
-  const thTip = (lbl, txt) =>
-    '<th class="th-tip">' + lbl + '<span class="th-i" tabindex="0" role="button" aria-label="' +
-    escapeHtml(txt) + '">?</span><span class="th-bub">' + escapeHtml(txt) + '</span></th>';
-
   document.getElementById('fisc-bases').innerHTML =
     '<thead><tr>' +
     thTip('Base', 'Cómo se arma la declaración: qué ventas se declaran y contra qué gastos. ' +
@@ -12810,10 +12883,6 @@ function renderCategoriasFiscales(d, figura, iAum) {
     'sin-credito': { txt: 'sin crédito', cls: 'no' },
     'amortiza':    { txt: 'amortiza', cls: 'dud' },
   };
-
-  const thTip = (lbl, txt) =>
-    '<th class="th-tip">' + lbl + '<span class="th-i" tabindex="0" role="button" aria-label="' +
-    escapeHtml(txt) + '">?</span><span class="th-bub">' + escapeHtml(txt) + '</span></th>';
 
   const filas = cats.map(c => {
     const ahorro = c.deducibleGanancias * tasa;
