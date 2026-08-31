@@ -968,12 +968,19 @@
               gap: 14px; margin: 0 0 16px; }
     .nl-tot .k { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted); }
     .nl-tot .v { font-size: 21px; font-weight: 700; margin-top: 3px; }
+    .nl-tot .s { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
     .nl-persona { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px;
                   padding: 12px 14px; margin-bottom: 10px; }
     .nl-cab { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 11px; }
     .nl-nombre { font-size: 14px; font-weight: 600; }
     .nl-cab-nota { font-size: 11px; color: var(--text-muted); font-weight: 400; }
-    .nl-total { font-size: 18px; font-weight: 700; white-space: nowrap; }
+    /* El número grande es lo que la persona COBRA, no lo que suma su sueldo: es
+       el que se lee para pagar y el que se le muestra a ella. Cómo se arma —el
+       sueldo, el feriado, el aguinaldo, los consumos— va chico, en el pie. */
+    .nl-cab-der { text-align: right; white-space: nowrap; }
+    .nl-total { font-size: 25px; font-weight: 700; line-height: 1.1; letter-spacing: -.5px; }
+    .nl-total-lbl { display: block; font-size: 10px; font-weight: 400; text-transform: uppercase;
+                    letter-spacing: .5px; color: var(--text-muted); margin-top: 1px; }
     /* El mes incompleto se avisa ARRIBA de los campos y no en el pie: es lo que
        explica por qué el sueldo de esa persona no es el de la hoja Nómina, y
        leerlo después de haber leído el número llega tarde. */
@@ -1008,9 +1015,16 @@
     .nl-consumos-campos { display: none; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
                           gap: 10px; margin-top: 8px; }
     .nl-consumos.abierto .nl-consumos-campos { display: grid; }
-    .nl-pie { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 11px; padding-top: 9px;
+    /* Dos renglones y no uno: arriba cómo se arma lo que cobra (sueldo, feriado,
+       aguinaldo, consumos) y abajo cómo se le paga (transferencia y efectivo).
+       En una sola línea de ocho ítems las dos preguntas se mezclan, y este pie
+       es lo que se le muestra a la persona cuando pregunta de dónde sale. */
+    .nl-pie { margin-top: 11px; padding-top: 9px;
               border-top: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
+    .nl-pie-l { display: flex; gap: 14px; flex-wrap: wrap; align-items: baseline; }
+    .nl-pie-l + .nl-pie-l { margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--border); }
     .nl-pie b { color: var(--text); font-size: 13px; }
+    .nl-pie .nl-neto b { font-size: 14px; }
     .nl-dif { color: var(--orange); }
     .nl-guardar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 11px 13px;
                   border-radius: 9px; background: var(--orange-dim); border: 1px solid var(--orange);
@@ -16285,6 +16299,10 @@ function nomLiqCuenta(e) {
   return {
     sueldo, feriados, feriado, sac, transf, consumos, total,
     servicios, sugerido, difSueldo: sueldo - sugerido,
+    // `total` es lo que se ganó y `aCobrar` lo que se le paga: los consumos ya
+    // están descontados. Es el número grande de la tarjeta, y el único que
+    // cierra contra transferencia + efectivo.
+    aCobrar: total - consumos,
     efectivo: total - transf - consumos,
   };
 }
@@ -16398,7 +16416,10 @@ function nomLiqPersona(e, i) {
       <span class="nl-nombre">${escapeHtml(e.nombre)}
         ${!e.enPlanilla ? '<span class="nl-cab-nota">· todavía no está en la hoja del mes</span>' : ''}
       </span>
-      <span class="nl-total" id="nl-total-${i}"></span>
+      <span class="nl-cab-der">
+        <span class="nl-total" id="nl-total-${i}"></span>
+        <span class="nl-total-lbl" id="nl-total-lbl-${i}">a cobrar</span>
+      </span>
     </div>
     <div class="nl-aviso" id="nl-aviso-${i}"></div>
     <div class="nl-campos">
@@ -16526,8 +16547,16 @@ function nomLiqPonerFeriados(i, cantidad) {
 function nomLiqRepintar(i) {
   const e = nomLiq.data.porEmpleado[i];
   const c = nomLiqCuenta(e);
+  // Arriba, grande, lo que se le paga —ya con los consumos descontados— y no lo
+  // que suma su sueldo: es el número que se busca para pagar y el que se le
+  // muestra a la persona. Lo bruto y de dónde sale están abajo, en el pie.
   const tot = document.getElementById(`nl-total-${i}`);
-  if (tot) tot.textContent = fmt(c.total);
+  if (tot) tot.textContent = fmt(c.aCobrar);
+  const totLbl = document.getElementById(`nl-total-lbl-${i}`);
+  // Cuando toda la plata va por un solo canal, decirlo acá ahorra leer el pie.
+  if (totLbl) totLbl.textContent = !c.transf ? 'a cobrar, todo en efectivo'
+    : !c.efectivo ? 'a cobrar, todo por transferencia'
+    : 'a cobrar';
   // El mes incompleto. Dos cosas distintas: cuántos servicios trabajó (siempre,
   // porque explica el sueldo) y, sólo si no coinciden, que lo escrito no es lo
   // que sale de esos servicios. Lo segundo NO se corrige solo: en la hoja de
@@ -16577,23 +16606,41 @@ function nomLiqRepintar(i) {
   const cantidadDesconocida = e.feriados == null && (e.feriadoARS || 0) > 0;
   const ferSug = e.feriadosSugeridos;
   const difFer = ferSug != null && !cantidadDesconocida && (c.feriados || 0) !== ferSug;
-  pie.innerHTML = [
+  // Primer renglón: de dónde sale lo que cobra. Es la explicación que se le da a
+  // la persona, así que va en el orden en que se cuenta —sueldo, lo que se suma,
+  // el bruto, lo que se descuenta— y no en el orden en que están los campos.
+  const arma = [
+    `Sueldo: <b>${fmt(c.sueldo)}</b>`,
     c.feriado ? `${c.feriados} feriado${c.feriados === 1 ? '' : 's'}: <b>${fmt(c.feriado)}</b>` : '',
+    c.sac ? `Aguinaldo: <b>${fmt(c.sac)}</b>` : '',
+    // El bruto sólo cuando hay algo más que el sueldo: si no, repite el número
+    // de al lado con otro nombre.
+    c.feriado || c.sac ? `= Bruto: <b>${fmt(c.total)}</b>` : '',
+    c.consumos ? `− Consumos: <b>${fmt(c.consumos)}</b>` : '',
+    // El reclamo del feriado va DESPUÉS de la cuenta y no en el medio: es una
+    // frase larga, y metida entre dos importes parte en dos la suma que este
+    // renglón existe para mostrar.
     difFer
       ? `<span class="nl-dif">Tiene <b>${c.feriados || 0}</b> feriado${(c.feriados || 0) === 1 ? '' : 's'} y el calendario dice `
         + `<b>${ferSug}</b>${ferSug === 0 ? ' (ninguno cayó en día de servicio)' : ''}. `
         + `Si ese día se abrió igual, dejalo así. `
         + `<button class="nota-btn nl-usar" onclick="nomLiqPonerFeriados(${i},${ferSug})">Poner ${ferSug}</button></span>`
       : '',
-    c.sac ? `Aguinaldo: <b>${fmt(c.sac)}</b>` : '',
+  ].filter(Boolean).join(' · ');
+
+  // Segundo renglón: cómo se le paga ese número. Los dos suman lo de arriba
+  // —por eso los consumos se descuentan antes— y siempre se muestran los dos,
+  // aunque uno sea cero: un canal ausente se lee como un dato que falta.
+  const paga = [
     `Transferencia: <b>${fmt(c.transf)}</b>`,
-    c.consumos ? `Consumos: <b>−${fmt(c.consumos)}</b>` : '',
-    `Efectivo: <b>${fmt(c.efectivo)}</b>`,
+    `<span class="nl-neto">Efectivo: <b>${fmt(c.efectivo)}</b></span>`,
     // Lo que la hoja dice y esta cuenta no. En las filas viejas son los consumos
     // que estaban tipeados adentro de la fórmula del efectivo.
     Math.abs(e.difEfectivoARS) > 0.5 && !nomLiq.cambios.has(e.nombre)
       ? `<span class="nl-dif">La hoja tiene ${fmt(Math.abs(e.difEfectivoARS))} ${e.difEfectivoARS > 0 ? 'menos' : 'más'} de efectivo que esta cuenta. Guardá para emparejarlo.</span>` : '',
   ].filter(Boolean).join(' · ');
+
+  pie.innerHTML = `<div class="nl-pie-l">${arma}</div><div class="nl-pie-l">${paga}</div>`;
 }
 
 function nomLiqRepintarTotales() {
@@ -16601,12 +16648,19 @@ function nomLiqRepintarTotales() {
   if (!el) return;
   const cuentas = nomLiq.data.porEmpleado.map(nomLiqCuenta);
   const suma = k => cuentas.reduce((s, c) => s + (c[k] || 0), 0);
+  const consumos = suma('consumos');
+  // El total de arriba es el mismo número que el grande de cada tarjeta: lo que
+  // se paga. Así los tres importes cierran entre sí —a cobrar = transferencia +
+  // efectivo—, que no pasaba mientras el primero era el bruto. El bruto no se
+  // pierde: va abajo, chico, junto a lo que se descontó.
   el.innerHTML = [
-    ['Personas', nomLiq.data.porEmpleado.length],
-    ['A pagar', fmt(suma('total'))],
-    ['Por transferencia', fmt(suma('transf'))],
-    ['En efectivo', fmt(suma('efectivo'))],
-  ].map(([k, v]) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+    ['Personas', nomLiq.data.porEmpleado.length, ''],
+    ['A cobrar', fmt(suma('aCobrar')),
+      consumos ? `${fmt(suma('total'))} menos ${fmt(consumos)} de consumos` : ''],
+    ['Por transferencia', fmt(suma('transf')), ''],
+    ['En efectivo', fmt(suma('efectivo')), ''],
+  ].map(([k, v, s]) => `<div><div class="k">${k}</div><div class="v">${v}</div>`
+    + (s ? `<div class="s">${s}</div>` : '') + '</div>').join('');
 }
 
 function nomLiqRepintarTodo() {
