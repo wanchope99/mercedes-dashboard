@@ -1460,9 +1460,28 @@
     #fiscal-pyl-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65);
       z-index: 320; align-items: center; justify-content: center; padding: 20px; }
     #fiscal-pyl-overlay.open { display: flex; }
+    /* 1060 y no 900: con cuatro columnas, tres de ellas con importe MÁS su
+       porcentaje al lado, a 900 la tabla entraba justo —835 de ancho visible
+       contra 835 que necesita— y cualquier ventana más angosta la mandaba a
+       scrollear de costado. Con el navegador en media pantalla (820px) faltaban
+       55px y había que arrastrar la tabla para leer la última columna. */
     #fiscal-pyl-overlay .modal { background: var(--surface); border: 1px solid var(--border);
-      border-radius: 16px; padding: 0 24px 24px; width: 900px; max-width: 96vw; max-height: 90vh; overflow-y: auto; }
+      border-radius: 16px; padding: 0 24px 24px; width: 1060px; max-width: 96vw; max-height: 90vh; overflow-y: auto; }
     #fiscal-pyl-overlay .modal-title { font-size: 17px; font-weight: 600; }
+    /* Y que la tabla pueda apretarse sola: las celdas de plata llevan el importe
+       y el % al lado, y cuando no entran en una línea el % baja abajo en vez de
+       forzar el scroll horizontal. Ancho de sobra → queda al lado; poco ancho →
+       se apila. Es la diferencia entre una tabla que se adapta y una que exige
+       una ventana de cierto tamaño. */
+    #fisc-pyl td { padding-left: 10px; padding-right: 10px; }
+    #fisc-pyl .pyl-pct { font-size: 11px; font-weight: 400; white-space: nowrap; }
+    /* Con el navegador en media pantalla la tabla tiene un piso propio y los
+       24px de padding a cada lado son justo lo que sobra. Se achican ahí y sólo
+       ahí: en una ventana normal el aire es parte de que se lea. */
+    @media (max-width: 1100px) {
+      #fiscal-pyl-overlay { padding: 10px; }
+      #fiscal-pyl-overlay .modal { padding: 0 12px 18px; max-width: 99vw; }
+    }
     /* Las filas del estado de resultados. La jerarquía la da el peso y una línea
        arriba, no la sangría: en el teléfono la tabla scrollea y una sangría se
        pierde apenas se corre un pixel. */
@@ -2437,6 +2456,28 @@
       <div class="fisc-nota" style="margin-top:12px" id="fisc-aumento-pie"></div>
     </div>
 
+    <!-- Descuento por pagar en efectivo. Va acá, pegado a "si subís la carta",
+         porque son la misma pregunta mirada desde los dos lados: qué hacés con
+         el precio para que el régimen no se coma el margen. Estaba abajo de
+         todo, después de las tablas de detalle, y ahí no lo veía nadie. -->
+    <div class="card">
+      <div class="card-title"><span>¿Cuánto podés descontar por pagar en efectivo?</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
+              id="fisc-desc-sub">sobre mesas reales del mes</span>
+      </div>
+      <div id="fisc-desc-kpi" class="fisc-kpi" style="margin-bottom:14px"></div>
+      <div class="table-wrap"><table id="fisc-descuento"></table></div>
+      <div class="fisc-nota" style="margin-top:12px" id="fisc-desc-pie"></div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div class="form-group" style="margin:0">
+          <label>Descuentos a comparar (%)</label>
+          <input type="text" id="fisc-desc-pcts" value="10, 15" onchange="cargarDescuentoEfectivo()"
+                 style="width:150px" title="Separados por coma. Se calcula cuánto te queda con cada uno.">
+        </div>
+        <button class="btn" onclick="cargarDescuentoEfectivo()">Recalcular</button>
+      </div>
+    </div>
+
     <!-- Mes a mes -->
     <div class="card">
       <div class="card-title"><span>Mes a mes</span>
@@ -2465,27 +2506,6 @@
       </div>
       <div class="table-wrap"><table id="fisc-bases"></table></div>
       <div class="fisc-nota" style="margin-top:10px" id="fisc-bases-pie"></div>
-    </div>
-
-    <!-- Descuento por pagar en efectivo. Va después del desglose por categoría
-         porque se apoya en él: la tasa marginal de Ganancias y el CMV son los
-         que deciden cuánto se puede resignar. -->
-    <div class="card">
-      <div class="card-title"><span>¿Cuánto podés descontar por pagar en efectivo?</span>
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
-              id="fisc-desc-sub">sobre mesas reales del mes</span>
-      </div>
-      <div id="fisc-desc-kpi" class="fisc-kpi" style="margin-bottom:14px"></div>
-      <div class="table-wrap"><table id="fisc-descuento"></table></div>
-      <div class="fisc-nota" style="margin-top:12px" id="fisc-desc-pie"></div>
-      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-        <div class="form-group" style="margin:0">
-          <label>Descuentos a comparar (%)</label>
-          <input type="text" id="fisc-desc-pcts" value="10, 15" onchange="cargarDescuentoEfectivo()"
-                 style="width:150px" title="Separados por coma. Se calcula cuánto te queda con cada uno.">
-        </div>
-        <button class="btn" onclick="cargarDescuentoEfectivo()">Recalcular</button>
-      </div>
     </div>
 
     <!-- Dónde se pierde crédito -->
@@ -13420,9 +13440,11 @@ function renderPylFiscal() {
   // números. Cada columna se mide contra SU propio ingreso: comparar el costo RI
   // contra la venta de hoy daría un porcentaje que no describe ningún mes.
   const pctDe = (v, base) => (base > 0 ? pct(Math.abs(v / base) * 100) : '—');
+  // Sin `nowrap` en la celda: el importe y el % quedan al lado mientras haya
+  // ancho, y cuando no lo hay el % baja solo en vez de empujar la tabla al
+  // scroll horizontal. El `nowrap` va sólo dentro del % para que no se parta él.
   const celda = (v, base) =>
-    '<td style="white-space:nowrap">' + money(v) +
-    ' <span class="val-accent" style="font-size:11px;font-weight:400">' + pctDe(v, base) + '</span></td>';
+    '<td>' + money(v) + ' <span class="val-accent pyl-pct">' + pctDe(v, base) + '</span></td>';
 
   const fila = (lbl, hoy, ri, cls, nota) => {
     const dif = ri - hoy;
@@ -13439,9 +13461,12 @@ function renderPylFiscal() {
     '<thead><tr>' +
     thTip('Concepto', 'Cada línea del mes, con el mismo criterio que el resto de la app: el gasto se ' +
       'agrupa por la columna J del libro y no incluye retiros, cambios entre cajas ni ajustes de arqueo.') +
-    thTip('Hoy (monotributo)', 'Lo que efectivamente pasó: la plata que entró, la que salió con impuestos ' +
-      'adentro, y la cuota fija como único costo fiscal. El % chico al lado es sobre las ventas del mes, ' +
-      'igual que la columna "% s/ing" del resumen mensual.') +
+    // Encabezados cortos: el `?` ya explica cada columna, y "Hoy (monotributo)"
+    // pedía 171px de ancho mínimo él solo — con cuatro columnas eso era la
+    // diferencia entre entrar y tener que scrollear de costado.
+    thTip('Hoy', 'Lo que efectivamente pasó, bajo monotributo: la plata que entró, la que salió con ' +
+      'impuestos adentro, y la cuota fija como único costo fiscal. El % chico al lado es sobre las ventas ' +
+      'del mes, igual que la columna "% s/ing" del resumen mensual.') +
     thTip('Como RI', 'El mismo mes bajo Responsable Inscripto: el IVA de las ventas deja de ser tuyo, los ' +
       'proveedores que hoy no facturan te suben el precio y ese IVA vuelve como crédito, y aparecen IVA, ' +
       'IIBB y Ganancias en lugar de la cuota. El % chico es sobre las ventas de ESTA columna.') +
