@@ -4630,30 +4630,73 @@ function mesesDesdeRegimen(resumenes) {
   return i >= 0 ? resumenes.slice(i) : (resumenes || []);
 }
 
-// Qué porción del sueldo va por recibo. Sólo esa parte se puede deducir en
-// Ganancias; lo que se paga por fuera es costo real y no es gasto deducible.
-async function pctPersonalDeducible() {
+// ─── Qué parte del costo del personal se puede deducir en Ganancias ───────────
+//
+// Sólo lo que tiene respaldo. Y respaldo NO es "el neto que va por recibo": es
+// todo lo que ARCA ve por esa persona — el bruto del recibo MÁS las cargas
+// patronales, que son plata que se paga contra un formulario y se deduce entera.
+//
+// La cuenta vieja era `Σ en blanco neto / Σ sueldo actual` y estaba subvaluada
+// por construcción: aplicaba una proporción medida sobre NETOS a un costo que
+// incluye las cargas, así que escalaba hacia abajo justamente la parte mejor
+// documentada del gasto. Con alguien de $1.000.000 de neto y $400.000 en blanco
+// daba 40% cuando lo deducible es el 52,7% del costo.
+//
+// Ahora se arma por persona con `costoDeEmpleado`, que es la misma función con
+// la que se calcula el costo laboral en todo el resto de la app:
+//
+//   deducible = costoLaboralARS          (bruto por recibo + cargas)
+//   total     = costoLaboralMasNoRemARS  (lo anterior + lo que se paga por fuera)
+//
+// Las provisiones (vacaciones y aguinaldo) se calculan sobre esa misma base, así
+// que la proporción vale igual con o sin ellas y no hace falta prorratearlas
+// aparte. Un socio da cero: su retiro no es un gasto deducible.
+//
+// Devuelve también el detalle, porque un número fiscal sin origen es un número
+// que nadie audita: la pantalla dice cuántas personas lo componen y cuánto es la
+// parte sin respaldo en pesos.
+async function personalDeducibleDesdeNomina() {
   try {
     const emp = await nomina.getEmpleados();
     const lista = (emp && emp.empleados) || emp || [];
-    let total = 0, blanco = 0;
+    const mesId = nomina.mesIdDe(new Date());
+    let deducible = 0, total = 0, conRecibo = 0, socios = 0;
     for (const e of lista) {
-      total += Number(e.sueldoActualARS) || 0;
-      blanco += Number(e.enBlancoNetoARS) || 0;
+      if (!e || !e.completo) continue;
+      const c = nomina.costoDeEmpleado(e, { mesId });
+      deducible += Number(c.costoLaboralARS) || 0;
+      total += Number(c.costoLaboralMasNoRemARS) || 0;
+      // El socio se lee de la FILA y no del costo. `costoDeEmpleado` devuelve
+      // `esSocio: true` para dos casos distintos —el socio y quien todavía cobra
+      // todo en efectivo—, porque para el costo dan lo mismo (los dos pagan cero
+      // a ARCA). Acá no dan lo mismo: contar a un empleado sin recibo como socio
+      // diría que hay tres dueños.
+      if (e.esSocio) socios++;
+      else if ((Number(c.netoRemunerativoARS) || 0) > 0) conRecibo++;
     }
-    return total > 0 ? blanco / total : null;
+    if (!(total > 0)) return null;
+    return {
+      pct: deducible / total,
+      dotacion: lista.filter(e => e && e.completo).length,
+      conRecibo,
+      socios,
+      costoDeducibleARS: Math.round(deducible),
+      costoTotalARS: Math.round(total),
+      sinRespaldoARS: Math.round(total - deducible),
+      incompletos: lista.filter(e => e && !e.completo).map(e => e.nombre),
+    };
   } catch (e) { return null; }   // sin nómina, el módulo usa su default
 }
 
 app.post('/api/fiscal/simulacion', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { meses: mesesPedidos, escenarios, parametros = {}, cantidadMeses = 3 } = req.body || {};
-    const [movimientos, resumenes, compras, padron, pctBlanco] = await Promise.all([
+    const [movimientos, resumenes, compras, padron, nom] = await Promise.all([
       getMovimientos(),
       getResumenMensual({}),
       prov.getCompras().catch(() => []),   // Compras es analítica: si falla, se sigue sin calibrar
       fiscalProv.leerPadron().catch(() => ({})),
-      pctPersonalDeducible(),
+      personalDeducibleDesdeNomina(),
     ]);
 
     const elegidos = mesesPedidos && mesesPedidos.length
@@ -4664,8 +4707,8 @@ app.post('/api/fiscal/simulacion', authMiddleware, adminOnly, async (req, res) =
     for (const r of elegidos) movimientosPorMes[r.mes] = movimientos.filter(m => m.mes === r.mes);
 
     const params = { ...parametros };
-    if (pctBlanco !== null && parametros.pctPersonalDeducible === undefined) {
-      params.pctPersonalDeducible = pctBlanco;
+    if (nom && parametros.pctPersonalDeducible === undefined) {
+      params.pctPersonalDeducible = nom.pct;
     }
 
     const data = regimenFiscal.simular({
@@ -4680,10 +4723,15 @@ app.post('/api/fiscal/simulacion', authMiddleware, adminOnly, async (req, res) =
     // De dónde salió cada supuesto que el usuario no eligió. Un número fiscal sin
     // origen declarado es un número que nadie audita.
     data.origen = {
-      pctPersonalDeducible: pctBlanco !== null ? 'nomina' : 'default',
+      pctPersonalDeducible: nom ? 'nomina' : 'default',
       proveedoresEnPadron: Object.keys(padron).length,
       renglonesDeCompras: compras.length,
       mesesSimulados: elegidos.map(r => r.mes),
+      // La nómina entera, para que la pantalla pueda decir sobre cuántas
+      // personas se apoya el número de Ganancias y cuánta plata queda sin
+      // respaldo. Sin esto, "sueldo deducible: sale de la nómina" es una
+      // afirmación que no se puede verificar desde la pantalla.
+      nomina: nom,
     };
     res.json({ ok: true, data });
   } catch (err) {
@@ -4696,13 +4744,14 @@ app.post('/api/fiscal/simulacion', authMiddleware, adminOnly, async (req, res) =
 // las alícuotas y las escalas las valida el contador, no este código.
 app.get('/api/fiscal/defaults', authMiddleware, adminOnly, async (req, res) => {
   try {
-    const [resumenes, pctBlanco] = await Promise.all([getResumenMensual({}), pctPersonalDeducible()]);
+    const [resumenes, nom] = await Promise.all([getResumenMensual({}), personalDeducibleDesdeNomina()]);
     const enCurso = mesEnCursoAR();
     res.json({
       ok: true,
       data: {
         parametros: regimenFiscal.PARAMETROS,
-        pctPersonalDeducible: pctBlanco,
+        pctPersonalDeducible: nom ? nom.pct : null,
+        nomina: nom,
         mesesDisponibles: resumenes.map(r => r.mes),
         // Sólo los CERRADOS: es lo que puede elegir el selector. Simular medio
         // mes contra costos fijos de mes entero da un porcentaje que no

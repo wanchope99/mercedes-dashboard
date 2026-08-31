@@ -735,6 +735,26 @@ function simularMes({ resumen, credito, escenarioPrecio = 0, parametros = {}, ba
     },
     advertencias,
     tasaMarginalGanancias,
+    // ─── Cada impuesto por separado, en plata y en % de la caja ───────────────
+    //
+    // El total contesta "cuánto", no "de qué". Son tres impuestos con tres
+    // palancas distintas: el IVA se baja consiguiendo factura A, IIBB no se baja
+    // con nada porque grava la venta, y Ganancias se baja deduciendo — y ahí
+    // manda la nómina, porque lo que se paga fuera de recibo no se puede
+    // deducir. Verlos juntos y en una sola escala es lo que deja decidir dónde
+    // apretar.
+    //
+    // El denominador es el mismo para los tres (`precioFinal`, la plata que pasa
+    // por la caja), así que los porcentajes suman el del total y se pueden leer
+    // uno contra otro.
+    porImpuesto: {
+      iva:  { ars: redondearRango(iva), pct: redondearRango(pctRango(iva)) },
+      iibb: { ars: round2(iibb), pct: round2(pctDe(iibb)) },
+      ganancias: {
+        personaHumana: { ars: redondearRango(ph.ganancias), pct: redondearRango(pctRango(ph.ganancias)) },
+        sociedad:      { ars: redondearRango(soc.ganancias), pct: redondearRango(pctRango(soc.ganancias)) },
+      },
+    },
     totalFiscal: {
       personaHumana: redondearRango(totalFiscal.personaHumana),
       sociedad: redondearRango(totalFiscal.sociedad),
