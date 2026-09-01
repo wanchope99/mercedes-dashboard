@@ -1371,11 +1371,13 @@
     #fisc-simple td .det { color: var(--text-muted); font-size: 11px; }
     #fisc-simple tr.res td { border-top: 1px solid var(--border); font-weight: 600; }
     #fisc-simple tr.tot td { font-weight: 700; font-size: 15px; border-top: 2px solid var(--border); color: var(--orange); }
-    /* El único dato que se tipea, marcado como la celda con borde de la
+    /* Los datos que se tipean, marcados como las celdas con borde de la
        planilla: todo lo demás sale del libro. */
     #fisc-simple input { width: 140px; text-align: right; background: var(--surface2);
       border: 1px solid var(--orange); border-radius: 8px; color: var(--text);
       padding: 6px 9px; font-size: 13px; font-family: inherit; }
+    /* El % facturado es un numerito de dos dígitos, no un importe. */
+    #fisc-simple input.pctin { width: 64px; }
 
     /* Los meses del período. Multiselección, y el estado se ve sin abrir nada. */
     .fisc-chips { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -2324,14 +2326,16 @@
 
     <!-- Descuento por pagar en efectivo: el porcentaje de equilibrio y UN
          ejemplo. Es un porcentaje de la venta, así que da prácticamente igual
-         en cualquier mesa — repetirlo cinco veces era la tabla que se sacó. -->
+         en cualquier mesa — de la tabla vieja de cinco percentiles queda el
+         formato (una columna por concepto) con una sola fila, la mesa típica. -->
     <div class="card">
       <div class="card-title"><span>¿Cuánto podés descontar por pagar en efectivo?</span>
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
               id="fisc-desc-sub">sobre mesas reales del mes</span>
       </div>
       <div id="fisc-desc-kpi" class="fisc-kpi" style="margin-bottom:14px"></div>
-      <div class="fisc-nota" id="fisc-desc-pie"></div>
+      <div class="table-wrap"><table id="fisc-descuento"></table></div>
+      <div class="fisc-nota" style="margin-top:12px" id="fisc-desc-pie"></div>
     </div>
   </main>
 </div>
@@ -12371,6 +12375,12 @@ let _fiscReduccion = { 1: 50, 2: 30, 3: 10 };
 let _fiscComprasValor = null;
 let _fiscComprasEstimado = 0;
 
+// El % de ventas facturadas también se puede pisar (la fila "En blanco"):
+// empujar ventas a efectivo con descuento es exactamente bajar este número, y
+// la pregunta "¿y si facturo menos?" se contesta tipeándolo. `null` = el dato
+// real del libro (lo que entra por Galicia sobre el total del mes).
+let _fiscPctBlancoValor = null;
+
 // La escala de Ganancias por tramos: fijo del tramo + % sobre el excedente.
 // Copia de `aplicarEscala` de regimen-fiscal.js; los tramos viajan del servidor
 // en `parametros`, así que el contador los corrige en un solo lugar.
@@ -12516,13 +12526,27 @@ async function recalcFiscal() {
   }
 }
 
-// El único dato tipeable de la tabla. `onchange` y no `oninput`: la tabla se
+// Los datos tipeables de la tabla. `onchange` y no `oninput`: la tabla se
 // redibuja entera al recalcular, y hacerlo por tecla perdería el foco a mitad
 // de un número (misma regla que los consumos de Nómina). Vacío significa
-// "volvé a seguir al padrón".
+// "volvé al dato del sistema".
+//
+// Las compras se leen con `parseMonto` —el lector único de importes— porque el
+// campo muestra el número con puntos de miles ("10.000.000") para que se vea
+// de un vistazo cuántos dígitos tiene; Number() leería eso como 10 con
+// decimales.
 function fiscComprasCambiada(v) {
-  const n = Number(v);
-  _fiscComprasValor = (String(v).trim() === '' || !Number.isFinite(n)) ? null : Math.max(0, n);
+  const s = String(v).trim();
+  _fiscComprasValor = s === '' ? null : Math.max(0, parseMonto(s));
+  renderFiscal();
+}
+
+// El % facturado. Number() y no parseMonto: es un porcentaje de dos dígitos,
+// no un importe con separadores — sólo se tolera la coma decimal.
+function fiscPctBlancoCambiado(v) {
+  const n = Number(String(v).trim().replace(',', '.'));
+  _fiscPctBlancoValor = (String(v).trim() === '' || !Number.isFinite(n))
+    ? null : Math.max(0, Math.min(100, n));
   renderFiscal();
 }
 
@@ -12540,8 +12564,13 @@ function renderFiscal() {
 
   // ── Los datos reales del período ──────────────────────────────────────────
   const ingresos = prom(m => e0(m).declaracion.ventaTotalHoy);
-  const facturado = prom(m => e0(m).ventas.cobradoHoy);
-  const pctBlanco = ingresos > 0 ? (facturado / ingresos) * 100 : 0;
+  const facturadoReal = prom(m => e0(m).ventas.cobradoHoy);
+  const pctBlancoReal = ingresos > 0 ? (facturadoReal / ingresos) * 100 : 0;
+  // El % facturado arranca en el dato real (lo que entra por Galicia) y se pisa
+  // desde la propia fila: empujar ventas a efectivo con descuento es bajar este
+  // número, y acá se ve qué le hace al costo fiscal.
+  const pctBlanco = _fiscPctBlancoValor !== null ? _fiscPctBlancoValor : pctBlancoReal;
+  const facturado = ingresos * (pctBlanco / 100);
 
   // ── La planilla, fila por fila ────────────────────────────────────────────
   // El IVA se AGREGA sobre el precio de hoy (débito = facturado × 21%): el
@@ -12606,10 +12635,14 @@ function renderFiscal() {
   document.getElementById('fisc-simple').innerHTML =
     '<thead><tr><th style="text-align:left">Concepto</th><th>Por mes</th><th>%</th></tr></thead><tbody>' +
     fila('Ingresos <span class="det">todo lo que entra</span>', fmt(ingresos), '') +
-    fila('En blanco (facturados) <span class="det">lo que liquida Galicia</span>', fmt(facturado), pct(pctBlanco)) +
+    fila('En blanco (facturados) <span class="det">% de la venta que se factura — editable</span>', fmt(facturado),
+      '<input type="number" class="pctin" id="fisc-pct-blanco" min="0" max="100" step="1" value="' +
+      Math.round(pctBlanco * 10) / 10 +
+      '" onchange="fiscPctBlancoCambiado(this.value)" aria-label="Porcentaje de ventas facturadas"> %') +
     fila('IVA débito <span class="det">' + un(iva) + '% sobre lo facturado</span>', fmt(debito), un(iva) + '%') +
     fila('Compras con factura A <span class="det">neto de IVA — editable</span>',
-      '<input type="number" id="fisc-compras-a" min="0" step="1000" value="' + Math.round(comprasA) +
+      '<input type="text" inputmode="numeric" id="fisc-compras-a" value="' +
+      Math.round(comprasA).toLocaleString('es-AR') +
       '" onchange="fiscComprasCambiada(this.value)" aria-label="Compras con factura A por mes">', '') +
     fila('IVA crédito <span class="det">' + un(iva) + '% sobre esas compras</span>',
       '<span style="color:var(--green)">−' + fmt(credito) + '</span>', un(iva) + '%') +
@@ -12630,6 +12663,9 @@ function renderFiscal() {
   if (!nom) {
     partes.push('<strong>Ojo:</strong> sin nómina cargada no se deduce nada de personal, así que Ganancias está SOBREVALUADO.');
   }
+  partes.push('<strong>El % facturado</strong> arranca en el dato real del período (' + pct(pctBlancoReal) +
+    ' de la venta entra por Galicia). Tipeá otro para simular empujar ventas a efectivo con descuento' +
+    (_fiscPctBlancoValor !== null ? ' — ahora manda el ' + pct(_fiscPctBlancoValor) + ' que tipeaste; borralo para volver al real' : '') + '.');
   partes.push('<strong>Compras con factura A</strong> viene precargado con <strong>' + fmt(_fiscComprasEstimado) +
     '/mes</strong>: las compras netas a los proveedores que el padrón dice que emiten A. Relevar más proveedores lo sube solo' +
     (_fiscComprasValor !== null ? ' — ahora manda el valor que tipeaste; borralo para volver al padrón' : '') + '.');
@@ -12686,6 +12722,8 @@ async function cargarDescuentoEfectivo() {
   kpi.innerHTML = '<div class="fisc-nota">Calculando sobre las mesas del mes…</div>';
   const pie = document.getElementById('fisc-desc-pie');
   if (pie) pie.innerHTML = '';
+  const tablaCarga = document.getElementById('fisc-descuento');
+  if (tablaCarga) tablaCarga.innerHTML = '';
   try {
     const { data } = await api('/api/fiscal/descuento-efectivo', {
       method: 'POST',
@@ -12749,17 +12787,38 @@ function renderDescuentoEfectivo() {
         ? fmt(o.ventaGaliciaARS) + '/mes por Galicia. Eso es lo que está en juego si movés parte a efectivo.'
         : 'sin dato de la proporción electrónica del mes.');
 
+  // El ejemplo, en el formato de tabla de siempre —una columna por concepto—
+  // pero con UNA fila: la mesa típica habla por todas porque cada costo es
+  // proporcional a la venta (pedido de Gonzalo, 01/09/2026).
   const ej = tipica.descuentos && tipica.descuentos[0];
+  const tabla = document.getElementById('fisc-descuento');
+  if (tabla && ej) {
+    const e = tipica.electronico;
+    tabla.innerHTML =
+      '<thead><tr>' +
+      '<th style="text-align:left">Mesa</th><th>Venta</th><th>Comisión</th><th>IVA</th><th>IIBB</th>' +
+      '<th>Ganancias</th><th>Te queda</th><th>Con −' + ej.pct + '%</th><th>Equilibrio</th>' +
+      '</tr></thead><tbody><tr>' +
+      '<td style="text-align:left">' + escapeHtml(tipica.etiqueta || 'Mesa típica') + '</td>' +
+      '<td style="font-weight:600">' + fmt(tipica.ventaARS) + '</td>' +
+      '<td style="color:var(--text-muted)">−' + fmt(e.comision) + '</td>' +
+      '<td style="color:var(--text-muted)">−' + fmt(e.ivaDebito) + '</td>' +
+      '<td style="color:var(--text-muted)">−' + fmt(e.iibb) + '</td>' +
+      '<td style="color:var(--text-muted)">−' + fmt(e.ganancias) + '</td>' +
+      '<td style="font-weight:600;color:var(--orange);white-space:nowrap">' + fmt(e.queda) +
+        ' <span style="font-size:11px;font-weight:400">' + pct(e.pctQueda) + '</span></td>' +
+      '<td style="white-space:nowrap">' + fmt(ej.cobras) +
+        ' <span style="font-size:11px;font-weight:600;color:' + (ej.conviene ? 'var(--green)' : 'var(--red)') + '">' +
+        (ej.ganasVsElectronico >= 0 ? '+' : '−') + fmt(Math.abs(ej.ganasVsElectronico)) + '</span></td>' +
+      '<td style="font-weight:600;color:var(--green)">' + pct(tipica.pctEquilibrio) + '</td>' +
+      '</tr></tbody>';
+  }
+
   const pieEl = document.getElementById('fisc-desc-pie');
   if (!pieEl || !ej) return;
   pieEl.innerHTML =
-    '<strong>Un ejemplo</strong> — la mesa típica del mes, de ' + fmt(tipica.ventaARS) +
-    ': cobrada por Galicia te quedan <strong>' + fmt(tipica.electronico.queda) + '</strong> (se van ' +
-    fmt(tipica.electronico.comision) + ' de comisión, ' + fmt(tipica.electronico.ivaDebito) + ' de IVA, ' +
-    fmt(tipica.electronico.iibb) + ' de IIBB y ' + fmt(tipica.electronico.ganancias) + ' de Ganancias). Con <strong>' +
-    ej.pct + '% de descuento en efectivo</strong> cobrás ' + fmt(ej.cobras) + ' y te quedás con <strong>' +
-    fmt(Math.abs(ej.ganasVsElectronico)) + (ej.ganasVsElectronico >= 0 ? ' más' : ' menos') + '</strong> que por Galicia.' +
-    '<br><br>' +
+    'La fila es la <strong>mesa típica</strong> del mes (la mediana de las mesas reales de Fudo); como cada ' +
+    'costo es un porcentaje de la venta, la cuenta vale igual para cualquier mesa. ' +
     'Supuestos: comisión de posnet <strong>' + pct(s.comisionPct) + '</strong> (' + escapeHtml(o.comisionDe || '') +
     '), IVA <strong>' + pct(s.ivaVentasPct) + '</strong>' +
     (Number(s.reduccionIvaPct) > 0 ? ' con la reducción del ' + pct(s.reduccionIvaPct) + ' ya aplicada' : '') +
