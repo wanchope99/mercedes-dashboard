@@ -1357,34 +1357,25 @@
       gap: 6px; padding: 16px 6px; font-size: 12px; min-height: 78px; }
 
     /* ── Régimen fiscal ──────────────────────────────────────────────────────
-       El número grande NO es un número: es un rango. La barra lo dibuja para que
-       el ancho se lea antes que los dígitos — un costo fiscal estimado con el
-       padrón a medio cargar tiene una incertidumbre que hay que ver, no leer en
-       una nota al pie. La barra se angosta sola a medida que se releva. */
-    #fisc-rango { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-    #fisc-rango .num { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
-    #fisc-rango .hasta { font-size: 15px; color: var(--text-muted); }
-    /* La plata va abajo del porcentaje y más chica: el porcentaje es lo que se
-       compara contra el monotributo de hoy, los pesos son lo que se siente. */
-    #fisc-rango-ars { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
-    #fisc-rango-ars .ars { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
-    #fisc-rango-ars .lbl { font-size: 12px; color: var(--text-muted); }
-    .fisc-barra { position: relative; height: 10px; background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 6px; margin-top: 12px; overflow: hidden; }
-    .fisc-barra .tramo { position: absolute; top: 0; bottom: 0; background: var(--orange); opacity: 0.85; }
-    .fisc-barra .marca { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text); }
-    .fisc-esc { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
-    .fisc-esc-card { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
-    .fisc-esc-card.activo { border-color: var(--orange); }
-    .fisc-esc-card .tit { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
-    .fisc-esc-card .val { font-size: 22px; font-weight: 700; margin-top: 6px; }
-    .fisc-esc-card .sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.5; }
-
-    /* El bloque del slider dentro de la tarjeta del número grande, separado por
-       una línea: es un control, no una conclusión más. */
-    .fisc-carta { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
-    .fisc-carta-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
-      color: var(--text-muted); margin-bottom: 10px; }
+       La pantalla reproduce la planilla de simulación de Gonzalo (31/08/2026):
+       una tabla de pocas filas con el costo fiscal del mes sobre datos reales
+       del libro. El número grande es UN número, no un rango: con "Compras con
+       factura A" como dato de entrada no queda incertidumbre que dibujar. */
+    #fisc-total { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    #fisc-total .num { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
+    #fisc-total .lbl { font-size: 13px; color: var(--text-muted); }
+    /* Las filas de la simulación, con la jerarquía de la planilla: los datos
+       arriba, los resultados con línea, el total en grande. La primera columna
+       va a la izquierda como en todo estado de resultados de la app. */
+    #fisc-simple td:first-child { text-align: left; }
+    #fisc-simple td .det { color: var(--text-muted); font-size: 11px; }
+    #fisc-simple tr.res td { border-top: 1px solid var(--border); font-weight: 600; }
+    #fisc-simple tr.tot td { font-weight: 700; font-size: 15px; border-top: 2px solid var(--border); color: var(--orange); }
+    /* El único dato que se tipea, marcado como la celda con borde de la
+       planilla: todo lo demás sale del libro. */
+    #fisc-simple input { width: 140px; text-align: right; background: var(--surface2);
+      border: 1px solid var(--orange); border-radius: 8px; color: var(--text);
+      padding: 6px 9px; font-size: 13px; font-family: inherit; }
 
     /* Los meses del período. Multiselección, y el estado se ve sin abrir nada. */
     .fisc-chips { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -1394,70 +1385,10 @@
     /* El mes en curso se ofrece igual, pero punteado: es elegible y no es lo mismo. */
     .fisc-chip.encurso { border-style: dashed; }
 
-    /* El slider del aumento de carta. El número va al lado y grande: el pulgar
-       tapa el thumb justo cuando se está eligiendo. */
-    .fisc-slider { display: flex; align-items: center; gap: 16px; }
-    .fisc-slider input[type=range] { flex: 1; min-width: 0; -webkit-appearance: none; appearance: none;
-      height: 6px; border-radius: 999px; background: var(--surface2); border: 1px solid var(--border); outline: none; }
-    .fisc-slider input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
-      width: 26px; height: 26px; border-radius: 50%; background: var(--orange); border: 2px solid var(--surface);
-      cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
-    .fisc-slider input[type=range]::-moz-range-thumb { width: 26px; height: 26px; border-radius: 50%;
-      background: var(--orange); border: 2px solid var(--surface); cursor: pointer; }
-    .fisc-slider-val { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; color: var(--orange);
-      min-width: 84px; text-align: right; }
-    .fisc-slider-escala { display: flex; justify-content: space-between; font-size: 10px;
-      color: var(--text-muted); margin-top: 6px; padding-right: 100px; }
-
-    /* Tooltip de encabezado de tabla. Se abre con el mouse Y con el foco, así que
-       en el teléfono se toca el `?` y se lee — un `title` ahí no existe. La burbuja
-       cae HACIA ABAJO a propósito: .table-wrap tiene overflow, y hacia arriba la
-       recorta. */
-    th.th-tip { position: relative; overflow: visible; }
-    th.th-tip .th-i { display: inline-flex; align-items: center; justify-content: center; margin-left: 5px;
-      width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--border); color: var(--text-muted);
-      font-size: 9px; font-weight: 700; cursor: help; vertical-align: middle; }
-    th.th-tip .th-bub { display: none; position: absolute; top: 100%; right: 8px; z-index: 20; width: 250px;
-      background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
-      font-size: 11px; font-weight: 400; line-height: 1.6; color: var(--text); text-transform: none;
-      letter-spacing: 0; text-align: left; white-space: normal; box-shadow: 0 10px 30px rgba(0,0,0,0.45); }
-    th.th-tip:first-child .th-bub { right: auto; left: 8px; }
-    th.th-tip:hover .th-bub, th.th-tip:focus-within .th-bub { display: block; }
-    th.th-tip:focus-within .th-i, th.th-tip:hover .th-i { border-color: var(--orange); color: var(--orange); }
-
-    /* En el teléfono la burbuja se despega del encabezado y se pega abajo de la
-       pantalla. Colgada del `th` no se puede leer: son 250px anclados al borde
-       derecho de una celda angosta dentro de una tabla que scrollea, así que en
-       "Mes a mes" —nueve columnas— seis de las nueve burbujas quedaban cortadas
-       por el borde izquierdo. El `th` se ve y se toca, y lo que explica la
-       columna no se lee: lo peor de los dos mundos.
-       `position: fixed` escapa el overflow de .table-wrap porque no hay ningún
-       transform ni filter en la cadena de padres (verificado). El z-index queda
-       por debajo del overlay del padrón (320) a propósito: con un modal abierto
-       la tabla ni siquiera se puede enfocar. */
-    @media (max-width: 640px) {
-      th.th-tip .th-bub, th.th-tip:first-child .th-bub {
-        position: fixed; left: 12px; right: 12px; top: auto; bottom: 12px;
-        width: auto; z-index: 300; box-shadow: 0 -6px 30px rgba(0,0,0,0.6);
-      }
-    }
-
-    /* La base inválida se muestra TACHADA en vez de esconderse: está justamente
-       para que se vea por qué no sirve declarar sólo una parte de las ventas y
-       deducir el 100% de los costos. */
-    .fisc-base-invalida td { text-decoration: line-through; color: var(--text-muted); }
     .fisc-nota { font-size: 12px; color: var(--text-muted); line-height: 1.6; }
-    .fisc-adv { border-left: 3px solid var(--orange); background: var(--orange-dim); padding: 10px 14px;
-      border-radius: 0 8px 8px 0; margin-top: 8px; font-size: 12px; line-height: 1.6; }
-    .fisc-tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 10px;
-      text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid var(--border); }
-    .fisc-tag.si { background: var(--green-dim); border-color: var(--green); color: var(--green); }
-    .fisc-tag.no { background: var(--red-dim); border-color: var(--red); color: var(--red); }
-    .fisc-tag.dud { background: var(--surface2); color: var(--text-muted); }
 
-    /* Los tres impuestos, uno al lado del otro. Son tres palancas distintas —el
-       IVA se baja con factura A, IIBB no se baja con nada, Ganancias se baja
-       deduciendo— y verlos separados es lo que deja decidir dónde apretar. */
+    /* Las tarjetas del descuento por efectivo: el porcentaje de equilibrio, lo
+       que queda de cada $100 por Galicia, y cuánto está en juego. */
     .fisc-kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
     .fisc-kpi-card { background: var(--surface2); border: 1px solid var(--border);
       border-radius: var(--radius); padding: 14px 16px; border-left-width: 3px; }
@@ -1465,46 +1396,6 @@
     .fisc-kpi-card .val { font-size: 24px; font-weight: 700; margin-top: 6px; letter-spacing: -0.02em; }
     .fisc-kpi-card .pc { font-size: 13px; font-weight: 600; color: var(--text-muted); margin-top: 2px; }
     .fisc-kpi-card .sub { font-size: 11px; color: var(--text-muted); margin-top: 6px; line-height: 1.5; }
-
-    /* El estado de resultados como RI. Va por id y con su propia regla, como
-       TODOS los overlays de esta app: no existe un .modal-overlay genérico y sin
-       la regla la ventana no se esconde — se dibuja al final de la página, a la
-       vista y con todo el contenido adentro. Se abre desde la pantalla Fiscal,
-       nunca sobre otro modal, así que 320 alcanza (mismo caso que el padrón). */
-    #fiscal-pyl-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65);
-      z-index: 320; align-items: center; justify-content: center; padding: 20px; }
-    #fiscal-pyl-overlay.open { display: flex; }
-    /* 1060 y no 900: con cuatro columnas, tres de ellas con importe MÁS su
-       porcentaje al lado, a 900 la tabla entraba justo —835 de ancho visible
-       contra 835 que necesita— y cualquier ventana más angosta la mandaba a
-       scrollear de costado. Con el navegador en media pantalla (820px) faltaban
-       55px y había que arrastrar la tabla para leer la última columna. */
-    #fiscal-pyl-overlay .modal { background: var(--surface); border: 1px solid var(--border);
-      border-radius: 16px; padding: 0 24px 24px; width: 1060px; max-width: 96vw; max-height: 90vh; overflow-y: auto; }
-    #fiscal-pyl-overlay .modal-title { font-size: 17px; font-weight: 600; }
-    /* Y que la tabla pueda apretarse sola: las celdas de plata llevan el importe
-       y el % al lado, y cuando no entran en una línea el % baja abajo en vez de
-       forzar el scroll horizontal. Ancho de sobra → queda al lado; poco ancho →
-       se apila. Es la diferencia entre una tabla que se adapta y una que exige
-       una ventana de cierto tamaño. */
-    #fisc-pyl td { padding-left: 10px; padding-right: 10px; }
-    #fisc-pyl .pyl-pct { font-size: 11px; font-weight: 400; white-space: nowrap; }
-    /* Con el navegador en media pantalla la tabla tiene un piso propio y los
-       24px de padding a cada lado son justo lo que sobra. Se achican ahí y sólo
-       ahí: en una ventana normal el aire es parte de que se lea. */
-    @media (max-width: 1100px) {
-      #fiscal-pyl-overlay { padding: 10px; }
-      #fiscal-pyl-overlay .modal { padding: 0 12px 18px; max-width: 99vw; }
-    }
-    /* Las filas del estado de resultados. La jerarquía la da el peso y una línea
-       arriba, no la sangría: en el teléfono la tabla scrollea y una sangría se
-       pierde apenas se corre un pixel. */
-    #fisc-pyl td:first-child { text-align: left; }
-    #fisc-pyl tr.sec td { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
-      color: var(--text-muted); padding-top: 16px; font-weight: 600; }
-    #fisc-pyl tr.sub td:first-child { padding-left: 18px; color: var(--text-muted); }
-    #fisc-pyl tr.tot td { font-weight: 700; border-top: 1px solid var(--border); }
-    #fisc-pyl tr.final td { font-weight: 700; font-size: 15px; border-top: 2px solid var(--border); }
 
     /* El padrón se abre desde la propia pantalla Fiscal, nunca sobre otro modal,
        así que 320 alcanza (ver el orden de apilado documentado en Pedidos). */
@@ -1535,10 +1426,7 @@
          renglón con la mitad vacía al lado. Mismo criterio que en Pedidos. */
       .fisc-prov > div:last-child { grid-column: 1 / -1; }
       .fisc-prov > div:last-child .btn { width: 100%; }
-      #fisc-rango .num { font-size: 26px; }
-      .fisc-slider-val { font-size: 24px; min-width: 64px; }
-      .fisc-slider-escala { padding-right: 80px; }
-      th.th-tip .th-bub { width: 200px; }
+      #fisc-total .num { font-size: 26px; }
     }
 
     /* ── Inicio (teléfono) ── */
@@ -2370,55 +2258,23 @@
 
 <div id="tab-fiscal" class="tab-panel">
   <main>
-    <!-- El número grande y su rango. Va primero porque es la pregunta. -->
+    <!-- La planilla de simulación, con datos reales. Reproduce la "Simulación
+         costo fiscal Régimen General" que armó Gonzalo (31/08/2026): se factura
+         lo que liquida Galicia, el IVA se agrega sobre ese precio, y el costo
+         del mes son tres líneas — IVA con el beneficio de transición, IIBB y
+         Ganancias. El único dato que se tipea es "Compras con factura A". -->
     <div class="card">
-      <div class="card-title"><span>Si fueras Responsable Inscripto</span>
+      <div class="card-title"><span>Simulación costo fiscal — Régimen General</span>
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
               id="fisc-subtitulo">recalculando meses ya cerrados…</span>
       </div>
-      <div id="fisc-rango"><span class="num" style="color:var(--text-muted)">—</span></div>
-      <!-- El mismo rango en plata. Un porcentaje solo no se puede comparar contra
-           nada: "12%" no dice si son cien mil o dos millones por mes, y la
-           decisión se toma en pesos. -->
-      <div id="fisc-rango-ars"></div>
-      <div class="fisc-barra" id="fisc-barra"></div>
-      <div class="fisc-nota" style="margin-top:10px" id="fisc-rango-pie"></div>
-
-      <!-- El slider vive ACÁ, pegado al número que mueve. Estaba dos tarjetas más
-           abajo, cambiando sólo sus propias tarjetas mientras el número grande se
-           quedaba fijo en el escenario de carta congelada: en el teléfono ni
-           siquiera se veían juntos, así que subir la carta parecía no hacer nada.
-           Los 21 escenarios (0% a 20%) vienen calculados de una en la misma
-           respuesta, así que arrastrarlo no pega al servidor. -->
-      <div class="fisc-carta">
-        <div class="fisc-carta-lbl">Si subís la carta…</div>
-        <div class="fisc-slider">
-          <input type="range" id="fisc-aumento" min="0" max="20" step="1" value="0"
-                 oninput="renderFiscal()" aria-label="Aumento de la carta en porcentaje">
-          <div class="fisc-slider-val" id="fisc-aumento-val">+0%</div>
-        </div>
-        <div class="fisc-slider-escala"><span>0%</span><span>10%</span><span>20%</span></div>
-      </div>
-
+      <div id="fisc-total"><span class="num" style="color:var(--text-muted)">—</span></div>
+      <div class="table-wrap" style="margin-top:14px"><table id="fisc-simple"></table></div>
+      <div class="fisc-nota" style="margin-top:12px" id="fisc-simple-pie"></div>
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-accent" onclick="abrirPadronFiscal()" id="fisc-btn-relevar">Relevar proveedores</button>
-        <button class="btn" onclick="abrirPylFiscal()">Ver el mes entero como RI</button>
         <button class="btn" onclick="recalcFiscal()">Recalcular</button>
       </div>
-    </div>
-
-    <!-- Los tres impuestos por separado. El número de arriba dice cuánto; éste
-         dice DE QUÉ, que es lo que decide dónde apretar: el IVA se baja
-         consiguiendo factura A, IIBB no se baja con nada porque grava la venta,
-         y Ganancias se baja deduciendo — y ahí la nómina es la palanca, porque
-         lo que se paga fuera de recibo no se puede deducir. -->
-    <div class="card">
-      <div class="card-title"><span>De qué está hecho ese costo</span>
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
-              id="fisc-kpi-sub">con los supuestos elegidos</span>
-      </div>
-      <div class="fisc-kpi" id="fisc-kpis"></div>
-      <div class="fisc-nota" style="margin-top:12px" id="fisc-kpi-pie"></div>
     </div>
 
     <!-- Supuestos. Arriba y editables, nunca enterrados: las alícuotas y las
@@ -2437,124 +2293,47 @@
         <div class="fisc-chips" id="fisc-meses-chips"></div>
         <div class="fisc-nota" style="margin-top:8px" id="fisc-meses-nota"></div>
       </div>
+      <!-- La figura no se elige: es persona humana, por ahora (decisión de
+           Gonzalo, 01/09/2026). El JS ya cae a `personaHumana` cuando el
+           selector no existe, así que volver a ofrecer SRL/SA es re-agregar
+           el <select id="fisc-figura"> acá. -->
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px">
         <div class="form-group">
-          <label>Figura</label>
-          <!-- La figura cambia la tasa marginal de Ganancias, que el descuento
-               calcula en el servidor: hay que volver a pedirlo, no basta con
-               redibujar. -->
-          <select id="fisc-figura" onchange="renderFiscal(); cargarDescuentoEfectivo()">
-            <option value="personaHumana">Persona humana</option>
-            <option value="sociedad">SRL / SA</option>
+          <label>IIBB CABA (%)</label>
+          <input type="number" id="fisc-iibb" step="0.1" value="3.5" onchange="renderFiscal(); cargarDescuentoEfectivo()">
+        </div>
+        <!-- El beneficio por pasar de Monotributo a RI: reduce el saldo de IVA
+             50% el primer año, 30% el segundo y 10% el tercero. -->
+        <div class="form-group">
+          <label>Año como RI (beneficio de IVA)</label>
+          <select id="fisc-anio-ri" onchange="renderFiscal(); cargarDescuentoEfectivo()">
+            <option value="1" selected>1er año — reducción 50%</option>
+            <option value="2">2º año — reducción 30%</option>
+            <option value="3">3er año — reducción 10%</option>
+            <option value="0">Sin beneficio</option>
           </select>
         </div>
         <div class="form-group">
-          <label>IIBB CABA (%)</label>
-          <input type="number" id="fisc-iibb" step="0.1" value="3" onchange="recalcFiscal()">
-        </div>
-        <div class="form-group">
           <label>Cuota de monotributo hoy (ARS/mes)</label>
-          <input type="number" id="fisc-cuota" value="0" onchange="recalcFiscal()"
+          <input type="number" id="fisc-cuota" value="0" onchange="renderFiscal()"
                  title="La categoría Fiscales del libro no sirve de línea de base: dio $0 en julio y agosto, y las cargas sociales se cargan dentro de Personal.">
         </div>
       </div>
       <div class="fisc-nota" style="margin-top:12px" id="fisc-origen"></div>
     </div>
 
-    <!-- Quién paga el IVA con el aumento elegido arriba. -->
-    <div class="card">
-      <div class="card-title"><span id="fisc-esc-tit">Con la carta congelada</span>
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">el IVA lo paga tu margen o lo paga el cliente</span>
-      </div>
-      <div class="fisc-esc" id="fisc-escenarios"></div>
-      <div class="fisc-nota" style="margin-top:12px" id="fisc-aumento-pie"></div>
-    </div>
-
-    <!-- Descuento por pagar en efectivo. Va acá, pegado a "si subís la carta",
-         porque son la misma pregunta mirada desde los dos lados: qué hacés con
-         el precio para que el régimen no se coma el margen. Estaba abajo de
-         todo, después de las tablas de detalle, y ahí no lo veía nadie. -->
+    <!-- Descuento por pagar en efectivo: el porcentaje de equilibrio y UN
+         ejemplo. Es un porcentaje de la venta, así que da prácticamente igual
+         en cualquier mesa — repetirlo cinco veces era la tabla que se sacó. -->
     <div class="card">
       <div class="card-title"><span>¿Cuánto podés descontar por pagar en efectivo?</span>
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
               id="fisc-desc-sub">sobre mesas reales del mes</span>
       </div>
       <div id="fisc-desc-kpi" class="fisc-kpi" style="margin-bottom:14px"></div>
-      <div class="table-wrap"><table id="fisc-descuento"></table></div>
-      <div class="fisc-nota" style="margin-top:12px" id="fisc-desc-pie"></div>
-      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-        <div class="form-group" style="margin:0">
-          <label>Descuentos a comparar (%)</label>
-          <input type="text" id="fisc-desc-pcts" value="10, 15" onchange="cargarDescuentoEfectivo()"
-                 style="width:150px" title="Separados por coma. Se calcula cuánto te queda con cada uno.">
-        </div>
-        <button class="btn" onclick="cargarDescuentoEfectivo()">Recalcular</button>
-      </div>
-    </div>
-
-    <!-- Mes a mes -->
-    <div class="card">
-      <div class="card-title"><span>Mes a mes</span>
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
-              id="fisc-meses-sub"></span>
-      </div>
-      <div class="table-wrap"><table id="fisc-meses"></table></div>
-    </div>
-
-    <!-- Qué le hace el régimen a cada categoría de compra. El total no dice
-         dónde duele: la mercadería, los sueldos y una heladera reciben tres
-         tratamientos distintos y viven todos dentro del mismo número. -->
-    <div class="card">
-      <div class="card-title"><span>Qué le hace a cada categoría de compra</span>
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
-              id="fisc-cat-sub">no depende del aumento de carta: son compras ya hechas</span>
-      </div>
-      <div class="table-wrap"><table id="fisc-categorias"></table></div>
-      <div class="fisc-nota" style="margin-top:10px" id="fisc-cat-pie"></div>
-    </div>
-
-    <!-- Las tres bases de Ganancias -->
-    <div class="card">
-      <div class="card-title"><span>Sobre qué se calcula Ganancias</span>
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">la primera fila está tachada a propósito</span>
-      </div>
-      <div class="table-wrap"><table id="fisc-bases"></table></div>
-      <div class="fisc-nota" style="margin-top:10px" id="fisc-bases-pie"></div>
-    </div>
-
-    <!-- Dónde se pierde crédito -->
-    <div class="card">
-      <div class="card-title"><span>Dónde se pierde crédito fiscal</span>
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
-              id="fisc-op-sub">montos anualizados</span>
-      </div>
-      <div class="table-wrap"><table id="fisc-oportunidades"></table></div>
-    </div>
-
-    <div class="card">
-      <div class="card-title"><span>Lo que el cálculo no puede saber</span></div>
-      <div id="fisc-advertencias"></div>
+      <div class="fisc-nota" id="fisc-desc-pie"></div>
     </div>
   </main>
-</div>
-
-<!-- El mes entero como RI: el mismo estado de resultados de siempre, pero con
-     cada concepto pasado por el régimen nuevo y al lado de lo que es hoy. Es un
-     modal y no una tarjeta más porque son treinta filas: abajo de todo lo demás
-     nadie las mira, y arriba tapan el número que la pantalla vino a contestar. -->
-<div class="modal-overlay" id="fiscal-pyl-overlay">
-  <div class="modal">
-    <div class="fisc-padron-head">
-      <div class="modal-title">El mes como Responsable Inscripto</div>
-      <button class="btn-close" onclick="cerrarPylFiscal()" aria-label="Cerrar">×</button>
-    </div>
-    <div class="fisc-nota" id="fisc-pyl-intro"></div>
-    <div class="table-wrap" style="margin-top:14px"><table id="fisc-pyl"></table></div>
-    <div class="fisc-nota" style="margin-top:14px" id="fisc-pyl-pie"></div>
-    <div style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
-      <button class="btn" onclick="cerrarPylFiscal()">Cerrar</button>
-    </div>
-  </div>
 </div>
 
 <!-- Padrón fiscal: la cola ordenada por plata. Se abre desde la pantalla
@@ -12552,11 +12331,15 @@ async function recalcCalc(sourceId) {
 
 // ─── RÉGIMEN FISCAL ───────────────────────────────────────────────────────────
 //
-// La pantalla no muestra un número: muestra un RANGO. El crédito fiscal no se
-// puede leer del libro (Movimientos guarda el total con impuestos y nada más),
-// así que se estima, y la amplitud del rango es cuánta plata todavía no se sabe.
-// Esa amplitud es también la barra de progreso del relevamiento: cada proveedor
-// que se carga la angosta, y eso es lo que hace que valga la pena cargarlos.
+// La pantalla reproduce la planilla "Simulación costo fiscal Régimen General"
+// de Gonzalo (31/08/2026), con los datos reales del libro en lugar de números
+// tipeados. El modelo es EL SIMPLE a propósito: se factura lo que liquida
+// Galicia, el IVA se agrega sobre ese precio (el neto del bar queda igual al de
+// hoy), y el costo fiscal del mes son tres líneas — el saldo de IVA con el
+// beneficio de transición, IIBB y Ganancias. El modelo anterior (rangos
+// min/esperado/max, traslado a la carta, aumento de proveedores) sigue vivo en
+// regimen-fiscal.js y lo usa el cálculo del descuento por efectivo; esta
+// pantalla ya no lo dibuja.
 let _fiscData = null, _fiscCola = null, _fiscSiembra = null;
 
 // Los meses que ofrece el selector y cuáles están elegidos. Son varios a la vez:
@@ -12572,27 +12355,32 @@ let _fiscMesesSel = [];       // los tildados
 // año y comparar índices deja la lista vacía apenas empiece el año que viene.
 const FISCAL_PRIMER_MES = 'Julio';
 
-// Los aumentos de carta que ofrece el slider: 0% a 20%, de a un punto. Se piden
-// LOS 21 al servidor en la misma llamada y el slider sólo indexa la respuesta.
-// Pedir uno por movimiento del slider haría que arrastrarlo dispare veinte
-// requests y el número tiemble; el cálculo del servidor es una función pura
-// sobre datos que ya leyó, así que los veintiuno salen igual de caros que uno.
-const FISC_AUMENTO_MAX = 20;
-const FISC_AUMENTOS = Array.from({ length: FISC_AUMENTO_MAX + 1 }, (_, i) => i);
-// El IVA de ventas con el que se convierte "aumento de carta" en "traslado":
-// trasladar todo el IVA es subir la carta 21%, así que traslado = aumento / 21.
-// El servidor lo confirma en `parametros.ivaVentasPct`; 21 es el arranque.
+// El IVA de ventas. El servidor lo confirma en `parametros.ivaVentasPct`.
 let _fiscIvaVentas = 21;
 
-// Un encabezado de tabla que explica qué es su columna. Se abre con el mouse Y
-// con el foco, así que en el teléfono se toca el `?` y se lee — un `title` ahí
-// no existe. Está acá arriba y no dentro de cada render porque las tres tablas
-// de esta pantalla lo usan: "Débito", "Crédito" o "Utilidad" significan en un
-// impuesto algo muy distinto de lo que significan en la caja, y sin la burbuja
-// hay que saber de antemano qué se está mirando.
-function thTip(lbl, txt) {
-  return '<th class="th-tip">' + lbl + '<span class="th-i" tabindex="0" role="button" aria-label="' +
-    escapeHtml(txt) + '">?</span><span class="th-bub">' + escapeHtml(txt) + '</span></th>';
+// El beneficio Monotributo → RI: cuánto se reduce el saldo de IVA según el año
+// (50% el primero, 30% el segundo, 10% el tercero). La tabla real viene del
+// servidor en `parametros.reduccionIvaPorAnio`; ésta es el arranque.
+let _fiscReduccion = { 1: 50, 2: 30, 3: 10 };
+
+// "Compras con factura A" es el único dato que se tipea, como la celda con
+// borde de la planilla. `null` significa "seguí al padrón": el campo se
+// precarga con las compras netas a proveedores que emiten A y se actualiza solo
+// al relevar. Apenas se tipea un número, manda la persona; borrarlo vuelve al
+// padrón.
+let _fiscComprasValor = null;
+let _fiscComprasEstimado = 0;
+
+// La escala de Ganancias por tramos: fijo del tramo + % sobre el excedente.
+// Copia de `aplicarEscala` de regimen-fiscal.js; los tramos viajan del servidor
+// en `parametros`, así que el contador los corrige en un solo lugar.
+function fiscEscala(base, tramos) {
+  const b = Number(base) || 0;
+  if (b <= 0 || !tramos || !tramos.length) return 0;
+  const orden = [...tramos].sort((x, y) => x.desde - y.desde);
+  let tramo = orden[0];
+  for (const t of orden) if (b >= t.desde) tramo = t;
+  return tramo.fijo + (b - tramo.desde) * (tramo.pct / 100);
 }
 
 async function loadFiscal() {
@@ -12608,6 +12396,7 @@ async function loadFiscal() {
     setIf('fisc-iibb', data.parametros.iibbPct);
     setIf('fisc-cuota', data.parametros.cuotaMonotributoMensual);
     if (Number(data.parametros.ivaVentasPct) > 0) _fiscIvaVentas = Number(data.parametros.ivaVentasPct);
+    if (data.parametros.reduccionIvaPorAnio) _fiscReduccion = data.parametros.reduccionIvaPorAnio;
 
     // El selector de período se arma UNA vez: rearmarlo en cada recálculo
     // perdería los meses que la persona eligió.
@@ -12658,7 +12447,7 @@ function renderChipsMeses() {
   nota.innerHTML = !_fiscMesesSel.length
     ? 'Elegí al menos un mes.'
     : (_fiscMesesSel.length > 1
-        ? 'Con más de un mes, el número grande es el <strong>promedio mensual</strong> y la tabla de abajo muestra cada mes por separado. '
+        ? 'Con más de un mes elegido, toda la tabla es el <strong>promedio mensual</strong> del período. '
         : '') +
       (enCursoSel
         ? 'Ojo: el mes en curso sólo tiene sentido si ya terminó. A mitad de mes son ingresos de medio mes contra costos fijos de mes entero.'
@@ -12684,15 +12473,18 @@ async function recalcFiscal() {
       body: JSON.stringify({
         // Sin `meses` el servidor toma los últimos 3 cerrados por su cuenta.
         meses: _fiscMesesSel.length ? _fiscMesesSel : undefined,
-        // Un escenario por cada punto de aumento de carta, 0% a 20%. El slider
-        // después es puro índice en este array: no vuelve a pedir nada.
-        escenarios: FISC_AUMENTOS.map(a => a / _fiscIvaVentas),
+        // Un solo escenario y con la carta quieta: el modelo simple asume que el
+        // IVA se agrega sobre el precio de hoy, así que no hay traslado que
+        // elegir. De la respuesta se usan los datos crudos — los ingresos, lo
+        // que liquida Galicia, el padrón aplicado al gasto y la nómina.
+        escenarios: [0],
         parametros: { iibbPct: num('fisc-iibb'), cuotaMonotributoMensual: num('fisc-cuota') },
       }),
     });
     _fiscData = data;
-    if (data.parametros && Number(data.parametros.ivaVentasPct) > 0) {
-      _fiscIvaVentas = Number(data.parametros.ivaVentasPct);
+    if (data.parametros) {
+      if (Number(data.parametros.ivaVentasPct) > 0) _fiscIvaVentas = Number(data.parametros.ivaVentasPct);
+      if (data.parametros.reduccionIvaPorAnio) _fiscReduccion = data.parametros.reduccionIvaPorAnio;
     }
     if (sub) {
       const ms = data.origen.mesesSimulados;
@@ -12700,6 +12492,20 @@ async function recalcFiscal() {
         : ms.length === 1 ? 'sobre ' + ms[0]
         : 'promedio mensual de ' + ms.join(' y ');
     }
+
+    // "Compras con factura A": promedio mensual de compras NETAS a los
+    // proveedores que el padrón dice que emiten A. Netas de IVA porque la
+    // planilla después lo vuelve a agregar como crédito (compras × 21%) — con
+    // el IVA adentro se contaría dos veces.
+    const nm = data.meses.length || 1;
+    _fiscComprasEstimado = data.meses.reduce((s, m) => {
+      let t = 0;
+      for (const p of (m.credito && m.credito.porProveedor) || []) {
+        if (p.emite === 'S') t += (Number(p.gasto) || 0) - ((p.credito && Number(p.credito.esperado)) || 0);
+      }
+      return s + t;
+    }, 0) / nm;
+
     renderFiscal();
     // Va aparte y sin await: necesita Fudo, que es lento, y la pantalla no tiene
     // por qué esperarlo. Si falla, esa tarjeta lo dice y el resto ya está.
@@ -12710,487 +12516,160 @@ async function recalcFiscal() {
   }
 }
 
+// El único dato tipeable de la tabla. `onchange` y no `oninput`: la tabla se
+// redibuja entera al recalcular, y hacerlo por tecla perdería el foco a mitad
+// de un número (misma regla que los consumos de Nómina). Vacío significa
+// "volvé a seguir al padrón".
+function fiscComprasCambiada(v) {
+  const n = Number(v);
+  _fiscComprasValor = (String(v).trim() === '' || !Number.isFinite(n)) ? null : Math.max(0, n);
+  renderFiscal();
+}
+
 function renderFiscal() {
   const d = _fiscData;
   if (!d || !d.meses || !d.meses.length) return;
   const figura = (document.getElementById('fisc-figura') || {}).value || 'personaHumana';
+  const num = id => { const el = document.getElementById(id); const n = Number(el && el.value); return Number.isFinite(n) ? n : 0; };
 
-  // Se promedian los meses: un mes suelto puede ser atípico y la decisión que se
-  // toma con esto es anual.
+  // Con más de un mes elegido todo es promedio mensual: un mes suelto puede ser
+  // atípico y la decisión que se toma con esto es anual.
   const n = d.meses.length;
   const prom = sel => d.meses.reduce((s, m) => s + sel(m), 0) / n;
-  const escDe = (m, i) => m.escenarios[i].declarado;
-  // Hay secciones que NO se pueden promediar —el desglose del credito, las
-  // bases de Ganancias, el ranking de proveedores— porque son listas, no
-  // numeros. Esas usan el mes MAS RECIENTE, no el primero, y la pantalla dice
-  // cual es cuando hay mas de uno. Antes tomaban meses[0], que con tres meses
-  // seleccionados mostraba el ranking del mes mas viejo sin avisar.
-  const ref = d.meses[d.meses.length - 1];
-  const sufijoRef = n > 1 ? ' (' + ref.mes + ')' : '';
+  const e0 = m => m.escenarios[0].declarado;
 
-  // ── El aumento de la carta, que manda sobre TODA la pantalla ───────────────
-  //
-  // El slider elige uno de los escenarios que ya vinieron calculados. El índice
-  // ES el aumento en puntos (escenario 7 = carta +7%), así que no hay que buscar
-  // nada; se acota igual al largo real de la respuesta por si el servidor
-  // devolviera otra cantidad.
-  //
-  // Se resuelve ACÁ ARRIBA porque el número grande, el mes a mes y las bases de
-  // Ganancias se calculan todos sobre él. Antes esos tres estaban clavados en el
-  // escenario 0 mientras el slider movía sólo sus propias tarjetas: subir la
-  // carta 10% dejaba el titular quieto, que es la pregunta que la pantalla
-  // existe para responder.
-  const slider = document.getElementById('fisc-aumento');
-  const iAum = Math.max(0, Math.min(ref.escenarios.length - 1, Math.round(Number(slider && slider.value) || 0)));
-  const aumento = iAum;
-  const lblAum = document.getElementById('fisc-aumento-val');
-  if (lblAum) lblAum.textContent = '+' + aumento + '%';
+  // ── Los datos reales del período ──────────────────────────────────────────
+  const ingresos = prom(m => e0(m).declaracion.ventaTotalHoy);
+  const facturado = prom(m => e0(m).ventas.cobradoHoy);
+  const pctBlanco = ingresos > 0 ? (facturado / ingresos) * 100 : 0;
 
-  // ── El rango, sobre el aumento de carta elegido ────────────────────────────
-  const pMin = prom(m => escDe(m, iAum).pctSobreIngresos[figura].min);
-  const pEsp = prom(m => escDe(m, iAum).pctSobreIngresos[figura].esperado);
-  const pMax = prom(m => escDe(m, iAum).pctSobreIngresos[figura].max);
-  const hoyPct = prom(m => escDe(m, iAum).hoyMonotributo.pctSobreIngresos);
+  // ── La planilla, fila por fila ────────────────────────────────────────────
+  // El IVA se AGREGA sobre el precio de hoy (débito = facturado × 21%): el
+  // supuesto es que al facturar, el cliente de tarjeta paga el IVA arriba del
+  // precio actual y el neto del bar queda igual. Es el modelo de la planilla de
+  // Gonzalo, no el de traslado del módulo viejo.
+  const iva = _fiscIvaVentas;
+  const comprasA = _fiscComprasValor !== null ? _fiscComprasValor : _fiscComprasEstimado;
+  const debito = facturado * (iva / 100);
+  const credito = comprasA * (iva / 100);
+  const saldo = Math.max(0, debito - credito);
+  const saldoAFavor = Math.max(0, credito - debito);
 
-  document.getElementById('fisc-rango').innerHTML =
-    '<span class="num" style="color:var(--orange)">' + pct(pMin) + '</span>' +
-    '<span class="hasta">a</span>' +
-    '<span class="num" style="color:var(--orange)">' + pct(pMax) + '</span>' +
-    '<span class="hasta">de lo que entra por caja · hoy pagás ' + pct(hoyPct) +
-    (aumento > 0 ? ' · con la carta +' + aumento + '%' : ' · con la carta congelada') + '</span>';
+  const anio = Number((document.getElementById('fisc-anio-ri') || {}).value) || 0;
+  const redPct = Number(_fiscReduccion[anio]) || 0;
+  const ahorroBeneficio = saldo * (redPct / 100);
+  const ivaAPagar = saldo - ahorroBeneficio;
 
-  // El mismo rango en plata. Un porcentaje no se compara contra nada solo: "12%"
-  // no dice si son cien mil o dos millones, y lo que se decide se decide en
-  // pesos. Sale de `totalFiscal`, que es el mismo número del que salió el
-  // porcentaje —no se reconstruye multiplicando, que daría distinto por el
-  // redondeo— y con varios meses elegidos es el promedio POR MES, igual que
-  // todo lo demás de esta tarjeta.
-  const aMin = prom(m => escDe(m, iAum).totalFiscal[figura].min);
-  const aMax = prom(m => escDe(m, iAum).totalFiscal[figura].max);
-  const hoyARS = prom(m => escDe(m, iAum).hoyMonotributo.cuota);
-  document.getElementById('fisc-rango-ars').innerHTML =
-    '<span class="ars" style="color:var(--orange)">' + fmt(aMin) + '</span>' +
-    '<span class="lbl">a</span>' +
-    '<span class="ars" style="color:var(--orange)">' + fmt(aMax) + '</span>' +
-    '<span class="lbl">por mes' + (n > 1 ? ' (promedio de ' + d.meses.map(m => m.mes).join(' y ') + ')' : '') +
-    ' · hoy pagás ' + fmt(hoyARS) + '</span>';
+  const iibbPct = num('fisc-iibb');
+  const iibb = facturado * (iibbPct / 100);
 
-  // La barra dibuja el rango sobre una escala 0–25%, con una marca en el esperado.
-  const esc = v => Math.max(0, Math.min(100, (v / 25) * 100));
-  document.getElementById('fisc-barra').innerHTML =
-    '<div class="tramo" style="left:' + esc(pMin) + '%;width:' + Math.max(1, esc(pMax) - esc(pMin)) + '%"></div>' +
-    '<div class="marca" style="left:' + esc(pEsp) + '%"></div>';
+  // Ganancias, la fila que la planilla dejó vacía. La utilidad declarada es lo
+  // facturado (que en este modelo es neto: el IVA va arriba) menos lo que se
+  // puede deducir — las compras con factura A, el costo del personal en blanco
+  // (bruto por recibo más cargas, de la nómina) y el propio IIBB, que es
+  // deducible. Sobre esa utilidad corre la escala de la figura elegida.
+  const nom = d.origen && d.origen.nomina;
+  const personalDeducible = nom ? (Number(nom.costoDeducibleARS) || 0) : 0;
+  const utilidad = facturado - comprasA - personalDeducible - iibb;
+  const tramos = (d.parametros || {})[figura === 'sociedad' ? 'gananciasSociedad' : 'gananciasPersonaHumana'];
+  const ganancias = fiscEscala(utilidad, tramos);
 
-  const cob = ref.credito.cobertura;
-  const sinResolver = d.meses.reduce((s, m) => s + m.credito.cobertura.incertidumbreARS, 0) / n;
-  document.getElementById('fisc-rango-pie').innerHTML =
-    'El ancho del rango son <strong>' + fmt(sinResolver) + ' por mes</strong> que todavía no se saben: ' +
-    'gasto de proveedores sin relevar, donde no se sabe si dan factura A. ' +
-    'Está clasificado el <strong>' + pct(cob.pctClasificado) + '</strong> del gasto' + sufijoRef + '. ' +
-    'Cada proveedor que cargues angosta esta barra.';
+  const total = ivaAPagar + iibb + ganancias;
+  const cuotaHoy = num('fisc-cuota');
+  const pctDe = v => (ingresos > 0 ? (v / ingresos) * 100 : 0);
+  const un = v => String(Math.round(v * 10) / 10);
+  const money = v => (v < 0 ? '−' + fmt(-v) : fmt(v));
 
-  const btn = document.getElementById('fisc-btn-relevar');
-  if (btn) btn.textContent = sinResolver > 0
-    ? 'Relevar proveedores — ' + fmt(sinResolver) + '/mes sin explicar'
-    : 'Ver proveedores';
+  // ── El número grande: el total y su % de lo que entra ─────────────────────
+  document.getElementById('fisc-total').innerHTML =
+    '<span class="num" style="color:var(--orange)">' + fmt(total) + '</span>' +
+    '<span class="lbl">por mes · <strong>' + pct(pctDe(total)) + '</strong> de lo que entra' +
+    (cuotaHoy > 0 ? ' · hoy pagás ' + fmt(cuotaHoy) + ' de monotributo (' + pct(pctDe(cuotaHoy)) + ')' : '') +
+    '</span>';
 
-  const nomOrigen = d.origen.nomina;
+  // ── La tabla ──────────────────────────────────────────────────────────────
+  const fila = (lbl, val, extra, cls) =>
+    '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + lbl + '</td>' +
+    '<td style="white-space:nowrap">' + val + '</td>' +
+    '<td style="color:var(--text-muted)">' + (extra || '') + '</td></tr>';
+
+  // Con beneficio, el saldo lleva sus dos filas (la reducción y lo que queda);
+  // sin beneficio el saldo ES lo que se paga y repetirlo sería la misma fila
+  // dos veces con dos nombres.
+  const filasIva = redPct > 0
+    ? fila('Saldo IVA del mes <span class="det">débito − crédito</span>', money(saldo), pct(pctDe(saldo)), 'res') +
+      fila('Reducción ' + (anio === 1 ? '1er' : anio + 'º') + ' año <span class="det">beneficio Monotributo → RI</span>',
+        '<span style="color:var(--green)">−' + fmt(ahorroBeneficio) + '</span>', '−' + un(redPct) + '%') +
+      fila('IVA a pagar', money(ivaAPagar), pct(pctDe(ivaAPagar)))
+    : fila('IVA a pagar <span class="det">débito − crédito, sin beneficio</span>', money(ivaAPagar), pct(pctDe(ivaAPagar)), 'res');
+
+  document.getElementById('fisc-simple').innerHTML =
+    '<thead><tr><th style="text-align:left">Concepto</th><th>Por mes</th><th>%</th></tr></thead><tbody>' +
+    fila('Ingresos <span class="det">todo lo que entra</span>', fmt(ingresos), '') +
+    fila('En blanco (facturados) <span class="det">lo que liquida Galicia</span>', fmt(facturado), pct(pctBlanco)) +
+    fila('IVA débito <span class="det">' + un(iva) + '% sobre lo facturado</span>', fmt(debito), un(iva) + '%') +
+    fila('Compras con factura A <span class="det">neto de IVA — editable</span>',
+      '<input type="number" id="fisc-compras-a" min="0" step="1000" value="' + Math.round(comprasA) +
+      '" onchange="fiscComprasCambiada(this.value)" aria-label="Compras con factura A por mes">', '') +
+    fila('IVA crédito <span class="det">' + un(iva) + '% sobre esas compras</span>',
+      '<span style="color:var(--green)">−' + fmt(credito) + '</span>', un(iva) + '%') +
+    filasIva +
+    fila('IIBB CABA <span class="det">' + un(iibbPct) + '% de lo facturado</span>', fmt(iibb), pct(pctDe(iibb))) +
+    fila('Impuesto a las Ganancias <span class="det">' + (figura === 'sociedad' ? 'SRL / SA' : 'persona humana') + '</span>',
+      fmt(ganancias), pct(pctDe(ganancias))) +
+    fila('Costo fiscal mensual total', fmt(total), pct(pctDe(total)), 'tot') +
+    '</tbody>';
+
+  // ── El pie: de dónde salió cada fila que no es una multiplicación ─────────
+  const partes = [];
+  partes.push('<strong>Ganancias</strong> sale de una utilidad estimada de <strong>' + money(utilidad) +
+    '</strong>: facturado ' + fmt(facturado) + ' − compras con factura A ' + fmt(comprasA) +
+    (personalDeducible > 0 ? ' − personal en blanco ' + fmt(personalDeducible) + ' (de la nómina: bruto por recibo más cargas)' : '') +
+    ' − IIBB ' + fmt(iibb) + ', con la escala de ' + (figura === 'sociedad' ? 'SRL / SA' : 'persona humana') + '.' +
+    (utilidad <= 0 ? ' Con utilidad negativa o cero no hay Ganancias que pagar.' : ''));
+  if (!nom) {
+    partes.push('<strong>Ojo:</strong> sin nómina cargada no se deduce nada de personal, así que Ganancias está SOBREVALUADO.');
+  }
+  partes.push('<strong>Compras con factura A</strong> viene precargado con <strong>' + fmt(_fiscComprasEstimado) +
+    '/mes</strong>: las compras netas a los proveedores que el padrón dice que emiten A. Relevar más proveedores lo sube solo' +
+    (_fiscComprasValor !== null ? ' — ahora manda el valor que tipeaste; borralo para volver al padrón' : '') + '.');
+  if (saldoAFavor > 0) {
+    partes.push('El crédito supera al débito: no hay IVA que pagar y quedan <strong>' + fmt(saldoAFavor) +
+      '</strong> de saldo técnico a favor, que se arrastra al mes siguiente.');
+  }
+  partes.push('El beneficio Monotributo → RI reduce el saldo de IVA un 50% el 1er año, 30% el 2º y 10% el 3º — el año se elige en Supuestos. ' +
+    'El modelo asume que al facturar, el IVA se agrega sobre el precio de hoy (el cliente de tarjeta paga ' + un(iva) +
+    '% más y tu neto queda igual) y que se factura sólo lo que liquida Galicia. Alícuotas, escalas y beneficio: confirmalos con tu contador.');
+  document.getElementById('fisc-simple-pie').innerHTML = partes.join('<br><br>');
+
+  // ── El origen de los supuestos, y el botón de relevar con su zanahoria ────
   document.getElementById('fisc-origen').innerHTML = [
-    'Personal deducible: ' + (nomOrigen
-      ? pct(d.parametros.pctPersonalDeducible * 100) + ' — sale de la nómina, persona por persona ' +
-        '(' + nomOrigen.dotacion + ' cargadas, ' + nomOrigen.conRecibo + ' con recibo' +
-        (nomOrigen.socios ? ', ' + nomOrigen.socios + ' socio' + (nomOrigen.socios > 1 ? 's' : '') : '') + ')'
-      : 'sin nómina, se asume todo deducible'),
+    'Personal en blanco: ' + (nom
+      ? fmt(nom.costoDeducibleARS) + '/mes — de la nómina, persona por persona (' + nom.dotacion + ' cargadas, ' +
+        nom.conRecibo + ' con recibo' + (nom.socios ? ', ' + nom.socios + ' socio' + (nom.socios > 1 ? 's' : '') : '') + ')'
+      : 'sin nómina cargada'),
     d.origen.proveedoresEnPadron + ' proveedores en el padrón',
     d.origen.renglonesDeCompras + ' renglones de Compras para calibrar',
   ].join(' · ');
 
-  renderKpisFiscales(d, figura, iAum, prom, escDe);
-
-  // ── Quién paga el IVA con ese aumento ─────────────────────────────────────
-  const titEsc = document.getElementById('fisc-esc-tit');
-  if (titEsc) titEsc.textContent = aumento === 0 ? 'Con la carta congelada' : 'Con la carta +' + aumento + '%';
-
-  const pAum = prom(m => escDe(m, iAum).pctSobreIngresos[figura].esperado);
-  const totAum = prom(m => escDe(m, iAum).totalFiscal[figura].esperado);
-  const resign = prom(m => escDe(m, iAum).ventas.netoResignado);
-  const sube = prom(m => escDe(m, iAum).ventas.aumentoAlCliente);
-  const hoyCuota = prom(m => escDe(m, iAum).hoyMonotributo.cuota);
-
-  const tarjeta = (tit, val, color, sub) =>
-    '<div class="fisc-esc-card">' +
-      '<div class="tit">' + tit + '</div>' +
-      '<div class="val"' + (color ? ' style="color:' + color + '"' : '') + '>' + val + '</div>' +
-      '<div class="sub">' + sub + '</div></div>';
-
-  document.getElementById('fisc-escenarios').innerHTML =
-    tarjeta('Costo fiscal', pct(pAum), 'var(--orange)',
-      fmt(totAum) + '/mes entre IVA, IIBB y Ganancias. Hoy pagás ' + fmt(hoyCuota) + '/mes de monotributo.') +
-    tarjeta('Lo paga el cliente', sube > 0 ? fmt(sube) : '—', sube > 0 ? 'var(--green)' : '',
-      sube > 0 ? 'Por mes, sobre la venta de hoy. La carta sube ' + aumento + '%.'
-               : 'La carta no se toca: el cliente paga lo mismo que hoy.') +
-    tarjeta('Lo pone tu margen', resign > 0 ? fmt(resign) : '—', resign > 0 ? 'var(--red)' : '',
-      resign > 0 ? 'Por mes. Es la parte del IVA que no trasladaste y sale de tu margen.'
-                 : 'Trasladaste todo: tu ingreso neto queda igual al de hoy.');
-
-  const pieAum = document.getElementById('fisc-aumento-pie');
-  if (pieAum) {
-    const un = v => String(Math.round(v * 10) / 10);
-    const faltan = Math.max(0, _fiscIvaVentas - aumento);
-    pieAum.innerHTML = aumento === 0
-      ? 'Con la carta congelada, el precio de hoy pasa a ser precio final con IVA adentro: tu ingreso neto baja a precio ÷ ' +
-        (1 + _fiscIvaVentas / 100).toFixed(2) + ' y el IVA entero sale de tu margen. Es el piso.'
-      : 'Para que el ingreso neto quede igual al de hoy la carta tiene que subir ' + un(_fiscIvaVentas) + '%' +
-        (faltan > 0 ? ', así que con +' + aumento + '% todavía absorbés ' + un(faltan) + ' puntos.' : '.');
-  }
-
-  // ── Mes a mes, sobre el mismo aumento que el número de arriba ─────────────
-  //
-  // Tiene que seguir al slider: con el titular en +10% y la tabla clavada en 0%
-  // la pantalla mostraría dos porcentajes distintos para la misma pregunta, y el
-  // que se cree es siempre el que está más cerca.
-  const subMeses = document.getElementById('fisc-meses-sub');
-  if (subMeses) subMeses.textContent = aumento === 0 ? 'con la carta congelada' : 'con la carta +' + aumento + '%';
-  const filas = d.meses.map(m => {
-    const e = m.escenarios[iAum].declarado;
-    return '<tr><td>' + m.mes + '</td>' +
-      '<td>' + fmt(e.ventas.cobradoHoy) + '</td>' +
-      '<td>' + fmt(e.iva.debito) + '</td>' +
-      '<td style="color:var(--green)">−' + fmt(e.iva.credito.esperado) + '</td>' +
-      '<td>' + fmt(e.iva.aPagar.esperado) + '</td>' +
-      '<td>' + fmt(e.iibb.sobreBaseDeclarada) + '</td>' +
-      '<td>' + fmt(e.ganancias[figura].esperado) + '</td>' +
-      '<td style="font-weight:600">' + fmt(e.totalFiscal[figura].esperado) + '</td>' +
-      '<td style="color:var(--orange);font-weight:600">' + pct(e.pctSobreIngresos[figura].esperado) + '</td></tr>';
-  }).join('');
-  // Cada encabezado explica su columna. "Débito" y "Crédito" son las dos que más
-  // se leen al revés: no son plata que entra y sale, son el IVA de las ventas y
-  // el de las compras, y el que se paga es la resta.
-  document.getElementById('fisc-meses').innerHTML =
-    '<thead><tr>' +
-    thTip('Mes', 'El mes al que la operación PERTENECE (columna Mes del libro), no el día en que se ' +
-      'pagó. Una compra en cuotas es gasto del mes en que se compró, aunque se termine de pagar tres ' +
-      'meses después.') +
-    thTip('Ventas Galicia', 'Lo que liquida Galicia: tarjeta de crédito, débito y QR. Es la base que ' +
-      'elegiste declarar, no todo lo que vende el bar — la diferencia está al pie de la pantalla.') +
-    thTip('Débito', 'El IVA de tus VENTAS. No es plata tuya: la cobrás al cliente por cuenta de ARCA y ' +
-      'la tenés que entregar. Sube si subís la carta, porque el cliente paga más.') +
-    thTip('Crédito', 'El IVA de tus COMPRAS, que se resta del débito. Sólo se computa el que viene en ' +
-      'factura A: lo que te facturan B o C no se recupera. Es el valor esperado de un rango, porque ' +
-      'depende de proveedores que todavía no están relevados.') +
-    thTip('IVA a pagar', 'Débito menos crédito: lo que efectivamente se deposita. Si el crédito fuera ' +
-      'mayor no te devuelven la diferencia — queda como saldo técnico a favor y se arrastra al mes ' +
-      'siguiente.') +
-    thTip('IIBB', 'Ingresos Brutos de CABA sobre el ingreso neto declarado. Se paga por VENDER, haya ' +
-      'ganancia o no: es el impuesto que no perdona un mes malo.') +
-    thTip('Ganancias', 'El impuesto sobre la utilidad, con la escala de la figura elegida arriba ' +
-      '(persona humana o SRL). Usa la base proporcional: ingresos declarados contra gastos prorrateados ' +
-      'al mismo porcentaje.') +
-    thTip('Total', 'IVA + IIBB + Ganancias del mes. Es el número contra el que se compara la cuota de ' +
-      'monotributo que pagás hoy.') +
-    thTip('% caja', 'El total dividido por lo que el cliente paga. El denominador es la plata que pasa ' +
-      'por la caja y no el neto, porque ésa es la que se siente — aunque de esa plata el IVA no sea tuyo.') +
-    '</tr></thead><tbody>' + filas + '</tbody>';
-
-  renderCategoriasFiscales(d, figura, iAum);
-
-  // ── Las tres bases de Ganancias ───────────────────────────────────────────
-  const bases = ref.escenarios[iAum].declarado.ganancias.bases;
-  const orden = [['soloDeclarado', 'Sólo lo declarado'], ['proporcional', 'Proporcional'], ['todoDeclarado', 'Declarando todo']];
-  // Cada encabezado explica qué es su columna. Son cuatro palabras que en un
-  // impuesto significan algo muy distinto de lo que significan en la caja, y
-  // esta tabla es justamente la que decide sobre qué se paga Ganancias.
-  document.getElementById('fisc-bases').innerHTML =
-    '<thead><tr>' +
-    thTip('Base', 'Cómo se arma la declaración: qué ventas se declaran y contra qué gastos. ' +
-      'Las tres filas son las tres formas posibles, y la primera está tachada porque no es un escenario ' +
-      'sino un error de método.') +
-    thTip('Ingresos netos', 'Lo que entra, sin IVA: la venta declarada dividida por ' +
-      (1 + _fiscIvaVentas / 100).toFixed(2) + '. No es lo que pasa por la caja — de eso, el IVA no es tuyo.') +
-    thTip('Gastos deducibles', 'Lo que se puede restar, que es menos que lo que sale: del sueldo sólo la ' +
-      'parte por recibo, el equipamiento amortizado en 5 años en vez de entero, y al resto se le saca el IVA ' +
-      'que se recupera como crédito fiscal.') +
-    thTip('Utilidad', 'Ingresos netos menos gastos deducibles. Es la base sobre la que corre la escala de ' +
-      'Ganancias. Si da negativa no hay Ganancias que pagar, pero casi siempre significa que la base está ' +
-      'mal armada.') +
-    '</tr></thead><tbody>' +
-    orden.map(([k, lbl]) => {
-      const b = bases[k];
-      // Una utilidad negativa se muestra en rojo y con signo. En la fila
-      // inválida es el argumento entero: no da "cero", da pérdida.
-      const col = b.utilidad < 0 ? 'var(--red)' : '';
-      return '<tr class="' + (b.valida ? '' : 'fisc-base-invalida') + '">' +
-        '<td>' + lbl + '</td><td>' + fmt(b.ingresos) + '</td>' +
-        '<td>' + fmt(b.gastos) + '</td>' +
-        '<td style="color:' + col + '">' + (b.utilidad < 0 ? '−' + fmt(-b.utilidad) : fmt(b.utilidad)) + '</td></tr>';
-    }).join('') + '</tbody>';
-  document.getElementById('fisc-bases-pie').textContent = bases.soloDeclarado.motivo +
-    ' · El número de arriba usa la base proporcional. ' + bases.proporcional.motivo;
-
-  // ── Oportunidades e incógnitas ────────────────────────────────────────────
-  const ops = ref.oportunidades || [];
-  const opSub = document.getElementById('fisc-op-sub');
-  if (opSub) opSub.textContent = 'montos anualizados' + (n > 1 ? ' · sobre ' + ref.mes : '');
-  document.getElementById('fisc-oportunidades').innerHTML = ops.length
-    ? '<thead><tr><th>Proveedor</th><th style="text-align:left">Qué pasa</th><th>Gasto/mes</th><th>Por año</th></tr></thead><tbody>' +
-      ops.slice(0, 12).map(o => {
-        const esPerdida = o.tipo === 'sin-factura-a';
-        return '<tr><td>' + escapeHtml(o.proveedor || '') + '</td>' +
-          '<td style="text-align:left">' +
-            '<span class="fisc-tag ' + (esPerdida ? 'no' : 'dud') + '">' +
-            (esPerdida ? 'no da factura A' : 'sin relevar') + '</span> ' +
-            '<span style="color:var(--text-muted);font-size:11px">' + escapeHtml(o.accion || '') + '</span></td>' +
-          '<td>' + fmt(o.gasto) + '</td>' +
-          '<td style="font-weight:600;color:' + (esPerdida ? 'var(--red)' : 'var(--text-muted)') + '">' +
-            fmt(o.perdidoAnualizado || o.enJuegoAnualizado || 0) + '</td></tr>';
-      }).join('') + '</tbody>'
-    : '<tbody><tr><td style="color:var(--text-muted)">Nada que reclamar: todo el gasto está relevado.</td></tr></tbody>';
-
-  // ── Advertencias ──────────────────────────────────────────────────────────
-  const advs = ref.escenarios[iAum].declarado.advertencias || [];
-  const decl = ref.escenarios[iAum].declarado.declaracion;
-  const fijas = [
-    { texto: 'Las alícuotas de IIBB y las escalas de Ganancias son un punto de partida para poder correr el modelo, no una afirmación sobre la ley vigente. Confirmalas con tu contador.', impactoARS: 0 },
-    { texto: 'Las retenciones que Galicia ya te hace están contabilizadas enteras como comisión. Parte puede ser retención de IVA o IIBB, que es pago a cuenta y no costo. Eso sólo lo dice la liquidación de Galicia.', impactoARS: 0 },
-    { texto: 'Estás declarando el ' + pct(decl.pctDeclarado) + ' de lo que vendés. La diferencia son ' +
-        fmt(decl.brechaAnualizadaARS) + ' por año que este cálculo deja afuera a propósito, por decisión tuya.', impactoARS: 0 },
-  ];
-  document.getElementById('fisc-advertencias').innerHTML =
-    advs.concat(fijas).map(a => '<div class="fisc-adv">' + escapeHtml(a.texto) +
-      (a.impactoARS ? ' <strong>' + fmt(a.impactoARS) + '/mes</strong>' : '') + '</div>').join('');
-}
-
-// ─── Los tres impuestos, uno al lado del otro ────────────────────────────────
-//
-// El número de arriba dice cuánto; éste dice DE QUÉ. Importa porque son tres
-// palancas distintas y una sola de las tres se puede mover rápido:
-//
-//   · IVA       → se baja consiguiendo factura A. Es el que tiene acción hoy.
-//   · IIBB      → no se baja con nada. Grava la venta, haya ganancia o no.
-//   · Ganancias → se baja deduciendo, y la palanca es la NÓMINA: lo que se paga
-//                 fuera de recibo es costo real del bar y no se puede deducir.
-//
-// Los tres porcentajes salen del mismo denominador (la plata que pasa por la
-// caja), así que suman el del titular y se leen uno contra otro.
-function renderKpisFiscales(d, figura, iAum, prom, escDe) {
-  const cont = document.getElementById('fisc-kpis');
-  if (!cont) return;
-
-  const ref = d.meses[d.meses.length - 1];
-  const pi = m => escDe(m, iAum).porImpuesto;
-
-  const iva  = { ars: prom(m => pi(m).iva.ars.esperado),  pct: prom(m => pi(m).iva.pct.esperado) };
-  const iibb = { ars: prom(m => pi(m).iibb.ars),          pct: prom(m => pi(m).iibb.pct) };
-  const gan  = { ars: prom(m => pi(m).ganancias[figura].ars.esperado),
-                 pct: prom(m => pi(m).ganancias[figura].pct.esperado) };
-
-  // El IVA es el único de los tres con rango: depende de cuánto crédito se
-  // recupere, que es lo que todavía no se sabe. Se dice.
-  const ivaMin = prom(m => pi(m).iva.ars.min);
-  const ivaMax = prom(m => pi(m).iva.ars.max);
-  const credito = prom(m => escDe(m, iAum).iva.credito.esperado);
-  const debito = prom(m => escDe(m, iAum).iva.debito);
-  const nom = d.origen && d.origen.nomina;
-
-  const tarjeta = (tit, ars, pc, color, sub) =>
-    '<div class="fisc-kpi-card" style="border-left-color:' + color + '">' +
-      '<div class="tit">' + tit + '</div>' +
-      '<div class="val" style="color:' + color + '">' + fmt(ars) + '</div>' +
-      '<div class="pc">' + pct(pc) + ' de la caja</div>' +
-      '<div class="sub">' + sub + '</div></div>';
-
-  cont.innerHTML =
-    tarjeta('IVA a pagar', iva.ars, iva.pct, 'var(--orange)',
-      'Débito ' + fmt(debito) + ' menos crédito ' + fmt(credito) + '. Entre ' + fmt(ivaMin) +
-      ' y ' + fmt(ivaMax) + ' según cuántos proveedores den factura A: es el único que podés bajar relevando.') +
-    tarjeta('IIBB', iibb.ars, iibb.pct, 'var(--red)',
-      'Sobre el ingreso neto declarado. Se paga por vender, haya ganancia o no — no hay nada que hacer para bajarlo.') +
-    tarjeta('Ganancias', gan.ars, gan.pct, 'var(--blue)',
-      (figura === 'sociedad' ? 'SRL / SA' : 'Persona humana') + ', sobre la base proporcional. ' +
-      (nom
-        ? 'Se deduce el ' + pct(d.parametros.pctPersonalDeducible * 100) + ' del costo del personal: ' +
-          nom.dotacion + ' personas en la nómina, ' + fmt(nom.sinRespaldoARS) + '/mes sin respaldo.'
-        : 'Sin nómina cargada se asume todo el personal deducible, así que este número está SUBVALUADO.'));
-
-  const sub = document.getElementById('fisc-kpi-sub');
-  if (sub) sub.textContent = (iAum === 0 ? 'con la carta congelada' : 'con la carta +' + iAum + '%') +
-    ' · ' + (figura === 'sociedad' ? 'SRL / SA' : 'persona humana');
-
-  const pie = document.getElementById('fisc-kpi-pie');
-  if (!pie) return;
-  const total = iva.ars + iibb.ars + gan.ars;
-  pie.innerHTML =
-    'Los tres suman <strong>' + fmt(total) + ' por mes</strong>, que es el número de arriba. ' +
-    (nom
-      ? 'La parte de Ganancias se apoya en la nómina: de ' + fmt(nom.costoTotalARS) + ' de costo laboral ' +
-        'se deducen ' + fmt(nom.costoDeducibleARS) + ' (bruto por recibo más cargas), y ' +
-        fmt(nom.sinRespaldoARS) + ' se pagan por fuera y no se pueden deducir. ' +
-        'Blanquear esa parte bajaría Ganancias en cerca de ' +
-        fmt(nom.sinRespaldoARS * (ref.escenarios[iAum].declarado.tasaMarginalGanancias[figura] || 0)) +
-        ' por mes, sin contar lo que costaría blanquearla.' +
-        (nom.incompletos && nom.incompletos.length
-          ? ' Ojo: ' + nom.incompletos.map(escapeHtml).join(', ') +
-            ' no tienen el legajo completo y quedan afuera de esta cuenta.'
-          : '')
-      : 'No hay nómina cargada, así que se asume que todo el personal se puede deducir. ' +
-        'Eso deja Ganancias por debajo de lo real.');
-}
-
-// ─── Qué le hace el régimen a cada categoría de compra ───────────────────────
-//
-// El total dice cuánto, no dónde. Pasar a RI no le hace lo mismo a la mercadería
-// que a los sueldos que a una heladera, y las tres viven dentro del mismo
-// número: la mercadería recupera IVA, el sueldo no tiene IVA que recuperar y la
-// heladera lo recupera entero pero se deduce en cinco años.
-//
-// Con varios meses elegidos se promedia: es una lista y no un número, así que no
-// alcanza con el `prom` de arriba — se suman las categorías mes a mes y se
-// divide por la cantidad de meses. Una categoría que aparece en julio y no en
-// agosto queda dividida por dos igual, que es lo correcto: el promedio mensual
-// de algo que se compró una sola vez en dos meses es la mitad.
-function renderCategoriasFiscales(d, figura, iAum) {
-  const tabla = document.getElementById('fisc-categorias');
-  const pie = document.getElementById('fisc-cat-pie');
-  if (!tabla) return;
-
-  const n = d.meses.length;
-  const acc = {};
-  const CAMPOS = ['gasto', 'aumentoProveedores', 'gastoRI', 'ivaPagado', 'creditoRecuperado',
-    'ahorroNeto', 'ivaPerdido', 'sinRelevar', 'deducibleGanancias'];
-  for (const m of d.meses) {
-    for (const c of (m.impactoCategorias || [])) {
-      if (!acc[c.nombre]) {
-        acc[c.nombre] = { nombre: c.nombre, tratamiento: c.tratamiento, nota: c.nota };
-        for (const k of CAMPOS) acc[c.nombre][k] = 0;
-      }
-      for (const k of CAMPOS) acc[c.nombre][k] += Number(c[k]) || 0;
-    }
-  }
-  const cats = Object.values(acc)
-    .map(c => { for (const k of CAMPOS) c[k] = c[k] / n; return c; })
-    .sort((a, b) => b.gasto - a.gasto);
-
-  if (!cats.length) {
-    tabla.innerHTML = '<tbody><tr><td style="color:var(--text-muted)">No hay gasto para desglosar en estos meses.</td></tr></tbody>';
-    if (pie) pie.textContent = '';
-    return;
-  }
-
-  // Cuánto vale un peso deducido en este escenario. Es lo único de esta tabla que
-  // depende del aumento de carta —la carta mueve la utilidad y la utilidad puede
-  // cambiar de tramo— y por eso viaja por escenario y no por mes.
-  const tasa = d.meses.reduce((s, m) => {
-    const t = m.escenarios[iAum].declarado.tasaMarginalGanancias;
-    return s + ((t && Number(t[figura])) || 0);
-  }, 0) / n;
-
-  // Sólo se etiquetan las EXCEPCIONES. Una etiqueta en cada fila es ruido, y
-  // "recupera IVA" sobre Insumos —una categoría que sí genera crédito, pero cuyo
-  // proveedor no factura A— se lee como que se recuperó algo, con un cero en la
-  // columna de al lado. La fila sin etiqueta es el tratamiento común; lo que hay
-  // que marcar es dónde el régimen hace otra cosa.
-  const ETIQUETA = {
-    'sin-credito': { txt: 'sin crédito', cls: 'no' },
-    'amortiza':    { txt: 'amortiza', cls: 'dud' },
-  };
-
-  const filas = cats.map(c => {
-    const ahorroGan = c.deducibleGanancias * tasa;
-    // El costo que la compra tiene DE VERDAD bajo RI: lo que se le paga al
-    // proveedor con el aumento incluido, menos el IVA que vuelve, menos lo que
-    // se ahorra en Ganancias por deducirla.
-    const costoReal = c.gastoRI - c.creditoRecuperado - ahorroGan;
-    const et = ETIQUETA[c.tratamiento];
-    return '<tr title="' + escapeHtml(c.nota || '') + '">' +
-      '<td style="text-align:left">' + escapeHtml(c.nombre) +
-        (et ? ' <span class="fisc-tag ' + et.cls + '">' + et.txt + '</span>' : '') + '</td>' +
-      '<td>' + fmt(c.gasto) + '</td>' +
-      '<td style="color:' + (c.aumentoProveedores > 0 ? 'var(--red)' : 'var(--text-muted)') + '">' +
-        (c.aumentoProveedores > 0 ? '+' + fmt(c.aumentoProveedores) : '—') + '</td>' +
-      '<td style="color:' + (c.creditoRecuperado > 0 ? 'var(--green)' : 'var(--text-muted)') + '">' +
-        (c.creditoRecuperado > 0 ? '−' + fmt(c.creditoRecuperado) : '—') + '</td>' +
-      '<td style="font-weight:600;color:' +
-        (c.ahorroNeto > 1 ? 'var(--green)' : (c.ahorroNeto < -1 ? 'var(--red)' : 'var(--text-muted)')) + '">' +
-        (Math.abs(c.ahorroNeto) < 1 ? '—' : (c.ahorroNeto > 0 ? '−' : '+') + fmt(Math.abs(c.ahorroNeto))) + '</td>' +
-      '<td style="color:' + (c.ivaPerdido > 0 ? 'var(--red)' : 'var(--text-muted)') + '">' +
-        (c.ivaPerdido > 0 ? fmt(c.ivaPerdido) : '—') + '</td>' +
-      '<td style="color:var(--text-muted)">' + (c.sinRelevar > 0 ? fmt(c.sinRelevar) : '—') + '</td>' +
-      '<td>' + fmt(c.deducibleGanancias) + '</td>' +
-      '<td style="font-weight:600">' + fmt(costoReal) + '</td></tr>';
-  }).join('');
-
-  const tot = k => cats.reduce((s, c) => s + c[k], 0);
-  const ahorroTot = tot('deducibleGanancias') * tasa;
-  const neto = tot('ahorroNeto');
-  const filaTot = '<tr class="row-total"><td style="text-align:left">TOTAL</td>' +
-    '<td>' + fmt(tot('gasto')) + '</td>' +
-    '<td style="color:var(--red)">+' + fmt(tot('aumentoProveedores')) + '</td>' +
-    '<td style="color:var(--green)">−' + fmt(tot('creditoRecuperado')) + '</td>' +
-    '<td style="color:' + (neto > 0 ? 'var(--green)' : 'var(--red)') + '">' +
-      (neto > 0 ? '−' : '+') + fmt(Math.abs(neto)) + '</td>' +
-    '<td style="color:var(--red)">' + fmt(tot('ivaPerdido')) + '</td>' +
-    '<td style="color:var(--text-muted)">' + fmt(tot('sinRelevar')) + '</td>' +
-    '<td>' + fmt(tot('deducibleGanancias')) + '</td>' +
-    '<td>' + fmt(tot('gastoRI') - tot('creditoRecuperado') - ahorroTot) + '</td></tr>';
-
-  tabla.innerHTML =
-    '<thead><tr>' +
-    thTip('Categoría', 'La columna J del libro. La etiqueta dice cómo trata el régimen a esa categoría: ' +
-      'sin crédito (sueldos e impuestos) o amortizada en vez de deducirse entera. Sin etiqueta es el ' +
-      'tratamiento común.') +
-    thTip('Gasto/mes', 'Lo que se gastó HOY, con impuestos adentro, promediado sobre los meses elegidos. ' +
-      'No incluye retiros, cambios entre cajas ni ajustes de arqueo: no son compras.') +
-    thTip('Sube el proveedor', 'Lo que te cobraría de más el proveedor que hoy no factura, cuando empiece ' +
-      'a hacerlo: no va a absorber el IVA, te lo va a agregar al precio. 21% en general, 10,5% para El ' +
-      'Ekeko y las verdulerías. El que YA te factura A no sube nada: su precio ya lo tiene adentro.') +
-    thTip('Recuperás', 'El crédito fiscal que volvería como RI. Es el valor esperado de un rango: depende ' +
-      'de qué proveedores emiten factura A, y se angosta a medida que se releva el padrón.') +
-    thTip('Ahorro real', 'Lo que recuperás MENOS lo que te cobran de más por recuperarlo. Es la única ' +
-      'columna que dice si el crédito es plata o es un espejismo: para el proveedor que empieza a ' +
-      'facturar da cero, porque el aumento y el crédito son el mismo número.') +
-    thTip('Se pierde', 'IVA que pagás y no vuelve, porque el proveedor no factura A. Se arregla ' +
-      'negociando o cambiando de proveedor.') +
-    thTip('Sin relevar', 'Gasto de proveedores sobre los que todavía no se sabe si dan factura A. No es ' +
-      'una pérdida: es la parte del número que se puede mejorar preguntando, y preguntar es gratis.') +
-    thTip('Deducible', 'Lo que se puede restar en Ganancias, sobre el precio CON el aumento. Del sueldo, ' +
-      'sólo la parte por recibo; del equipamiento, la cuota de amortización del mes; del resto, el gasto ' +
-      'neto de IVA.') +
-    thTip('Costo real', 'Lo que la compra te cuesta de verdad como RI: lo que le pagás al proveedor con ' +
-      'el aumento, menos el IVA que recuperás, menos lo que ahorrás en Ganancias por deducirla.') +
-    '</tr></thead><tbody>' + filas + filaTot + '</tbody>';
-
-  if (pie) {
-    const perdido = tot('ivaPerdido');
-    const enJuego = tot('sinRelevar');
-    const aum = tot('aumentoProveedores');
-    const cred = tot('creditoRecuperado');
-    pie.innerHTML =
-      (aum > 0
-        ? '<strong>El crédito no es todo ganancia.</strong> De los ' + fmt(cred) + ' que volverían, ' +
-          fmt(aum) + ' se los lleva el aumento de los proveedores que hoy no facturan: cuando les pidas ' +
-          'factura no van a absorber el IVA, te lo van a agregar al precio (21%, o 10,5% para El Ekeko y ' +
-          'las verdulerías). El ahorro real es <strong>' + fmt(neto) + ' por mes</strong>, y sale casi ' +
-          'todo de los proveedores que YA te facturan. '
-        : '') +
-      'El <strong>costo real</strong> usa una tasa marginal de Ganancias del <strong>' + pct(tasa * 100) +
-      '</strong> (' + (figura === 'sociedad' ? 'SRL / SA' : 'persona humana') +
-      ', sobre la utilidad de este escenario): es lo que se ahorra el próximo peso deducido, no la tasa promedio. ' +
-      (perdido > 0
-        ? 'Se pierden <strong>' + fmt(perdido) + ' por mes</strong> de IVA que se paga y no vuelve. '
-        : '') +
-      (enJuego > 0
-        ? 'Y hay <strong>' + fmt(enJuego) + ' por mes</strong> de gasto sin relevar: hasta saber si esos ' +
-          'proveedores dan factura A, la fila no está cerrada.'
-        : '');
-  }
+  const enJuego = prom(m => Number(m.credito && m.credito.cobertura && m.credito.cobertura.incertidumbreARS) || 0);
+  const btn = document.getElementById('fisc-btn-relevar');
+  if (btn) btn.textContent = enJuego > 0
+    ? 'Relevar proveedores — ' + fmt(enJuego) + '/mes de crédito en juego'
+    : 'Ver proveedores';
 }
 
 // ─── Cuánto se puede descontar por cobrar en efectivo ────────────────────────
 //
 // La misma mesa deja plata distinta según cómo pague. Por Galicia se lleva
-// comisión de posnet, IVA débito, IIBB y Ganancias; en efectivo y sin declarar,
-// nada de eso. La diferencia es lo que se puede resignar como descuento sin
-// terminar peor — y da mucho más de lo que la intuición dice.
+// comisión de posnet, IVA débito (ya con la reducción del beneficio), IIBB y
+// Ganancias; en efectivo y sin declarar, nada de eso. La diferencia es lo que
+// se puede resignar como descuento sin terminar peor.
+//
+// Es UN porcentaje y UN ejemplo, no una tabla: los cuatro costos son
+// proporcionales a la venta, así que el equilibrio da prácticamente igual en
+// cualquier mesa — la tabla de cinco percentiles repetía cinco veces el mismo
+// número (decisión de Gonzalo, 01/09/2026).
 //
 // Pega al servidor aparte de la simulación principal porque necesita las mesas
 // REALES del mes (Fudo), y cargar Fudo en la ruta principal haría más lenta la
@@ -13198,15 +12677,15 @@ function renderCategoriasFiscales(d, figura, iAum) {
 let _fiscDesc = null;
 
 async function cargarDescuentoEfectivo() {
-  const tabla = document.getElementById('fisc-descuento');
-  if (!tabla) return;
+  const kpi = document.getElementById('fisc-desc-kpi');
+  if (!kpi) return;
   const figura = (document.getElementById('fisc-figura') || {}).value || 'personaHumana';
   const num = id => { const el = document.getElementById(id); const n = Number(el && el.value); return Number.isFinite(n) ? n : 0; };
-  const pcts = ((document.getElementById('fisc-desc-pcts') || {}).value || '10, 15')
-    .split(',').map(s => Number(String(s).replace('%', '').trim()))
-    .filter(n => Number.isFinite(n) && n > 0 && n < 100);
+  const anio = Number((document.getElementById('fisc-anio-ri') || {}).value) || 0;
 
-  tabla.innerHTML = '<tbody><tr><td style="color:var(--text-muted)">Calculando sobre las mesas del mes…</td></tr></tbody>';
+  kpi.innerHTML = '<div class="fisc-nota">Calculando sobre las mesas del mes…</div>';
+  const pie = document.getElementById('fisc-desc-pie');
+  if (pie) pie.innerHTML = '';
   try {
     const { data } = await api('/api/fiscal/descuento-efectivo', {
       method: 'POST',
@@ -13215,44 +12694,43 @@ async function cargarDescuentoEfectivo() {
         // sobre mesas concretas y mezclar dos meses mezcla precios de carta.
         mes: _fiscMesesSel.length ? _fiscMesesSel[_fiscMesesSel.length - 1] : undefined,
         figura,
-        parametros: { iibbPct: num('fisc-iibb'), cuotaMonotributoMensual: num('fisc-cuota') },
-        descuentos: pcts.length ? pcts : [10, 15],
+        parametros: {
+          iibbPct: num('fisc-iibb'),
+          cuotaMonotributoMensual: num('fisc-cuota'),
+          // El beneficio también alcanza al IVA marginal de una venta más
+          // declarada: sin esto, el equilibrio sale más alto de lo real y el
+          // descuento que "empata" en realidad pierde plata.
+          reduccionIvaPct: Number(_fiscReduccion[anio]) || 0,
+        },
+        descuentos: [10],
       }),
     });
     _fiscDesc = data;
     renderDescuentoEfectivo();
   } catch (e) {
-    tabla.innerHTML = '<tbody><tr><td style="color:var(--text-muted)">No se pudo calcular: ' +
-      escapeHtml(e.message) + '</td></tr></tbody>';
+    kpi.innerHTML = '<div class="fisc-nota">No se pudo calcular: ' + escapeHtml(e.message) + '</div>';
   }
 }
 
 function renderDescuentoEfectivo() {
   const d = _fiscDesc;
-  const tabla = document.getElementById('fisc-descuento');
-  if (!d || !tabla) return;
+  const kpi = document.getElementById('fisc-desc-kpi');
+  if (!d || !kpi) return;
   if (!d.filas || !d.filas.length) {
-    tabla.innerHTML = '<tbody><tr><td style="color:var(--text-muted)">No hay mesas de ese mes en Fudo para analizar.</td></tr></tbody>';
+    kpi.innerHTML = '<div class="fisc-nota">No hay mesas de ese mes en Fudo para analizar.</div>';
     return;
   }
 
   const s = d.supuestos, o = d.origen || {};
-  const pcts = d.filas[0].descuentos.map(x => x.pct);
-
   const sub = document.getElementById('fisc-desc-sub');
   if (sub) sub.textContent = o.mesasAnalizadas
     ? o.mesasAnalizadas.toLocaleString('es-AR') + ' mesas reales de ' + d.mes +
       ' · ticket promedio ' + fmt(o.ticketPromedioARS)
     : 'sobre mesas reales de ' + d.mes;
 
-  // ── El titular: el descuento de equilibrio ────────────────────────────────
-  //
-  // Es prácticamente el mismo para todas las mesas, porque los cuatro costos son
-  // proporcionales a la venta. Se muestra el de la mesa típica y se dice que el
-  // resto está cerquísima, en vez de repetir cinco veces el mismo número.
+  // El equilibrio es un porcentaje de la venta y los cuatro costos son
+  // proporcionales a ella, así que la mesa típica (la mediana) habla por todas.
   const tipica = d.filas[Math.floor(d.filas.length / 2)];
-  const eqMin = Math.min(...d.filas.map(f => f.pctEquilibrio));
-  const eqMax = Math.max(...d.filas.map(f => f.pctEquilibrio));
 
   const tarjeta = (tit, val, color, txt) =>
     '<div class="fisc-kpi-card" style="border-left-color:' + color + '">' +
@@ -13260,289 +12738,37 @@ function renderDescuentoEfectivo() {
       '<div class="val" style="color:' + color + '">' + val + '</div>' +
       '<div class="sub">' + txt + '</div></div>';
 
-  const kpi = document.getElementById('fisc-desc-kpi');
-  if (kpi) {
-    kpi.innerHTML =
-      tarjeta('Podés descontar hasta', pct(tipica.pctEquilibrio), 'var(--green)',
-        'Ahí te da exactamente lo mismo cobrar en efectivo con descuento que cobrar por Galicia. ' +
-        'Por debajo ganás, por encima perdés. Va de ' + pct(eqMin) + ' a ' + pct(eqMax) +
-        ' según la mesa.') +
-      tarjeta('De cada $100 por Galicia', fmt(tipica.electronico.queda / tipica.ventaARS * 100),
-        'var(--orange)',
-        'te quedan, después de comisión, IVA, IIBB y Ganancias. El resto se va antes de que lo toques.') +
-      tarjeta('Hoy cobrás electrónico', o.pctElectronico != null ? pct(o.pctElectronico) : '—',
-        'var(--blue)',
-        o.pctElectronico != null
-          ? fmt(o.ventaGaliciaARS) + '/mes por Galicia. Eso es lo que está en juego si movés parte a efectivo.'
-          : 'sin dato de la proporción electrónica del mes.');
-  }
+  kpi.innerHTML =
+    tarjeta('Podés descontar hasta', pct(tipica.pctEquilibrio), 'var(--green)',
+      'Ahí da exactamente lo mismo cobrar en efectivo con descuento que cobrar por Galicia. ' +
+      'Por debajo ganás, por encima perdés. Es un porcentaje de la venta, así que vale para cualquier mesa.') +
+    tarjeta('De cada $100 por Galicia', fmt(tipica.electronico.queda / tipica.ventaARS * 100), 'var(--orange)',
+      'te quedan, después de comisión, IVA, IIBB y Ganancias. El resto se va antes de que lo toques.') +
+    tarjeta('Hoy cobrás electrónico', o.pctElectronico != null ? pct(o.pctElectronico) : '—', 'var(--blue)',
+      o.pctElectronico != null
+        ? fmt(o.ventaGaliciaARS) + '/mes por Galicia. Eso es lo que está en juego si movés parte a efectivo.'
+        : 'sin dato de la proporción electrónica del mes.');
 
-  // ── La tabla ──────────────────────────────────────────────────────────────
-  const cols = pcts.map(p =>
-    thTip('Con −' + p + '%', 'Lo que cobrás en efectivo con ' + p + '% de descuento, y cuánto ganás o ' +
-      'perdés contra haber cobrado esa misma mesa por Galicia. En verde conviene el efectivo.'));
-
-  const filas = d.filas.map(f => {
-    const e = f.electronico;
-    return '<tr>' +
-      '<td style="text-align:left">' + escapeHtml(f.etiqueta || '') + '</td>' +
-      '<td style="font-weight:600">' + fmt(f.ventaARS) + '</td>' +
-      '<td style="color:var(--text-muted)">−' + fmt(e.comision) + '</td>' +
-      '<td style="color:var(--text-muted)">−' + fmt(e.ivaDebito) + '</td>' +
-      '<td style="color:var(--text-muted)">−' + fmt(e.iibb) + '</td>' +
-      '<td style="color:var(--text-muted)">−' + fmt(e.ganancias) + '</td>' +
-      '<td style="font-weight:600;color:var(--orange);white-space:nowrap">' + fmt(e.queda) +
-        ' <span class="val-accent" style="font-size:11px;font-weight:400">' + pct(e.pctQueda) + '</span></td>' +
-      f.descuentos.map(x =>
-        '<td style="white-space:nowrap">' + fmt(x.cobras) +
-        ' <span style="font-size:11px;font-weight:600;color:' +
-        (x.conviene ? 'var(--green)' : 'var(--red)') + '">' +
-        (x.ganasVsElectronico >= 0 ? '+' : '−') + fmt(Math.abs(x.ganasVsElectronico)) + '</span></td>').join('') +
-      '<td style="font-weight:600;color:var(--green)">' + pct(f.pctEquilibrio) + '</td></tr>';
-  }).join('');
-
-  tabla.innerHTML =
-    '<thead><tr>' +
-    thTip('Mesa', 'Cinco mesas reales del mes, elegidas por percentil de lo que gastaron: no son montos ' +
-      'redondos inventados. Los extremos de la distribución son una mesa de doce y una copa suelta, y ' +
-      'por eso se toman percentiles y no la más cara y la más barata.') +
-    thTip('Venta', 'Lo que paga el cliente hoy, con IVA adentro.') +
-    thTip('Comisión', 'Lo que se lleva Galicia por el posnet. Sale del libro: es el bruto menos el neto ' +
-      'acreditado del mes, que el cierre ya escribe como gasto Financieros. En efectivo es cero.') +
-    thTip('IVA', 'El IVA débito de esa venta. Lo cobrás al cliente y se lo entregás a ARCA. Sólo si la ' +
-      'declarás.') +
-    thTip('IIBB', 'Ingresos Brutos sobre el neto de esa venta. Sólo si la declarás.') +
-    thTip('Ganancias', 'El impuesto sobre la UTILIDAD de esa mesa —el neto menos lo que costó la ' +
-      'mercadería—, a la tasa marginal de la figura elegida arriba. Si la mesa diera pérdida no hay ' +
-      'impuesto, y por eso puede dar cero.') +
-    thTip('Te queda', 'Lo que realmente entra al bolsillo cobrando esa mesa por Galicia, y qué porcentaje ' +
-      'de la venta es. Todo lo demás se fue antes de que lo tocaras.') +
-    cols.join('') +
-    thTip('Equilibrio', 'El descuento que deja exactamente lo mismo por los dos caminos. Descontá menos ' +
-      'que esto y ganás; más, y perdés. Es casi igual para todas las mesas porque los cuatro costos son ' +
-      'proporcionales a la venta.') +
-    '</tr></thead><tbody>' + filas + '</tbody>';
-
-  // ── El pie ────────────────────────────────────────────────────────────────
-  const d10 = tipica.descuentos[0];
-  document.getElementById('fisc-desc-pie').innerHTML =
-    'Sobre la <strong>' + escapeHtml((tipica.etiqueta || '').toLowerCase()) + '</strong> de ' +
-    fmt(tipica.ventaARS) + ': cobrada por Galicia te quedan <strong>' + fmt(tipica.electronico.queda) +
-    '</strong>; con <strong>' + d10.pct + '% de descuento en efectivo</strong> cobrás ' + fmt(d10.cobras) +
-    ' y te quedás con <strong>' + fmt(d10.ganasVsElectronico) + ' más</strong> que por Galicia.' +
+  const ej = tipica.descuentos && tipica.descuentos[0];
+  const pieEl = document.getElementById('fisc-desc-pie');
+  if (!pieEl || !ej) return;
+  pieEl.innerHTML =
+    '<strong>Un ejemplo</strong> — la mesa típica del mes, de ' + fmt(tipica.ventaARS) +
+    ': cobrada por Galicia te quedan <strong>' + fmt(tipica.electronico.queda) + '</strong> (se van ' +
+    fmt(tipica.electronico.comision) + ' de comisión, ' + fmt(tipica.electronico.ivaDebito) + ' de IVA, ' +
+    fmt(tipica.electronico.iibb) + ' de IIBB y ' + fmt(tipica.electronico.ganancias) + ' de Ganancias). Con <strong>' +
+    ej.pct + '% de descuento en efectivo</strong> cobrás ' + fmt(ej.cobras) + ' y te quedás con <strong>' +
+    fmt(Math.abs(ej.ganasVsElectronico)) + (ej.ganasVsElectronico >= 0 ? ' más' : ' menos') + '</strong> que por Galicia.' +
     '<br><br>' +
     'Supuestos: comisión de posnet <strong>' + pct(s.comisionPct) + '</strong> (' + escapeHtml(o.comisionDe || '') +
-    '), IVA <strong>' + pct(s.ivaVentasPct) + '</strong>, IIBB <strong>' + pct(s.iibbPct) +
-    '</strong>, CMV <strong>' + pct(s.cmvPct) + '</strong> (' + escapeHtml(o.cmvDe || '') +
+    '), IVA <strong>' + pct(s.ivaVentasPct) + '</strong>' +
+    (Number(s.reduccionIvaPct) > 0 ? ' con la reducción del ' + pct(s.reduccionIvaPct) + ' ya aplicada' : '') +
+    ', IIBB <strong>' + pct(s.iibbPct) + '</strong>, CMV <strong>' + pct(s.cmvPct) + '</strong> (' + escapeHtml(o.cmvDe || '') +
     ') y tasa marginal de Ganancias <strong>' + pct(s.tasaMarginalGananciasPct) + '</strong>. ' +
-    'El costo de la mercadería NO se resta de las dos columnas porque es el mismo plato se cobre como se ' +
-    'cobre: entra sólo donde de verdad cambia, que es la utilidad sobre la que corre Ganancias.' +
-    '<br><br>' +
-    '<strong>Lo que este número no dice.</strong> Como Responsable Inscripto hay que facturar todas las ' +
-    'ventas. Esto mide la consecuencia económica del supuesto que ya usa toda la pantalla —declarar sólo ' +
-    'lo que liquida Galicia—, no es una recomendación ni asesoramiento fiscal. Y hay dos costos que no ' +
-    'están en la tabla: el efectivo hay que contarlo, guardarlo y moverlo, y un descuento publicado es ' +
-    'difícil de sacar después.';
-}
-
-// ─── El mes entero como RI: el estado de resultados, concepto por concepto ───
-//
-// La pantalla contesta "cuánto me cuesta el régimen". Ésta contesta la que viene
-// después: "y entonces cómo me habría ido". Es el mismo estado de resultados de
-// siempre —lo que entra, lo que sale por categoría, lo que queda— con cada línea
-// pasada por el régimen nuevo y al lado de lo que es hoy.
-//
-// Dos decisiones sobre qué se muestra, y las dos cambian el número:
-//
-// 1) Se muestra la operación REAL, no la declaración: TODAS las ventas y TODOS
-//    los costos. Un dashboard describe el negocio; la declaración es otra cosa y
-//    ya tiene su propia tabla ("Sobre qué se calcula Ganancias"). Los impuestos
-//    que se restan abajo sí salen de la base declarada, que es el supuesto de
-//    negocio elegido, y la fila lo dice.
-//
-// 2) La venta total como RI se escala con el mismo factor que el módulo aplicó a
-//    la venta declarada (`precioFinalRI / cobradoHoy`), en vez de recalcular el
-//    traslado acá. Si la carta sube 10%, sube para todo el mundo — y la cuenta
-//    que lo traduce vive en regimen-fiscal.js, no en dos lugares.
-function abrirPylFiscal() {
-  if (!_fiscData || !_fiscData.meses || !_fiscData.meses.length) {
-    showToast('Todavía no hay nada calculado');
-    return;
-  }
-  document.getElementById('fiscal-pyl-overlay').classList.add('open');
-  renderPylFiscal();
-}
-
-function cerrarPylFiscal() {
-  document.getElementById('fiscal-pyl-overlay').classList.remove('open');
-}
-
-function renderPylFiscal() {
-  const d = _fiscData;
-  if (!d || !d.meses || !d.meses.length) return;
-  const figura = (document.getElementById('fisc-figura') || {}).value || 'personaHumana';
-  const ref = d.meses[d.meses.length - 1];
-  const slider = document.getElementById('fisc-aumento');
-  const iAum = Math.max(0, Math.min(ref.escenarios.length - 1, Math.round(Number(slider && slider.value) || 0)));
-
-  const n = d.meses.length;
-  const prom = sel => d.meses.reduce((s, m) => s + sel(m), 0) / n;
-  const e = m => m.escenarios[iAum].declarado;
-
-  // ── Ingresos ──────────────────────────────────────────────────────────────
-  const ventaHoy = prom(m => e(m).declaracion.ventaTotalHoy);
-  // El factor de aumento sale del propio módulo, no se recalcula.
-  const factor = prom(m => {
-    const v = e(m).ventas;
-    return v.cobradoHoy > 0 ? v.precioFinalRI / v.cobradoHoy : 1;
-  });
-  const ventaRI = ventaHoy * factor;
-  const debito = prom(m => e(m).iva.debito);
-
-  // ── Costos por categoría ──────────────────────────────────────────────────
-  // El costo RI de una categoría es lo que le pagás al proveedor CON el aumento
-  // por empezar a facturar, menos el crédito que vuelve. Para el que hoy no
-  // factura los dos son el mismo número y la línea no se mueve — que es
-  // exactamente lo que el supuesto de aumento existe para mostrar.
-  const acc = {};
-  for (const m of d.meses) {
-    for (const c of (m.impactoCategorias || [])) {
-      if (!acc[c.nombre]) acc[c.nombre] = { nombre: c.nombre, gasto: 0, gastoRI: 0, credito: 0, aumento: 0 };
-      acc[c.nombre].gasto += Number(c.gasto) || 0;
-      acc[c.nombre].gastoRI += Number(c.gastoRI) || 0;
-      acc[c.nombre].credito += Number(c.creditoRecuperado) || 0;
-      acc[c.nombre].aumento += Number(c.aumentoProveedores) || 0;
-    }
-  }
-  const cats = Object.values(acc)
-    .map(c => ({ nombre: c.nombre, hoy: c.gasto / n, ri: (c.gastoRI - c.credito) / n,
-                 aumento: c.aumento / n, credito: c.credito / n }))
-    .sort((a, b) => b.hoy - a.hoy);
-  const costoHoy = cats.reduce((s, c) => s + c.hoy, 0);
-  const costoRI = cats.reduce((s, c) => s + c.ri, 0);
-  const aumentoTot = cats.reduce((s, c) => s + c.aumento, 0);
-
-  // ── Impuestos ─────────────────────────────────────────────────────────────
-  //
-  // OJO CON EL IVA, que es donde esta tabla se contaba dos veces. El crédito ya
-  // está descontado ARRIBA, adentro del costo de cada categoría — que es
-  // justamente lo que hace legible el desglose por concepto. Así que acá abajo
-  // va el DÉBITO solo, no el "IVA a pagar": restar débito−crédito después de
-  // haber bajado los costos por el crédito lo descuenta dos veces y hunde el
-  // resultado en el monto del IVA entero.
-  //
-  // La resta de los dos —débito menos crédito— es el "IVA a pagar" de la tarjeta
-  // de arriba, y el pie de la tabla lo dice para que los dos números se puedan
-  // atar en vez de parecer que se contradicen.
-  const cuota = prom(m => e(m).hoyMonotributo.cuota);
-  const ivaPagar = prom(m => e(m).iva.aPagar.esperado);
-  const credito = cats.reduce((s, c) => s + c.credito, 0);
-  const iibb = prom(m => e(m).iibb.sobreBaseDeclarada);
-  const gan = prom(m => e(m).ganancias[figura].esperado);
-  const impHoy = cuota;
-  const impRI = debito + iibb + gan;
-
-  const opHoy = ventaHoy - costoHoy;
-  const opRI = ventaRI - costoRI;
-  const finHoy = opHoy - impHoy;
-  const finRI = opRI - impRI;
-
-  // ── La tabla ──────────────────────────────────────────────────────────────
-  const money = v => (v < 0 ? '−' + fmt(-v) : fmt(v));
-  // El % sobre el ingreso, al lado de cada importe y chico — la misma lectura
-  // que la columna "% s/ing" del resumen mensual, que es donde ya se leen estos
-  // números. Cada columna se mide contra SU propio ingreso: comparar el costo RI
-  // contra la venta de hoy daría un porcentaje que no describe ningún mes.
-  const pctDe = (v, base) => (base > 0 ? pct(Math.abs(v / base) * 100) : '—');
-  // Sin `nowrap` en la celda: el importe y el % quedan al lado mientras haya
-  // ancho, y cuando no lo hay el % baja solo en vez de empujar la tabla al
-  // scroll horizontal. El `nowrap` va sólo dentro del % para que no se parta él.
-  const celda = (v, base) =>
-    '<td>' + money(v) + ' <span class="val-accent pyl-pct">' + pctDe(v, base) + '</span></td>';
-
-  const fila = (lbl, hoy, ri, cls, nota) => {
-    const dif = ri - hoy;
-    const col = Math.abs(dif) < 1 ? 'var(--text-muted)' : (dif > 0 ? 'var(--green)' : 'var(--red)');
-    return '<tr class="' + (cls || '') + '">' +
-      '<td>' + escapeHtml(lbl) + (nota ? ' <span style="color:var(--text-muted);font-size:11px">' + nota + '</span>' : '') + '</td>' +
-      celda(hoy, ventaHoy) +
-      celda(ri, ventaRI) +
-      '<td style="color:' + col + '">' + (Math.abs(dif) < 1 ? '—' : (dif > 0 ? '+' : '') + money(dif)) + '</td></tr>';
-  };
-  const seccion = txt => '<tr class="sec"><td colspan="4">' + txt + '</td></tr>';
-
-  document.getElementById('fisc-pyl').innerHTML =
-    '<thead><tr>' +
-    thTip('Concepto', 'Cada línea del mes, con el mismo criterio que el resto de la app: el gasto se ' +
-      'agrupa por la columna J del libro y no incluye retiros, cambios entre cajas ni ajustes de arqueo.') +
-    // Encabezados cortos: el `?` ya explica cada columna, y "Hoy (monotributo)"
-    // pedía 171px de ancho mínimo él solo — con cuatro columnas eso era la
-    // diferencia entre entrar y tener que scrollear de costado.
-    thTip('Hoy', 'Lo que efectivamente pasó, bajo monotributo: la plata que entró, la que salió con ' +
-      'impuestos adentro, y la cuota fija como único costo fiscal. El % chico al lado es sobre las ventas ' +
-      'del mes, igual que la columna "% s/ing" del resumen mensual.') +
-    thTip('Como RI', 'El mismo mes bajo Responsable Inscripto: el IVA de las ventas deja de ser tuyo, los ' +
-      'proveedores que hoy no facturan te suben el precio y ese IVA vuelve como crédito, y aparecen IVA, ' +
-      'IIBB y Ganancias en lugar de la cuota. El % chico es sobre las ventas de ESTA columna.') +
-    thTip('Diferencia', 'Cuánto cambia cada línea. En verde lo que mejora el resultado, en rojo lo que lo ' +
-      'empeora — no lo que sube o baja: un costo que baja es verde.') +
-    '</tr></thead><tbody>' +
-
-    seccion('Ingresos — lo que paga el cliente') +
-    fila('Ventas del mes', ventaHoy, ventaRI, 'tot',
-      iAum > 0 ? '· la carta sube ' + iAum + '%' : '· la carta no se toca') +
-
-    seccion('Costos — en RI, con el aumento del proveedor y netos del IVA que vuelve') +
-    cats.map(c => fila(c.nombre, -c.hoy, -c.ri, 'sub',
-      c.aumento > 1 ? '· +' + fmt(c.aumento) + ' de aumento, −' + fmt(c.credito) + ' de crédito' : '')).join('') +
-    fila('Total costos', -costoHoy, -costoRI, 'tot') +
-
-    seccion('Resultado antes de impuestos') +
-    fila('Resultado operativo', opHoy, opRI, 'tot') +
-
-    seccion('Impuestos') +
-    fila('Monotributo', -cuota, 0, 'sub') +
-    fila('IVA débito', 0, -debito, 'sub', '· el crédito ya está descontado arriba') +
-    fila('IIBB', 0, -iibb, 'sub') +
-    fila('Ganancias', 0, -gan, 'sub',
-      '· ' + (figura === 'sociedad' ? 'SRL / SA' : 'persona humana')) +
-    fila('Total impuestos', -impHoy, -impRI, 'tot') +
-
-    seccion('') +
-    fila('RESULTADO NETO', finHoy, finRI, 'final') +
-    '</tbody>';
-
-  const meses = d.meses.map(m => m.mes).join(' y ');
-  document.getElementById('fisc-pyl-intro').innerHTML =
-    (n > 1 ? 'Promedio mensual de <strong>' + escapeHtml(meses) + '</strong>. ' : '<strong>' + escapeHtml(meses) + '</strong>. ') +
-    'Es la operación entera —todas las ventas y todos los costos—, no la declaración. ' +
-    'Los impuestos de abajo sí salen de declarar sólo lo que liquida Galicia, que es el supuesto elegido.';
-
-  const nom = d.origen && d.origen.nomina;
-  const caida = finHoy !== 0 ? ((finHoy - finRI) / Math.abs(finHoy)) * 100 : 0;
-  document.getElementById('fisc-pyl-pie').innerHTML =
-    'El resultado del mes pasa de <strong>' + money(finHoy) + '</strong> a <strong>' + money(finRI) + '</strong>' +
-    (finHoy > 0 && finRI < finHoy ? ' — se lleva el ' + pct(caida) + ' de lo que hoy queda.' : '.') +
-    ' Anualizado son <strong>' + money((finRI - finHoy) * 12) + '</strong>.' +
-    // Por qué esta tabla dice un número de impuestos y la tarjeta de arriba dice
-    // otro. Sin esta línea parecen contradecirse, y el que mira se queda sin
-    // saber cuál creer.
-    '<br><br>El IVA está partido en dos lugares a propósito: el crédito (<strong>' + fmt(credito) +
-    '</strong>) baja el costo de cada categoría acá arriba, y el débito (<strong>' + fmt(debito) +
-    '</strong>) va en la línea de impuestos. La resta de los dos es <strong>' + fmt(ivaPagar) +
-    '</strong>, que es el IVA a pagar de la tarjeta de arriba: el mismo número, mostrado donde se siente.' +
-    (aumentoTot > 0
-      ? '<br><br>Los costos de la columna RI incluyen <strong>' + fmt(aumentoTot) + '</strong> de aumento ' +
-        'de los proveedores que hoy no facturan: cuando les pidas factura te van a agregar el IVA al ' +
-        'precio en vez de absorberlo (21%, y 10,5% El Ekeko y las verdulerías). Para esos proveedores el ' +
-        'crédito y el aumento son el mismo número, así que la línea no se mueve — el crédito existe pero ' +
-        'no es plata que ganás.'
-      : '') +
-    (nom
-      ? ' La línea de Ganancias deduce ' + fmt(nom.costoDeducibleARS) + ' de personal sobre ' +
-        fmt(nom.costoTotalARS) + ' de costo laboral real: los ' + fmt(nom.sinRespaldoARS) +
-        ' que se pagan fuera de recibo son costo del bar y no bajan el impuesto.'
-      : ' Sin nómina cargada, Ganancias asume todo el personal deducible y queda por debajo de lo real.');
+    '<strong>Lo que este número no dice:</strong> como Responsable Inscripto hay que facturar todas las ventas — ' +
+    'esto mide la consecuencia económica del supuesto que usa toda la pantalla (declarar sólo lo que liquida ' +
+    'Galicia), no es una recomendación ni asesoramiento fiscal. Y el efectivo hay que contarlo, guardarlo y ' +
+    'moverlo, y un descuento publicado es difícil de sacar después.';
 }
 
 // ─── El padrón: cargar la condición fiscal de cada proveedor ─────────────────

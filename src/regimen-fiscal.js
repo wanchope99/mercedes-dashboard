@@ -104,8 +104,19 @@ const PARAMETROS = {
   //   · Fiscales → un impuesto no genera crédito de otro impuesto.
   categoriasSinCredito: ['Personal', 'Fiscales'],
 
-  // Ingresos Brutos — CABA. Alícuota sobre la base gravada neta.
-  iibbPct: 3,
+  // Ingresos Brutos — CABA. Gastronomía: 3,5% (confirmado por Gonzalo, 01/09/2026).
+  iibbPct: 3.5,
+
+  // ─── Beneficio de transición Monotributo → RI ──────────────────────────────
+  //
+  // El bar es elegible (confirmado por Gonzalo, 01/09/2026): el IVA a pagar
+  // (débito menos crédito) se reduce 50% el primer año como RI, 30% el segundo
+  // y 10% el tercero. Si el saldo del mes da $6M, el primer año se pagan $3M.
+  // La pantalla elige el año; `reduccionIvaPct` es el valor vigente y es el que
+  // usa `descuentoEfectivo` cuando la pantalla no manda otro. Los porcentajes
+  // los valida el contador, como todo lo demás de este archivo.
+  reduccionIvaPorAnio: { 1: 50, 2: 30, 3: 10 },
+  reduccionIvaPct: 50,
 
   // Ganancias. Dos figuras porque todavía no está definida cuál va a ser.
   // Escala progresiva por tramos: se paga `fijo` + `pct` sobre el excedente de `desde`.
@@ -1019,7 +1030,9 @@ function oportunidades({ credito, mesesAnalizados = 1 } = {}) {
 // Sobre una venta de X (precio final, IVA adentro):
 //
 //   comisión      X × comisionPct                        (sólo electrónico)
-//   IVA débito    X − X/(1+a/100)                        (sólo si se declara)
+//   IVA débito    (X − X/(1+a/100)) × (1 − reducción)    (sólo si se declara;
+//                 la reducción es el beneficio Monotributo → RI, que también
+//                 alcanza al IVA marginal de una venta más declarada)
 //   IIBB          neto × iibbPct                         (sólo si se declara)
 //   Ganancias     tasaMarginal × (neto − CMV)            (sólo si se declara)
 //
@@ -1040,6 +1053,7 @@ function descuentoEfectivo({
   const cmv = Math.max(0, Math.min(1, Number(cmvPct) || 0));
   const tm = Math.max(0, Math.min(1, Number(tasaMarginalGanancias) || 0));
   const iibbP = (Number(P.iibbPct) || 0) / 100;
+  const red = Math.max(0, Math.min(100, Number(P.reduccionIvaPct) || 0)) / 100;
 
   const filas = (ventas || []).map(v => {
     const X = Number(v && v.montoARS != null ? v.montoARS : v) || 0;
@@ -1047,7 +1061,7 @@ function descuentoEfectivo({
 
     const comision = X * com;
     const neto = netoDe(X, a);
-    const ivaDebito = X - neto;
+    const ivaDebito = (X - neto) * (1 - red);
     const iibb = neto * iibbP;
     const costoMercaderia = X * cmv;
     // Ganancias grava la utilidad, no la venta. Si la mesa diera pérdida no hay
@@ -1097,6 +1111,7 @@ function descuentoEfectivo({
     filas,
     supuestos: {
       ivaVentasPct: a,
+      reduccionIvaPct: round2(red * 100),
       iibbPct: Number(P.iibbPct) || 0,
       comisionPct: round2(com * 100),
       cmvPct: round2(cmv * 100),
