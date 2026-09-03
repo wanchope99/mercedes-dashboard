@@ -21,6 +21,8 @@ const prov = require('./proveedores');
 const { extraerCabecera, extraerItems } = require('./extractor');
 const cats = require('./proveedores-categorias');
 const provCfg = require('./proveedores-config');
+const convo = require('./compra-conversacion');
+const pedidos = require('./pedidos');
 
 // Umbral de confianza por debajo del cual un campo se considera dudoso.
 const UMBRAL = parseFloat(process.env.PROVEEDORES_UMBRAL_CONFIANZA || '0.6');
@@ -270,7 +272,7 @@ async function procesarFactura(factura, items) {
     categoriaGasto, estadoGasto: '', diasCredito, fecha: factura.fecha || '' };
 }
 
-module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro } = {}) {
+module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, registrarCompra } = {}) {
 
   // Escribe en Movimientos el gasto de una factura ya confirmada.
   //
@@ -322,6 +324,115 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro } 
     const d = base ? new Date(Number(base[1]), Number(base[2]) - 1, Number(base[3])) : new Date();
     d.setDate(d.getDate() + dias);
     return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
+  }
+
+  // ─── Confirmar la compra: acá se escribe todo ─────────────────────────────
+  //
+  // El orden importa y es el de siempre en este repo: primero la plata, después
+  // el pedido, después el análisis. Cada paso que falla se INFORMA y no se
+  // deshace — deshacer la fila del libro sería dejar plata sin registrar, y
+  // callarse sería peor todavía.
+  //
+  //   1. los renglones (se esperan primero para saber cuántos son)
+  //   2. `registrarCompra` → Movimientos y/o el pedido en Pedidos
+  //   3. los renglones del pedido → Pedidos Items
+  //   4. la hoja Compras
+  //   5. el aprendizaje del proveedor
+  //
+  // Sólo el 2 es imprescindible: si falla, no se hizo nada y se dice.
+  async function confirmarCompra(id, conv, req) {
+    if (typeof registrarCompra !== 'function') {
+      return { ok: false, error: 'El servidor no tiene habilitada la carga de compras.' };
+    }
+    const reg = prov.getPendiente(id);
+    const usuario = (reg && reg.origen && reg.origen.usuario) || 'bot';
+    const avisos = [];
+
+    // 1. Los renglones. Para acá casi siempre ya llegaron: la persona tardó más
+    //    en contestar que el modelo en leer.
+    const esp = await prov.esperarItems(id);
+    const items = (esp.ok && reg ? (reg.items || []) : []).filter(it => !it.descartado);
+    if (!esp.ok) avisos.push(`No se pudieron leer los productos (${esp.error}).`);
+    const conItems = { ...conv, itemsCount: items.length };
+
+    // 2. La plata y el pedido, por la MISMA función que usa el formulario de la app.
+    const datos = convo.aDatosDeCompra(conItems, { usuario });
+    const out = await registrarCompra(datos);
+    if (!out.ok) return { ok: false, error: out.error };
+    if (out.aviso) avisos.push(out.aviso);
+
+    // 3. Qué llega, para poder tildarlo en la puerta. Reemplaza al pegado manual
+    //    de la imagen en la app: sale de la misma foto.
+    let itemsPedido = 0;
+    if (out.pedido && items.length) {
+      try {
+        const creados = await pedidos.agregarItems(out.pedido.id, items.map(it => ({
+          producto: it.producto, cantidad: it.cantidad, unidad: it.unidad, nota: '',
+        })), { origen: 'remito' });
+        itemsPedido = (creados || []).length;
+      } catch (e) {
+        avisos.push(`El pedido quedó sin la lista de productos (${e.message}). Se puede pegar el remito desde Operación › Pedidos.`);
+      }
+    }
+
+    // 4. La hoja Compras. Es análisis de costos: que falle no invalida nada de
+    //    lo anterior, pero hay que decirlo porque ese renglón no se reescribe solo.
+    let escritas = 0;
+    if (items.length) {
+      const iva = convo.ivaParaCompras(conItems);
+      for (const it of items) {
+        it.formaPago = datos.medioPago || it.formaPago || '';
+        it.ivaPct = iva.ivaPct;
+        it.ivaIncluido = iva.ivaIncluido;
+      }
+      try {
+        escritas = await prov.appendCompras(items);
+        prov.marcarEscritosYCerrar(id, items);
+      } catch (e) {
+        avisos.push(`Los productos no entraron en la hoja Compras (${e.message}).`);
+      }
+    }
+
+    // 5. Lo que no se vuelve a preguntar. Que falle sólo cuesta una repregunta
+    //    la próxima vez, así que nunca frena nada.
+    try {
+      const aprender = convo.aprendizajeDe(conItems);
+      if (datos.medioPago) aprender['Medio de Pago'] = datos.medioPago;
+      Object.assign(aprender, await fiscalSiCorresponde(conItems));
+      if (Object.keys(aprender).length) {
+        await provCfg.setAtributosProveedor(conItems.proveedor, aprender);
+      }
+    } catch (e) {
+      console.warn('No se pudo guardar el aprendizaje del proveedor:', e.message);
+    }
+
+    prov.marcarResuelto(id);
+
+    return {
+      ok: true, status: 'escrito',
+      resumen: convo.armarResumen(conItems),
+      enElLibro: out.enElLibro,
+      pedido: out.pedido ? { id: out.pedido.id, fecha: out.pedido.fecha, items: itemsPedido } : null,
+      escritas,
+      avisos,
+    };
+  }
+
+  // El padrón fiscal se siembra con lo que ya se preguntó, PERO nunca se pisa
+  // una ficha que cargó una persona: `Fuente Fiscal = 'manual'` es la marca de
+  // relevamiento a mano y gana siempre. Hoy 16 de 20 proveedores están sin
+  // relevar, así que esto es lo que los va llenando solo.
+  async function fiscalSiCorresponde(conv) {
+    const nuevo = convo.fiscalDe(conv);
+    if (!Object.keys(nuevo).length) return {};
+    try {
+      const todos = await provCfg.leerConfig();
+      const ficha = (todos.byNombre || {})[provCfg.norm(conv.proveedor)];
+      if (ficha && String(ficha.fuenteFiscal || '').toLowerCase() === 'manual') return {};
+    } catch (e) { return {}; }
+    // La fecha de acá, no la UTC: después de las 21:00 `toISOString()` ya está
+    // en el día siguiente y el relevamiento quedaría fechado mañana.
+    return { ...nuevo, 'Fuente Fiscal': 'bot', 'Fecha Relevamiento': pedidos.hoyAR() };
   }
 
   const router = express.Router();
@@ -412,15 +523,100 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro } 
         return procesados;
       }));
 
+      // ─── La conversación ────────────────────────────────────────────────
+      //
+      // El bot no decide qué preguntar: acá se arma el estado cruzando lo que
+      // se leyó de la foto con lo que ya se sabe del proveedor, y se devuelve
+      // el primer paso ya dibujado. Ver `compra-conversacion.js`.
+      let cfg = null;
+      try {
+        const todos = await provCfg.leerConfig();
+        cfg = (todos.byNombre || {})[provCfg.norm(provNombre)] || null;
+      } catch (e) { /* sin ficha se pregunta todo, que es lo correcto */ }
+
+      const conv = convo.estadoInicial({
+        factura, cfg, proveedor: provNombre, pendienteId: reg.id,
+        itemsCount: 0,
+      });
+      prov.setConversacion(reg.id, conv);
+
       return res.json({
         ok: true, status: 'pendiente',
         pendienteId: reg.id,
         itemsEnCurso: true,
         factura: reg.factura, items: [],
-        message: 'Leí la factura. Confirmá estos datos y la cargo.',
+        resumen: convo.armarResumen(conv),
+        paso: convo.siguientePaso(conv),
+        message: 'Leí la factura.',
       });
     } catch (err) {
       console.error('Error /api/proveedores/ingest:', err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── Un paso de la conversación ──────────────────────────────────────────
+  //
+  // El bot manda el botón que se tocó y recibe el próximo paso. Toda la lógica
+  // —qué se pregunta, en qué orden, qué se puede omitir— vive en
+  // `compra-conversacion.js`, que es puro y se prueba sin Telegram.
+  //
+  // Cuando no falta nada y se confirma, acá se orquesta la escritura.
+  router.post('/api/proveedores/pendientes/:id/paso', ingestAuth, async (req, res) => {
+    try {
+      await prov.cargarPendientesPersistidos();
+      const id = req.params.id;
+      let conv = prov.getConversacion(id);
+      if (!conv) return res.status(404).json({ ok: false, error: 'Esa factura ya no está en curso. Mandá la foto de nuevo.' });
+
+      const { campo, valor } = req.body || {};
+      const r = convo.aplicarRespuesta(conv, { campo, valor });
+
+      if (r.cancelar) {
+        prov.descartarPendiente(id);
+        return res.json({ ok: true, status: 'cancelado', message: 'Listo, no cargué nada.' });
+      }
+      if (r.error) {
+        // El valor no se guarda: se repregunta el mismo paso con el error arriba.
+        return res.json({
+          ok: true, status: 'pregunta', error: r.error,
+          resumen: convo.armarResumen(conv), paso: convo.siguientePaso(conv),
+        });
+      }
+
+      conv = r.estado;
+      prov.setConversacion(id, conv);
+
+      const paso = convo.siguientePaso(conv);
+      if (paso.tipo !== 'listo') {
+        return res.json({ ok: true, status: 'pregunta', resumen: convo.armarResumen(conv), paso });
+      }
+
+      // Confirmado: se escribe.
+      const out = await confirmarCompra(id, conv, req);
+      return res.json(out);
+    } catch (err) {
+      console.error('Error /api/proveedores/pendientes/:id/paso:', err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ─── Empezar de cero con los proveedores ─────────────────────────────────
+  //
+  // Vacía SÓLO las columnas que fue creando el bot. `dryRun` es el default (el
+  // mismo patrón que POST /api/movimientos/completar-tc): la primera llamada
+  // dice qué se va a borrar y recién la segunda, con `dryRun:false`, borra —
+  // después de dejar una copia de la hoja entera.
+  //
+  // adminOnly y NO ingestAuth: esto no lo dispara el bot.
+  router.post('/api/proveedores/reset-aprendizaje', authMiddleware, soloAdmin, async (req, res) => {
+    try {
+      const dryRun = req.body && req.body.dryRun === false ? false : true;
+      const r = await provCfg.resetAprendizaje({ dryRun });
+      if (!r.ok) return res.status(400).json(r);
+      res.json(r);
+    } catch (err) {
+      console.error('Error /api/proveedores/reset-aprendizaje:', err.message);
       res.status(500).json({ ok: false, error: err.message });
     }
   });
@@ -489,11 +685,17 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro } 
       const reg = prov.getPendiente(req.params.id);
       const ivaProv = reg && reg.factura && reg.factura.iva;  // 'con' | 'sin'
       const fk = (reg && reg.factura) || {};
-      // Si es "sin IVA", la columna % IVA queda 0; si "con", se respeta lo leído.
+      // Si es "sin IVA", las columnas de IVA quedan VACÍAS (no en 0); si "con",
+      // se respeta lo leído. Vacío es "esta compra no da crédito fiscal", que es
+      // lo que significa una factura que no es A — ver el comentario de
+      // `appendCompras`. Hasta el 02/09/2026 acá iba un 0, que en esta hoja
+      // significa "sale cero" y no "no corresponde".
       for (const it of out.listoParaEscribir) {
-        if (ivaProv === 'sin') it.ivaPct = 0;
         if (fk.descuentoIncluido != null) it.descIncluido = fk.descuentoIncluido;
         if (fk.ivaIncluido != null) it.ivaIncluido = fk.ivaIncluido;
+        // Va último a propósito: "sin IVA" gana sobre lo que haya dicho la
+        // cabecera. Si no hay alícuota, decir si está incluida no significa nada.
+        if (ivaProv === 'sin') { it.ivaPct = null; it.ivaIncluido = null; }
       }
       const n = await prov.appendCompras(out.listoParaEscribir);
       // Los renglones que quedaron con dudas NO se pierden: el pendiente sigue

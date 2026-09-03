@@ -1242,6 +1242,159 @@ async function registrarGastoEnLibro(datos = {}) {
   return { ok: true, monto: montoNum, medio, medioRow, categoria: categoria || 'Otros', estado: estadoRow, fecha: fechaRow, mes, registradoEnSesion };
 }
 
+// ─── Una compra de pago único: la fila del libro y el pedido ────────────────────
+//
+// Es el árbol de decisión que estaba adentro de `POST /api/pagos`. Se extrajo el
+// 02/09/2026 para que el bot de Telegram cargue una compra por el MISMO camino
+// que el formulario de la app, en vez de una copia.
+//
+// Que sea una función y no una llamada HTTP del bot a su propia app es lo que
+// evita tener que abrirle `/api/pagos` al token de ingest: esa ruta pide JWT y
+// firma con `req.user.nombre`. Acá el usuario viaja como un parámetro más.
+//
+// NO cubre las compras en cuotas: atar un pedido a una de N cuotas hijas es una
+// pregunta de diseño que nadie contestó, y esa rama sigue viviendo en la ruta.
+//
+// Devuelve siempre un objeto; los errores vienen como { ok:false, status, error }
+// para que quien llama decida qué hacer con ellos.
+async function registrarCompra(datos = {}) {
+  const {
+    fecha, mes, proveedor, categoria, salidaARS, vencimiento, descripcion,
+    estado, usuario,
+  } = datos;
+
+  if (!fecha || !proveedor) {
+    return { ok: false, status: 400, error: 'Fecha y proveedor son obligatorios' };
+  }
+
+  const medioPago = normalizarMedio(datos.medioPago);
+  const estadoRow = estado === 'Pagado' ? 'Pagado' : 'A pagar';
+
+  // Cómo se va a pagar. Si no viene, se deduce del `estado` de siempre.
+  const previsto = pedidos.PAGOS_PREVISTOS.includes(datos.pagoPrevisto)
+    ? datos.pagoPrevisto
+    : (estadoRow === 'Pagado' ? 'pagado' : 'a-pagar');
+
+  const entregaFecha = pedidos.normalizarFecha(datos.entrega && datos.entrega.fecha);
+
+  // "Se paga al recibir" sin entrega no significa nada: no hay puerta donde
+  // pagar, y sobre todo no hay fecha para el vencimiento de la fila.
+  if (previsto === 'al-recibir' && !entregaFecha) {
+    return {
+      ok: false, status: 400,
+      error: 'Para "se paga al recibir" hace falta la fecha de entrega: es el día en que sale la plata.',
+    };
+  }
+
+  const estadoLibro = previsto === 'pagado' ? 'Pagado' : 'A pagar';
+  // El vencimiento de "se paga al recibir" ES el día de la entrega.
+  const vencLibro = previsto === 'al-recibir' ? entregaFecha : (vencimiento || '');
+
+  // Si hay entrega, el id es el del pedido y la fila del libro nace con él
+  // adentro. Si no, uno propio: la columna H se puebla igual, que es lo que
+  // deja rastro de qué cargó esta fila. `_esDeOtroPedido` sólo excluye los que
+  // empiezan con "ped", así que una compra suelta sigue siendo candidata para
+  // el pedido de esa entrega — que es justo lo correcto.
+  const idCompra = entregaFecha
+    ? pedidos.nuevoId()
+    : `cmp${Date.now()}${Math.floor(Math.random() * 100)}`;
+
+  // ─── Cuándo entra al libro (25/08/2026) ──────────────────────────────────
+  //
+  // Un pedido está en Movimientos si se RECIBIÓ o si se PAGÓ. Ni recibido ni
+  // pagado no es un gasto todavía: la mercadería no llegó y la plata no salió.
+  //
+  //   · "ya está pago"        → la plata YA salió: se escribe ahora.
+  //   · "se paga al recibir"  → la escribe la recepción (POST /:id/recibir).
+  //   · "queda a pagar"       → la escribe la recepción.
+  //
+  // Sin entrega no hay recepción que la escriba nunca (un alquiler, un VEP),
+  // así que ahí se escribe ahora como siempre — la regla es de los pedidos.
+  const escribeAhora = previsto === 'pagado' || !entregaFecha;
+
+  // El monto lo validaba `registrarGastoEnLibro` al escribir la fila. Cuando
+  // la fila no se escribe hoy, esa validación no corre, y un pedido sin monto
+  // llega a la puerta sin poder recibirse ("poné cuánto es") justo cuando no
+  // hay tiempo. Se rechaza acá, que es donde se puede corregir.
+  if (!escribeAhora && !(leerMonto(salidaARS) > 0)) {
+    return {
+      ok: false, status: 400,
+      error: 'Poné el monto de la compra: es lo que se va a registrar cuando llegue el pedido.',
+    };
+  }
+
+  let r = { ok: true, registradoEnSesion: false };
+  if (escribeAhora) {
+    r = await registrarGastoEnLibro({
+      facturaId: idCompra,
+      fecha, mes, proveedor, categoria,
+      monto: salidaARS,
+      descripcion,
+      medioPago,
+      estado: estadoLibro,
+      vencimiento: vencLibro,
+      usuario,
+    });
+    if (!r.ok) return { ok: false, status: 400, error: r.error };
+  }
+
+  // ─── Y ahora el pedido ───────────────────────────────────────────────────
+  //
+  // Si la fila YA se escribió y esto falla, la compra está registrada igual:
+  // no se deshace ni se esconde, se dice dónde cargarlo a mano. Deshacer la
+  // fila sería peor —quedaría plata sin registrar— y callarse, peor todavía.
+  //
+  // Si la fila NO se escribió (se paga al recibir, o queda a pagar), el pedido
+  // es lo ÚNICO que se estaba escribiendo: un fallo ahí no deja nada a medias,
+  // y por eso se contesta como error en vez de como "compra registrada".
+  let pedido = null, aviso = '';
+  if (entregaFecha) {
+    try {
+      pedido = await pedidos.crearPedido({
+        id: idCompra,
+        fecha: entregaFecha,
+        proveedor,
+        detalle: descripcion || '',
+        costoEstimado: centavos(leerMonto(salidaARS)),
+        // Con qué categoría y a qué mes entra el gasto cuando llegue. Se
+        // deciden acá y viajan con el pedido: entre la compra y la entrega
+        // pueden pasar días, y la recepción no tiene de dónde sacarlos.
+        categoria,
+        mes,
+        // En la puerta se paga siempre en efectivo del local; es la única
+        // caja que existe ahí. En los otros dos casos, el medio elegido.
+        medioPrevisto: previsto === 'al-recibir' ? CAJA_EFECTIVO : (medioPago || ''),
+        pagoPrevisto: previsto,
+        vence: previsto === 'a-pagar' ? vencLibro : '',
+        origen: 'compra',
+      });
+    } catch (e) {
+      // Sin fila escrita, el pedido era todo: no hay nada a medias que
+      // explicar, hay un error que decir.
+      if (!escribeAhora) {
+        return {
+          ok: false, status: 500,
+          error: `No se pudo anotar el pedido (${e.message}). No se escribió nada: volvé a intentarlo.`,
+        };
+      }
+      aviso = `La compra quedó registrada en Movimientos, pero el pedido NO se pudo crear (${e.message}). `
+        + 'Cargalo a mano desde Operación › Pedidos.';
+    }
+  }
+
+  return {
+    ok: true,
+    message: r.yaExistia ? 'Esa compra ya estaba registrada' : 'Compra registrada correctamente',
+    pedido, aviso,
+    idCompra,
+    // Si es false, el gasto todavía NO está en Movimientos: lo escribe la
+    // recepción. La pantalla lo dice, porque es lo que cambia respecto de lo
+    // que esta pantalla venía haciendo.
+    enElLibro: escribeAhora,
+    registradoEnSesion: r.registradoEnSesion,
+  };
+}
+
 // GET /api/arqueo/fudo-hoy — ventas del día de servicio en curso según Fudo,
 // agrupadas en Efectivo / Mercado Pago / Otros. Para el control de cierre de caja.
 app.get('/api/arqueo/fudo-hoy', authMiddleware, async (req, res) => {
@@ -1886,7 +2039,6 @@ app.post('/api/pagos', authMiddleware, async (req, res) => {
   try {
     const { fecha, mes, proveedor, categoria, salidaARS, vencimiento, descripcion, cuotas, estado } = req.body;
     const medioPago = normalizarMedio(req.body.medioPago);
-    const estadoRow = estado === 'Pagado' ? 'Pagado' : 'A pagar';
     if (!fecha || !proveedor) return res.status(400).json({ ok: false, error: 'Fecha y proveedor son obligatorios' });
     const auth = getAuth();
     const sheets = google.sheets({ version: 'v4', auth });
@@ -1930,135 +2082,27 @@ app.post('/api/pagos', authMiddleware, async (req, res) => {
     }
 
     // ─── Pago único ──────────────────────────────────────────────────────────
-
-    // Cómo se va a pagar. Si no viene (nada más que el modal llama a esta ruta,
-    // pero el fallback es una línea), se deduce del `estado` de siempre.
-    const previsto = pedidos.PAGOS_PREVISTOS.includes(req.body.pagoPrevisto)
-      ? req.body.pagoPrevisto
-      : (estadoRow === 'Pagado' ? 'pagado' : 'a-pagar');
-
-    const entregaFecha = pedidos.normalizarFecha(req.body.entrega && req.body.entrega.fecha);
-
-    // "Se paga al recibir" sin entrega no significa nada: no hay puerta donde
-    // pagar, y sobre todo no hay fecha para el vencimiento de la fila.
-    if (previsto === 'al-recibir' && !entregaFecha) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Para "se paga al recibir" hace falta la fecha de entrega: es el día en que sale la plata.',
-      });
-    }
-
-    const estadoLibro = previsto === 'pagado' ? 'Pagado' : 'A pagar';
-    // El vencimiento de "se paga al recibir" ES el día de la entrega.
-    const vencLibro = previsto === 'al-recibir' ? entregaFecha : (vencimiento || '');
-
-    // Si hay entrega, el id es el del pedido y la fila del libro nace con él
-    // adentro. Si no, uno propio: la columna H se puebla igual, que es lo que
-    // deja rastro de qué cargó esta fila. `_esDeOtroPedido` sólo excluye los que
-    // empiezan con "ped", así que una compra suelta sigue siendo candidata para
-    // el pedido de esa entrega — que es justo lo correcto.
-    const idCompra = entregaFecha
-      ? pedidos.nuevoId()
-      : `cmp${Date.now()}${Math.floor(Math.random() * 100)}`;
-
-    // ─── Cuándo entra al libro (25/08/2026) ──────────────────────────────────
     //
-    // Un pedido está en Movimientos si se RECIBIÓ o si se PAGÓ. Ni recibido ni
-    // pagado no es un gasto todavía: la mercadería no llegó y la plata no salió.
-    //
-    // Hasta esta fecha la compra escribía la fila siempre, en el acto, también
-    // cuando se pagaba al recibir o quedaba a cuenta. Eso ponía en el libro
-    // —y en la sección Pagos, reclamando— entregas que no habían llegado: la de
-    // Thames de esta semana figuraba como deuda sin haber llegado ni pagarse.
-    //
-    // Así que la fila la escribe quien hace verdadero el hecho:
-    //   · "ya está pago"        → la plata YA salió: se escribe ahora.
-    //   · "se paga al recibir"  → la escribe la recepción (POST /:id/recibir).
-    //   · "queda a pagar"       → la escribe la recepción.
-    //
-    // Sin entrega no hay recepción que la escriba nunca (un alquiler, un VEP),
-    // así que ahí se escribe ahora como siempre — la regla es de los pedidos.
-    const escribeAhora = previsto === 'pagado' || !entregaFecha;
-
-    // El monto lo validaba `registrarGastoEnLibro` al escribir la fila. Cuando
-    // la fila no se escribe hoy, esa validación no corre, y un pedido sin monto
-    // llega a la puerta sin poder recibirse ("poné cuánto es") justo cuando no
-    // hay tiempo. Se rechaza acá, que es donde se puede corregir.
-    if (!escribeAhora && !(leerMonto(salidaARS) > 0)) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Poné el monto de la compra: es lo que se va a registrar cuando llegue el pedido.',
-      });
-    }
-
-    let r = { ok: true, registradoEnSesion: false };
-    if (escribeAhora) {
-      r = await registrarGastoEnLibro({
-        facturaId: idCompra,
-        fecha, mes, proveedor, categoria,
-        monto: salidaARS,
-        descripcion,
-        medioPago,
-        estado: estadoLibro,
-        vencimiento: vencLibro,
-        usuario: req.user.nombre,
-      });
-      if (!r.ok) return res.status(400).json({ ok: false, error: r.error });
-    }
-
-    // ─── Y ahora el pedido ───────────────────────────────────────────────────
-    //
-    // Si la fila YA se escribió y esto falla, la compra está registrada igual:
-    // no se deshace ni se esconde, se dice dónde cargarlo a mano. Deshacer la
-    // fila sería peor —quedaría plata sin registrar— y callarse, peor todavía.
-    //
-    // Si la fila NO se escribió (se paga al recibir, o queda a pagar), el pedido
-    // es lo ÚNICO que se estaba escribiendo: un fallo ahí no deja nada a medias,
-    // y por eso se contesta como error en vez de como "compra registrada".
-    let pedido = null, aviso = '';
-    if (entregaFecha) {
-      try {
-        pedido = await pedidos.crearPedido({
-          id: idCompra,
-          fecha: entregaFecha,
-          proveedor,
-          detalle: descripcion || '',
-          costoEstimado: centavos(leerMonto(salidaARS)),
-          // Con qué categoría y a qué mes entra el gasto cuando llegue. Se
-          // deciden acá y viajan con el pedido: entre la compra y la entrega
-          // pueden pasar días, y la recepción no tiene de dónde sacarlos.
-          categoria,
-          mes,
-          // En la puerta se paga siempre en efectivo del local; es la única
-          // caja que existe ahí. En los otros dos casos, el medio elegido.
-          medioPrevisto: previsto === 'al-recibir' ? CAJA_EFECTIVO : (medioPago || ''),
-          pagoPrevisto: previsto,
-          vence: previsto === 'a-pagar' ? vencLibro : '',
-          origen: 'compra',
-        });
-      } catch (e) {
-        // Sin fila escrita, el pedido era todo: no hay nada a medias que
-        // explicar, hay un error que decir.
-        if (!escribeAhora) {
-          return res.status(500).json({
-            ok: false,
-            error: `No se pudo anotar el pedido (${e.message}). No se escribió nada: volvé a intentarlo.`,
-          });
-        }
-        aviso = `La compra quedó registrada en Movimientos, pero el pedido NO se pudo crear (${e.message}). `
-          + 'Cargalo a mano desde Operación › Pedidos.';
-      }
-    }
+    // El árbol entero vive en `registrarCompra`, que es la misma función que usa
+    // el bot de Telegram. Acá sólo se traduce a HTTP.
+    const out = await registrarCompra({
+      fecha, mes, proveedor, categoria, salidaARS, vencimiento, descripcion,
+      estado, medioPago: req.body.medioPago,
+      pagoPrevisto: req.body.pagoPrevisto,
+      entrega: req.body.entrega,
+      usuario: req.user.nombre,
+    });
+    if (!out.ok) return res.status(out.status || 400).json({ ok: false, error: out.error });
 
     res.json({
       ok: true,
-      message: r.yaExistia ? 'Esa compra ya estaba registrada' : 'Compra registrada correctamente',
-      pedido, aviso,
+      message: out.message,
+      pedido: out.pedido, aviso: out.aviso,
       // Si es false, el gasto todavía NO está en Movimientos: lo escribe la
       // recepción. La pantalla lo dice, porque es lo que cambia respecto de lo
       // que esta pantalla venía haciendo.
-      enElLibro: escribeAhora,
-      registradoEnSesion: r.registradoEnSesion,
+      enElLibro: out.enElLibro,
+      registradoEnSesion: out.registradoEnSesion,
     });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
@@ -5157,7 +5201,10 @@ app.get('/api/fudo/probe-stock-single', authMiddleware, adminOnly, async (req, r
 // ─── Módulo Proveedores (ingesta de facturas + dashboard de costos) ───────────
 // registrarGastoEnLibro se inyecta: la escritura en Movimientos necesita
 // normalizarMedio, estadoCaja y clearCache, que viven acá. Ver su comentario.
-app.use(proveedoresRoutes({ authMiddleware, adminOnly, registrarGastoEnLibro }));
+// `registrarCompra` es la misma función que usa POST /api/pagos: es lo que hace
+// que cargar una compra desde el bot y desde el formulario sean el mismo camino,
+// y lo que evita abrirle `/api/pagos` al token de ingest.
+app.use(proveedoresRoutes({ authMiddleware, adminOnly, registrarGastoEnLibro, registrarCompra }));
 
 // ─── Static y fallback ────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, '../public')));

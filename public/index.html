@@ -10979,8 +10979,22 @@ async function openProvNotif() {
 }
 function closeProvNotif() { document.getElementById('prov-notif-overlay').classList.remove('open'); }
 
-const DUDA_LABEL = { categoria:'Categoría', medioPago:'Medio de pago', iva:'¿Con o sin IVA?', producto:'Producto', precio_unitario:'Precio unitario', factor:'¿Cuántas botellas por empaque?' };
-const IVA_OPT_LABEL = { con:'Con IVA', sin:'Sin IVA' };
+// Las 13 dudas que puede devolver el pendiente. Faltaban siete y se mostraban
+// con el nombre crudo del campo ("categoriaGasto", "ivaDeducible"), que es el
+// nombre de una variable y no una pregunta.
+const DUDA_LABEL = {
+  categoria: 'Categoría', medioPago: 'Medio de pago', iva: '¿Con o sin IVA?',
+  producto: 'Producto', precio_unitario: 'Precio unitario',
+  factor: '¿Cuántas botellas por empaque?',
+  ivaDeducible: '¿Sirve para descontar IVA?',
+  descuentoIncluido: '¿El descuento ya está incluido en el precio?',
+  ivaIncluido: '¿El IVA ya está incluido en el precio?',
+  ivaPct: '% de IVA',
+  totalGasto: 'Total del gasto',
+  estadoGasto: '¿Ya está pagada o queda a pagar?',
+  categoriaGasto: 'Categoría del gasto',
+};
+const IVA_OPT_LABEL = { con: 'Con IVA', sin: 'Sin IVA', si: 'Sí', no: 'No' };
 
 function renderDudaControl(domId, d) {
   const lbl = DUDA_LABEL[d.campo] || d.campo;

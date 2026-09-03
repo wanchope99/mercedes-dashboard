@@ -204,7 +204,17 @@ async function appendCompras(items) {
     // K Total: si Descuento Incluido = "S" no se resta el %; si "N" se aplica.
     const total = subtotal ? `=IF(J${fila}="S",H${fila},H${fila}*(1-N(I${fila})/100))` : '';
     const ivaPct = (it.ivaPct != null && it.ivaPct !== '') ? it.ivaPct : '';
-    const ivaIncl = (it.ivaIncluido === true || /^s/i.test(String(it.ivaIncluido||''))) ? 'S' : 'N';
+    // Sin alícuota no hay nada que decir sobre el IVA, así que M también queda
+    // VACÍA — antes se escribía 'N' siempre y eso afirmaba "el IVA no viene
+    // incluido" de una factura que no tiene IVA.
+    //
+    // Vacío significa NO DEDUCIBLE (decisión del dueño, 02/09/2026): una factura
+    // B o C no da crédito fiscal, así que no lleva alícuota ni corresponde
+    // preguntar si está incluida. La fórmula de N aguanta las dos celdas vacías
+    // —`IF(M="S",K,K*(1+N(L)/100))` con L vacío da K— así que el Total Final
+    // sigue siendo la plata que se pagó.
+    const ivaIncl = ivaPct === '' ? ''
+      : ((it.ivaIncluido === true || /^s/i.test(String(it.ivaIncluido || ''))) ? 'S' : 'N');
     // N Total con IVA: si IVA Incluido = "S" no se suma el %; si "N" se aplica.
     const totalConIva = total ? `=IF(M${fila}="S",K${fila},K${fila}*(1+N(L${fila})/100))` : '';
     const otroImpuesto = (it.otroImpuesto != null && it.otroImpuesto !== '') ? it.otroImpuesto : '';
@@ -593,6 +603,27 @@ async function esperarItems(id, ms = 90000) {
 }
 
 function getPendiente(id) { return pendientes.get(id) || null; }
+
+// ─── El estado de la conversación del bot ───────────────────────────────────
+//
+// Vive adentro del pendiente (`reg.conv`) y no en `chat_data` de Telegram, por
+// dos razones. La primera es que el bot es un cliente delgado: no decide nada,
+// así que tampoco tiene por qué recordar nada. La segunda es que `_persistPendiente`
+// serializa el registro entero a la hoja, así que una conversación a medias
+// sobrevive a un reinicio del servidor — lo único que no sobrevive es la lectura
+// de los renglones, que es una promesa en memoria y ya lo dice `esperarItems`.
+function setConversacion(id, conv) {
+  const reg = pendientes.get(id);
+  if (!reg) return null;
+  reg.conv = conv;
+  _persistPendiente(reg);
+  return reg;
+}
+
+function getConversacion(id) {
+  const reg = pendientes.get(id);
+  return (reg && reg.conv) || null;
+}
 function listPendientes() {
   return [...pendientes.values()]
     .filter(p => p.estado === 'pendiente')
@@ -729,6 +760,8 @@ module.exports = {
   getProductosYCategorias, getSerieProducto, nombreVisible,
   crearPendiente, getPendiente, listPendientes, countPendientes,
   aplicarResoluciones, marcarResuelto, descartarPendiente, marcarEscritosYCerrar,
+  // El estado de la conversación del bot, guardado dentro del pendiente.
+  setConversacion, getConversacion,
   // Los renglones llegan después que la cabecera (lectura partida en dos).
   adjuntarItems, esperarItems,
   cargarPendientesPersistidos,

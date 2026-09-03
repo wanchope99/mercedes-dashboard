@@ -30,7 +30,6 @@ mediante un token de servicio (PROVEEDORES_INGEST_TOKEN).
 """
 
 import os
-import re
 import base64
 import logging
 
@@ -86,11 +85,17 @@ async def post_ingest(image_bytes: bytes, mime: str, origen: dict, nombre: str) 
         return r.json()
 
 
-async def post_resolver(pendiente_id: str, resoluciones: dict) -> dict:
+async def post_paso(pendiente_id: str, campo: str, valor) -> dict:
+    """Contesta un paso de la conversación y trae el siguiente.
+
+    El bot no sabe qué se está preguntando ni qué sigue: manda el botón que se
+    tocó y dibuja lo que vuelve. Toda la lógica vive en la app
+    (src/compra-conversacion.js), que es donde se puede probar.
+    """
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as cli:
         r = await cli.post(
-            f"{APP_BASE_URL}/api/proveedores/pendientes/{pendiente_id}/resolver",
-            json={"resoluciones": resoluciones},
+            f"{APP_BASE_URL}/api/proveedores/pendientes/{pendiente_id}/paso",
+            json={"campo": campo, "valor": valor},
             headers=_headers(),
         )
         r.raise_for_status()
@@ -137,255 +142,182 @@ def is_allowed(update: Update) -> bool:
     return username in {u.lower() for u in ALLOWED_USERS}
 
 
-# ── Estado de confirmaciones por chat ─────────────────────────────────
+# ── La conversación de una factura ────────────────────────────────────
+#
+# El bot NO decide qué preguntar. La app manda un "paso" ya armado —el texto,
+# los botones, si acepta que se escriba— y acá sólo se dibuja y se devuelve el
+# botón que se tocó.
+#
+# Antes la lógica estaba partida: la app armaba las dudas y este archivo decidía
+# el orden, armaba la cola y traducía las etiquetas. Se desincronizaron (el
+# mensaje llegó a decir "Leí None producto(s)") y ese es el motivo de que ahora
+# viva de un solo lado. El otro motivo, más terco: en la máquina donde se
+# desarrolla no hay Python, así que lo que quede acá no se puede ni ejecutar.
+#
 # context.chat_data["pend"] = {
-#   "id": pendiente_id,
-#   "items": [...],                # items con dudas devueltos por la app
-#   "cola": [(item_idx, campo), ...],  # dudas a resolver, en orden
-#   "resoluciones": { item_idx: { campo: valor } },
-#   "esperando_texto": (item_idx, campo) | None,
+#   "id":      pendiente_id,
+#   "mid":     message_id de la tarjeta que se va editando,
+#   "campo":   qué se está preguntando ahora,
+#   "botones": [id, ...] en el mismo orden que se dibujaron,
+#   "texto":   True si además se puede contestar escribiendo,
 # }
 
-CAMPO_LABEL = {
-    "categoria": "categoría",
-    "medioPago": "medio de pago",
-    "iva": "¿se paga con o sin IVA?",
-    "producto": "nombre del producto",
-    "precio_unitario": "precio unitario",
-    "factor": "unidades por paquete",
-    "ivaDeducible": "¿Esta factura sirve para descontar IVA?",
-    "descuentoIncluido": "¿El descuento ya viene incluido en el precio?",
-    "ivaIncluido": "¿El IVA ya viene incluido en el precio?",
-    "ivaPct": "% de IVA a imputar",
-    # Del gasto que va al libro (Movimientos), no a Compras.
-    "totalGasto": "total del gasto",
-    "estadoGasto": "¿ya está pagada o queda a pagar?",
-    "categoriaGasto": "categoría del gasto",
-}
-
-# Campos que son un NÚMERO: se parsean antes de mandarlos, y si no se entienden
-# se vuelve a preguntar en vez de guardar basura. El total va acá porque es la
-# plata que entra al libro.
-CAMPOS_NUMERICOS = {"precio_unitario": "precioUnit", "totalGasto": "totalGasto"}
+# callback_data tiene 64 bytes: se manda el ÍNDICE del botón, no su valor. Un
+# nombre de categoría o una fecha ISO no siempre entran, y truncarlos silencioso
+# sería contestar otra cosa.
+CB_PASO = "p"
 
 
-def parse_monto(texto):
-    """Un importe tipeado, con la MISMA regla que src/monto.js y el navegador.
+def _teclado(paso):
+    """Los botones del paso, de a dos por fila."""
+    botones, fila = [], []
+    for n, b in enumerate(paso.get("botones") or []):
+        etiqueta = b.get("label", "")
+        if b.get("sugerido"):
+            etiqueta = "✅ " + etiqueta
+        fila.append(InlineKeyboardButton(etiqueta[:40], callback_data=f"{CB_PASO}|{n}"))
+        if len(fila) == 2:
+            botones.append(fila); fila = []
+    if fila:
+        botones.append(fila)
+    return InlineKeyboardMarkup(botones) if botones else None
 
-    Con los dos separadores manda el de más a la derecha ("93.926,67" y
-    "93,926.67" son los mismos noventa y tres mil). Con uno solo es de miles
-    nada más que si todo el número tiene forma de agrupado ("124.500",
-    "1.700.000"); en cualquier otro caso es decimal ("124500,50",
-    "124500.50", "0,5").
 
-    Antes acá se borraban TODOS los puntos, así que "124500.50" entraba como
-    doce millones y medio. Es una tercera copia de la regla porque el bot es
-    Python y no puede importar el módulo de Node; si se toca una, van las tres.
+def _texto_paso(resp):
+    """El resumen arriba y la pregunta abajo, siempre en el mismo mensaje.
+
+    Que el resumen esté SIEMPRE a la vista es lo que permite contestar sin
+    scrollear: lo que se está por escribir en la planilla no puede quedar dos
+    mensajes atrás.
     """
-    s = re.sub(r"[^0-9.,-]", "", str(texto or "").strip())
-    if not s or s == "-":
-        raise ValueError("vacío")
+    partes = []
+    if resp.get("error"):
+        partes.append(f"⚠️ {resp['error']}")
+    if resp.get("resumen"):
+        partes.append(resp["resumen"])
+    paso = resp.get("paso") or {}
+    if paso.get("texto"):
+        partes.append(paso["texto"])
+    if paso.get("ayuda"):
+        partes.append(f"_{paso['ayuda']}_")
+    return "\n\n".join(p for p in partes if p)
 
-    coma, punto = s.rfind(","), s.rfind(".")
-    decimal = None
-    if coma != -1 and punto != -1:
-        decimal = "," if coma > punto else "."
-    elif coma != -1 or punto != -1:
-        sep = "," if coma != -1 else "."
-        patron = r"^\d{1,3}(,\d{3})+$" if sep == "," else r"^\d{1,3}(\.\d{3})+$"
-        if not re.match(patron, s.lstrip("-")):
-            decimal = sep
 
-    if decimal:
-        corte = s.rfind(decimal)
-        limpio = re.sub(r"[.,]", "", s[:corte]) + "." + re.sub(r"[.,]", "", s[corte + 1:])
+async def dibujar(context, chat_id, resp, mid=None):
+    """Dibuja el paso que mandó la app, editando la tarjeta si ya existe.
+
+    Devuelve el message_id de la tarjeta.
+    """
+    texto = _texto_paso(resp)
+    teclado = _teclado(resp.get("paso") or {})
+    return await _mostrar(context, chat_id, texto, teclado, mid)
+
+
+async def _mostrar(context, chat_id, texto, teclado=None, mid=None):
+    """Manda o edita un mensaje, y si el Markdown no parsea lo manda plano.
+
+    El nombre de un proveedor puede traer `_` o `*` (viene de una factura, no de
+    nosotros) y eso rompe el parser de Telegram. Perder la negrita es aceptable;
+    perder el mensaje entero no.
+    """
+    for modo in ("Markdown", None):
+        try:
+            if mid:
+                m = await context.bot.edit_message_text(
+                    chat_id=chat_id, message_id=mid, text=texto,
+                    parse_mode=modo, reply_markup=teclado)
+            else:
+                m = await context.bot.send_message(
+                    chat_id, texto, parse_mode=modo, reply_markup=teclado)
+            return m.message_id if hasattr(m, "message_id") else mid
+        except Exception as e:
+            # "message is not modified" no es un error que valga reintentar.
+            if "not modified" in str(e).lower():
+                return mid
+            if modo is None:
+                log.warning("No se pudo mostrar el mensaje: %s", e)
+                return mid
+    return mid
+
+
+def _guardar_paso(context, pendiente_id, resp, mid):
+    paso = resp.get("paso") or {}
+    context.chat_data["pend"] = {
+        "id": pendiente_id,
+        "mid": mid,
+        "campo": paso.get("campo") or ("confirmar" if paso.get("tipo") == "confirmar" else ""),
+        "botones": [b.get("id") for b in (paso.get("botones") or [])],
+        "texto": bool(paso.get("permiteTexto")),
+    }
+
+
+def _texto_final(resp):
+    """Lo que quedó escrito. El que sacó la foto tiene que poder verlo sin abrir
+    la app: si el monto o la caja están mal, es AHORA cuando se da cuenta."""
+    lineas = ["✅ *Cargado.*", ""]
+    if resp.get("resumen"):
+        lineas.append(resp["resumen"])
+        lineas.append("")
+    if resp.get("enElLibro"):
+        lineas.append("📒 Quedó anotado en Movimientos.")
     else:
-        limpio = re.sub(r"[.,]", "", s)
-
-    return round(float(limpio), 2)
-
-# Índice especial para las dudas de FACTURA (medio de pago, IVA): -1.
-FACTURA_IDX = -1
-
-
-def construir_cola(items, factura=None):
-    cola = []
-    # Primero las dudas de FACTURA (medio de pago, IVA) — se preguntan una vez.
-    for d in (factura or {}).get("dudas", []):
-        cola.append((FACTURA_IDX, d["campo"]))
-    for it in items:
-        for d in it.get("dudas", []):
-            cola.append((it["idx"] if "idx" in it else items.index(it), d["campo"]))
-    return cola
+        lineas.append("📒 Todavía NO entra en Movimientos: se anota cuando llegue el pedido.")
+    ped = resp.get("pedido")
+    if ped:
+        n = ped.get("items") or 0
+        detalle = f" con {n} producto{'s' if n != 1 else ''} para tildar" if n else ""
+        lineas.append(f"📦 Pedido anotado para el {ped.get('fecha', '')}{detalle}.")
+    if resp.get("escritas"):
+        lineas.append(f"🧾 {resp['escritas']} renglón/es en la hoja Compras.")
+    for a in (resp.get("avisos") or []):
+        lineas.append(f"⚠️ {_md(str(a))}")
+    return "\n".join(lineas)
 
 
-def duda_factura(factura, campo):
-    for d in (factura or {}).get("dudas", []):
-        if d["campo"] == campo:
-            return d
-    return None
-
-
-def duda_de(pend, item_idx, campo):
-    if item_idx == FACTURA_IDX:
-        fact = pend.get("factura") or {}
-        d = duda_factura(fact, campo)
-        if d:
-            # "it" sintético para mostrar contexto del proveedor
-            return {"producto": "(toda la factura)", "proveedor": fact.get("proveedor", "?")}, d
-        return None, None
-    items = pend["items"]
-    for it in items:
-        idx = it.get("idx", items.index(it))
-        if idx == item_idx:
-            for d in it.get("dudas", []):
-                if d["campo"] == campo:
-                    return it, d
-    return None, None
-
-
-async def preguntar_siguiente(update_or_query, context):
-    """Toma la próxima duda de la cola y la pregunta. Si no quedan, resuelve."""
-    pend = context.chat_data.get("pend")
-    if not pend:
-        return
-
-    # Asegurar idx en items
-    for i, it in enumerate(pend["items"]):
-        it.setdefault("idx", i)
-
-    if not pend["cola"]:
-        await finalizar(update_or_query, context)
-        return
-
-    item_idx, campo = pend["cola"][0]
-    it, d = duda_de(pend, item_idx, campo)
-    if it is None:
-        pend["cola"].pop(0)
-        await preguntar_siguiente(update_or_query, context)
-        return
-
-    prod = it.get("producto") or "(producto ilegible)"
-    prov = it.get("proveedor") or "?"
-    label = CAMPO_LABEL.get(campo, campo)
-    sugerido = d.get("sugerido")
-    sug_txt = f"\nSugerencia: *{sugerido}*" if sugerido else ""
-    fuente = d.get("fuente", "")
-    fuente_txt = {
-        "proveedor-historico": " (según compras previas de este proveedor)",
-        "producto-historico": " (según compras previas de este producto)",
-        "keywords": " (estimado por el nombre)",
-        "baja-confianza": " (la imagen no era clara)",
-        "plazo-no-es-medio": " (la factura dice \"Contado\", que es un plazo, no el medio real)",
-        "proveedor-config": " (medio habitual de este proveedor)",
-    }.get(fuente, "")
-
-    # Si la app mandó una "pregunta" explícita, usarla tal cual (más clara).
-    pregunta = d.get("pregunta")
-    if pregunta:
-        texto = f"🧾 *{prov}*\n{pregunta}{sug_txt}{fuente_txt}"
-    else:
-        texto = (
-            f"🧾 *{prov}* — {prod}\n"
-            f"Necesito confirmar la *{label}*.{sug_txt}{fuente_txt}"
-        )
-
-    opciones = d.get("opciones", [])
-    chat = _chat(update_or_query)
-
-    if opciones:
-        # Botones inline. callback_data: "r|<item_idx>|<campo>|<n>" donde n indexa opciones.
-        botones, fila = [], []
-        for n, op in enumerate(opciones):
-            etiqueta = ("✅ " + op) if op == sugerido else op
-            fila.append(InlineKeyboardButton(etiqueta[:40], callback_data=f"r|{item_idx}|{campo}|{n}"))
-            if len(fila) == 2:
-                botones.append(fila); fila = []
-        if fila:
-            botones.append(fila)
-        botones.append([InlineKeyboardButton("⏭️ Dejar para la app", callback_data=f"skip|{item_idx}|{campo}|0")])
-        # Guardar opciones para resolver el callback
-        pend.setdefault("opciones", {})[f"{item_idx}|{campo}"] = opciones
-        await context.bot.send_message(chat, texto, parse_mode="Markdown",
-                                       reply_markup=InlineKeyboardMarkup(botones))
-    else:
-        # Campo de texto libre (producto / precio): esperamos el próximo mensaje.
-        pend["esperando_texto"] = (item_idx, campo)
-        await context.bot.send_message(
-            chat,
-            texto + "\n\nEscribí el valor correcto (o mandá «-» para dejarlo a la app).",
-            parse_mode="Markdown",
-        )
-
-
-def _chat(update_or_query):
-    if hasattr(update_or_query, "message") and update_or_query.message:
-        return update_or_query.message.chat_id
-    if hasattr(update_or_query, "effective_chat") and update_or_query.effective_chat:
-        return update_or_query.effective_chat.id
-    return update_or_query.callback_query.message.chat_id
-
-
-async def finalizar(update_or_query, context):
-    pend = context.chat_data.get("pend")
-    chat = _chat(update_or_query)
-    if not pend:
-        return
+async def avanzar(context, chat_id, pendiente_id, campo, valor):
+    """Contesta un paso y dibuja lo que venga: otra pregunta, o el resultado."""
+    pend = context.chat_data.get("pend") or {}
+    mid = pend.get("mid")
     try:
-        resp = await post_resolver(pend["id"], pend["resoluciones"])
+        resp = await post_paso(pendiente_id, campo, valor)
+    except httpx.HTTPStatusError as e:
+        await _mostrar(context, chat_id, f"❌ La app respondió con error ({e.response.status_code}).", None, mid)
+        context.chat_data.pop("pend", None)
+        return
     except Exception as e:
-        log.exception("Error al resolver")
-        await context.bot.send_message(chat, f"❌ Error al guardar: {e}")
+        log.exception("Error avanzando la conversación")
+        await _mostrar(context, chat_id, f"❌ Error: {e}", None, mid)
+        context.chat_data.pop("pend", None)
+        return
+
+    if not resp.get("ok"):
+        await _mostrar(context, chat_id, f"❌ {resp.get('error', 'No se pudo cargar.')}", None, mid)
+        context.chat_data.pop("pend", None)
         return
 
     status = resp.get("status")
     if status == "escrito":
-        # Se muestra la fila que quedó en el libro, no sólo "listo". El que sacó
-        # la foto tiene que poder ver el gasto que acaba de crear sin abrir la
-        # app: si el monto o la caja están mal, es ahora cuando se da cuenta.
-        gasto = resp.get("gasto") or {}
-        lineas = [f"✅ {resp.get('message', 'Cargado.')}"]
-        if gasto.get("ok") and not gasto.get("yaExistia"):
-            lineas.append("")
-            lineas.append("📒 *En el libro quedó:*")
-            lineas.append(f"• {_md(str(gasto.get('montoTexto', '')))} — {_md(str(gasto.get('categoria', '')))}")
-            lineas.append(f"• Sale de: {_md(str(gasto.get('medio', '')))}")
-            lineas.append(f"• Estado: {_md(str(gasto.get('estado', '')))}")
-            if gasto.get("registradoEnSesion"):
-                lineas.append("• Descontado del arqueo de esta noche")
-        # Los renglones dudosos ya no frenan el gasto: se avisan y se resuelven
-        # desde la app, que es donde se ve mejor un nombre de producto.
-        if resp.get("renglonesPendientes"):
-            n = resp["renglonesPendientes"]
-            lineas.append(f"\n📋 Quedaron *{n}* producto{'s' if n > 1 else ''} para confirmar en Pagos › Pendientes.")
-        elif gasto.get("yaExistia"):
-            lineas.append("\n📒 _Ese gasto ya estaba anotado en el libro; no se duplicó._")
-        elif gasto and not gasto.get("ok"):
-            lineas.append(f"\n⚠️ *El gasto NO se anotó en el libro:* {_md(str(gasto.get('error', '')))}")
-            lineas.append("_Los productos sí quedaron cargados. El gasto hay que cargarlo a mano._")
-        lineas.append("\n_Verificá en la planilla si algo quedó mal._")
-        await context.bot.send_message(chat, "\n".join(lineas), parse_mode="Markdown")
+        await _mostrar(context, chat_id, _texto_final(resp), None, mid)
         context.chat_data.pop("pend", None)
-    elif status == "incompleto":
-        # Quedaron dudas que el usuario decidió dejar para la app.
-        await context.bot.send_message(
-            chat,
-            f"📋 {resp.get('message')}\nLo pendiente quedó en el panel *Proveedores* de la app para confirmar ahí.",
-            parse_mode="Markdown",
-        )
+        return
+    if status == "cancelado":
+        await _mostrar(context, chat_id, f"🚫 {resp.get('message', 'No cargué nada.')}", None, mid)
         context.chat_data.pop("pend", None)
-    else:
-        await context.bot.send_message(chat, f"ℹ️ {resp.get('message', 'Listo.')}")
-        context.chat_data.pop("pend", None)
+        return
+
+    nuevo_mid = await dibujar(context, chat_id, resp, mid)
+    _guardar_paso(context, pendiente_id, resp, nuevo_mid)
 
 
 # ── Handlers ──────────────────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Hola! Hago dos cosas:\n\n"
-        "📸 *Facturas* — mandame una foto de una factura o remito y la cargo en "
-        "la planilla de Compras. Si algún dato no queda claro, te pregunto acá "
-        "mismo antes de guardarlo.\n\n"
+        "📸 *Compras* — mandame la foto de una factura y la cargo entera: el "
+        "gasto en el libro, el IVA, y si lleva entrega también el pedido con la "
+        "lista de lo que tiene que llegar, para tildarlo en la puerta.\n"
+        "Te muestro lo que leí y confirmás con un toque. La primera factura de "
+        "cada proveedor lleva unas preguntas más; después ya las sé.\n\n"
         "🔧 *Arreglos* — `/arreglo se quemó la lámpara del baño` y queda anotado "
         "en la lista de mantenimiento. `/pendientes` para ver qué falta hacer.",
         parse_mode="Markdown",
@@ -501,8 +433,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ No tenés permiso para usar este bot.")
         return
 
-    # Si estábamos esperando texto para una duda, esto NO es una nueva factura.
-    await update.message.reply_text("📸 Recibí la foto, procesando...")
+    # Se guarda el id de este mensaje para EDITARLO con el resumen cuando la
+    # factura esté leída: así el chat queda con una sola tarjeta por compra.
+    aviso = await update.message.reply_text("📸 Leyendo la factura…")
+    aviso_mid = aviso.message_id
 
     try:
         if update.message.photo:
@@ -537,46 +471,25 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     status = resp.get("status")
+    chat = update.effective_chat.id
 
-    if status == "escrito":
-        lines = [f"✅ {resp.get('message')}"]
-        for it in resp.get("items", []):
-            lines.append(f"• *{it.get('producto','?')}* — {it.get('proveedor','?')} "
-                         f"— ${it.get('precioUnit','?')} ({it.get('categoria','?')})")
-        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    if not resp.get("ok"):
+        await _mostrar(context, chat, f"❌ {resp.get('error', 'No se pudo leer la factura.')}", None, aviso_mid)
         return
 
     if status == "sin_datos":
-        await update.message.reply_text("⚠️ No pude leer productos. Probá con una foto más nítida.")
+        await _mostrar(context, chat, "⚠️ No pude leer la factura. Probá con una foto más nítida.", None, aviso_mid)
         return
 
     if status == "pendiente":
-        items = resp.get("items", [])
-        for i, it in enumerate(items):
-            it.setdefault("idx", i)
-        factura = resp.get("factura", {}) or {}
-        context.chat_data["pend"] = {
-            "id": resp.get("pendienteId"),
-            "items": items,
-            "factura": factura,
-            "cola": construir_cola(items, factura),
-            "resoluciones": {},
-            "esperando_texto": None,
-            "opciones": {},
-        }
-        nfac = len((factura or {}).get("dudas", []))
-        ndud = resp.get("conDudas", 0)
-        partes = []
-        if nfac: partes.append("datos de la factura (medio de pago / IVA)")
-        if ndud: partes.append(f"{ndud} producto(s)")
-        detalle = " y ".join(partes) if partes else "algunos datos"
-        await update.message.reply_text(
-            f"📝 Leí {resp.get('total')} producto(s). Necesito confirmar {detalle}:"
-        )
-        await preguntar_siguiente(update, context)
+        # La misma tarjeta del "leyendo…" se convierte en el resumen con los
+        # botones: el chat queda con UN mensaje que se va completando en vez de
+        # una tira de preguntas.
+        mid = await dibujar(context, chat, resp, aviso_mid)
+        _guardar_paso(context, resp.get("pendienteId"), resp, mid)
         return
 
-    await update.message.reply_text(f"ℹ️ {resp.get('message', 'Listo.')}")
+    await _mostrar(context, chat, f"ℹ️ {resp.get('message', 'Listo.')}", None, aviso_mid)
 
 
 async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -594,28 +507,26 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Esta confirmación ya expiró. Mandá la foto de nuevo si hace falta.")
         return
 
-    accion, item_idx, campo, n = query.data.split("|")
-    item_idx, n = int(item_idx), int(n)
-
-    if accion == "skip":
-        # Quitar esta duda de la cola → quedará pendiente en la app.
-        pend["cola"] = [c for c in pend["cola"] if not (c[0] == item_idx and c[1] == campo)]
-        await query.edit_message_text("⏭️ Lo dejo para confirmar en la app.")
-        await preguntar_siguiente(query, context)
+    partes = query.data.split("|")
+    if len(partes) != 2 or partes[0] != CB_PASO:
         return
-
-    opciones = pend.get("opciones", {}).get(f"{item_idx}|{campo}", [])
-    valor = opciones[n] if 0 <= n < len(opciones) else None
-    if valor is None:
+    n = int(partes[1])
+    botones = pend.get("botones") or []
+    if not (0 <= n < len(botones)):
         await query.edit_message_text("No pude registrar la opción, probá de nuevo.")
         return
 
-    key = "factura" if item_idx == FACTURA_IDX else item_idx
-    pend["resoluciones"].setdefault(key, {})[campo] = valor
-    pend["cola"] = [c for c in pend["cola"] if not (c[0] == item_idx and c[1] == campo)]
-    etiqueta = CAMPO_LABEL.get(campo, campo)
-    await query.edit_message_text(f"✅ {etiqueta}: *{valor}*", parse_mode="Markdown")
-    await preguntar_siguiente(query, context)
+    valor = botones[n]
+    campo = pend.get("campo") or ""
+
+    # "Corregir" viaja como `corregir:<bloque>` en el id del botón, para no
+    # gastar un tipo de paso en algo que es una respuesta más.
+    if isinstance(valor, str) and valor.startswith("corregir:"):
+        campo, valor = "corregir", valor.split(":", 1)[1]
+    elif campo == "confirmar":
+        valor = "si"
+
+    await avanzar(context, query.message.chat_id, pend["id"], campo, valor)
 
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -630,36 +541,17 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     pend = context.chat_data.get("pend")
-    if not pend or not pend.get("esperando_texto"):
+    if not pend or not pend.get("texto"):
         return  # texto suelto sin contexto: ignorar
-    item_idx, campo = pend["esperando_texto"]
+
     valor = (update.message.text or "").strip()
-    pend["esperando_texto"] = None
+    if not valor:
+        return
 
-    if valor and valor != "-":
-        # producto → texto; precio y total → número
-        if campo in CAMPOS_NUMERICOS:
-            try:
-                # "124.500", "124500", "124.500,50" y "124500.50" son todos
-                # válidos: la persona escribe como habla, no como una planilla.
-                valor_num = parse_monto(valor)
-                if valor_num <= 0:
-                    raise ValueError("no positivo")
-                key = "factura" if item_idx == FACTURA_IDX else item_idx
-                pend["resoluciones"].setdefault(key, {})[CAMPOS_NUMERICOS[campo]] = valor_num
-            except ValueError:
-                await update.message.reply_text("No entendí el número. Probá de nuevo (ej: 17990).")
-                pend["esperando_texto"] = (item_idx, campo)
-                return
-        else:
-            key = "factura" if item_idx == FACTURA_IDX else item_idx
-            pend["resoluciones"].setdefault(key, {})[campo] = valor
-        await update.message.reply_text(f"✅ Anotado: *{valor}*", parse_mode="Markdown")
-    else:
-        await update.message.reply_text("⏭️ Lo dejo para la app.")
-
-    pend["cola"] = [c for c in pend["cola"] if not (c[0] == item_idx and c[1] == campo)]
-    await preguntar_siguiente(update, context)
+    # El monto y las fechas los interpreta la app, con la misma regla que usa
+    # para todo lo demás. Acá ya no se parsea plata: había una tercera copia de
+    # esa regla en este archivo y era una de más.
+    await avanzar(context, update.effective_chat.id, pend["id"], pend.get("campo") or "", valor)
 
 
 # ── Main ──────────────────────────────────────────────────────────────

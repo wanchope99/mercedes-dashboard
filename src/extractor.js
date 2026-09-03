@@ -45,17 +45,35 @@ Devolvé un OBJETO JSON con esta forma EXACTA, sin texto adicional:
 {
   "fecha": "YYYY-MM-DD",
   "proveedor": "Nombre del proveedor",
+  "tipo_comprobante": "A | B | C | M | X | Remito | \\"\\"",
+  "cuit_proveedor": "",
   "forma_de_pago": "Efectivo | Mercado Pago | Galicia | Echeq | Contado | \\"\\"",
   "vendedor": "Nombre del vendedor si figura, o \\"\\"",
   "dias_credito": 0,
   "subtotal_factura": 0,
   "iva_monto": 0,
+  "iva_discriminado": true,
   "otros_impuestos_monto": 0,
   "total_factura": 0,
-  "confianza": { "proveedor": 0.0, "fecha": 0.0, "forma_de_pago": 0.0, "total_factura": 0.0 }
+  "confianza": { "proveedor": 0.0, "fecha": 0.0, "forma_de_pago": 0.0, "total_factura": 0.0, "tipo_comprobante": 0.0 }
 }
 
 Reglas IMPORTANTES:
+- tipo_comprobante = la LETRA del comprobante. En las facturas argentinas es una
+  letra grande dentro de un recuadro, arriba y al medio, entre los datos del
+  emisor y los del comprador. Es el dato que decide si se puede descontar IVA,
+  así que importa casi tanto como el total.
+  · Si ves la letra, ponela con confianza ALTA ("A", "B", "C", "M", "X").
+  · Si el papel dice "REMITO" o "PRESUPUESTO" en vez de "FACTURA", poné
+    "Remito" — no es un comprobante fiscal.
+  · Si NO la podés ver, poné "" con confianza 0. NO la deduzcas del IVA ni del
+    CUIT: un humano lo va a confirmar y es preferible.
+- cuit_proveedor = el CUIT de QUIEN EMITE la factura (el proveedor), con guiones
+  (ej "30-71234567-8"). OJO: una factura tiene DOS CUIT, el del emisor arriba y
+  el del comprador. Queremos el del EMISOR. Si dudás cuál es, poné "".
+- iva_discriminado = true si la factura muestra el IVA como un renglón aparte en
+  el pie (ej "IVA 21%: $21.000"), false si los precios ya vienen con IVA adentro
+  y no se discrimina en ningún lado.
 - DISTINGUÍ forma de pago (CÓMO se paga: efectivo, transferencia, Mercado Pago,
   tarjeta) de días de crédito / condición (plazo: "30 días", "Contado").
   · "30 días" → dias_credito = 30, NO es forma de pago.
@@ -236,7 +254,36 @@ async function extraerCabecera({ base64, mime = 'image/jpeg' }) {
   factura.subtotal_factura = factura.subtotal_factura ?? null;
   factura.iva_monto = factura.iva_monto ?? null;
   factura.otros_impuestos_monto = factura.otros_impuestos_monto ?? null;
+  factura.tipo_comprobante = normalizarComprobante(factura.tipo_comprobante);
+  factura.cuit_proveedor = normalizarCuit(factura.cuit_proveedor);
+  // Si el modelo no se pronunció, el pie de la factura ya lo dice: un IVA en
+  // pesos separado del subtotal ES el IVA discriminado. Se deduce sólo cuando
+  // el campo no vino, nunca se pisa lo que el modelo afirmó.
+  if (typeof factura.iva_discriminado !== 'boolean') {
+    factura.iva_discriminado = Number(factura.iva_monto) > 0 && Number(factura.subtotal_factura) > 0;
+  }
   return { factura, rawText: raw };
+}
+
+// La letra del comprobante, normalizada a los valores que entiende
+// `fiscal-proveedores.js` (COMPROBANTES). Cualquier cosa que no reconozcamos
+// vuelve como '' — o sea "no se sabe", que es lo que dispara la pregunta.
+// NO se deduce de nada: adivinar la letra es adivinar si se descuenta IVA.
+function normalizarComprobante(v) {
+  const s = String(v == null ? '' : v).trim().toUpperCase();
+  if (!s) return '';
+  if (/^(FACTURA\s*)?([ABCM])$/.test(s)) return s.replace(/[^ABCM]/g, '');
+  if (s === 'X') return 'X';
+  if (/REMITO|PRESUPUESTO/.test(s)) return 'Remito';
+  return '';
+}
+
+// CUIT a "NN-NNNNNNNN-N". Devuelve '' si no tiene 11 dígitos: un CUIT a medias
+// no sirve para cruzar contra el padrón y ensucia la ficha del proveedor.
+function normalizarCuit(v) {
+  const d = String(v == null ? '' : v).replace(/[^0-9]/g, '');
+  if (d.length !== 11) return '';
+  return `${d.slice(0, 2)}-${d.slice(2, 10)}-${d.slice(10)}`;
 }
 
 // Sólo los renglones. Corre en paralelo con la cabecera y termina mientras la
@@ -386,4 +433,6 @@ module.exports = {
   extraerCabecera, extraerItems, buildPromptCabecera, buildPromptItems, aplanar,
   // El remito de un pedido: qué y cuánto llega, sin precios. Ver su comentario.
   extraerItemsRemito, buildPromptRemito,
+  // Exportados para poder probarlos sin llamar al modelo.
+  normalizarComprobante, normalizarCuit,
 };
