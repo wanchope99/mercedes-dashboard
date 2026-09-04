@@ -1141,6 +1141,12 @@
     #cierre-modal .subtitle { font-size: 13px; color: var(--text-muted); margin-bottom: 24px; }
 
     /* ── Servicios (Fudo) ── */
+    /* La tarjeta de la lista de servicios. El padding vive acá y no en un
+       `style=` inline porque un inline le gana a la media query del teléfono, y
+       en 390px esos 24px por lado son ancho que la fila necesita. */
+    .serv-card { padding: 0; overflow: hidden; }
+    .serv-card-title { padding: 20px 24px 0; margin-bottom: 0; }
+    .serv-card-body { padding: 16px 24px 24px; }
     .serv-list { display: flex; flex-direction: column; gap: 8px; }
     .serv-row {
       background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
@@ -1164,6 +1170,21 @@
     .serv-cb-legend .dot-c { color: var(--orange); }
     .serv-cb-legend .dot-b { color: var(--blue); }
     .serv-empty { text-align: center; color: var(--text-muted); padding: 48px 24px; font-size: 14px; }
+
+    /* Productos vendidos del período. EN ESTA APP CADA MODAL NECESITA SU PROPIA
+       REGLA: no hay una genérica, y sin esto la ventana se dibuja A LA VISTA al
+       pie de la página (ya pasó con los dos modales de saldos el 26/08/2026).
+       Comparte z-index con el detalle de un servicio porque nunca se abren los
+       dos: éste sale de la barra de filtros, aquél de la lista. */
+    #servagg-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 600; align-items: center; justify-content: center; padding: 16px; }
+    #servagg-overlay.open { display: flex; }
+    #servagg-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+      padding: 24px; width: 760px; max-width: 96vw; max-height: 88vh; overflow-y: auto;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.5); }
+    /* Adentro del modal las tarjetas no llevan su propio marco: ya están adentro
+       de uno, y anidar dos bordes come ancho justo donde menos sobra. */
+    #servagg-modal .card { background: transparent; border: none; padding: 16px 0 0; }
+    #servagg-modal .kpi-grid { gap: 10px; }
 
     /* Modal servicio */
     #serv-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 600; align-items: center; justify-content: center; }
@@ -1528,6 +1549,33 @@
       #btn-refresh .refresh-icon { font-size: 15px; }
 
       .filters-bar, .pagos-filters { padding: 10px 14px; gap: 8px; }
+
+      /* ── Servicios: la fila NO entra en un teléfono ──────────────────────
+         `.serv-row` es una grilla de cuatro columnas (130px 90px 1fr auto) y
+         `.serv-cb` pide 200px de mínimo: el ancho mínimo real de la fila son
+         ~570px. En un teléfono de 390px eso desborda, y la tarjeta que la
+         contiene tiene `overflow: hidden`, así que la parte derecha —la barra
+         de comida vs bebida y parte del total— quedaba CORTADA y sin forma de
+         llegar a ella. No es que hubiera que scrollear: no se podía.
+
+         Acá pasa a tres columnas y dos filas. La fecha y los cubiertos ocupan
+         lo que necesitan, el total se lleva el resto y puede cortar el renglón
+         del ticket, y la barra ocupa el ancho entero abajo. Todo con
+         `grid-column`/`grid-row` explícitos: el orden del DOM es fecha, pax,
+         total, barra, y no coincide con el visual. */
+      .serv-row {
+        grid-template-columns: auto auto minmax(0, 1fr);
+        gap: 10px 12px; padding: 13px 14px; align-items: start;
+      }
+      .serv-fecha { grid-column: 1; grid-row: 1; }
+      .serv-pax   { grid-column: 2; grid-row: 1; }
+      .serv-total { grid-column: 3; grid-row: 1; text-align: right; min-width: 0; }
+      /* El mínimo de 200px es lo que rompía la grilla: acá la barra ya tiene
+         el ancho entero y no necesita reservarlo. */
+      .serv-cb    { grid-column: 1 / -1; grid-row: 2; min-width: 0; }
+      /* Gana 20px de ancho por lado, que en 390px se notan. */
+      .serv-card-title { padding: 16px 14px 0; }
+      .serv-card-body { padding: 12px 14px 16px; }
 
       /* ── Navegación ──
          Arriba desaparece la barra de secciones (la reemplaza la de abajo) y
@@ -2494,6 +2542,33 @@
     </div>
     <div id="fisc-siembra" class="fisc-nota" style="margin-bottom:10px"></div>
     <div id="fisc-cola"></div>
+
+    <!-- ── Empezar de cero con lo que aprendió el bot ─────────────────────────
+         Vive acá, al pie del padrón, porque es donde alguien está pensando en el
+         IVA de los proveedores. Pero NO es el padrón: vacía las seis columnas
+         que fue creando el bot al confirmar facturas, y deja intactas las
+         fiscales, que son relevamiento a mano. Está dicho arriba del botón,
+         porque un botón que borra tiene que decir qué NO toca.
+
+         Dos pasos obligados, y el default del servidor es el primero: la primera
+         llamada devuelve el plan (`dryRun`) y sólo la segunda borra, después de
+         copiar la hoja entera. Mismo patrón que la siembra de acá arriba y que
+         POST /api/movimientos/completar-tc. -->
+    <div style="margin-top:22px;padding-top:16px;border-top:1px solid var(--border)">
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px">Empezar de cero con lo que aprendió el bot</div>
+      <div class="fisc-nota" style="margin-bottom:10px">
+        Vacía lo que el bot fue aprendiendo al confirmar facturas —si descuenta IVA, la categoría del
+        gasto, cómo se paga— para que a cada proveedor se le vuelva a preguntar la primera vez.
+        <b>No toca</b> el relevamiento fiscal de arriba, ni el medio de pago, ni nada cargado a mano.
+        Deja una copia de la hoja antes de borrar.
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" onclick="resetAprendizaje(false)">Ver qué se borraría</button>
+        <button class="btn btn-accent" onclick="resetAprendizaje(true)" id="fisc-btn-reset" style="display:none">Borrar</button>
+      </div>
+      <div id="fisc-reset" class="fisc-nota" style="margin-top:10px"></div>
+    </div>
+
     <div style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
       <button class="btn" onclick="cerrarPadronFiscal()">Cerrar</button>
     </div>
@@ -3707,11 +3782,18 @@
 
 <!-- ═══ SERVICIOS TAB (Fudo) ═══ -->
 <div id="tab-servicios" class="tab-panel">
+  <!-- El agregado de productos es un BOTÓN de esta barra y no una tarjeta, desde
+       el 04/09/2026. Estaba entre los KPIs y la lista de servicios, plegado y con
+       su PROPIO par de fechas: dos rangos en la misma pantalla que se podían
+       contradecir, y una tarjeta que casi siempre estaba vacía empujando la lista
+       para abajo. Ahora manda el rango de acá, que es el único, y el agregado se
+       abre en una ventana cuando se lo pide. -->
   <div class="filters-bar">
     <span class="filter-label">Desde</span>
     <input type="date" id="serv-desde" onchange="loadServicios()" />
     <span class="filter-label">Hasta</span>
     <input type="date" id="serv-hasta" onchange="loadServicios()" />
+    <button class="btn" onclick="abrirServAgg()">📦 Productos vendidos</button>
     <div style="flex:1"></div>
     <button class="btn" onclick="spinRefresh(this, refreshServicios)"><span class="refresh-icon">↻</span> Actualizar Fudo</button>
   </div>
@@ -3721,24 +3803,11 @@
       <div class="loading"><div class="spinner"></div></div>
     </div>
 
-    <div class="card">
-      <div class="card-title">Productos vendidos en el período (todos los días)
-        <button class="btn" style="float:right;font-size:12px;padding:6px 12px" onclick="toggleServAgg()" id="servagg-toggle">Ver agregado de productos</button>
-      </div>
-      <div id="servagg-wrap" style="display:none">
-        <div class="filters-bar" style="margin:0 0 12px">
-          <span class="filter-label">Desde</span>
-          <input type="date" id="servagg-desde" onchange="loadServiciosAgregado()" />
-          <span class="filter-label">Hasta</span>
-          <input type="date" id="servagg-hasta" onchange="loadServiciosAgregado()" />
-          <button class="btn" style="padding:6px 12px;font-size:12px" onclick="spinRefresh(this, loadServiciosAgregado)"><span class="refresh-icon">↻</span> Actualizar</button>
-        </div>
-        <div id="servagg-content"><div style="color:var(--text-muted);font-size:13px">Elegí un rango (o dejalo vacío para todo) y actualizá.</div></div>
-      </div>
-    </div>
-
-    <div class="card" style="padding:0;overflow:hidden">
-      <div class="card-title" style="padding:20px 24px 0;margin-bottom:0">
+    <!-- El padding va por CLASE y no inline: un `style=` gana siempre sobre la
+         hoja de estilos, así que con el padding inline la media query del
+         teléfono no podía achicarlo. Ver .serv-card-* abajo. -->
+    <div class="card serv-card">
+      <div class="card-title serv-card-title">
         Servicios
         <span class="pv-toggle">
           <button class="pv-btn active" id="sv-agrup-crono" onclick="setServAgrup('crono')">Cronológico</button>
@@ -3746,13 +3815,28 @@
         </span>
         <span id="serv-count" style="font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted)"></span>
       </div>
-      <div style="padding:16px 24px 24px">
+      <div class="serv-card-body">
         <div class="serv-list" id="serv-list">
           <div class="loading"><div class="spinner"></div></div>
         </div>
       </div>
     </div>
   </main>
+</div>
+
+<!-- Productos vendidos en todo el período. Se abre desde la barra de filtros de
+     Servicios y usa ESE rango: no tiene fechas propias. -->
+<div id="servagg-overlay">
+  <div id="servagg-modal">
+    <div class="serv-modal-head">
+      <div>
+        <div class="serv-modal-title">Productos vendidos</div>
+        <div class="serv-modal-sub" id="servagg-rango"></div>
+      </div>
+      <button class="btn-close" onclick="cerrarServAgg()">×</button>
+    </div>
+    <div id="servagg-content"><div class="loading"><div class="spinner"></div></div></div>
+  </div>
 </div>
 
 <!-- Modal detalle de servicio -->
@@ -11059,6 +11143,10 @@ function closeServModal() {
   document.getElementById('serv-modal-overlay').classList.remove('open');
 }
 document.getElementById('serv-modal-overlay').addEventListener('click', function(e) { if (e.target === this) closeServModal(); });
+// Mismo gesto para el agregado de productos: tocar afuera cierra. Es lo que ya
+// hacen todos los modales de la app, y el único que no lo hiciera sería el que
+// parece trabado.
+document.getElementById('servagg-overlay').addEventListener('click', function(e) { if (e.target === this) cerrarServAgg(); });
 
 async function refreshServicios() {
   try { await api('/api/servicios/refresh', { method: 'POST' }); } catch(e) {}
@@ -12269,7 +12357,36 @@ function miniTabla(cols,rows){
   _miniTablas[id] = { cols: cols, rows: rows, sortCol: null, sortDir: 'asc' };
   return _miniRender(id);
 }
-function toggleServAgg(){var w=document.getElementById('servagg-wrap');var btn=document.getElementById('servagg-toggle');if(w.style.display==='none'){w.style.display='block';btn.textContent='Ocultar agregado';if(!w.dataset.loaded){loadServiciosAgregado();w.dataset.loaded='1';}}else{w.style.display='none';btn.textContent='Ver agregado de productos';}}
+// ─── Productos vendidos en el período ───────────────────────────────────────
+//
+// Era una tarjeta plegable entre los KPIs y la lista de servicios, con SU PROPIO
+// par de fechas. Dos rangos en la misma pantalla que se podían contradecir, y
+// una tarjeta casi siempre vacía empujando la lista para abajo.
+//
+// Ahora es un botón de la barra de filtros y una ventana, y el rango es el de
+// esa barra: uno solo, el que ya estabas mirando. Sin fechas propias no hay nada
+// que sincronizar.
+//
+// Se recarga en CADA apertura y no se cachea: el rango de arriba pudo cambiar
+// mientras la ventana estaba cerrada, y mostrar el agregado de un período que ya
+// no es el que dice la barra es peor que esperar un segundo.
+function abrirServAgg() {
+  document.getElementById('servagg-overlay').classList.add('open');
+  const d = (document.getElementById('serv-desde') || {}).value || '';
+  const h = (document.getElementById('serv-hasta') || {}).value || '';
+  const sub = document.getElementById('servagg-rango');
+  const fd = s => s ? s.split('-').reverse().join('/') : '';
+  if (sub) {
+    sub.textContent = d || h
+      ? `${d ? 'desde ' + fd(d) : ''}${d && h ? ' · ' : ''}${h ? 'hasta ' + fd(h) : ''}`
+      : 'todo el período cargado';
+  }
+  loadServiciosAgregado();
+}
+
+function cerrarServAgg() {
+  document.getElementById('servagg-overlay').classList.remove('open');
+}
 
 function openResultadoNetoModal() {
   const r = state.resumen || [];
@@ -13702,6 +13819,60 @@ async function guardarProveedorFiscal(id, btn) {
 
 // Siembra desde lo que ya está en Compras. Dry-run primero SIEMPRE: escribe en
 // la planilla, así que se ve qué cambiaría antes de aplicarlo.
+// ─── Empezar de cero con lo que aprendió el bot ─────────────────────────────
+//
+// El endpoint existe desde el 02/09/2026 y hasta hoy NO lo llamaba nadie: no
+// había botón. Por eso el borrado quedó dos días pendiente — estaba decidido,
+// implementado y probado, y era inalcanzable desde la app.
+//
+// El servidor manda: `dryRun` es su default, así que la primera llamada sólo
+// devuelve el plan. El botón de borrar recién aparece cuando hay algo que
+// borrar, y muestra proveedor por proveedor qué valor se va a perder: un borrado
+// masivo que no dice qué se lleva puesto no se puede confirmar con criterio.
+async function resetAprendizaje(aplicar) {
+  const cont = document.getElementById('fisc-reset');
+  const btn = document.getElementById('fisc-btn-reset');
+  if (aplicar && !confirm('¿Vaciar lo que el bot aprendió de los proveedores?\n\n'
+    + 'Se copia la hoja entera antes de borrar. A cada proveedor se le va a volver a preguntar '
+    + 'la primera vez que llegue una factura suya.')) return;
+  cont.textContent = aplicar ? 'Borrando…' : 'Mirando…';
+  if (btn) btn.disabled = true;
+  try {
+    // Esta ruta devuelve el plan en la RAÍZ, no adentro de `data` como casi todo
+    // el resto. `api()` ya tira si `ok` es falso, así que acá sólo llega lo bueno.
+    const d = await api('/api/proveedores/reset-aprendizaje', {
+      method: 'POST', body: JSON.stringify({ dryRun: !aplicar }),
+    });
+    if (aplicar) {
+      cont.innerHTML = 'Listo: se vaciaron <strong>' + (d.celdas || 0) + '</strong> celdas de <strong>'
+        + (d.proveedores || 0) + '</strong> proveedores.'
+        + (d.backup ? ' La copia quedó en la hoja <strong>' + escapeHtml(d.backup) + '</strong>.' : '')
+        + '<br>A cada proveedor se le va a preguntar todo de nuevo la primera vez que llegue una factura suya.';
+      if (btn) btn.style.display = 'none';
+      return;
+    }
+    if (!d.celdas) {
+      cont.innerHTML = 'No hay nada aprendido para borrar.';
+      if (btn) btn.style.display = 'none';
+      return;
+    }
+    // Agrupado por proveedor: la lista plana de celdas son ~120 renglones y no
+    // se lee. Así se ve de un vistazo a quién se le va a repreguntar qué.
+    const porProv = {};
+    for (const c of (d.detalle || [])) (porProv[c.proveedor] = porProv[c.proveedor] || []).push(c.columna + ': ' + c.valor);
+    cont.innerHTML = 'Se van a vaciar <strong>' + d.celdas + '</strong> celdas de <strong>'
+      + d.proveedores + '</strong> proveedores, en las columnas <em>' + escapeHtml((d.columnas || []).join(', ')) + '</em>.'
+      + '<br><span style="opacity:0.75">Quedan intactas: ' + escapeHtml((d.intactas || []).join(', ')) + '</span>'
+      + '<br><br>' + Object.entries(porProv).map(([p, vs]) =>
+        '· <strong>' + escapeHtml(p) + '</strong> — ' + escapeHtml(vs.join(' · '))).join('<br>');
+    if (btn) btn.style.display = '';
+  } catch (e) {
+    cont.innerHTML = '<span style="color:var(--orange)">No se pudo: ' + escapeHtml(e.message) + '</span>';
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function sembrarPadronFiscal(aplicar) {
   const cont = document.getElementById('fisc-siembra');
   cont.textContent = aplicar ? 'Aplicando…' : 'Buscando…';
@@ -14651,8 +14822,11 @@ function renderRsvRanking(servicios) {
 }
 
 async function loadServiciosAgregado() {
-  const desde = document.getElementById('servagg-desde') ? document.getElementById('servagg-desde').value : '';
-  const hasta = document.getElementById('servagg-hasta') ? document.getElementById('servagg-hasta').value : '';
+  // El rango sale de la barra de filtros de Servicios, que es el único que hay
+  // en la pantalla desde el 04/09/2026. Antes esto leía `servagg-desde` /
+  // `servagg-hasta`, un segundo par de fechas que podía decir otra cosa.
+  const desde = (document.getElementById('serv-desde') || {}).value || '';
+  const hasta = (document.getElementById('serv-hasta') || {}).value || '';
   const qs = new URLSearchParams();
   if (desde) qs.set('desde', desde);
   if (hasta) qs.set('hasta', hasta);
