@@ -543,8 +543,15 @@
        acá no hay estados que elegir ni comentario que escribir, hay una lista y
        un dedo. Todo el renglón es el área de toque: apuntarle a un checkbox de
        18px con las manos ocupadas es lo que hace que nadie tilde nada. */
+    /* La tira de modos. `flex: 1` reparte en partes iguales, que es lo correcto
+       cuando las dos vistas se usan parecido (Cierre, Propinas, Costos). Cuando
+       no —Fiscal, donde "Este mes" se abre todos los días y "Simulación" cada
+       tanto— el botón lleva su propio `flex` inline y se reparten 75/25. Ver
+       renderModos(): un botón más grande dice cuál es el principal sin
+       escribirlo. `min-width: 0` para que el texto largo no fuerce el ancho y
+       rompa la proporción. */
     .cp-modos { display: flex; gap: 6px; margin: 0 0 14px; }
-    .cp-modo { flex: 1; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; font-weight: 700;
+    .cp-modo { flex: 1; min-width: 0; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; font-weight: 700;
                cursor: pointer; font-family: inherit; text-align: center;
                background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); }
     .cp-modo.active { background: var(--accent); border-color: var(--accent); color: var(--text); }
@@ -1939,8 +1946,15 @@
   </main>
 </div>
 
+<!-- DOS VISTAS del mismo tema, fusionadas el 04/09/2026 por pedido de Gonzalo.
+     El Historial era un sub aparte que vivía adentro de "Más" y era, literalmente,
+     la cola de esta pantalla: los repartos que ya se hicieron. Como sub separado
+     obligaba a salir de Propinas para ver lo de Propinas. Mismo patrón que Fiscal
+     y que el cierre de cocina. -->
 <div id="tab-propinas" class="tab-panel">
   <main>
+    <div id="prop-modos" class="cp-modos"></div>
+    <div id="prop-modo-reparto">
     <div class="card">
       <div class="card-title"><span>Reparto de propinas</span>
         <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· sólo las digitales · no toca la contabilidad del bar</span>
@@ -1989,17 +2003,15 @@
     </div>
 
     <div id="prop-resultado"></div>
-  </main>
-</div>
+    </div><!-- /prop-modo-reparto -->
 
-<!-- ═══ PROPINAS › HISTORIAL ═══ -->
-<div id="tab-propinas-historial" class="tab-panel">
-  <main>
-    <div class="card">
-      <div class="card-title"><span>Repartos anteriores</span>
-        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· más nuevo primero</span>
+    <div id="prop-modo-historial" style="display:none">
+      <div class="card">
+        <div class="card-title"><span>Repartos anteriores</span>
+          <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">· más nuevo primero</span>
+        </div>
+        <div id="prop-historial"><div class="loading"><div class="spinner"></div> Cargando historial...</div></div>
       </div>
-      <div id="prop-historial"><div class="loading"><div class="spinner"></div> Cargando historial...</div></div>
     </div>
   </main>
 </div>
@@ -2250,24 +2262,20 @@
   </div>
 </div>
 
-<!-- "Más" de Operación: las dos pantallas que son la cola de otra sección
-     (Config. de costos vive de Costos, Historial de propinas de Propinas) y se
-     abren una vez cada tanto. Los paneles no se tocaron: sólo salieron de la
-     barra, igual que cuando se archivó tab-proveedores. -->
+<!-- "Más" de Operación. Reescrito el 04/09/2026: Costos subió a la barra y se
+     llevó adentro su configuración, y el Historial de propinas se fusionó con
+     Propinas. Quedan Mantenimiento —que bajó de la barra— y Propinas.
+     Los paneles no se tocaron: sólo cambia por dónde se llega.
+
+     LA GRILLA SE FILTRA POR ROL, y es lo que hace que este panel pueda dejar de
+     ser soloAdmin. Mantenimiento lo usa el encargado (es el que está en el salón
+     cuando se rompe algo) y Propinas es adminOnly de punta a punta. Sin el
+     filtro, o Charly perdía Mantenimiento o veía un botón que le contesta 403. -->
 <div id="tab-operacion-mas" class="tab-panel">
   <main>
     <div class="card">
       <div class="card-title"><span>Más de Operación</span></div>
-      <div class="mas-grid" style="margin-top:6px">
-        <button class="btn mas-item" onclick="abrirDesdeMas('costos-resumen')">
-          <span style="font-size:22px">🧮</span><span>Costos</span></button>
-        <button class="btn mas-item" onclick="abrirDesdeMas('propinas')">
-          <span style="font-size:22px">💸</span><span>Propinas</span></button>
-        <button class="btn mas-item" onclick="abrirDesdeMas('costos-config')">
-          <span style="font-size:22px">⚙️</span><span>Config. de costos</span></button>
-        <button class="btn mas-item" onclick="abrirDesdeMas('propinas-historial')">
-          <span style="font-size:22px">📋</span><span>Historial de propinas</span></button>
-      </div>
+      <div class="mas-grid" style="margin-top:6px" id="operacion-mas-grid"></div>
     </div>
   </main>
 </div>
@@ -2496,12 +2504,7 @@
   <main>
     <div class="card">
       <div class="card-title"><span>Más de Plan</span></div>
-      <div class="mas-grid" style="margin-top:6px">
-        <button class="btn mas-item" onclick="abrirDesdeMas('inversiones', 'plan-mas')">
-          <span style="font-size:22px">🛠️</span><span>Inversiones</span></button>
-        <button class="btn mas-item" onclick="abrirDesdeMas('finanzas', 'plan-mas')">
-          <span style="font-size:22px">🏦</span><span>Finanzas</span></button>
-      </div>
+      <div class="mas-grid" style="margin-top:6px" id="plan-mas-grid"></div>
     </div>
   </main>
 </div>
@@ -3217,6 +3220,13 @@
     <span id="costos-periodo-label" style="font-size:12px;color:var(--text-muted);margin-left:8px"></span>
   </div>
   <main>
+    <!-- DOS VISTAS, fusionadas el 04/09/2026: la Config. de costos era un sub
+         aparte adentro de "Más" y es la cola de esta pantalla — las reglas con
+         las que se calcula lo que se está mirando acá. La barra de filtros de
+         arriba queda AFUERA del conmutador a propósito: es del análisis, y en
+         la configuración no tiene nada que filtrar. Ver `costosVerModo`. -->
+    <div id="costos-modos" class="cp-modos"></div>
+    <div id="costos-modo-analisis">
 
     <!-- COMIDA -->
     <div class="card">
@@ -3328,12 +3338,9 @@
       </div>
     </div>
 
-  </main>
-</div>
+    </div><!-- /costos-modo-analisis -->
 
-<!-- ═══ COSTOS — subtab: Configuración ═══ -->
-<div id="tab-costos-config" class="tab-panel">
-  <main>
+    <div id="costos-modo-config" style="display:none">
 
     <!-- PROVEEDORES SIN CLASIFICAR -->
     <div class="card" id="c-sin-config-card" style="border-left:3px solid #e0a85c">
@@ -3361,6 +3368,7 @@
         <div style="color:var(--text-muted);font-size:13px">Carg&#xe1; el tab Costos primero para ver la configuraci&#xF3;n.</div>
       </div>
     </div>
+    </div><!-- /costos-modo-config -->
 
   </main>
 </div>
@@ -4641,40 +4649,65 @@ const TAB_GROUPS = {
   ] },
 
   // ── El bar funcionando ────────────────────────────────────────────────────
-  // Lo que llega (Pedidos), lo que se consume (Bebidas), lo que se rompe
-  // (Mantenimiento), lo que cuesta (Costos) y lo que se reparte (Propinas).
+  // Lo que llega (Pedidos), lo que se consume (Bebidas), lo que se cierra de
+  // noche (Cierre), lo que se le debe al fisco (Fiscal), lo que cuesta la gente
+  // (Nómina) y lo que cuesta la comida (Costos).
   //
-  // Pedidos y Mantenimiento SIN soloAdmin a propósito: el encargado es el que
-  // está en el salón cuando se rompe algo y el que recibe al proveedor en la
-  // puerta. Todo /api/propinas/* y /api/costos* es adminOnly, así que esos subs
-  // sí se le esconden.
+  // Pedidos, Bebidas y Cierre SIN soloAdmin a propósito: el encargado recibe al
+  // proveedor en la puerta y cierra el turno. Fiscal, Nómina y Costos son
+  // adminOnly del lado del servidor, así que se le esconden. Mantenimiento
+  // también es suyo y ahora vive adentro de Más — ver el comentario de ese sub.
   //
-  // El sexto lugar es "Más" y no un sexto tema: al agregar Pedidos el 15/08/2026
-  // el grupo llegaba a siete, y la regla de este archivo dice que a los seis hay
-  // que repensar el agrupamiento. Config. de costos e Historial de propinas son
-  // las dos pantallas que se abren una vez cada tanto — son la cola de Costos y
-  // de Propinas, no temas propios — así que se movieron adentro de Más. El
-  // criterio para lo que venga: si un sub es el detalle de otro sub, va a Más.
-  // El orden es el del día, no el de cuándo entró cada pantalla: primero lo que
-  // llega (Pedidos, Bebidas), después lo que se cierra a la noche (Cierre), la
-  // administración (Nómina) y por último lo que se rompe (Mantenimiento), que es
-  // lo que se abre cuando pasa algo y no todos los días. Reordenado el 24/08/2026.
+  // "Más" nació el 15/08/2026 con Config. de costos e Historial de propinas
+  // adentro, bajo el criterio de que si un sub es el DETALLE de otro sub, va a
+  // Más. Ese criterio era correcto y la solución no: el 04/09/2026 las dos
+  // volvieron a su pantalla como una segunda solapa, que es donde tenían que
+  // estar desde el principio — el detalle de una cosa no es otro lugar, es la
+  // misma cosa. Lo que quedó en Más son las dos pantallas que sí son temas
+  // propios pero no se abren todos los días: Mantenimiento y Propinas.
+  //
+  // El orden es el del día, no el de cuándo entró cada pantalla.
+  // ── Reordenado el 04/09/2026, por decisión de Gonzalo ─────────────────────
+  //
+  // Fiscal se mudó acá desde Plan, y Costos subió desde "Más". A cambio bajaron
+  // Mantenimiento y Propinas. El criterio es el mismo de siempre —lo de todos
+  // los días adelante— aplicado con lo que se aprendió usando la app: Fiscal
+  // dejó de ser una pregunta sobre el futuro (¿conviene pasar a RI?) y pasó a
+  // ser la pantalla donde se mira el IVA del mes en curso, que es operación.
+  //
+  // SIETE SUBS PARA EL ADMIN, y este archivo dice que a los seis hay que
+  // repensar el agrupamiento. Se dejó igual porque lo pidió el dueño, pero el
+  // costo está medido y hay que saberlo: la barra de submenús usa `overflow-x`
+  // con la scrollbar OCULTA (ver .subtab-nav), que es el mismo mecanismo por el
+  // que en agosto se perdían secciones de la barra de arriba. Con siete botones
+  // entra cómodo en una pantalla ancha y empieza a recortar el último abajo de
+  // ~850px. En el teléfono no es problema: switchSub centra el elegido. En la
+  // computadora no hay ese rescate, así que si aparece un octavo, esto se rompe
+  // en silencio.
+  //
+  // Para el ENCARGADO son cuatro: Pedidos, Bebidas, Cierre y Más. Fiscal,
+  // Nómina y Costos son adminOnly del lado del servidor, así que llevan
+  // soloAdmin acá — sin eso, Charly vería tres pantallas que le contestan 403.
   operacion: { label: '🍽️ Operación', icono: '🍽️', corto: 'Operación', phonePrio: 3, subs: [
     { id: 'pedidos',        label: '📦 Pedidos' },
     { id: 'vinos',          label: '🥂 Bebidas' },
-    // Cierre entró el 17/08/2026 y Costos bajó a "Más" por la misma regla que
-    // movió a Propinas: el grupo ya estaba en seis. Costos es una pantalla de
-    // análisis que se abre cada tanto y su propia Config. de costos YA vivía
-    // adentro de Más, así que juntarlas es reunir una cosa con su detalle.
-    // Cierre, en cambio, se abre todas las noches y lo usa también el encargado.
     { id: 'cierre',         label: '🍳 Cierre' },
-    // Nómina entró el 17/08/2026 y Propinas bajó a "Más" para dejarle el lugar:
-    // el grupo ya estaba en seis y la regla es repensar, no agregar un séptimo.
-    // Propinas se junta ahí con su propio Historial, y es una tarea semanal de
-    // administración, no algo que se abra durante el servicio.
+    // Fiscal llegó de Plan el 04/09/2026. Va acá y no al final porque desde que
+    // el registro de facturas existe, la pregunta que contesta es del mes en
+    // curso: cuánto crédito IVA se juntó y qué gasto todavía no tiene factura.
+    { id: 'fiscal',         label: '🧾 Fiscal', soloAdmin: true },
     { id: 'nomina',         label: '👥 Nómina', soloAdmin: true },
-    { id: 'mantenimiento',  label: '🔧 Mantenimiento' },
-    { id: 'operacion-mas',  label: '⋯ Más', soloAdmin: true },
+    // Costos subió de "Más" y se llevó adentro su Config. de costos, que ahora
+    // es su segunda vista en vez de un sub aparte. Reunir una pantalla con las
+    // reglas que la calculan es lo que la regla de "Más" pedía desde el
+    // principio; lo que cambió es que se resolvió juntándolas, no separándolas.
+    { id: 'costos-resumen', label: '🧮 Costos', soloAdmin: true },
+    // "Más" deja de ser soloAdmin: adentro quedó Mantenimiento, que el
+    // encargado SÍ usa —es el que está en el salón cuando se rompe algo— y que
+    // hasta hoy era un sub suyo. Los ítems de adentro se filtran por rol, así
+    // que Charly abre Más y ve Mantenimiento solo. Sin esto, moverlo acá le
+    // sacaba la sección: exactamente el flujo donde no se anota nada.
+    { id: 'operacion-mas',  label: '⋯ Más' },
   ] },
 
   // ── Lo que viene ──────────────────────────────────────────────────────────
@@ -4685,13 +4718,14 @@ const TAB_GROUPS = {
   // administración que se abre cada tanto y no algo que se mire seguido.
   // Quedan arriba las tres que contestan "qué viene": el resumen, la
   // calculadora de escenarios y la proyección del mes en curso.
-  // Fiscal entró el 22/08/2026, en el lugar que dejaron Inversiones y Finanzas.
-  // Va segundo, apenas después del Resumen: la pregunta que contesta —cuánto de
-  // lo que entra se va a ir en impuestos al pasar a Responsable Inscripto— es la
-  // que más peso tiene sobre lo que viene.
+  // Fiscal entró acá el 22/08/2026 y SE FUE A OPERACIÓN el 04/09/2026. Entró
+  // cuando la pregunta que contestaba era sobre el futuro —cuánto de lo que
+  // entra se iría en impuestos al pasar a Responsable Inscripto—; se fue cuando
+  // el registro de facturas la convirtió en una pantalla del mes en curso. La
+  // simulación sigue existiendo, pero ahora es la segunda vista de esa pantalla,
+  // no lo que la pantalla es.
   plan: { label: '🗓️ Plan', icono: '🗓️', corto: 'Plan', soloAdmin: true, phonePrio: 4, subs: [
     { id: 'plan',        label: '📋 Resumen' },
-    { id: 'fiscal',      label: '🧾 Fiscal' },
     { id: 'calculadora', label: '🧮 Calculadora' },
     { id: 'proymes',     label: '📅 Proyección Mes' },
     { id: 'plan-mas',    label: '⋯ Más' },
@@ -4793,8 +4827,10 @@ function abrirMasSheet() {
 function cargarPanel(tab) {
   if (tab === 'inicio') renderInicio();
   else if (tab === 'pedidos') loadPedidos();
-  else if (tab === 'operacion-mas') { /* sólo botones, nada que cargar */ }
-  else if (tab === 'plan-mas') { /* sólo botones, nada que cargar */ }
+  // Los dos "Más" sólo tienen botones, pero la grilla se arma acá porque se
+  // filtra por rol: dibujarla en el HTML la haría igual para todos.
+  else if (tab === 'operacion-mas') renderMasGrid('operacion-mas', 'operacion-mas-grid');
+  else if (tab === 'plan-mas') renderMasGrid('plan-mas', 'plan-mas-grid');
   else if (tab === 'fiscal') loadFiscal();
   else if (tab === 'pagos') { if (state.rol === 'admin') loadPagos(); }
   else if (tab === 'cajas') loadCajas();
@@ -4817,10 +4853,10 @@ function cargarPanel(tab) {
       const hoy = new Date();
       hastaEl.value = hoy.toISOString().slice(0,10);
     }
+    // La configuración es ahora la segunda vista de esta misma pantalla, así
+    // que se abre con `costosVerModo` y no con un panel propio. Ver más abajo.
+    costosVerModo(_costosModo);
     loadCostos();
-  }
-  else if (tab === 'costos-config') {
-    loadCostosConfig();
   }
   else if (tab === 'calculadora') loadCalculadora();
   else if (tab === 'proymes') loadProyeccionMes();
@@ -4828,8 +4864,9 @@ function cargarPanel(tab) {
   else if (tab === 'reportes-servicios') initReporteServicios();
   else if (tab === 'mantenimiento') loadMantenimiento();
   else if (tab === 'informes') loadInformes();
+  // El historial de propinas dejó de ser un panel: es la segunda vista de
+  // `propinas`, y la abre `propVerModo` desde loadPropinas().
   else if (tab === 'propinas') loadPropinas();
-  else if (tab === 'propinas-historial') loadPropinasHistorial();
   else if (tab === 'nomina') loadNomina();
   else if (tab === 'cierre') loadTabCierre();
   else if (tab === 'inversiones') loadPlan();
@@ -4909,14 +4946,28 @@ function switchTab(tab, btn) {
       return;
     }
   }
+  // ¿Vive adentro de un "Más"? Entonces hay que abrir su grupo y dejar marcado
+  // el subtab "Más", que es donde uno está parado. Sin esto el panel se abre
+  // igual pero la barra de submenús marca otra cosa, o nada — ver EN_MAS.
+  const enMas = EN_MAS[tab];
+  if (enMas) {
+    const grupo = Object.entries(TAB_GROUPS)
+      .find(([, cfg]) => cfg.subs && cfg.subs.some(s => s.id === enMas.mas));
+    if (grupo) {
+      switchGroup(grupo[0]);
+      abrirDesdeMas(tab, enMas.mas);
+      return;
+    }
+  }
   // Fallback: activar el panel directamente.
   activarPanel(tab);
 }
 
 // Abre un panel que ya NO está en la barra de submenús porque vive adentro de
-// "Más" (Config. de costos, Historial de propinas; Inversiones y Finanzas desde
-// el 22/08/2026). El subtab "Más" queda marcado: es dónde estás parado, y
-// dejarlo sin marcar haría parecer que la barra se desincronizó.
+// "Más" — hoy Mantenimiento y Propinas en Operación, Inversiones y Finanzas en
+// Plan; la lista está en EN_MAS, acá abajo. El subtab "Más" queda marcado: es
+// dónde estás parado, y dejarlo sin marcar haría parecer que la barra se
+// desincronizó.
 //
 // `masId` existe desde que hay más de un grupo con "Más". Con el id fijo, abrir
 // algo de Plan marcaba el subtab de Operación — un botón encendiéndose en una
@@ -4926,6 +4977,36 @@ function abrirDesdeMas(tab, masId = 'operacion-mas') {
   document.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
   const mas = document.getElementById('subtab-' + masId);
   if (mas) mas.classList.add('active');
+}
+
+// ─── Lo que vive adentro de un "Más" ────────────────────────────────────────
+//
+// Una sola lista, y es la que contesta las dos preguntas que antes estaban
+// repartidas: qué botones dibuja el panel de Más, y —en `switchTab`— a qué
+// grupo pertenece un panel que ya no está en ninguna barra.
+//
+// Ese segundo uso arregla algo que este archivo ya tenía anotado como trampa:
+// "un sub que dejó de estar listado cae en activarPanel sin marcar el submenú,
+// así que toda entrada tiene que pasar por abrirDesdeMas". Depender de que cada
+// entrada se acuerde es exactamente cómo se rompió: la campanita manda
+// `ir: { tab: 'mantenimiento' }` y, al bajar Mantenimiento a Más el 04/09/2026,
+// habría abierto el panel con la barra de submenús marcando otra cosa.
+const EN_MAS = {
+  mantenimiento: { mas: 'operacion-mas', icono: '🔧', label: 'Mantenimiento' },
+  propinas:      { mas: 'operacion-mas', icono: '💸', label: 'Propinas', soloAdmin: true },
+  inversiones:   { mas: 'plan-mas',      icono: '🛠️', label: 'Inversiones', soloAdmin: true },
+  finanzas:      { mas: 'plan-mas',      icono: '🏦', label: 'Finanzas', soloAdmin: true },
+};
+
+function renderMasGrid(masId, contId) {
+  const cont = document.getElementById(contId);
+  if (!cont) return;
+  cont.innerHTML = Object.entries(EN_MAS)
+    .filter(([, m]) => m.mas === masId && (!m.soloAdmin || getRol() === 'admin'))
+    .map(([tab, m]) =>
+      `<button class="btn mas-item" onclick="abrirDesdeMas('${tab}', '${masId}')">` +
+      `<span style="font-size:22px">${m.icono}</span><span>${m.label}</span></button>`)
+    .join('');
 }
 
 // ─── ARQUEO DE CAJAS ──────────────────────────────────────────────────────────
@@ -9064,16 +9145,16 @@ async function cerrarAvisoInforme(marcarLeido) {
 // misma computadora no se pisen.
 const RELEASE_LOG = [
   {
-    version: '2026-09-04-compras-y-fiscal',
+    version: '2026-09-04-menu-ordenado',
     fecha: '4 de septiembre de 2026',
-    titulo: 'Caja pasa a llamarse Compras, y Fiscal se parte en dos',
+    titulo: 'El menú se ordenó: Compras, y Operación con Fiscal y Costos adentro',
     // El menú cambia debajo de los pies de todos, Charly incluido: una sección
     // que se llamaba de una manera y ahora se llama de otra es exactamente lo
     // que hace que alguien la busque y no la encuentre.
     paraTodos: true,
-    porque: 'La sección <b>Caja</b> hacía rato que no era sólo el arqueo de la noche: por ahí se '
-      + 'carga una compra, se la paga y se ve de qué caja salió. Ahora se llama <b>Compras</b> y '
-      + 'abre en Pagos, que es lo que se hace más seguido. Las cuatro pantallas son las mismas.',
+    porque: 'Lo que se usa todos los días quedó adelante, y lo que se abre cada tanto atrás de '
+      + '<b>⋯ Más</b>. Ninguna pantalla desapareció: cambiaron de lugar, y dos que estaban '
+      + 'partidas en dos ahora son una sola con dos solapas.',
     items: [
       {
         icono: '🛒',
@@ -9085,12 +9166,28 @@ const RELEASE_LOG = [
       },
       {
         icono: '🧾',
-        titulo: 'Fiscal abre en el IVA real del mes',
-        desc: 'La pantalla tiene dos solapas. <b>Del mes</b> es lo que dicen las facturas cargadas: cuánto '
-            + 'crédito IVA se juntó, qué porcentaje del gasto ya tiene factura detrás y la lista de lo que '
-            + 'falta cargar. <b>Simulación</b> es la de siempre, la que recalcula meses cerrados como '
-            + 'Responsable Inscripto. Lo medido abre primero; lo estimado quedó atrás de la otra solapa.',
-        donde: 'Plan › Fiscal',
+        titulo: 'Fiscal se mudó a Operación y abre en el IVA de este mes',
+        desc: 'Estaba en Plan, cuando la pregunta que contestaba era si convenía pasar a Responsable '
+            + 'Inscripto. Ahora es la pantalla donde se mira el IVA del mes en curso, así que vive con '
+            + 'lo operativo. Tiene dos solapas: <b>Este mes</b> —cuánto crédito IVA se juntó, qué parte '
+            + 'del gasto ya tiene factura y qué falta cargar— y <b>Simulación</b>, la de siempre.',
+        donde: 'Operación › Fiscal',
+      },
+      {
+        icono: '🧮',
+        titulo: 'Costos y Propinas se juntaron con su propia configuración',
+        desc: '<b>Costos</b> salió de "Más" y se llevó adentro la <b>Config. de costos</b>, que ahora es '
+            + 'una solapa de la misma pantalla: se cambia la regla y se ve el efecto sin cambiar de '
+            + 'sección. Lo mismo con <b>Propinas</b> y su <b>Historial de repartos</b>.',
+        donde: 'Operación › Costos',
+      },
+      {
+        icono: '⋯',
+        titulo: 'Mantenimiento y Propinas quedaron adentro de Más',
+        desc: 'Son las dos que no se abren todos los días. <b>Mantenimiento</b> lo sigue viendo todo el '
+            + 'mundo —el botón <b>Anotar</b> de la pantalla de inicio del teléfono no cambió—; Propinas '
+            + 'la ven sólo los dueños, como siempre.',
+        donde: 'Operación › ⋯ Más',
       },
     ],
   },
@@ -12334,6 +12431,42 @@ async function openConceptoModal(grupo, extra) {
 
 let _costosResumen = null;
 
+// ─── Las dos vistas de Costos ───────────────────────────────────────────────
+//
+// `analisis` es el CMV y los márgenes; `config` son las reglas con las que ese
+// número se calcula — qué proveedor es Comida, cuál Bebida, cuál Insumos. Era
+// un sub aparte adentro de "Más", o sea que para cambiar la regla había que
+// salir de la pantalla que muestra su resultado. Fusionados el 04/09/2026.
+//
+// La barra de filtros de fechas queda AFUERA del conmutador y sólo se ve en
+// análisis: en la configuración no hay período que filtrar, y dejarla ahí
+// invitaría a tocarla esperando que cambie algo.
+//
+// La configuración se carga la primera vez que se entra a su vista. Y NO se
+// invalida sola al guardar una regla: `guardarConfigProveedores` ya recarga lo
+// que corresponde, y el análisis se recalcula desde el servidor.
+const COSTOS_MODOS = [
+  { id: 'analisis', label: '🧮 Análisis' },
+  { id: 'config',   label: '⚙️ Configuración' },
+];
+let _costosModo = 'analisis';
+let _costosConfigCargada = false;
+
+function costosVerModo(modo) {
+  _costosModo = COSTOS_MODOS.some(m => m.id === modo) ? modo : 'analisis';
+  renderModos('costos-modos', COSTOS_MODOS, _costosModo, 'costosVerModo');
+  const a = document.getElementById('costos-modo-analisis');
+  const c = document.getElementById('costos-modo-config');
+  const filtros = document.querySelector('#tab-costos-resumen .filters-bar');
+  if (a) a.style.display = _costosModo === 'analisis' ? '' : 'none';
+  if (c) c.style.display = _costosModo === 'config' ? '' : 'none';
+  if (filtros) filtros.style.display = _costosModo === 'analisis' ? '' : 'none';
+  if (_costosModo === 'config' && !_costosConfigCargada) {
+    _costosConfigCargada = true;
+    loadCostosConfig().catch(() => { _costosConfigCargada = false; });
+  }
+}
+
 async function loadCostos() {
   const desde = document.getElementById('costos-desde').value;
   const hasta  = document.getElementById('costos-hasta').value;
@@ -12991,19 +13124,38 @@ async function guardarAltaFactura(btn) {
 // /api/fiscal/simulacion recorre meses enteros de Movimientos, y hacer esperar
 // eso al abrir Fiscal sería cobrarle a todos un número que quizá nadie vino a
 // ver. `_fiscSimCargada` es lo que hace que sea una vez y no cada clic.
+// ─── La tira de modos, compartida ──────────────────────────────────────────
+//
+// Tres pantallas tienen dos vistas del mismo tema y las muestran igual: Fiscal
+// (Este mes / Simulación), Propinas (Reparto / Historial) y Costos (Análisis /
+// Configuración). Antes cada una lo dibujaba por su cuenta; ahora es una sola
+// función, así que un cambio de estilo o de comportamiento va a las tres.
+//
+// `flex` es opcional y sirve para que los botones NO sean iguales cuando las
+// dos vistas no se usan igual: en Fiscal, "Este mes" se abre todos los días y
+// "Simulación" cada tanto, así que la primera se lleva el 75% del ancho. Un
+// botón más grande es la forma más barata de decir cuál es el principal sin
+// escribirlo. Sin `flex`, los modos se reparten en partes iguales.
+function renderModos(contId, modos, activo, fn) {
+  const cont = document.getElementById(contId);
+  if (!cont) return;
+  cont.innerHTML = modos.map(m =>
+    `<button type="button" class="cp-modo${m.id === activo ? ' active' : ''}"` +
+    (m.flex ? ` style="flex:${m.flex}"` : '') +
+    ` onclick="${fn}('${m.id}')">${m.label}</button>`).join('');
+}
+
 const FISC_MODOS = [
-  { id: 'mes',        label: '🧾 Del mes' },
-  { id: 'simulacion', label: '📐 Simulación' },
+  // 75 / 25: el crédito del mes es la pantalla de todos los días y la
+  // simulación se abre cada tanto. Pedido de Gonzalo (04/09/2026).
+  { id: 'mes',        label: '🧾 Este mes',   flex: 3 },
+  { id: 'simulacion', label: '📐 Simulación', flex: 1 },
 ];
 let _fiscModo = 'mes';
 let _fiscSimCargada = false;
 
 function renderFiscModos() {
-  const cont = document.getElementById('fisc-modos');
-  if (!cont) return;
-  cont.innerHTML = FISC_MODOS.map(m =>
-    `<button type="button" class="cp-modo${m.id === _fiscModo ? ' active' : ''}" ` +
-    `onclick="fiscVerModo('${m.id}')">${m.label}</button>`).join('');
+  renderModos('fisc-modos', FISC_MODOS, _fiscModo, 'fiscVerModo');
 }
 
 function fiscVerModo(modo) {
@@ -14550,7 +14702,45 @@ function parsePropinaMonto(v) {
   return centavos(parseMonto(v));
 }
 
+// ─── Las dos vistas de Propinas ─────────────────────────────────────────────
+//
+// `reparto` es lo de esta semana y `historial` los repartos que ya se hicieron.
+// Eran dos subs y el segundo vivía adentro de "Más", así que para ver lo de
+// Propinas había que salir de Propinas. Fusionados el 04/09/2026.
+//
+// El historial se carga la primera vez que se entra a su vista: es una lectura
+// más de la planilla y la mayoría de las veces se abre Propinas para repartir,
+// no para mirar atrás. Se recarga sola después de guardar un reparto, que es lo
+// único que lo cambia.
+const PROP_MODOS = [
+  { id: 'reparto',   label: '💸 Reparto de la semana' },
+  { id: 'historial', label: '📋 Repartos anteriores' },
+];
+let _propModo = 'reparto';
+let _propHistCargado = false;
+
+function propVerModo(modo) {
+  _propModo = PROP_MODOS.some(m => m.id === modo) ? modo : 'reparto';
+  renderModos('prop-modos', PROP_MODOS, _propModo, 'propVerModo');
+  const r = document.getElementById('prop-modo-reparto');
+  const h = document.getElementById('prop-modo-historial');
+  if (r) r.style.display = _propModo === 'reparto' ? '' : 'none';
+  if (h) h.style.display = _propModo === 'historial' ? '' : 'none';
+  if (_propModo === 'historial' && !_propHistCargado) {
+    _propHistCargado = true;
+    loadPropinasHistorial().catch(() => { _propHistCargado = false; });
+  }
+}
+
+// Que el historial se vuelva a leer la próxima vez que se abra. Lo llama quien
+// guarda un reparto: si no, quedaría mostrando la lista de antes de guardarlo.
+function propInvalidarHistorial() {
+  _propHistCargado = false;
+  if (_propModo === 'historial') { _propHistCargado = true; loadPropinasHistorial().catch(() => { _propHistCargado = false; }); }
+}
+
 async function loadPropinas() {
+  propVerModo(_propModo);
   const cont = document.getElementById('prop-equipo-list');
   try {
     const { data } = await api('/api/propinas');
@@ -14777,6 +14967,10 @@ async function guardarPropinaReparto(btn) {
       }),
     });
     showToast('Reparto guardado');
+    // El historial vive en la otra vista de esta misma pantalla desde el
+    // 04/09/2026: si no se marca, la próxima vez que se abra muestra la lista
+    // de antes de guardar esto.
+    propInvalidarHistorial();
     document.getElementById('prop-saldo-galicia').value = '';
     document.getElementById('prop-saldo-brubank').value = '';
     document.getElementById('prop-periodo').value = '';
