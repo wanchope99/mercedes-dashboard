@@ -24,6 +24,7 @@
 
 const pedidos = require('./pedidos');
 const cats = require('./proveedores-categorias');
+const facturas = require('./facturas');
 const { parseMonto } = require('./monto');
 
 // ─── Qué categorías tienen una puerta donde recibir ─────────────────────────
@@ -65,7 +66,15 @@ const CONFIANZA_MINIMA_TOTAL = 0.7;
  * `cfg` es la ficha del proveedor (`proveedores-config.leerConfig().byNombre[x]`),
  * o null si es un proveedor que nunca pasó por acá.
  */
-function estadoInicial({ factura = {}, cfg = null, proveedor = '', itemsCount = 0, pendienteId = '' } = {}) {
+function estadoInicial({
+  factura = {}, cfg = null, proveedor = '', itemsCount = 0, pendienteId = '',
+  // Lo que se encontró antes de empezar a preguntar. Los dos vienen de afuera
+  // porque leen planillas y este archivo no lee ninguna.
+  //   · `enLibro`    → salida de `facturas.buscarCompraEnLibro`: filas del libro
+  //                    que podrían ser esta misma compra.
+  //   · `yaCargada`  → la factura YA registrada con este mismo número.
+  enLibro = null, yaCargada = null,
+} = {}) {
   const conf = factura.confianza || {};
   const tipo = factura.tipo_comprobante || '';
 
@@ -96,6 +105,22 @@ function estadoInicial({ factura = {}, cfg = null, proveedor = '', itemsCount = 
     itemsCount,
     confianzaTotal: conf.total_factura == null ? 1 : Number(conf.total_factura),
 
+    // ─── La identidad fiscal del comprobante ───────────────────────────────
+    //
+    // El punto de venta y el número son lo único que identifica una factura sin
+    // ambigüedad: dos facturas distintas no pueden compartirlo y la misma
+    // re-fotografiada siempre lo comparte. No se pregunta nunca — si la foto no
+    // lo mostró, se registra sin él y la factura se identifica por la fila del
+    // libro a la que se enganchó.
+    puntoVenta: factura.punto_venta || '',
+    numero: factura.numero_comprobante || '',
+    // El pie de la factura, tal como se leyó. Sirve para no recalcular lo que el
+    // comprobante ya dice — ver `facturas.desglosar`, que los prefiere sobre la
+    // cuenta pero sólo cuando cierran contra el total.
+    subtotalLeido: numeroONull(factura.subtotal_factura),
+    ivaMontoLeido: numeroONull(factura.iva_monto),
+    otrosImpuestos: numeroONull(factura.otros_impuestos_monto) || 0,
+
     // ─── Lo que hay que definir ───
     deducible,
     ivaPct: deducible === true ? alicuotaDe(factura, cfg) : null,
@@ -116,8 +141,24 @@ function estadoInicial({ factura = {}, cfg = null, proveedor = '', itemsCount = 
     // Qué se propuso solo, para poder decirlo en el resumen. Lo propuesto se
     // confirma o se cambia; nada de esto se escribe sin que alguien lo mire.
     propuesto: [],
-    duplicado: null,
+
+    // ─── Lo que ya estaba cargado ──────────────────────────────────────────
+    //
+    // `yaCargada` es la MISMA factura (mismo número) ya registrada. Es un
+    // rechazo, no una rama: lo único que puede pasar es cancelar o insistir.
+    yaCargada: yaCargada || null,
+    yaCargadaOk: false,
+    // `duplicado` es la misma COMPRA ya anotada en Movimientos, por otro
+    // camino: la cargaron en la app, o llegó el pedido y se recibió. Acá no se
+    // cancela nada: se carga la factura y sus productos SIN volver a escribir
+    // la plata. Ver el bloque del paso 0b en `siguientePaso`.
+    duplicado: enLibro && enLibro.mejor ? enLibro : null,
     duplicadoOk: false,
+    // Cuando alguien dice "sí, es esa fila": la compra ya está en el libro y
+    // esta foto sólo aporta el comprobante, sus renglones y el IVA.
+    soloFactura: false,
+    movimiento: null,
+
     confirmado: false,
   };
 
@@ -302,14 +343,69 @@ function capitalizar(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 function siguientePaso(estado) {
   const e = estado;
 
-  // 0. ¿Ya cargamos esta misma factura hace un rato?
-  if (e.duplicado && !e.duplicadoOk) {
-    return paso('duplicado',
-      `⚠️ Ya hay una compra de *${e.duplicado.proveedor}* por ${plata(e.duplicado.monto)} del ${fechaCorta(e.duplicado.fecha)}.\n\n¿Es otra factura o es la misma?`,
+  // ─── 0a. Esta MISMA factura ya está registrada ───────────────────────────
+  //
+  // Mismo proveedor, misma letra, mismo punto de venta y mismo número: es el
+  // comprobante, no una compra parecida. Acá no hay nada que decidir, así que no
+  // se ofrece enganchar nada: o se cancela, o alguien afirma que el número se
+  // leyó mal. Cancelar va primero porque es lo que casi siempre corresponde.
+  if (e.yaCargada && !e.yaCargadaOk) {
+    const y = e.yaCargada;
+    return paso('yaCargada',
+      `🧾 La factura *${nroComprobante(e)}* de *${e.proveedor}* ya está registrada `
+      + `(${plata(y.total)} del ${fechaCorta(y.fecha)}).\n\n`
+      + 'Si le sacaste la foto de nuevo, no hay nada que hacer.',
       [
-        { id: 'otra', label: 'Es otra, seguí' },
-        { id: 'misma', label: 'Es la misma, cancelá' },
+        { id: 'cancelar', label: '🚫 Listo, no cargues nada', sugerido: true },
+        { id: 'igual', label: 'Es otra factura, seguí' },
       ]);
+  }
+
+  // ─── 0b. Esta COMPRA ya está en el libro ─────────────────────────────────
+  //
+  // La plata ya se anotó por otro camino: la cargaron desde "Nueva compra" o
+  // llegó el pedido y se recibió. Volver a escribirla duplica el gasto del mes.
+  //
+  // Pero la factura SÍ falta: el comprobante, sus renglones y el IVA no están en
+  // ningún lado. Por eso las opciones no son "seguí" y "cancelá" —que era como
+  // estaba escrito este paso y nunca llegó a usarse—: la que importa es la
+  // tercera, cargar la factura SIN tocar la plata.
+  //
+  // El orden de los botones lo decide la evidencia y no una preferencia fija.
+  // Con el importe coincidiendo, "es esa" arriba; con sólo el proveedor y la
+  // fecha, arriba va "es otra compra". Los dos errores son caros y opuestos —
+  // enganchar mal deja un gasto sin escribir para siempre y en silencio,
+  // desenganchar mal deja una fila duplicada que se ve en Pagos— así que lo que
+  // manda es cuánto prueba lo que se encontró.
+  if (e.duplicado && !e.duplicadoOk) {
+    const cands = (e.duplicado.candidatas || []).slice(0, 2);
+    const fuerte = (e.duplicado.mejor || {}).fuerza === 'monto';
+
+    const L = [`📒 Esta compra de *${e.proveedor}* puede que ya esté anotada en el libro:`, ''];
+    for (const c of cands) {
+      const que = c.descripcion ? ` · ${c.descripcion}` : '';
+      L.push(`• *${plata(c.monto)}* del ${fechaCorta(c.fecha)} · ${c.estado}${que}`);
+    }
+    L.push('');
+    L.push(fuerte
+      ? '¿Es esta misma compra? Si sí, cargo la factura y los productos y *no* vuelvo a anotar la plata.'
+      : '⚠️ El importe no coincide, así que puede ser otra compra del mismo proveedor.');
+
+    const botonesCand = cands.map(c => ({
+      id: `misma:${c.idMovimiento}`,
+      label: cands.length > 1
+        ? `✅ Es la de ${plata(c.monto)}`
+        : '✅ Sí, es esta — no la anotes de nuevo',
+      sugerido: fuerte,
+    }));
+    const botonOtra = { id: 'otra', label: '➕ Es otra compra, anotala', sugerido: !fuerte };
+
+    return paso('duplicado', L.join('\n'),
+      fuerte ? [...botonesCand, botonOtra, { id: 'cancelar', label: '🚫 Cancelá' }]
+             : [botonOtra, ...botonesCand, { id: 'cancelar', label: '🚫 Cancelá' }],
+      { ayuda: e.duplicado.conFactura
+        ? `Hay ${e.duplicado.conFactura} fila(s) más de este proveedor que ya tienen su factura, así que no las ofrezco.`
+        : '' });
   }
 
   // 1. ¿Descuenta IVA? La condición es ser factura A.
@@ -342,6 +438,28 @@ function siguientePaso(estado) {
     return paso('total', `${leido}¿Es correcto?`,
       e.total > 0 ? [{ id: String(e.total), label: `✅ ${plata(e.total)}`, sugerido: true }] : [],
       { permiteTexto: true, ayuda: 'Si no, escribí el monto.' });
+  }
+
+  // ─── De acá para abajo, todo lo que decide la PLATA ──────────────────────
+  //
+  // En modo "sólo la factura" nada de esto se pregunta, y no es un atajo: la
+  // categoría, el medio, si está paga, cuándo llega y cuándo vence YA están
+  // escritos en la fila del libro y en su pedido. Preguntarlos de nuevo sería
+  // pedirle a alguien que conteste algo que el sistema sabe, y peor, dejarlo
+  // contestar distinto de lo que quedó registrado sin que eso cambie nada.
+  if (e.soloFactura) {
+    if (!e.confirmado) {
+      return {
+        tipo: 'confirmar', campo: '', texto: armarResumen(e),
+        botones: [
+          { id: 'confirmar', label: '✅ Confirmar así', sugerido: true },
+          { id: 'corregir:datos', label: '✏️ Corregir el IVA o el total' },
+          { id: 'corregir:enganche', label: '🔗 No era esa compra' },
+        ],
+        permiteTexto: false,
+      };
+    }
+    return { tipo: 'listo', campo: '', texto: armarResumen(e), botones: [], permiteTexto: false };
   }
 
   // 5. La categoría del gasto.
@@ -442,10 +560,33 @@ function aplicarRespuesta(estado, { campo, valor } = {}) {
   const v = valor == null ? '' : String(valor).trim();
 
   switch (campo) {
-    case 'duplicado':
-      if (v === 'misma') return { estado: e, cancelar: true };
+    case 'yaCargada':
+      if (v === 'igual') { e.yaCargadaOk = true; return { estado: e }; }
+      return { estado: e, cancelar: true };
+
+    case 'duplicado': {
+      if (v === 'cancelar') return { estado: e, cancelar: true };
       e.duplicadoOk = true;
+      if (v === 'otra') return { estado: e };
+
+      // "misma:<idMovimiento>" — se engancha a ESA fila y no a la que el
+      // sistema prefería: el botón dice el importe, así que lo que se tocó es
+      // lo que se eligió.
+      const id = v.startsWith('misma:') ? v.slice(6) : '';
+      const cand = ((e.duplicado && e.duplicado.candidatas) || [])
+        .find(c => c.idMovimiento === id);
+      if (!cand) return { estado, error: 'Esa fila ya no está. Volvé a mandar la foto.' };
+
+      e.soloFactura = true;
+      e.movimiento = cand;
+      // Lo que ya está decidido se COPIA de la fila, no se vuelve a preguntar.
+      // La categoría se normaliza igual: la columna J de una fila vieja puede
+      // decir algo que hoy no es una categoría válida.
+      e.categoria = cats.normalizarCategoriaGasto(cand.categoria) || e.categoria || '';
+      e.estaPago = null; e.medioPago = ''; e.pagaAlLlegar = null;
+      e.entregaFecha = ''; e.vencimiento = ''; e.propuesto = [];
       return { estado: e };
+    }
 
     case 'deducible':
       e.deducible = esSi(v);
@@ -531,8 +672,19 @@ function aplicarRespuesta(estado, { campo, valor } = {}) {
     case 'corregir':
       if (v === 'pago') { e.estaPago = null; e.medioPago = ''; e.pagaAlLlegar = null; e.vencimiento = ''; }
       else if (v === 'entrega') { e.entregaFecha = null; e.pagaAlLlegar = null; }
-      else if (v === 'datos') { e.total = null; e.confianzaTotal = 0; e.categoria = ''; e.deducible = null; e.ivaPct = null; e.ivaIncluido = null; }
-      else return { estado, error: 'No sé qué corregir.' };
+      else if (v === 'datos') {
+        e.total = null; e.confianzaTotal = 0; e.deducible = null; e.ivaPct = null; e.ivaIncluido = null;
+        // Enganchada a una fila, la categoría es la de esa fila y no algo que
+        // esta pantalla pueda cambiar: borrarla haría que se pregunte de nuevo
+        // para después no escribirla en ningún lado.
+        if (!e.soloFactura) e.categoria = '';
+      } else if (v === 'enganche') {
+        // Deshacer el enganche: vuelve a preguntarse todo el bloque de la plata,
+        // y la propuesta se muestra otra vez para poder elegir bien.
+        e.soloFactura = false; e.movimiento = null; e.duplicadoOk = false;
+        e.estaPago = null; e.medioPago = ''; e.pagaAlLlegar = null;
+        e.entregaFecha = null; e.vencimiento = '';
+      } else return { estado, error: 'No sé qué corregir.' };
       // Deja de ser una propuesta en cuanto alguien la toca: lo que conteste
       // ahora SÍ es lo que ese proveedor hace, y eso es lo que se aprende.
       e.propuesto = (e.propuesto || []).filter(x => x !== v);
@@ -582,22 +734,50 @@ function fechaCorta(iso) {
  */
 function armarResumen(e) {
   const L = [];
-  L.push(`🧾 *${e.proveedor || '¿?'}* · ${fechaCorta(e.fecha)}`);
+  const nro = nroComprobante(e);
+  L.push(`🧾 *${e.proveedor || '¿?'}*${nro ? ` · ${nro}` : ''} · ${fechaCorta(e.fecha)}`);
   L.push(e.total > 0 ? `💵 *${plata(e.total)}*` : '💵 ❓ falta el total');
 
   if (e.deducible === true) {
     const como = e.ivaIncluido === true ? 'incluido' : e.ivaIncluido === false ? 'discriminado' : '❓';
     L.push(`🅰️ Descuenta IVA · ${e.ivaPct != null ? `${String(e.ivaPct).replace('.', ',')}%` : '❓'} ${como}`);
+    // Cuánto crédito fiscal deja esta factura. Es el número que el registro
+    // existe para acumular, así que se dice ACÁ y no sólo en la pantalla: quien
+    // sacó la foto tiene que poder ver el aporte del mes creciendo.
+    const d = desgloseDe(e);
+    if (d && d.iva > 0) L.push(`   ↳ crédito IVA *${plata(d.iva)}* sobre ${plata(d.neto)} de neto`);
   } else if (e.deducible === false) {
     L.push('🚫 No descuenta IVA');
   } else {
     L.push('❓ No sé si descuenta IVA');
   }
 
+  // La fila del libro a la que se engancha. Va arriba de todo lo demás porque
+  // cambia qué significa el resto del resumen: la plata no se vuelve a escribir.
+  if (e.soloFactura && e.movimiento) {
+    const m = e.movimiento;
+    L.push(`📒 Ya está en el libro: ${plata(m.monto)} del ${fechaCorta(m.fecha)} · ${m.estado}`
+      + `${m.medioPago ? ` · ${m.medioPago}` : ''}`);
+    L.push('   ↳ *no* la vuelvo a anotar; cargo la factura y los productos.');
+    // Si el total de la factura no es el de la fila, hay que decirlo: puede ser
+    // un pago parcial, un saldo o una lectura mal hecha, y las tres se resuelven
+    // mirándolo, no eligiendo por la persona.
+    const dif = (e.total || 0) - (m.monto || 0);
+    if (e.total > 0 && Math.abs(dif) > Math.max(1, (m.monto || 0) * 0.005)) {
+      L.push(`   ⚠️ La factura dice ${plata(e.total)} y la fila ${plata(m.monto)} `
+        + `(${dif > 0 ? '+' : '−'}${plata(Math.abs(dif))}).`);
+    }
+  }
+
   const trozos = [];
   trozos.push(e.categoria ? `🏷️ ${e.categoria}` : '🏷️ ❓');
   if (e.itemsCount > 0) trozos.push(`📦 ${e.itemsCount} producto${e.itemsCount === 1 ? '' : 's'}`);
   L.push(trozos.join(' · '));
+
+  // Enganchada a una fila, el bloque del pago ya está contestado en el libro.
+  // Repetirlo acá con un "❓ falta definir el pago" diría que falta algo que no
+  // falta, que es la única cosa que este resumen no puede hacer.
+  if (e.soloFactura) return L.join('\n');
 
   // Lo que se propuso solo se marca: hay que poder distinguir "esto lo dijiste
   // vos" de "esto lo supuse yo porque es lo que hacés siempre".
@@ -664,6 +844,63 @@ function aDDMMAAAA(iso) {
   return m ? `${Number(m[3])}/${Number(m[2])}/${m[1]}` : String(iso || '');
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// La factura como comprobante
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** "A 00003-00001234", o '' si la foto no mostró el número. */
+function nroComprobante(e) {
+  const { puntoVenta, numero } = facturas.formatearNumero(e.puntoVenta, e.numero);
+  if (!numero) return '';
+  const letra = facturas.normalizarComprobante(e.tipoComprobante);
+  return `${letra ? `${letra} ` : ''}${puntoVenta || '?????'}-${numero}`;
+}
+
+/** El desglose fiscal de lo que se lleva contestado. Puede dar null. */
+function desgloseDe(e) {
+  if (!(e.total > 0)) return null;
+  return facturas.desglosar({
+    total: e.total,
+    otrosImpuestos: e.otrosImpuestos,
+    computable: facturas.esComputable({ comprobante: e.tipoComprobante, deducible: e.deducible }),
+    alicuota: e.ivaPct,
+    netoLeido: e.subtotalLeido,
+    ivaLeido: e.ivaMontoLeido,
+  });
+}
+
+/**
+ * El renglón que va a la hoja `Facturas`.
+ *
+ * `idMovimiento` lo pone quien llama: cuando la compra se escribe ahora es el id
+ * que acuñó `registrarCompra`, y cuando se engancha a una fila que ya existía es
+ * el de esa fila. Es el único dato que este archivo no puede saber solo, porque
+ * nace de una escritura.
+ */
+function aRegistroDeFactura(estado, { usuario = '', origen = 'bot', idMovimiento = '' } = {}) {
+  const e = estado;
+  const { puntoVenta, numero } = facturas.formatearNumero(e.puntoVenta, e.numero);
+  return {
+    fecha: e.fecha,
+    mes: mesDe(e.fecha),
+    proveedor: e.proveedor,
+    cuit: e.cuit || '',
+    comprobante: e.tipoComprobante,
+    // Cuando la letra no se leyó pero alguien contestó que descuenta IVA, la
+    // columna `Computable` lo dice igual. No se escribe una "A" inventada: la
+    // letra es lo que dice el papel, no lo que se dedujo de una respuesta.
+    deducible: e.deducible,
+    puntoVenta, numero,
+    total: e.total,
+    alicuota: e.ivaPct,
+    neto: e.subtotalLeido,
+    iva: e.ivaMontoLeido,
+    otrosImpuestos: e.otrosImpuestos,
+    idMovimiento: idMovimiento || (e.movimiento && e.movimiento.idMovimiento) || '',
+    origen, usuario,
+  };
+}
+
 /** Lo que hay que guardar en la ficha del proveedor para no repreguntarlo. */
 function aprendizajeDe(estado) {
   const e = estado;
@@ -710,7 +947,9 @@ function ivaParaCompras(estado) {
 module.exports = {
   estadoInicial, siguientePaso, aplicarRespuesta,
   armarResumen, aDatosDeCompra, aprendizajeDe, fiscalDe, ivaParaCompras,
+  aRegistroDeFactura,
   // Puras, exportadas para poder ejercitarlas.
+  nroComprobante, desgloseDe,
   pagoPrevistoDe, llevaEntrega, atajosDeEntrega, vencimientoSugerido,
   fechaSuelta, mesDe, aDDMMAAAA, plata, fechaCorta,
   CATEGORIAS_CON_ENTREGA, SIN_ENTREGA, ALICUOTAS, MEDIOS, CONFIANZA_MINIMA_TOTAL,

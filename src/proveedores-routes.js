@@ -23,6 +23,7 @@ const cats = require('./proveedores-categorias');
 const provCfg = require('./proveedores-config');
 const convo = require('./compra-conversacion');
 const pedidos = require('./pedidos');
+const facturasReg = require('./facturas');
 
 // Umbral de confianza por debajo del cual un campo se considera dudoso.
 const UMBRAL = parseFloat(process.env.PROVEEDORES_UMBRAL_CONFIANZA || '0.6');
@@ -266,13 +267,21 @@ async function procesarFactura(factura, items) {
 
   const otrosImpuestos = Number(factura.otros_impuestos_monto) || 0;
   return { proveedor, medioPago, iva, ivaDeducible, descuentoIncluido, ivaIncluido,
-    ivaPctSugerido, otrosImpuestos, subtotalFact, dudas,
+    ivaPctSugerido, otrosImpuestos, subtotalFact, ivaMonto, dudas,
     // Para el gasto del libro
     totalGasto: totalSugerido, sumaLineas: redondear(sumaLineas), totalLeido: redondear(totalLeido),
-    categoriaGasto, estadoGasto: '', diasCredito, fecha: factura.fecha || '' };
+    categoriaGasto, estadoGasto: '', diasCredito, fecha: factura.fecha || '',
+    // ─── La identidad fiscal del comprobante ──────────────────────────────
+    // Viaja para que el registro de facturas pueda escribirla y para poder
+    // reconocer la MISMA factura si alguien la fotografía dos veces. No genera
+    // ninguna pregunta: si la foto no la mostró, se registra sin ella.
+    tipoComprobante: factura.tipo_comprobante || '',
+    cuit: factura.cuit_proveedor || '',
+    puntoVenta: factura.punto_venta || '',
+    numero: factura.numero_comprobante || '' };
 }
 
-module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, registrarCompra } = {}) {
+module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, registrarCompra, buscarCompraParaFactura } = {}) {
 
   // Escribe en Movimientos el gasto de una factura ya confirmada.
   //
@@ -337,11 +346,19 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, r
   //   2. `registrarCompra` → Movimientos y/o el pedido en Pedidos
   //   3. los renglones del pedido → Pedidos Items
   //   4. la hoja Compras
-  //   5. el aprendizaje del proveedor
+  //   5. la hoja Facturas — el comprobante y su crédito fiscal
+  //   6. el aprendizaje del proveedor
   //
   // Sólo el 2 es imprescindible: si falla, no se hizo nada y se dice.
+  //
+  // ─── Y el paso 2 puede no existir (03/09/2026) ────────────────────────────
+  //
+  // Cuando la compra YA está anotada en el libro —la cargaron desde la app, o
+  // llegó el pedido y se recibió— la foto no viene a escribir plata: viene a
+  // aportar el comprobante, sus renglones y el IVA. Ahí el paso 2 se saltea
+  // entero y el resto ocurre igual. Ver `soloFactura` en compra-conversacion.js.
   async function confirmarCompra(id, conv, req) {
-    if (typeof registrarCompra !== 'function') {
+    if (typeof registrarCompra !== 'function' && !conv.soloFactura) {
       return { ok: false, error: 'El servidor no tiene habilitada la carga de compras.' };
     }
     const reg = prov.getPendiente(id);
@@ -355,23 +372,58 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, r
     if (!esp.ok) avisos.push(`No se pudieron leer los productos (${esp.error}).`);
     const conItems = { ...conv, itemsCount: items.length };
 
-    // 2. La plata y el pedido, por la MISMA función que usa el formulario de la app.
-    const datos = convo.aDatosDeCompra(conItems, { usuario });
-    const out = await registrarCompra(datos);
-    if (!out.ok) return { ok: false, error: out.error };
-    if (out.aviso) avisos.push(out.aviso);
+    // 2. La plata y el pedido, por la MISMA función que usa el formulario de la
+    //    app. Enganchada a una fila que ya existe, esto NO corre: volver a
+    //    escribirla duplicaría el gasto del mes, que es exactamente lo que la
+    //    pregunta del enganche existe para evitar.
+    let out;
+    const datos = conv.soloFactura ? null : convo.aDatosDeCompra(conItems, { usuario });
+    if (conv.soloFactura) {
+      const m = conv.movimiento || {};
+      out = {
+        ok: true, idCompra: m.idMovimiento || '', enElLibro: true, yaEstaba: true,
+        pedido: null, aviso: '',
+      };
+      // El pedido de esa compra, si lo tuvo. Un id que empieza con `ped` es un
+      // pedido; uno `cmp` es una compra sin entrega y no hay nada que buscar.
+      if (/^ped/.test(out.idCompra)) {
+        try {
+          const p = await pedidos.getPedido(out.idCompra);
+          if (p) out.pedido = p;
+        } catch (e) { /* sin pedido no se pierde nada: los productos van a Compras igual */ }
+      }
+    } else {
+      out = await registrarCompra(datos);
+      if (!out.ok) return { ok: false, error: out.error };
+      if (out.aviso) avisos.push(out.aviso);
+    }
 
     // 3. Qué llega, para poder tildarlo en la puerta. Reemplaza al pegado manual
     //    de la imagen en la app: sale de la misma foto.
+    //
+    //    Enganchada a un pedido que YA tiene renglones, no se agrega nada: un
+    //    remito nuevo SUMA filas y no las pisa (regla de `agregarItems`), así que
+    //    volver a mandarlos duplicaría la lista que alguien ya está tildando.
     let itemsPedido = 0;
     if (out.pedido && items.length) {
-      try {
-        const creados = await pedidos.agregarItems(out.pedido.id, items.map(it => ({
-          producto: it.producto, cantidad: it.cantidad, unidad: it.unidad, nota: '',
-        })), { origen: 'remito' });
-        itemsPedido = (creados || []).length;
-      } catch (e) {
-        avisos.push(`El pedido quedó sin la lista de productos (${e.message}). Se puede pegar el remito desde Operación › Pedidos.`);
+      let yaTiene = 0;
+      if (conv.soloFactura) {
+        try { yaTiene = (await pedidos.itemsDe(out.pedido.id) || []).length; }
+        catch (e) { yaTiene = -1; }   // no se pudo saber → no se toca
+      }
+      if (yaTiene > 0) {
+        avisos.push(`El pedido ya tenía ${yaTiene} producto(s) cargados, así que no los volví a agregar.`);
+      } else if (yaTiene < 0) {
+        avisos.push('No pude ver si el pedido ya tenía productos, así que no le agregué ninguno.');
+      } else {
+        try {
+          const creados = await pedidos.agregarItems(out.pedido.id, items.map(it => ({
+            producto: it.producto, cantidad: it.cantidad, unidad: it.unidad, nota: '',
+          })), { origen: 'remito' });
+          itemsPedido = (creados || []).length;
+        } catch (e) {
+          avisos.push(`El pedido quedó sin la lista de productos (${e.message}). Se puede pegar el remito desde Operación › Pedidos.`);
+        }
       }
     }
 
@@ -380,8 +432,15 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, r
     let escritas = 0;
     if (items.length) {
       const iva = convo.ivaParaCompras(conItems);
+      // Enganchada a una fila que ya existe no hay `datos`: la compra no se
+      // vuelve a armar. El medio sale de esa fila, que es donde está escrito de
+      // verdad — y puede estar vacío, porque una fila "A pagar" no lleva medio
+      // hasta que se paga.
+      const medio = datos
+        ? datos.medioPago
+        : ((conv.movimiento && conv.movimiento.medioPago) || '');
       for (const it of items) {
-        it.formaPago = datos.medioPago || it.formaPago || '';
+        it.formaPago = medio || it.formaPago || '';
         it.ivaPct = iva.ivaPct;
         it.ivaIncluido = iva.ivaIncluido;
       }
@@ -393,11 +452,25 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, r
       }
     }
 
-    // 5. Lo que no se vuelve a preguntar. Que falle sólo cuesta una repregunta
+    // 5. El COMPROBANTE. Compras responde "a qué precio compramos" y Movimientos
+    //    "cuánta plata salió"; ninguna de las dos contesta "cuánto crédito IVA
+    //    acumulamos este mes", que se computa por comprobante y no por renglón.
+    //    Esta es la única hoja que lo contesta.
+    //
+    //    Va después de todo lo demás y no puede tumbar nada: `registrar` nunca
+    //    tira. Que falle sólo cuesta cargar la factura a mano, y el aviso es lo
+    //    que hace que alguien la cargue.
+    const factura = await facturasReg.registrar(
+      convo.aRegistroDeFactura(conItems, { usuario, origen: 'bot', idMovimiento: out.idCompra }));
+    if (factura && !factura.ok) {
+      avisos.push(`La factura no quedó en el registro de IVA (${factura.error}). Cargala desde Plan › Fiscal.`);
+    }
+
+    // 6. Lo que no se vuelve a preguntar. Que falle sólo cuesta una repregunta
     //    la próxima vez, así que nunca frena nada.
     try {
       const aprender = convo.aprendizajeDe(conItems);
-      if (datos.medioPago) aprender['Medio de Pago'] = datos.medioPago;
+      if (datos && datos.medioPago) aprender['Medio de Pago'] = datos.medioPago;
       Object.assign(aprender, await fiscalSiCorresponde(conItems));
       if (Object.keys(aprender).length) {
         await provCfg.setAtributosProveedor(conItems.proveedor, aprender);
@@ -412,10 +485,34 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, r
       ok: true, status: 'escrito',
       resumen: convo.armarResumen(conItems),
       enElLibro: out.enElLibro,
+      // `yaEstaba` es lo que separa "lo anoté" de "ya estaba anotado". Sin este
+      // campo el bot diría "quedó anotado en Movimientos" sobre una fila que
+      // escribió otro, que es cierto y engañoso a la vez.
+      yaEstaba: !!out.yaEstaba,
       pedido: out.pedido ? { id: out.pedido.id, fecha: out.pedido.fecha, items: itemsPedido } : null,
       escritas,
+      // El crédito fiscal que aportó esta factura. `texto` viaja ya armado
+      // porque el bot no formatea plata: sería una cuarta copia de esa regla.
+      factura: factura && factura.ok
+        ? { ok: true, yaExistia: !!factura.yaExistia,
+            iva: (factura.desglose && factura.desglose.iva) || 0,
+            computable: !!factura.computable,
+            texto: textoDeFactura(factura) }
+        : { ok: false, error: (factura && factura.error) || '', texto: '' },
       avisos,
     };
+  }
+
+  // Cómo se cuenta en el chat lo que quedó registrado del comprobante. Vive acá
+  // y no en el bot porque `plata()` es la regla de formato del repo y el bot no
+  // tiene ninguna: dibuja lo que la app le manda.
+  function textoDeFactura(f) {
+    if (!f || !f.ok) return '';
+    if (f.yaExistia) return '🧾 Esa factura ya estaba en el registro de IVA.';
+    const iva = (f.desglose && f.desglose.iva) || 0;
+    if (f.computable && iva > 0) return `🅰️ Crédito IVA registrado: *${convo.plata(iva)}*.`;
+    if (f.computable) return '🅰️ Factura registrada, pero sin el IVA: falta la alícuota.';
+    return '🧾 Factura registrada (no da crédito IVA).';
   }
 
   // El padrón fiscal se siembra con lo que ya se preguntó, PERO nunca se pisa
@@ -528,15 +625,43 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, r
       // El bot no decide qué preguntar: acá se arma el estado cruzando lo que
       // se leyó de la foto con lo que ya se sabe del proveedor, y se devuelve
       // el primer paso ya dibujado. Ver `compra-conversacion.js`.
-      let cfg = null;
-      try {
-        const todos = await provCfg.leerConfig();
-        cfg = (todos.byNombre || {})[provCfg.norm(provNombre)] || null;
-      } catch (e) { /* sin ficha se pregunta todo, que es lo correcto */ }
+      // ─── Las tres lecturas van JUNTAS ───────────────────────────────────
+      //
+      // La ficha del proveedor, si la compra ya está en el libro, y si esta
+      // misma factura ya está registrada. Son tres planillas distintas y
+      // ninguna depende de las otras: encadenarlas le sumaría dos idas y
+      // vueltas a Google a la espera de la primera pregunta, que es justo el
+      // tiempo que este circuito ya peleó una vez.
+      //
+      // ─── Por qué se pregunta ACÁ y no al confirmar ──────────────────────
+      //
+      // Si la compra ya está en el libro, la mitad de la conversación —el
+      // medio, si está paga, cuándo llega, cuándo vence— no hay que hacerla:
+      // ya está contestada en esa fila. Preguntarlo primero es lo que ahorra
+      // esos toques, no un chequeo de más.
+      //
+      // Ninguna de las tres puede frenar la ingesta: todas leen planillas, y un
+      // error de lectura no puede dejar una factura sin poder cargarse.
+      const [cfg, enLibro, yaCargada] = await Promise.all([
+        provCfg.leerConfig()
+          .then(todos => (todos.byNombre || {})[provCfg.norm(provNombre)] || null)
+          .catch(() => null),   // sin ficha se pregunta todo, que es lo correcto
+        typeof buscarCompraParaFactura === 'function'
+          ? buscarCompraParaFactura({
+            proveedor: provNombre, fecha: factura.fecha, total: factura.total_factura,
+          }).catch(() => null)
+          : Promise.resolve(null),
+        facturasReg.buscarPorClave(facturasReg.claveDe({
+          proveedor: provNombre,
+          comprobante: factura.tipo_comprobante,
+          puntoVenta: factura.punto_venta,
+          numero: factura.numero_comprobante,
+        })).catch(() => null),
+      ]);
 
       const conv = convo.estadoInicial({
         factura, cfg, proveedor: provNombre, pendienteId: reg.id,
-        itemsCount: 0,
+        itemsCount: 0, enLibro, yaCargada,
       });
       prov.setConversacion(reg.id, conv);
 
@@ -743,10 +868,40 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, r
       // las dos cosas.
       const gasto = await escribirGastoDeFactura(reg);
 
+      // ─── Y el comprobante ────────────────────────────────────────────────
+      //
+      // Esta ruta es el panel de la app, no el bot: no pasa por la
+      // conversación, así que no tiene la letra ni el número del comprobante —
+      // el pendiente sólo guarda un subconjunto de lo leído. Se registra con lo
+      // que SÍ hay, y `Computable` sale de `ivaDeducible`, que es la respuesta a
+      // la misma pregunta ("¿esta factura sirve para descontar IVA?").
+      //
+      // Registrar de menos acá sería peor que registrar sin número: una factura
+      // que no está deja su gasto en la lista de pendientes del mes para
+      // siempre, y nadie sabe que ya se miró.
+      const facturaReg = await facturasReg.registrar({
+        fecha: fk.fecha || (out.listoParaEscribir[0] && out.listoParaEscribir[0].fecha) || '',
+        proveedor: fk.proveedor,
+        comprobante: fk.tipoComprobante,
+        deducible: fk.ivaDeducible,
+        cuit: fk.cuit,
+        puntoVenta: fk.puntoVenta,
+        numero: fk.numero,
+        total: fk.totalGasto,
+        alicuota: fk.ivaPct != null ? fk.ivaPct : fk.ivaPctSugerido,
+        neto: fk.subtotalFact,
+        iva: fk.ivaMonto,
+        otrosImpuestos: fk.otrosImpuestos,
+        // Es el mismo id que `escribirGastoDeFactura` pone en la columna H.
+        idMovimiento: reg.id,
+        origen: 'panel',
+        usuario: (req.user && req.user.nombre) || (reg.origen && reg.origen.usuario) || 'bot',
+      });
+
       res.json({
         ok: true, status: 'escrito', escritas: n,
         items: out.listoParaEscribir,
-        gasto, renglonesPendientes: quedan,
+        gasto, factura: facturaReg, renglonesPendientes: quedan,
         message: `${n} producto(s) cargado(s) en Compras.`
           + (gasto && gasto.ok && !gasto.yaExistia ? ` Gasto de ${gasto.montoTexto} anotado en el libro.` : '')
           + (gasto && gasto.ok && gasto.yaExistia ? ' El gasto ya estaba anotado en el libro.' : '')

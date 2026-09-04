@@ -1399,6 +1399,20 @@
     .fisc-kpi-card .pc { font-size: 13px; font-weight: 600; color: var(--text-muted); margin-top: 2px; }
     .fisc-kpi-card .sub { font-size: 11px; color: var(--text-muted); margin-top: 6px; line-height: 1.5; }
 
+    /* El alta de una factura contra un gasto ya cargado. Se abre desde la lista
+       de pendientes de la propia pantalla Fiscal, nunca sobre otro modal, así
+       que 320 alcanza — el mismo escalón que el padrón.
+
+       EN ESTA APP CADA MODAL NECESITA SU PROPIA REGLA: no hay una genérica para
+       `.modal-overlay`, y sin esto la ventana se dibuja A LA VISTA al pie de la
+       página. Ya pasó con los dos modales de saldos (26/08/2026). */
+    #fac-alta-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+      z-index: 320; align-items: center; justify-content: center; padding: 20px; }
+    #fac-alta-overlay.open { display: flex; }
+    #fac-alta-overlay .modal { background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 24px; width: 520px; max-width: 96vw; max-height: 90vh; overflow-y: auto; }
+    #fac-alta-overlay .modal-title { font-size: 17px; font-weight: 600; }
+
     /* El padrón se abre desde la propia pantalla Fiscal, nunca sobre otro modal,
        así que 320 alcanza (ver el orden de apilado documentado en Pedidos). */
     #fiscal-padron-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65);
@@ -2260,6 +2274,42 @@
 
 <div id="tab-fiscal" class="tab-panel">
   <main>
+    <!-- ── El crédito IVA REAL del mes ──────────────────────────────────────
+         Va ARRIBA de la simulación a propósito: esto es lo que dicen las
+         facturas, y lo de abajo es lo que se estima cuando no hay facturas. Un
+         número medido no puede quedar debajo de uno supuesto.
+
+         Y va con su COBERTURA pegada, porque el crédito solo no dice si está
+         completo. La lista de gastos sin factura no es contexto: es la lista de
+         trabajo, y es lo que hace que el número de arriba llegue a ser cierto.
+         Ver src/facturas.js. -->
+    <div class="card">
+      <div class="card-title"><span>Crédito IVA del mes — facturas cargadas</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
+              id="fac-subtitulo">cargando…</span>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+        <select id="fac-mes" onchange="loadFacturas()" style="max-width:180px"></select>
+        <button class="btn" onclick="loadFacturas()">Actualizar</button>
+      </div>
+      <div id="fac-total"><span class="num" style="color:var(--text-muted)">—</span></div>
+      <div id="fac-cobertura" class="fisc-nota" style="margin-top:12px"></div>
+      <div class="table-wrap" style="margin-top:14px"><table id="fac-alicuotas"></table></div>
+      <div class="table-wrap" style="margin-top:14px"><table id="fac-proveedores"></table></div>
+    </div>
+
+    <!-- Los gastos del mes a los que les falta el comprobante, del más caro al
+         más barato. El orden es el mismo criterio del padrón fiscal: con veinte
+         para cargar, empezar por plata es la diferencia entre resolver el 80%
+         en diez minutos o abandonar a la mitad. -->
+    <div class="card" id="fac-pendientes-card" style="display:none">
+      <div class="card-title"><span>Gastos del mes sin factura cargada</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
+              id="fac-pend-sub"></span>
+      </div>
+      <div id="fac-pendientes"></div>
+    </div>
+
     <!-- La planilla de simulación, con datos reales. Reproduce la "Simulación
          costo fiscal Régimen General" que armó Gonzalo (31/08/2026): se factura
          lo que liquida Galicia, el IVA se agrega sobre ese precio, y el costo
@@ -2338,6 +2388,60 @@
       <div class="fisc-nota" style="margin-top:12px" id="fisc-desc-pie"></div>
     </div>
   </main>
+</div>
+
+<!-- Cargar la factura de un gasto que ya está en el libro. El proveedor, la
+     fecha y el monto NO se editan: se está diciendo qué comprobante respalda ESE
+     gasto, no cargando uno nuevo. -->
+<div class="modal-overlay" id="fac-alta-overlay">
+  <div class="modal">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:6px">
+      <div class="modal-title">Cargar la factura de este gasto</div>
+      <button class="btn-close" onclick="cerrarAltaFactura()" aria-label="Cerrar">×</button>
+    </div>
+    <div id="fac-alta-titulo" style="font-size:13px;color:var(--text-muted);margin-bottom:16px"></div>
+    <div class="form-grid" style="margin:0">
+      <div class="form-group">
+        <label>Comprobante</label>
+        <select id="fac-alta-tipo" onchange="onAltaFacturaChange()">
+          <option value="A">A (descuenta IVA)</option>
+          <option value="B">B</option>
+          <option value="C">C</option>
+          <option value="M">M (descuenta IVA)</option>
+          <option value="X">X</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Nº (punto de venta - número)</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="text" inputmode="numeric" id="fac-alta-pv" placeholder="0003" style="flex:0 0 80px;min-width:0">
+          <span style="color:var(--text-muted)">-</span>
+          <input type="text" inputmode="numeric" id="fac-alta-nro" placeholder="00001234" style="flex:1;min-width:0">
+        </div>
+      </div>
+      <div class="form-group"><label>CUIT del proveedor</label><input type="text" id="fac-alta-cuit" placeholder="30-71234567-8"></div>
+      <div class="form-group" id="fac-alta-alic-wrap">
+        <label>Alícuota de IVA</label>
+        <select id="fac-alta-alicuota" onchange="onAltaFacturaChange()">
+          <option value="21">21%</option>
+          <option value="10.5">10,5%</option>
+          <option value="27">27%</option>
+          <option value="5">5%</option>
+          <option value="2.5">2,5%</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Otros impuestos ARS <span style="text-transform:none;font-weight:400">(no IVA)</span></label>
+        <input type="text" inputmode="decimal" id="fac-alta-otros" placeholder="0" oninput="onAltaFacturaChange()">
+      </div>
+    </div>
+    <div id="fac-alta-hint" style="font-size:12px;color:var(--text-muted);margin-top:10px"></div>
+    <div id="fac-alta-msg" style="font-size:12px;margin-top:10px;min-height:16px"></div>
+    <div style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn" onclick="cerrarAltaFactura()">Cancelar</button>
+      <button class="btn btn-accent" onclick="guardarAltaFactura(this)">Registrar factura</button>
+    </div>
+  </div>
 </div>
 
 <!-- Padrón fiscal: la cola ordenada por plata. Se abre desde la pantalla
@@ -3757,6 +3861,70 @@
       </select></div>
 
       <div class="form-group full"><label>Descripción / Notas</label><textarea id="f-descripcion" placeholder="Detalle adicional, datos bancarios, etc."></textarea></div>
+
+      <!-- ── El comprobante ──────────────────────────────────────────────────
+           Opcional y PLEGADO, por dos motivos que tiran para el mismo lado.
+           Hay compras sin factura, así que exigirla haría imposible cargar lo
+           que existe; y estos seis campos abiertos en cada compra son ruido en
+           un formulario que ya se usa apurado.
+
+           Pero plegado no es escondido: el título dice lo que hay adentro y se
+           pone en verde con el crédito en cuanto se completa, igual que los
+           consumos de Nómina. Sin esto, el crédito IVA del mes sólo tendría las
+           facturas que pasan por el bot y el total estaría subvaluado sin que
+           nadie lo note. Ver src/facturas.js. -->
+      <div class="form-group full" style="border-top:1px solid var(--border);padding-top:12px">
+        <div id="f-fac-toggle" onclick="toggleFacturaCompra()"
+             style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:8px">
+          <div style="font-size:13px">
+            🧾 <b>Datos de la factura</b>
+            <span id="f-fac-resumen" style="color:var(--text-muted);font-weight:400"> — opcional, sumá el crédito IVA</span>
+          </div>
+          <span id="f-fac-chevron" style="color:var(--text-muted)">▾</span>
+        </div>
+        <div id="f-fac-body" style="display:none;margin-top:12px">
+          <div class="form-grid" style="margin:0">
+            <div class="form-group">
+              <label>Comprobante</label>
+              <select id="f-fac-tipo" onchange="onFacturaCompraChange()">
+                <option value="">— sin factura —</option>
+                <option value="A">A (descuenta IVA)</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+                <option value="M">M (descuenta IVA)</option>
+                <option value="X">X</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Nº (punto de venta - número)</label>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input type="text" inputmode="numeric" id="f-fac-pv" placeholder="0003" style="flex:0 0 80px;min-width:0">
+                <span style="color:var(--text-muted)">-</span>
+                <input type="text" inputmode="numeric" id="f-fac-nro" placeholder="00001234" style="flex:1;min-width:0">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>CUIT del proveedor</label>
+              <input type="text" id="f-fac-cuit" placeholder="30-71234567-8">
+            </div>
+            <div class="form-group" id="f-fac-alic-wrap">
+              <label>Alícuota de IVA</label>
+              <select id="f-fac-alicuota" onchange="onFacturaCompraChange()">
+                <option value="21">21%</option>
+                <option value="10.5">10,5%</option>
+                <option value="27">27%</option>
+                <option value="5">5%</option>
+                <option value="2.5">2,5%</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Otros impuestos ARS <span style="text-transform:none;font-weight:400">(no IVA)</span></label>
+              <input type="text" inputmode="decimal" id="f-fac-otros" placeholder="0" oninput="onFacturaCompraChange()">
+            </div>
+          </div>
+          <div id="f-fac-hint" style="font-size:12px;color:var(--text-muted);margin-top:8px"></div>
+        </div>
+      </div>
     </div>
     <div id="modal-status"></div>
     <div class="modal-actions">
@@ -9765,6 +9933,7 @@ async function openModal() {
   document.getElementById('f-concuotas').checked = false;
   document.getElementById('f-cuotas-wrap').style.display = 'none';
   document.getElementById('f-descripcion').value = '';
+  resetFacturaCompra();
   document.getElementById('modal-status').style.display = 'none';
   document.getElementById('f-entrega').value = '';
   state.vencManual = false;
@@ -9774,6 +9943,115 @@ async function openModal() {
   onCategoriaChange();
   document.getElementById('modal-overlay').classList.add('open');
   ensureSugerencias();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// El comprobante de la compra
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// La regla es UNA y es la misma que en el bot y en src/facturas.js:
+//
+//     hay crédito fiscal ⟺ es factura A (o M)
+//
+// Un IVA discriminado en una factura B no da crédito. Acá esa regla se aplica
+// SÓLO para mostrar el número mientras se tipea: lo que se escribe en la
+// planilla lo decide el servidor con la misma regla, que es la que manda.
+// Son dos copias del criterio y por eso está dicho en las dos.
+const FAC_CON_CREDITO = ['A', 'M'];
+
+function resetFacturaCompra() {
+  ['f-fac-pv', 'f-fac-nro', 'f-fac-cuit', 'f-fac-otros'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  const tipo = document.getElementById('f-fac-tipo');
+  if (tipo) tipo.value = '';
+  const alic = document.getElementById('f-fac-alicuota');
+  if (alic) alic.value = '21';
+  const body = document.getElementById('f-fac-body');
+  if (body) body.style.display = 'none';
+  const chev = document.getElementById('f-fac-chevron');
+  if (chev) chev.textContent = '▾';
+  onFacturaCompraChange();
+}
+
+function toggleFacturaCompra() {
+  const body = document.getElementById('f-fac-body');
+  const abierto = body.style.display !== 'none';
+  body.style.display = abierto ? 'none' : 'block';
+  document.getElementById('f-fac-chevron').textContent = abierto ? '▾' : '▴';
+}
+
+// Lo que está cargado se ve SIN abrir el plegado, y en verde cuando hay crédito.
+// Un dato tapado atrás de un plegado que no se anuncia se pierde: es la misma
+// razón por la que el plegado de consumos en Nómina muestra su contenido en el
+// título.
+function onFacturaCompraChange() {
+  const tipo = (document.getElementById('f-fac-tipo') || {}).value || '';
+  const resumen = document.getElementById('f-fac-resumen');
+  const hint = document.getElementById('f-fac-hint');
+  const alicWrap = document.getElementById('f-fac-alic-wrap');
+  if (!resumen) return;
+
+  const daCredito = FAC_CON_CREDITO.includes(tipo);
+  // Sin factura A no hay alícuota que preguntar: el campo no aporta nada y
+  // mostrarlo invita a llenarlo para nada. Mismo criterio que el bot.
+  if (alicWrap) alicWrap.style.display = daCredito ? '' : 'none';
+
+  if (!tipo) {
+    resumen.textContent = ' — opcional, sumá el crédito IVA';
+    resumen.style.color = 'var(--text-muted)';
+    if (hint) hint.textContent = '';
+    return;
+  }
+
+  const d = calcularCreditoCompra();
+  if (daCredito && d.iva > 0) {
+    resumen.textContent = ` — ${tipo} · crédito IVA ${fmt(d.iva)}`;
+    resumen.style.color = 'var(--green)';
+    if (hint) hint.textContent = `Neto gravado ${fmt(d.neto)} + IVA ${fmt(d.iva)}`
+      + (d.otros > 0 ? ` + otros impuestos ${fmt(d.otros)}` : '') + ` = ${fmt(d.total)}.`;
+  } else if (daCredito) {
+    resumen.textContent = ` — ${tipo}, falta el monto`;
+    resumen.style.color = 'var(--text-muted)';
+    if (hint) hint.textContent = 'Poné el monto de la compra arriba para ver el crédito.';
+  } else {
+    resumen.textContent = ` — ${tipo}, no da crédito IVA`;
+    resumen.style.color = 'var(--text-muted)';
+    if (hint) hint.textContent = 'Se registra igual: es lo que permite saber qué parte del gasto del mes ya está mirada.';
+  }
+}
+
+// La misma cuenta que `desglosar` en src/facturas.js: el total es SIEMPRE con
+// IVA, los otros impuestos salen afuera antes de sacar el neto. Acá es sólo para
+// mostrarla; el número que se guarda lo calcula el servidor.
+function calcularCreditoCompra() {
+  const total = montoDe('f-monto') || 0;
+  const otros = montoDe('f-fac-otros') || 0;
+  const pct = parseFloat((document.getElementById('f-fac-alicuota') || {}).value) || 0;
+  const base = Math.max(0, total - otros);
+  if (!(base > 0) || !(pct > 0)) return { neto: 0, iva: 0, otros, total };
+  const neto = base / (1 + pct / 100);
+  return { neto: Math.round(neto * 100) / 100, iva: Math.round((base - neto) * 100) / 100, otros, total };
+}
+
+// Lo que viaja al servidor. `null` cuando no se cargó nada: una compra sin
+// factura NO es una fila vacía en el registro, es una fila que no existe — y así
+// aparece en la lista de "gasto sin factura" del mes, que es la lista de trabajo.
+function datosDeFacturaCompra() {
+  const tipo = (document.getElementById('f-fac-tipo') || {}).value || '';
+  const nro = (document.getElementById('f-fac-nro') || {}).value || '';
+  const cuit = (document.getElementById('f-fac-cuit') || {}).value || '';
+  if (!tipo && !nro.trim() && !cuit.trim()) return null;
+  return {
+    comprobante: tipo,
+    puntoVenta: (document.getElementById('f-fac-pv') || {}).value || '',
+    numero: nro,
+    cuit,
+    alicuota: FAC_CON_CREDITO.includes(tipo)
+      ? parseFloat((document.getElementById('f-fac-alicuota') || {}).value) || null
+      : null,
+    otrosImpuestos: montoDe('f-fac-otros') || 0,
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -10193,6 +10471,7 @@ async function guardarCompra(conEntrega) {
       vencimiento: fmtDate(d.vencRaw), descripcion: d.descripcion, cuotas: d.cuotas, estado,
       pagoPrevisto: d.previsto,
       entrega: entregaISO ? { fecha: entregaISO } : null,
+      factura: datosDeFacturaCompra(),
     }) });
 
     // `enElLibro` es false cuando el gasto todavía NO se escribió: se paga al
@@ -12407,7 +12686,226 @@ function fiscEscala(base, tramos) {
   return tramo.fijo + (b - tramo.desde) * (tramo.pct / 100);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// El crédito IVA real del mes
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Todo lo de acá abajo lee `GET /api/facturas` y no calcula NADA: el acumulado,
+// la cobertura y la lista de pendientes vienen resueltos del servidor, por las
+// funciones puras de src/facturas.js. Dos copias de esta cuenta —una acá y otra
+// allá— se separarían el día que se toque una, y ésta es la cuenta que se le
+// muestra al contador.
+let _facData = null;
+
+async function loadFacturas() {
+  const sub = document.getElementById('fac-subtitulo');
+  const sel = document.getElementById('fac-mes');
+  if (sub) sub.textContent = 'cargando…';
+  try {
+    const q = sel && sel.value ? '?mes=' + encodeURIComponent(sel.value) : '';
+    const { data } = await api('/api/facturas' + q);
+    _facData = data;
+
+    if (!data.configurada) {
+      if (sub) sub.textContent = 'apagado';
+      document.getElementById('fac-total').innerHTML =
+        `<span style="color:var(--orange)">${escapeHtml(data.error || 'El registro de facturas está apagado.')}</span>`;
+      return;
+    }
+
+    // El selector se arma una vez y siempre incluye el mes que se está mirando,
+    // aunque todavía no tenga ninguna factura: si no, el primer día del mes el
+    // desplegable no ofrecería el mes en curso y no habría forma de llegar a él.
+    if (sel && !sel.options.length) {
+      const meses = [...new Set([...(data.meses || []), data.mes])];
+      meses.sort((a, b) => MESES_NOMBRES_PAGO.indexOf(b) - MESES_NOMBRES_PAGO.indexOf(a));
+      sel.innerHTML = meses.map(m => `<option value="${escapeHtml(m)}"${m === data.mes ? ' selected' : ''}>${escapeHtml(m)}</option>`).join('');
+    }
+
+    renderFacturas(data);
+  } catch (e) {
+    if (sub) sub.textContent = 'error';
+    document.getElementById('fac-total').innerHTML =
+      `<span style="color:var(--orange)">No se pudo leer el registro: ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+function renderFacturas(data) {
+  const a = data.acumulado || {};
+  const c = data.cobertura || {};
+  const sub = document.getElementById('fac-subtitulo');
+  if (sub) sub.textContent = `${a.facturas || 0} factura(s) en ${data.mes}`;
+
+  document.getElementById('fac-total').innerHTML =
+    `<span class="num">${fmt(a.credito || 0)}</span>`
+    + `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">`
+    + `de crédito fiscal, sobre ${fmt(a.netoGravado || 0)} de neto gravado`
+    + `${a.otrosImpuestos > 0 ? ` · ${fmt(a.otrosImpuestos)} de otros impuestos, que no son crédito` : ''}`
+    + `</div>`;
+
+  // ── La cobertura, dicha entera ────────────────────────────────────────────
+  // Incluido lo que NO se sabe. Un total de crédito sin decir qué parte del
+  // gasto tiene factura detrás invita a tratarlo como completo, y no lo es.
+  const partes = [];
+  partes.push(`<b>${(c.pct || 0).toFixed(1)}%</b> del gasto del mes tiene factura cargada `
+    + `(${fmt(c.gastoCubierto || 0)} de ${fmt(c.gastoTotal || 0)}).`);
+  if (a.sinCredito > 0) partes.push(`${a.sinCredito} no dan crédito (no son factura A).`);
+  if (a.incompletas > 0) {
+    partes.push(`<span style="color:var(--orange)">${a.incompletas} son factura A pero les falta la alícuota, `
+      + `así que su crédito todavía no está contado.</span>`);
+  }
+  if (c.montoSinVincular > 0) {
+    partes.push(`${fmt(c.montoSinVincular)} en facturas que no están atadas a ninguna fila del libro, `
+      + `así que suman al crédito pero no a la cobertura.`);
+  }
+  document.getElementById('fac-cobertura').innerHTML = partes.join(' ');
+
+  // ── Por alícuota: es como lo pide una declaración ─────────────────────────
+  const tA = document.getElementById('fac-alicuotas');
+  if (!(a.porAlicuota || []).length) {
+    tA.innerHTML = '';
+  } else {
+    tA.innerHTML = '<thead><tr><th>Alícuota</th><th class="r">Neto gravado</th><th class="r">IVA</th><th class="r">Facturas</th></tr></thead><tbody>'
+      + a.porAlicuota.map(x => `<tr><td>${x.alicuota == null ? 'sin alícuota' : String(x.alicuota).replace('.', ',') + '%'}</td>`
+        + `<td class="r">${fmt(x.neto)}</td><td class="r">${fmt(x.iva)}</td><td class="r">${x.facturas}</td></tr>`).join('')
+      + `<tr style="font-weight:600"><td>Total</td><td class="r">${fmt(a.netoGravado)}</td><td class="r">${fmt(a.credito)}</td><td class="r">${a.computables}</td></tr>`
+      + '</tbody>';
+  }
+
+  // ── Por proveedor: de quién viene el crédito ──────────────────────────────
+  const tP = document.getElementById('fac-proveedores');
+  if (!(a.porProveedor || []).length) {
+    tP.innerHTML = '';
+  } else {
+    tP.innerHTML = '<thead><tr><th>Proveedor</th><th class="r">Crédito IVA</th><th class="r">Comprado</th><th class="r">Facturas</th></tr></thead><tbody>'
+      + a.porProveedor.map(p => `<tr><td>${escapeHtml(p.proveedor)}</td>`
+        + `<td class="r">${p.credito > 0 ? fmt(p.credito) : '<span style="color:var(--text-muted)">—</span>'}</td>`
+        + `<td class="r">${fmt(p.total)}</td>`
+        + `<td class="r">${p.facturas}${p.computables < p.facturas ? ` <span style="color:var(--text-muted)">(${p.computables} con crédito)</span>` : ''}</td></tr>`).join('')
+      + '</tbody>';
+  }
+
+  renderFacturasPendientes(c.sinFactura || []);
+}
+
+// La lista que está dibujada ahora. El botón manda el ÍNDICE y no el gasto
+// serializado: un JSON metido adentro de un atributo `onclick` se parte con la
+// primera comilla que traiga una descripción, y las descripciones las escribe
+// gente. Mismo motivo por el que los ids de las notificaciones se resuelven del
+// lado del servidor.
+let _facPendientes = [];
+
+function renderFacturasPendientes(lista) {
+  _facPendientes = lista;
+  const card = document.getElementById('fac-pendientes-card');
+  const cont = document.getElementById('fac-pendientes');
+  const sub = document.getElementById('fac-pend-sub');
+  if (!lista.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  const total = lista.reduce((s, x) => s + (x.monto || 0), 0);
+  if (sub) sub.textContent = `${lista.length} · ${fmt(total)} sin comprobante`;
+
+  // Sólo los 40 más caros. La lista completa de un mes son cientos de filas y
+  // las de abajo son gastos chicos cuyo crédito no mueve el número; mostrarlas
+  // todas convierte una lista de trabajo en una pared.
+  const ver = lista.slice(0, 40);
+  cont.innerHTML = ver.map((g, i) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);flex-wrap:wrap">
+      <div style="flex:1;min-width:180px">
+        <div style="font-size:13px"><b>${escapeHtml(g.proveedor || '(sin proveedor)')}</b>
+          <span style="color:var(--text-muted)"> · ${escapeHtml(g.categoria || '')}</span></div>
+        <div style="font-size:11px;color:var(--text-muted)">${escapeHtml(g.fecha || '')}${g.descripcion ? ' · ' + escapeHtml(g.descripcion.slice(0, 60)) : ''}</div>
+      </div>
+      <div style="font-weight:600;white-space:nowrap">${fmt(g.monto)}</div>
+      <button class="btn" style="padding:6px 10px;font-size:12px"
+        onclick="abrirAltaFactura(${i})">🧾 Cargar factura</button>
+    </div>`).join('')
+    + (lista.length > ver.length
+      ? `<div style="font-size:12px;color:var(--text-muted);padding-top:10px">y ${lista.length - ver.length} más, todos por debajo de ${fmt(ver[ver.length - 1].monto)}.</div>`
+      : '');
+}
+
+// ─── Alta de una factura contra una fila que ya existe ──────────────────────
+//
+// Es lo que permite completar el mes hacia atrás en vez de que el registro
+// empiece recién hoy. El proveedor, la fecha y el monto vienen de la fila y NO
+// se editan: se está diciendo qué comprobante respalda ESE gasto, no cargando
+// un gasto nuevo.
+let _altaFactura = null;
+
+function abrirAltaFactura(indice) {
+  const gasto = _facPendientes[indice];
+  if (!gasto) return;
+  _altaFactura = gasto;
+  document.getElementById('fac-alta-titulo').textContent =
+    `${gasto.proveedor} · ${fmt(gasto.monto)} · ${gasto.fecha}`;
+  document.getElementById('fac-alta-tipo').value = 'A';
+  ['fac-alta-pv', 'fac-alta-nro', 'fac-alta-cuit', 'fac-alta-otros'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('fac-alta-alicuota').value = '21';
+  document.getElementById('fac-alta-msg').textContent = '';
+  onAltaFacturaChange();
+  document.getElementById('fac-alta-overlay').classList.add('open');
+}
+
+function cerrarAltaFactura() {
+  document.getElementById('fac-alta-overlay').classList.remove('open');
+  _altaFactura = null;
+}
+
+function onAltaFacturaChange() {
+  const tipo = document.getElementById('fac-alta-tipo').value;
+  const daCredito = FAC_CON_CREDITO.includes(tipo);
+  document.getElementById('fac-alta-alic-wrap').style.display = daCredito ? '' : 'none';
+  const hint = document.getElementById('fac-alta-hint');
+  if (!_altaFactura) { hint.textContent = ''; return; }
+  if (!daCredito) {
+    hint.textContent = 'No da crédito IVA. Se registra igual: es lo que hace que este gasto deje de figurar como pendiente.';
+    return;
+  }
+  const total = _altaFactura.monto || 0;
+  const otros = montoDe('fac-alta-otros') || 0;
+  const pct = parseFloat(document.getElementById('fac-alta-alicuota').value) || 0;
+  const base = Math.max(0, total - otros);
+  const neto = pct > 0 ? base / (1 + pct / 100) : 0;
+  hint.innerHTML = neto > 0
+    ? `Crédito IVA <b style="color:var(--green)">${fmt(base - neto)}</b> sobre ${fmt(neto)} de neto.`
+    : '';
+}
+
+async function guardarAltaFactura(btn) {
+  if (!_altaFactura) return;
+  const tipo = document.getElementById('fac-alta-tipo').value;
+  const msg = document.getElementById('fac-alta-msg');
+  btn.disabled = true; msg.textContent = 'Guardando…';
+  try {
+    await api('/api/facturas', { method: 'POST', body: JSON.stringify({
+      fecha: _altaFactura.fecha,
+      proveedor: _altaFactura.proveedor,
+      idMovimiento: _altaFactura.idMovimiento,
+      total: _altaFactura.monto,
+      comprobante: tipo,
+      puntoVenta: document.getElementById('fac-alta-pv').value,
+      numero: document.getElementById('fac-alta-nro').value,
+      cuit: document.getElementById('fac-alta-cuit').value,
+      alicuota: FAC_CON_CREDITO.includes(tipo)
+        ? parseFloat(document.getElementById('fac-alta-alicuota').value) || null : null,
+      otrosImpuestos: montoDe('fac-alta-otros') || 0,
+    }) });
+    cerrarAltaFactura();
+    showToast('🧾 Factura registrada');
+    loadFacturas();
+  } catch (e) {
+    msg.innerHTML = `<span style="color:var(--orange)">${escapeHtml(e.message)}</span>`;
+  } finally { btn.disabled = false; }
+}
+
 async function loadFiscal() {
+  // El crédito real y la simulación se piden en paralelo y son independientes:
+  // que la simulación falle no puede dejar sin ver las facturas, que es el dato
+  // que sí está medido.
+  loadFacturas();
   const sub = document.getElementById('fisc-subtitulo');
   if (sub) sub.textContent = 'recalculando…';
   try {

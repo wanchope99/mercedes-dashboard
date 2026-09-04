@@ -46,6 +46,8 @@ Devolvé un OBJETO JSON con esta forma EXACTA, sin texto adicional:
   "fecha": "YYYY-MM-DD",
   "proveedor": "Nombre del proveedor",
   "tipo_comprobante": "A | B | C | M | X | Remito | \\"\\"",
+  "punto_venta": "",
+  "numero_comprobante": "",
   "cuit_proveedor": "",
   "forma_de_pago": "Efectivo | Mercado Pago | Galicia | Echeq | Contado | \\"\\"",
   "vendedor": "Nombre del vendedor si figura, o \\"\\"",
@@ -68,6 +70,13 @@ Reglas IMPORTANTES:
     "Remito" — no es un comprobante fiscal.
   · Si NO la podés ver, poné "" con confianza 0. NO la deduzcas del IVA ni del
     CUIT: un humano lo va a confirmar y es preferible.
+- punto_venta y numero_comprobante = el número de la factura, que en Argentina
+  viene como "0003-00001234" (punto de venta - número), casi siempre arriba a la
+  derecha, cerca de la letra. Poné cada mitad por separado y SÓLO los dígitos:
+  punto_venta = "0003", numero_comprobante = "00001234". Si sólo ves un número
+  sin guion, poné todo en numero_comprobante y dejá punto_venta = "".
+  Es lo que identifica a esta factura y a ninguna otra: sirve para no cargar dos
+  veces la misma. Si no lo ves, poné "" — no lo inventes ni lo deduzcas.
 - cuit_proveedor = el CUIT de QUIEN EMITE la factura (el proveedor), con guiones
   (ej "30-71234567-8"). OJO: una factura tiene DOS CUIT, el del emisor arriba y
   el del comprador. Queremos el del EMISOR. Si dudás cuál es, poné "".
@@ -256,6 +265,12 @@ async function extraerCabecera({ base64, mime = 'image/jpeg' }) {
   factura.otros_impuestos_monto = factura.otros_impuestos_monto ?? null;
   factura.tipo_comprobante = normalizarComprobante(factura.tipo_comprobante);
   factura.cuit_proveedor = normalizarCuit(factura.cuit_proveedor);
+  // El número del comprobante: sólo dígitos. Es la identidad de esta factura y
+  // de ninguna otra, así que un "0003-00001234" que llegue entero en un campo se
+  // parte acá en vez de guardarse como una cadena que después no matchea nada.
+  const nro = partirNumero(factura.punto_venta, factura.numero_comprobante);
+  factura.punto_venta = nro.puntoVenta;
+  factura.numero_comprobante = nro.numero;
   // Si el modelo no se pronunció, el pie de la factura ya lo dice: un IVA en
   // pesos separado del subtotal ES el IVA discriminado. Se deduce sólo cuando
   // el campo no vino, nunca se pisa lo que el modelo afirmó.
@@ -263,6 +278,24 @@ async function extraerCabecera({ base64, mime = 'image/jpeg' }) {
     factura.iva_discriminado = Number(factura.iva_monto) > 0 && Number(factura.subtotal_factura) > 0;
   }
   return { factura, rawText: raw };
+}
+
+// El punto de venta y el número, a dígitos limpios.
+//
+// El modelo a veces manda las dos mitades juntas en un solo campo ("0003-00001234"
+// o "0003 00001234"): si el punto de venta vino vacío y el número trae un
+// separador, se parte. Se hace ACÁ y no en la comparación porque la clave que
+// identifica una factura se arma con las dos mitades, y una guardada entera no
+// vuelve a encontrarse nunca.
+function partirNumero(pv, nro) {
+  let a = String(pv == null ? '' : pv).replace(/\D/g, '');
+  let b = String(nro == null ? '' : nro).trim();
+  if (!a) {
+    const m = /^(\d{1,5})[\s\-–/]+(\d{1,8})$/.exec(b);
+    if (m) { a = m[1]; b = m[2]; }
+  }
+  b = b.replace(/\D/g, '');
+  return { puntoVenta: a, numero: b };
 }
 
 // La letra del comprobante, normalizada a los valores que entiende

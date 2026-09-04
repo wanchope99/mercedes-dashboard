@@ -186,6 +186,42 @@ Note this strategy's nominal rate is **below** the assumed inflation, so real va
 4. `src/unidades.js` normalizes purchase units to a base unit (e.g. "Caja x6" → 6 bottles) so purchased-vs-sold quantities are comparable.
 5. Anything the pipeline can't resolve confidently (category, payment method, product match, unit factor) is queued as "pendiente" for a human to confirm via Telegram reply or the app's panel — never silently guessed.
 
+### The photo is not always the first time that purchase is recorded (2026-09-03)
+
+A purchase can already be in `Movimientos` before anyone photographs its invoice: it was loaded from "Nueva compra", or the order arrived and `POST /api/pedidos/:id/recibir` wrote its row. Until this date the bot wrote a second one — `registrarCompra` mints a fresh `idCompra` on every call, so the column-H idempotency (which exists against a double tap) could never recognise a row written by another path. The expense was duplicated and the month inflated.
+
+**So the ingest now asks, and the question is built before the conversation starts.** `facturas.buscarCompraEnLibro` (pure) returns the ledger rows that could be this purchase — same supplier, within `VENTANA_DIAS` (10), amount matching to 0.5% — and the ingest hands them to `estadoInicial` as `enLibro`. Answering "yes, it's that one" sets `soloFactura` and the flow **skips step 2 entirely**: no ledger row, no `Pedidos` row, no payment questions. Compras, the invoice registry and the supplier learning all still run.
+
+**The three questions the ingest asks in parallel** are the supplier's card, this match, and whether *this same invoice* (supplier + letter + punto de venta + número) is already in the registry. Three different spreadsheets, none depending on the others — chaining them would add two Google round-trips to the wait before the first question, which is the latency this circuit already fought once. None of the three can block the ingest: they all read sheets, and a read error must not make an invoice unloadable.
+
+**The buttons are ordered by how much the evidence proves, not by a fixed preference.** With the amount matching, "it's that one" goes first; with only supplier and date, "it's another purchase" goes first. The two errors are expensive and opposite: linking wrongly leaves an expense unwritten *for ever and in silence*, while not linking leaves a duplicate row that shows up in Pagos and someone finds. Neither is safe enough to default to, so the ordering follows the evidence. `fuerza` (`'monto'` | `'fecha'`) travels with the result for exactly this.
+
+**A row that already has an invoice is never offered.** Offering it would mean proposing to attach two comprobantes to one row and losing one of the two expenses; the count goes out as `conFactura` and is said out loud, because a row that exists and does not appear needs an explanation.
+
+**Linked to an order that already has items, nothing is added.** `agregarItems` *adds* rows and does not replace them (one order can arrive in two deliveries), so re-sending them would duplicate the list somebody is ticking. If the count can't be read, nothing is touched and that is reported.
+
+### `src/facturas.js`: the invoice registry, and why the credit stopped being a range
+
+`regimen-fiscal.js` says in its own header that "the credit is not read, it is estimated" — the ledger holds a total and nothing else, and `Compras` breaks VAT down **per line**, which prices a product but does not compute a tax: a line is not a comprobante. This module is the missing fact table. One row per invoice, in a `Facturas` sheet next to `Compras` in `PROVEEDORES_SHEET_ID` (they are the header and the lines of the same piece of paper).
+
+**Owner's decision, 2026-09-03: the move to Responsable Inscripto is under way, so this is not a simulation.** It is the month's VAT credit, the one computed against the sales debit. It runs from that date forward; everything before it stays what `regimen-fiscal.js` estimates.
+
+**The rule is one and it is the same everywhere:** there is credit ⟺ it is an A (or M) invoice. Same rule already governing the bot conversation and the `Compras` VAT columns. Direct consequence in this sheet: a non-computable invoice leaves **neto, alícuota and IVA empty, not zero** — zero says "this invoice's VAT is nil", which is a different and false claim. Same criterion as `appendCompras`.
+
+**Invoices that give no credit are registered anyway**, and that is the half that makes the number believable. They are the only thing that can say what share of the month's spend has already been looked at. `cobertura()` crosses the registry against `Movimientos` by `ID Movimiento` and returns `sinFactura` — the month's expenses with no comprobante yet, biggest first. That list is not context, it is the work queue: the same reasoning that orders the fiscal padrón by money.
+
+**There is no "Crédito Fiscal" column.** It would be exactly column J when M says S. A stored total next to what produces it drifts apart the day someone edits the sheet by hand, and then one question has two answers. The month's credit is the sum of J.
+
+**The total is always VAT-inclusive, so `ivaIncluido` plays no part in `desglosar`.** "Included" vs "discriminated" describes the *line prices* — whether the unit price already carries it — which is what decides columns L and M of `Compras`. The foot of the invoice has no such ambiguity. Other taxes (percepciones, impuestos internos) are subtracted **before** taking the neto and kept in their own column: treating them as VAT would inflate the credit with money that does not come back. Read figures beat computed ones, but only when `neto + IVA + otros` equals the total; otherwise one of the three was misread and computing from the total — which a person confirmed with one tap — is more trustworthy. `Fuente Importes` records which, because a number with no declared origin cannot be audited.
+
+**No fallback to `SPREADSHEET_ID`**, same as `saldos.js`: without the variable the sheet would be created in the *Gestión* spreadsheet and nobody would notice. And the cost of switching off is the right one of the two — with no registry the month's coverage reads 0% and the screen shouts it, while a sheet in the wrong spreadsheet never says anything.
+
+**`registrar()` never throws**, same rule as `avisos.js` and `saldos.js`: whoever calls it has already done the real work (ledger row written, products loaded) and none of that can fail because a comprobante could not be noted. It returns `{ok:false}` and the screen says the invoice went unregistered, which is the only thing that makes someone load it by hand.
+
+**Four write paths feed it, and the coverage is the point.** The bot's conversation (`/paso`), the app's pendientes panel (`/resolver`, which has no letter or number — the pendiente only carried a subset, the very hole its own comment warns about, now widened), "Nueva compra" via an optional collapsed block in the form, and `POST /api/facturas` against a row that already exists — which is what lets the month be completed backwards instead of the registry starting only today. A purchase with no invoice is **not** an empty row in the registry: it is a row that does not exist, and that is how it shows up in the month's `sinFactura` list. Writing a hollow row would take it off that list by lying.
+
+**For an installment purchase the comprobante goes against the PARENT row**, which carries the total and the purchase month. The credit is born with the invoice, not with each installment: splitting it across the due dates would move it between months, the same error column B already documents.
+
 ### Propinas: deliberately outside the ledger
 
 `src/propinas.js` splits the week's **digital** tips among the staff. Cash tips are handed out at the bar and never enter the app. The digital ones land in two accounts, `Galicia` and `Brubank`, so the module's real job is not the division (it's equal shares) but deciding **which account each transfer comes out of**.

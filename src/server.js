@@ -37,6 +37,7 @@ const cierreCocina = require('./cierre-cocina');
 const notificaciones = require('./notificaciones');
 const avisos = require('./avisos');
 const saldos = require('./saldos');
+const facturasReg = require('./facturas');
 const stockBebidas = require('./stock-bebidas');
 const regimenFiscal = require('./regimen-fiscal');
 const fiscalProv = require('./fiscal-proveedores');
@@ -1242,6 +1243,76 @@ async function registrarGastoEnLibro(datos = {}) {
   return { ok: true, monto: montoNum, medio, medioRow, categoria: categoria || 'Otros', estado: estadoRow, fecha: fechaRow, mes, registradoEnSesion };
 }
 
+// ─── El comprobante de una compra cargada a mano ───────────────────────────────
+//
+// "Nueva compra" puede venir con los datos de la factura: la letra, el número, la
+// alícuota. Es opcional a propósito —hay compras sin factura y la carga no puede
+// depender de tenerla— pero es lo único que hace que el crédito IVA del mes sea
+// un número y no una estimación: el bot cubre las que se fotografían, y esto
+// cubre el resto.
+//
+// NUNCA tira ni bloquea. La compra ya está escrita cuando esto corre; que no se
+// pueda anotar el comprobante no puede deshacer la plata. Se devuelve el fallo
+// para que la pantalla lo diga, que es lo que hace que alguien lo cargue a mano.
+async function registrarFacturaDeCompra({ factura, fecha, mes, proveedor, total, idMovimiento, usuario, origen = 'app' } = {}) {
+  const f = factura || {};
+  // Sin ningún dato del comprobante no hay factura que registrar. Una compra sin
+  // factura NO es una fila vacía en el registro: es una fila que no existe, y
+  // así aparece en la lista de "gasto sin factura" del mes, que es la lista de
+  // trabajo. Escribir una fila hueca la sacaría de esa lista mintiendo.
+  const hayAlgo = ['comprobante', 'numero', 'cuit', 'alicuota', 'iva', 'neto']
+    .some(k => f[k] != null && String(f[k]).trim() !== '');
+  if (!hayAlgo) return null;
+
+  return facturasReg.registrar({
+    fecha: /^\d{4}-\d{2}-\d{2}/.test(String(fecha || '')) ? fecha : isoDesdeDDMM(fecha),
+    mes, proveedor,
+    cuit: f.cuit,
+    comprobante: f.comprobante,
+    deducible: f.deducible,
+    puntoVenta: f.puntoVenta,
+    numero: f.numero,
+    total: f.total != null && f.total !== '' ? f.total : total,
+    alicuota: f.alicuota,
+    neto: f.neto,
+    iva: f.iva,
+    otrosImpuestos: f.otrosImpuestos,
+    idMovimiento, usuario, origen,
+  });
+}
+
+// DD/MM/AAAA → ISO. El formulario manda la fecha como la escribe la planilla;
+// el registro de facturas la guarda en ISO para poder ordenarla.
+function isoDesdeDDMM(fecha) {
+  const m = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/.exec(String(fecha || '').trim());
+  if (!m) return String(fecha || '').slice(0, 10);
+  return `${m[3]}-${String(m[2]).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
+}
+
+// ─── ¿Esta factura corresponde a una compra que YA está anotada? ───────────────
+//
+// Vive acá y no en `facturas.js` por la misma razón que `registrarGastoEnLibro`:
+// necesita `getMovimientos()`, que es de este archivo. La decisión de qué fila
+// puede ser cuál es pura y está en `facturas.buscarCompraEnLibro`; acá sólo se
+// le acercan los datos.
+//
+// NUNCA tira. Si no se puede leer el libro, se contesta "no encontré nada" y la
+// conversación sigue por el camino de siempre — que escribe la fila. El riesgo
+// de duplicar un gasto es real, pero el de NO escribirlo por un error de lectura
+// es peor: un gasto de más se ve en Pagos, uno de menos no se ve nunca.
+async function buscarCompraParaFactura({ proveedor, fecha, total } = {}) {
+  try {
+    const [movs, facs] = await Promise.all([
+      getMovimientos(),
+      facturasReg.listar().catch(() => []),
+    ]);
+    return facturasReg.buscarCompraEnLibro(movs, { proveedor, fecha, total }, facs);
+  } catch (e) {
+    console.warn('No se pudo revisar si la compra ya estaba en el libro:', e.message);
+    return { candidatas: [], mejor: null, conFactura: 0, error: e.message };
+  }
+}
+
 // ─── Una compra de pago único: la fila del libro y el pedido ────────────────────
 //
 // Es el árbol de decisión que estaba adentro de `POST /api/pagos`. Se extrajo el
@@ -2078,7 +2149,18 @@ app.post('/api/pagos', authMiddleware, async (req, res) => {
         valueInputOption: 'USER_ENTERED', requestBody: { values },
       });
       clearCache();
-      return res.json({ ok: true, message: `Compra en ${nCuotas} cuotas registrada (${values.length} filas)` });
+      // El comprobante va contra la fila MADRE, que es la que lleva el total y
+      // el mes de la compra. El crédito fiscal nace con la factura y no con cada
+      // cuota: repartirlo entre los vencimientos lo movería de mes, que es el
+      // mismo error que la columna B ya tiene documentado.
+      const facCuotas = await registrarFacturaDeCompra({
+        factura: req.body.factura, fecha, mes: mesCompra, proveedor,
+        total, idMovimiento: cuotaId, usuario: req.user.nombre,
+      });
+      return res.json({
+        ok: true, message: `Compra en ${nCuotas} cuotas registrada (${values.length} filas)`,
+        factura: facCuotas,
+      });
     }
 
     // ─── Pago único ──────────────────────────────────────────────────────────
@@ -2094,10 +2176,20 @@ app.post('/api/pagos', authMiddleware, async (req, res) => {
     });
     if (!out.ok) return res.status(out.status || 400).json({ ok: false, error: out.error });
 
+    // El comprobante, si la compra vino con uno. Va DESPUÉS de escribir la
+    // compra y no puede tumbar la respuesta: la plata ya está registrada, y
+    // perderla por no haber podido anotar un número de factura sería el peor
+    // orden posible de las dos cosas.
+    const factura = await registrarFacturaDeCompra({
+      factura: req.body.factura, fecha, mes: mes || mesDeFecha(fecha), proveedor,
+      total: salidaARS, idMovimiento: out.idCompra, usuario: req.user.nombre,
+    });
+
     res.json({
       ok: true,
       message: out.message,
       pedido: out.pedido, aviso: out.aviso,
+      factura,
       // Si es false, el gasto todavía NO está en Movimientos: lo escribe la
       // recepción. La pantalla lo dice, porque es lo que cambia respecto de lo
       // que esta pantalla venía haciendo.
@@ -4942,6 +5034,66 @@ app.post('/api/fiscal/descuento-efectivo', authMiddleware, adminOnly, async (req
 // Y sale de los meses A RÉGIMEN (ver `mesesDesdeRegimen`), no de los últimos
 // tres cerrados: con mayo y junio adentro, la cabeza de la lista eran compras de
 // puesta en marcha que no se repiten.
+// ─── El crédito IVA del mes, factura por factura ───────────────────────────────
+//
+// Lo que `regimen-fiscal.js` estima como un rango, acá se lee. Y va con su
+// COBERTURA pegada: el crédito solo no dice si está completo, y un total que no
+// se sabe si está completo invita a decidir sobre una precisión que no existe.
+//
+// `sinFactura` es la mitad que hace que esto sirva: no es un dato de contexto,
+// es la lista de trabajo — los gastos del mes a los que todavía les falta el
+// comprobante, del más caro al más barato.
+app.get('/api/facturas', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    if (!facturasReg.configurada()) {
+      return res.json({ ok: true, data: { configurada: false,
+        error: 'Falta PROVEEDORES_SHEET_ID: el registro de facturas está apagado.' } });
+    }
+    // El mes de ACÁ, no el UTC: después de las 21:00 el 30 de un mes, `new Date()`
+    // en Londres ya está en el siguiente y el panel abriría en el mes que viene.
+    const mes = (req.query.mes || '').toString().trim() || facturasReg.mesDeISO(pedidos.hoyAR());
+    const [todas, movimientos] = await Promise.all([facturasReg.listar(), getMovimientos()]);
+    const acumulado = facturasReg.acumuladoDelMes(todas, mes);
+    const cobertura = facturasReg.cobertura(todas, movimientos, mes);
+    res.json({
+      ok: true,
+      data: {
+        configurada: true, mes, acumulado, cobertura,
+        // Los meses que ya tienen alguna factura cargada, para el selector.
+        meses: [...new Set(todas.map(f => f.mes).filter(Boolean))],
+        facturas: todas.filter(f => facturasReg.norm(f.mes) === facturasReg.norm(mes))
+          .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '')),
+      },
+    });
+  } catch (err) {
+    console.error('Error /api/facturas:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Alta de una factura contra una fila del libro que ya existe. Es lo que permite
+// completar el mes hacia atrás en vez de que el registro empiece recién hoy.
+app.post('/api/facturas', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.proveedor) return res.status(400).json({ ok: false, error: 'Falta el proveedor' });
+    const r = await facturasReg.registrar({
+      fecha: /^\d{4}-\d{2}-\d{2}/.test(String(b.fecha || '')) ? b.fecha : isoDesdeDDMM(b.fecha),
+      mes: b.mes, proveedor: b.proveedor, cuit: b.cuit,
+      comprobante: b.comprobante, deducible: b.deducible,
+      puntoVenta: b.puntoVenta, numero: b.numero,
+      total: b.total, alicuota: b.alicuota, neto: b.neto, iva: b.iva,
+      otrosImpuestos: b.otrosImpuestos,
+      idMovimiento: b.idMovimiento, origen: 'app', usuario: req.user.nombre,
+    });
+    if (!r.ok) return res.status(400).json(r);
+    res.json({ ok: true, data: r });
+  } catch (err) {
+    console.error('Error POST /api/facturas:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.get('/api/fiscal/padron', authMiddleware, adminOnly, async (req, res) => {
   try {
     const [movimientos, resumenes, compras, padron] = await Promise.all([
@@ -5204,7 +5356,7 @@ app.get('/api/fudo/probe-stock-single', authMiddleware, adminOnly, async (req, r
 // `registrarCompra` es la misma función que usa POST /api/pagos: es lo que hace
 // que cargar una compra desde el bot y desde el formulario sean el mismo camino,
 // y lo que evita abrirle `/api/pagos` al token de ingest.
-app.use(proveedoresRoutes({ authMiddleware, adminOnly, registrarGastoEnLibro, registrarCompra }));
+app.use(proveedoresRoutes({ authMiddleware, adminOnly, registrarGastoEnLibro, registrarCompra, buscarCompraParaFactura }));
 
 // ─── Static y fallback ────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, '../public')));

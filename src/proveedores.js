@@ -534,6 +534,21 @@ function crearPendiente({ origen = {}, imagenInfo = {}, items, factura = {} }) {
       estadoGasto: factura.estadoGasto || '',
       diasCredito: factura.diasCredito || 0,
       fecha: factura.fecha || '',
+      // ─── Lo que necesita el registro de facturas (03/09/2026) ────────────
+      // Misma razón que el bloque de arriba, y el mismo agujero: sin estos
+      // campos el panel de la app confirma una factura y el crédito IVA de ese
+      // mes queda sin ella, en silencio. El pie de la factura (neto, IVA, otros
+      // impuestos) va entero porque `facturas.desglosar` prefiere lo LEÍDO
+      // sobre lo calculado cuando cierra contra el total.
+      tipoComprobante: factura.tipoComprobante || '',
+      cuit: factura.cuit || '',
+      puntoVenta: factura.puntoVenta || '',
+      numero: factura.numero || '',
+      ivaPct: factura.ivaPct != null ? factura.ivaPct : null,
+      ivaPctSugerido: factura.ivaPctSugerido != null ? factura.ivaPctSugerido : null,
+      subtotalFact: factura.subtotalFact || null,
+      ivaMonto: factura.ivaMonto || null,
+      otrosImpuestos: factura.otrosImpuestos || 0,
     },
     items: items.map((it, i) => ({ idx: i, ...it })),
     estado: 'pendiente',

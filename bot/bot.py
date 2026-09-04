@@ -258,7 +258,12 @@ def _texto_final(resp):
     if resp.get("resumen"):
         lineas.append(resp["resumen"])
         lineas.append("")
-    if resp.get("enElLibro"):
+    # "Ya estaba" y "lo anoté" son cosas distintas y hay que decirlas distinto:
+    # sobre una fila que escribió otro camino, "quedó anotado" es cierto y
+    # engañoso a la vez — parece que esta foto movió plata, y no la movió.
+    if resp.get("yaEstaba"):
+        lineas.append("📒 Esa compra YA estaba en Movimientos: no la dupliqué.")
+    elif resp.get("enElLibro"):
         lineas.append("📒 Quedó anotado en Movimientos.")
     else:
         lineas.append("📒 Todavía NO entra en Movimientos: se anota cuando llegue el pedido.")
@@ -269,6 +274,12 @@ def _texto_final(resp):
         lineas.append(f"📦 Pedido anotado para el {ped.get('fecha', '')}{detalle}.")
     if resp.get("escritas"):
         lineas.append(f"🧾 {resp['escritas']} renglón/es en la hoja Compras.")
+    # El texto viene armado de la app. Formatear plata acá sería una cuarta copia
+    # de esa regla (Node, navegador, bot) y este archivo existe para no tener
+    # ninguna: pide un paso, lo dibuja, devuelve el botón que se tocó.
+    fac = resp.get("factura") or {}
+    if fac.get("texto"):
+        lineas.append(fac["texto"])
     for a in (resp.get("avisos") or []):
         lineas.append(f"⚠️ {_md(str(a))}")
     return "\n".join(lineas)
