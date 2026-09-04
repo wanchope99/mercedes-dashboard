@@ -2272,14 +2272,34 @@
   </main>
 </div>
 
+<!-- ═══ FISCAL ════════════════════════════════════════════════════════════════
+     DOS MODOS, y la separación es la misma que hay entre un hecho y un supuesto:
+
+       · Del mes — el crédito IVA REAL, el que dicen las facturas cargadas, con
+         su cobertura y la lista de lo que falta cargar. Es el HOME: se abre
+         primero porque es el dato medido, y un número medido no puede quedar
+         debajo de uno estimado.
+       · Simulación — recalcular meses ya cerrados como si hubieran ocurrido
+         bajo Responsable Inscripto. Es un modelo con parámetros que valida el
+         contador, no una medición.
+
+     El mismo tab y no un sexto ítem del menú Plan: el grupo ya está en cinco
+     subs, la regla de este archivo dice que a los seis hay que repensar el
+     agrupamiento, y sobre todo son dos vistas del MISMO tema. Es el patrón que
+     ya usa `tab-cierre` con Producción / Cierre, y reutiliza sus clases
+     (.cp-modos / .cp-modo).
+
+     La simulación se carga PEREZOSAMENTE, la primera vez que se entra a su
+     modo: lee /api/fiscal/defaults y después /api/fiscal/simulacion, que
+     recorre meses enteros de Movimientos. Cargarla al abrir Fiscal haría
+     esperar por un número que quizá nadie vino a ver.                       -->
 <div id="tab-fiscal" class="tab-panel">
   <main>
-    <!-- ── El crédito IVA REAL del mes ──────────────────────────────────────
-         Va ARRIBA de la simulación a propósito: esto es lo que dicen las
-         facturas, y lo de abajo es lo que se estima cuando no hay facturas. Un
-         número medido no puede quedar debajo de uno supuesto.
+    <div id="fisc-modos" class="cp-modos"></div>
 
-         Y va con su COBERTURA pegada, porque el crédito solo no dice si está
+    <div id="fisc-modo-mes">
+    <!-- ── El crédito IVA REAL del mes ──────────────────────────────────────
+         Va con su COBERTURA pegada, porque el crédito solo no dice si está
          completo. La lista de gastos sin factura no es contexto: es la lista de
          trabajo, y es lo que hace que el número de arriba llegue a ser cierto.
          Ver src/facturas.js. -->
@@ -2309,7 +2329,9 @@
       </div>
       <div id="fac-pendientes"></div>
     </div>
+    </div><!-- /fisc-modo-mes -->
 
+    <div id="fisc-modo-simulacion" style="display:none">
     <!-- La planilla de simulación, con datos reales. Reproduce la "Simulación
          costo fiscal Régimen General" que armó Gonzalo (31/08/2026): se factura
          lo que liquida Galicia, el IVA se agrega sobre ese precio, y el costo
@@ -2387,6 +2409,7 @@
       <div class="table-wrap"><table id="fisc-descuento"></table></div>
       <div class="fisc-nota" style="margin-top:12px" id="fisc-desc-pie"></div>
     </div>
+    </div><!-- /fisc-modo-simulacion -->
   </main>
 </div>
 
@@ -4542,7 +4565,7 @@ async function checkSavedToken() {
 //
 // El criterio ahora es la pregunta del que mira:
 //   Negocio   ¿cómo venimos?          (los números y el análisis)
-//   Caja      la plata de hoy          (lo operativo del día)
+//   Compras   la plata que sale        (qué se paga, de qué caja, y el arqueo)
 //   Operación el bar funcionando       (lo que se consume, se gasta y se rompe)
 //   Plan      lo que viene             (inversión y recupero)
 //
@@ -4588,18 +4611,32 @@ const TAB_GROUPS = {
     { id: 'informes',           label: '🔎 Informe', soloUsuario: 'tincho' },
   ] },
 
-  // ── La plata de hoy ───────────────────────────────────────────────────────
-  // Arqueo va PRIMERO: es lo que se abre cada noche, y para el encargado es la
-  // pantalla con la que empieza el turno. Cajas es el estado de las cuentas,
-  // Pagos lo que hay que pagar. Historial lee /api/arqueo/historial, que es
-  // adminOnly: mostrárselo al encargado sólo le daba un error de permisos.
+  // ── La plata que sale ─────────────────────────────────────────────────────
+  // Se llamaba "Caja" y pasó a llamarse "Compras" el 04/09/2026, por decisión de
+  // Gonzalo. El grupo dejó de ser sólo el arqueo de la noche: por acá se carga
+  // una compra, se la paga, se ve de qué caja salió y se cierra el turno.
+  //
+  // El ID DEL GRUPO SIGUE SIENDO `caja`, y a propósito. Cambia la etiqueta, no
+  // la identidad: `badge`, `phonePrio` y todo lo que resuelve submenús lo hace
+  // por id, y este archivo tiene escrito que a un grupo NUNCA se lo busca por
+  // nombre (ver veInformes / subDeMenu). Renombrar el id sería el cambio caro y
+  // no compra nada.
+  //
+  // ORDEN: Pagos primero, o sea que es lo que se abre al entrar al grupo
+  // (switchGroup abre subs[0]). Antes iba Arqueo, con el argumento de que era la
+  // pantalla con la que el encargado empieza el turno; eso sigue siendo cierto y
+  // sigue resuelto, pero por otro lado: Charly trabaja en el teléfono y ahí tiene
+  // Arqueo como PRIMER botón de su home (ver HOME_TELEFONO), así que no llega
+  // por acá. Historial lee /api/arqueo/historial, que es adminOnly: mostrárselo
+  // al encargado sólo le daba un error de permisos.
   //
   // El badge de facturas pendientes vive acá porque las pendientes se confirman
-  // desde Pagos (antes estaba en Stocks, que es de donde se mudaron).
-  caja: { label: '🏦 Caja', icono: '🏦', corto: 'Caja', phonePrio: 2, badge: true, subs: [
-    { id: 'arqueo', label: '🗃️ Arqueo de Caja' },
-    { id: 'cajas',  label: '🏦 Cajas' },
+  // desde Pagos (antes estaba en Stocks, que es de donde se mudaron). Ahora ese
+  // badge además apunta al sub que se abre primero, que es lo que corresponde.
+  caja: { label: '🛒 Compras', icono: '🛒', corto: 'Compras', phonePrio: 2, badge: true, subs: [
     { id: 'pagos',  label: '💳 Pagos' },
+    { id: 'cajas',  label: '🏦 Cajas' },
+    { id: 'arqueo', label: '🗃️ Arqueo de Caja' },
     { id: 'historial-arqueos', label: '📋 Historial de Arqueos', soloAdmin: true },
   ] },
 
@@ -9027,6 +9064,37 @@ async function cerrarAvisoInforme(marcarLeido) {
 // misma computadora no se pisen.
 const RELEASE_LOG = [
   {
+    version: '2026-09-04-compras-y-fiscal',
+    fecha: '4 de septiembre de 2026',
+    titulo: 'Caja pasa a llamarse Compras, y Fiscal se parte en dos',
+    // El menú cambia debajo de los pies de todos, Charly incluido: una sección
+    // que se llamaba de una manera y ahora se llama de otra es exactamente lo
+    // que hace que alguien la busque y no la encuentre.
+    paraTodos: true,
+    porque: 'La sección <b>Caja</b> hacía rato que no era sólo el arqueo de la noche: por ahí se '
+      + 'carga una compra, se la paga y se ve de qué caja salió. Ahora se llama <b>Compras</b> y '
+      + 'abre en Pagos, que es lo que se hace más seguido. Las cuatro pantallas son las mismas.',
+    items: [
+      {
+        icono: '🛒',
+        titulo: 'Caja ahora se llama Compras, y abre en Pagos',
+        desc: 'Mismas cuatro pantallas, otro orden: <b>Pagos</b>, <b>Cajas</b>, <b>Arqueo de Caja</b> e '
+            + '<b>Historial de Arqueos</b>. Al entrar a la sección se abre Pagos. El arqueo no se movió '
+            + 'de lugar en el teléfono: sigue siendo el primer botón de la pantalla de inicio.',
+        donde: 'Compras',
+      },
+      {
+        icono: '🧾',
+        titulo: 'Fiscal abre en el IVA real del mes',
+        desc: 'La pantalla tiene dos solapas. <b>Del mes</b> es lo que dicen las facturas cargadas: cuánto '
+            + 'crédito IVA se juntó, qué porcentaje del gasto ya tiene factura detrás y la lista de lo que '
+            + 'falta cargar. <b>Simulación</b> es la de siempre, la que recalcula meses cerrados como '
+            + 'Responsable Inscripto. Lo medido abre primero; lo estimado quedó atrás de la otra solapa.',
+        donde: 'Plan › Fiscal',
+      },
+    ],
+  },
+  {
     version: '2026-08-26-recibir-dos-botones',
     fecha: '26 de agosto de 2026',
     titulo: 'Recibir un pedido son dos botones',
@@ -9089,7 +9157,7 @@ const RELEASE_LOG = [
             + '<b>se paga al recibir</b> (en la puerta, en efectivo) o <b>queda a pagar</b> con su vencimiento. '
             + 'Son las mismas tres que se elegían al recibir el pedido — lo que cambia es que ahora las decide '
             + 'quien hace la compra, que es el que sabe.',
-        donde: 'Caja › Pagos › + Nueva compra',
+        donde: 'Compras › Pagos › + Nueva compra',
       },
       {
         icono: '📦',
@@ -9097,7 +9165,7 @@ const RELEASE_LOG = [
         desc: 'Si la compra es de algo que llega en una entrega (mercadería, insumos, cocina, sala, fríos, '
             + 'mobiliario), al guardar pregunta el día y <b>anota el pedido solo</b>. Un alquiler o un VEP no '
             + 'lo preguntan. Si algo ya lo tenés, "no lleva entrega" lo saltea.',
-        donde: 'Caja › Pagos › + Nueva compra',
+        donde: 'Compras › Pagos › + Nueva compra',
       },
       {
         icono: '💰',
@@ -9112,7 +9180,7 @@ const RELEASE_LOG = [
         titulo: 'Un gasto cargado con la caja abierta ya no aparece como faltante',
         desc: 'Cargar una compra ya pagada en efectivo durante el servicio hacía que esa noche el cierre marcara '
             + 'una diferencia que no existía. Ahora se descuenta del esperado, igual que los gastos rápidos.',
-        donde: 'Caja › Pagos',
+        donde: 'Compras › Pagos',
       },
       {
         icono: '📅',
@@ -9207,7 +9275,7 @@ const RELEASE_LOG = [
         titulo: 'Caja — la plata de hoy',
         desc: 'El <b>Arqueo</b> quedó primero porque es lo que se abre cada noche. Al lado, los saldos de las '
             + 'cuentas, los <b>Pagos</b> a proveedores y el historial de arqueos.',
-        donde: 'Caja',
+        donde: 'Compras',
       },
       {
         icono: '🍽️',
@@ -9221,7 +9289,7 @@ const RELEASE_LOG = [
         titulo: 'Las facturas del bot ahora se confirman en Pagos',
         desc: 'El botón <b>🔔 Pendientes</b> —el de las facturas que Charly manda por Telegram— se mudó de Stocks '
             + 'a <b>Pagos</b>, que es donde ya viven las compras. El contador rojo ahora aparece en Caja.',
-        donde: 'Caja › Pagos',
+        donde: 'Compras › Pagos',
       },
       {
         icono: '📦',
@@ -9246,7 +9314,7 @@ const RELEASE_LOG = [
         desc: 'La pantalla de cierre ahora muestra <b>cuánto entró esa noche por tarjeta de crédito, débito y QR</b>, '
             + 'y hay que tildar una casilla para poder cerrar. Tildala <b>solamente si ya facturaste</b>: '
             + 'queda registrado quién confirmó y sobre qué monto.',
-        donde: 'Caja › Arqueo de Caja',
+        donde: 'Compras › Arqueo de Caja',
       },
       {
         icono: '📅',
@@ -12736,11 +12804,22 @@ function renderFacturas(data) {
   const sub = document.getElementById('fac-subtitulo');
   if (sub) sub.textContent = `${a.facturas || 0} factura(s) en ${data.mes}`;
 
+  // La bajada muestra la SUMA, no la base. Decía "de crédito fiscal, sobre $X de
+  // neto gravado" y eso se lee como si el crédito se sacara aplicando la alícuota
+  // al neto — Gonzalo lo reportó como error de cálculo el 04/09/2026 mirando el
+  // renglón equivalente del bot. El crédito es el IVA que YA ESTÁ ADENTRO de lo
+  // que se pagó, no una alícuota aplicada a nada; escrito como una igualdad que
+  // cierra, se verifica contra las facturas sin interpretar nada.
+  const pagado = (a.netoGravado || 0) + (a.credito || 0) + (a.otrosImpuestos || 0);
   document.getElementById('fac-total').innerHTML =
     `<span class="num">${fmt(a.credito || 0)}</span>`
     + `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">`
-    + `de crédito fiscal, sobre ${fmt(a.netoGravado || 0)} de neto gravado`
-    + `${a.otrosImpuestos > 0 ? ` · ${fmt(a.otrosImpuestos)} de otros impuestos, que no son crédito` : ''}`
+    + `de crédito fiscal — el IVA que ya está adentro de lo que se pagó`
+    + `</div>`
+    + `<div style="font-size:12px;color:var(--text-muted);margin-top:2px">`
+    + `${fmt(a.netoGravado || 0)} de neto + ${fmt(a.credito || 0)} de IVA`
+    + `${a.otrosImpuestos > 0 ? ` + ${fmt(a.otrosImpuestos)} de otros impuestos (que no son crédito)` : ''}`
+    + ` = ${fmt(pagado)}`
     + `</div>`;
 
   // ── La cobertura, dicha entera ────────────────────────────────────────────
@@ -12901,11 +12980,56 @@ async function guardarAltaFactura(btn) {
   } finally { btn.disabled = false; }
 }
 
-async function loadFiscal() {
-  // El crédito real y la simulación se piden en paralelo y son independientes:
-  // que la simulación falle no puede dejar sin ver las facturas, que es el dato
-  // que sí está medido.
+// ═══════════════════════════════════════════════════════════════════════════
+// Los dos modos de Fiscal
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// `mes` es el crédito IVA REAL, el que dicen las facturas; `simulacion` es el
+// modelo del régimen nuevo. Se abre en `mes` porque es el dato medido.
+//
+// La simulación se carga la PRIMERA vez que se entra a su modo y no antes:
+// /api/fiscal/simulacion recorre meses enteros de Movimientos, y hacer esperar
+// eso al abrir Fiscal sería cobrarle a todos un número que quizá nadie vino a
+// ver. `_fiscSimCargada` es lo que hace que sea una vez y no cada clic.
+const FISC_MODOS = [
+  { id: 'mes',        label: '🧾 Del mes' },
+  { id: 'simulacion', label: '📐 Simulación' },
+];
+let _fiscModo = 'mes';
+let _fiscSimCargada = false;
+
+function renderFiscModos() {
+  const cont = document.getElementById('fisc-modos');
+  if (!cont) return;
+  cont.innerHTML = FISC_MODOS.map(m =>
+    `<button type="button" class="cp-modo${m.id === _fiscModo ? ' active' : ''}" ` +
+    `onclick="fiscVerModo('${m.id}')">${m.label}</button>`).join('');
+}
+
+function fiscVerModo(modo) {
+  _fiscModo = FISC_MODOS.some(m => m.id === modo) ? modo : 'mes';
+  renderFiscModos();
+  const mes = document.getElementById('fisc-modo-mes');
+  const sim = document.getElementById('fisc-modo-simulacion');
+  if (mes) mes.style.display = _fiscModo === 'mes' ? '' : 'none';
+  if (sim) sim.style.display = _fiscModo === 'simulacion' ? '' : 'none';
+  if (_fiscModo === 'simulacion' && !_fiscSimCargada) {
+    _fiscSimCargada = true;
+    // Si falla, se deja volver a intentar: una simulación que no cargó no puede
+    // quedar marcada como cargada, o el modo queda vacío para siempre.
+    loadSimulacionFiscal().catch(() => { _fiscSimCargada = false; });
+  }
+}
+
+// El loader del tab. Sólo abre el modo del mes: es lo único que se pide al
+// entrar. Ver `cargarPanel()`.
+function loadFiscal() {
+  renderFiscModos();
+  fiscVerModo(_fiscModo);
   loadFacturas();
+}
+
+async function loadSimulacionFiscal() {
   const sub = document.getElementById('fisc-subtitulo');
   if (sub) sub.textContent = 'recalculando…';
   try {

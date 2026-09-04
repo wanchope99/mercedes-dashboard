@@ -195,6 +195,27 @@ function acercarAlicuota(pct) {
  * ambigüedad: el total final es el total final. Así que acá la cuenta es una
  * sola y no depende de `ivaIncluido`.
  *
+ * ─── El crédito es el IVA que YA ESTÁ ADENTRO del total ───────────────────
+ *
+ * Léase esto antes de "corregir" la cuenta. El 04/09/2026 se reportó como bug
+ * que el crédito se calculaba "sobre el neto y no sobre el total", pidiendo que
+ * la alícuota se aplicara al total final. No es así, y aplicarlo escribiría un
+ * número que no existe en la factura:
+ *
+ *     neto 100.000 + IVA 10,5% 10.500 = total 110.500
+ *     crédito = 10.500                      ← el importe discriminado
+ *     10,5% × 110.500 = 11.602,50           ← no figura en ningún renglón
+ *
+ * El proveedor liquidó el impuesto sobre el neto, así que el crédito es igual a
+ * `alícuota × neto`, que es lo mismo que `total − neto`. Que se despeje desde el
+ * total —`neto = total / (1 + p/100)`— es sólo aritmética para llegar al mismo
+ * número cuando la factura no discrimina; cuando discrimina, se usa el importe
+ * leído y no se despeja nada.
+ *
+ * El malentendido vino de cómo estaba redactado el resumen del bot ("crédito IVA
+ * $X sobre $Y de neto"), no del cálculo. Ahora esas pantallas muestran la suma
+ * completa, que cierra contra el papel y no se puede leer al revés.
+ *
  * ─── Otros impuestos NO son crédito ────────────────────────────────────────
  *
  * Percepciones, impuestos internos, sellos: se pagan, están adentro del total y

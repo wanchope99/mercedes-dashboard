@@ -741,11 +741,27 @@ function armarResumen(e) {
   if (e.deducible === true) {
     const como = e.ivaIncluido === true ? 'incluido' : e.ivaIncluido === false ? 'discriminado' : '❓';
     L.push(`🅰️ Descuenta IVA · ${e.ivaPct != null ? `${String(e.ivaPct).replace('.', ',')}%` : '❓'} ${como}`);
-    // Cuánto crédito fiscal deja esta factura. Es el número que el registro
-    // existe para acumular, así que se dice ACÁ y no sólo en la pantalla: quien
-    // sacó la foto tiene que poder ver el aporte del mes creciendo.
+    // ─── Cuánto crédito fiscal deja esta factura ──────────────────────────
+    //
+    // Se dice ACÁ y no sólo en la pantalla: quien sacó la foto tiene que poder
+    // ver el aporte del mes creciendo.
+    //
+    // Y se dice MOSTRANDO LA SUMA, no la base. Hasta el 04/09/2026 este renglón
+    // decía "crédito IVA $10.500 sobre $100.000 de neto", y Gonzalo lo reportó
+    // como un error de cálculo: leído así parece que el crédito se saca
+    // aplicando la alícuota a un número que no es el que uno mira, y que
+    // debería salir del total. La cuenta estaba bien; la frase, no.
+    //
+    // El crédito NO es la alícuota por el total —eso daría $11.602,50 sobre una
+    // factura de $110.500, un número que no figura en ningún renglón del papel—:
+    // es el IVA que YA ESTÁ ADENTRO del total, que es exactamente el importe
+    // discriminado. Escrito como una igualdad que cierra, eso se verifica de un
+    // vistazo contra la factura y no hay nada que interpretar.
     const d = desgloseDe(e);
-    if (d && d.iva > 0) L.push(`   ↳ crédito IVA *${plata(d.iva)}* sobre ${plata(d.neto)} de neto`);
+    if (d && d.iva > 0) {
+      L.push(`   ↳ ${plata(d.neto)} + ${plata(d.iva)} de IVA${d.otros > 0 ? ` + ${plata(d.otros)} de otros imp.` : ''} = ${plata(d.total)}`);
+      L.push(`   ↳ crédito fiscal *${plata(d.iva)}* — el IVA que ya pagaste adentro del total`);
+    }
   } else if (e.deducible === false) {
     L.push('🚫 No descuenta IVA');
   } else {
