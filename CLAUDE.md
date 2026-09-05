@@ -290,6 +290,47 @@ That rule was exercised on 2026-08-15: adding Pedidos would have made `operacion
 
 **Archived, not deleted (2026-08-12):** `tab-proveedores` and `tab-comportamiento` are out of the menu — of the old Stocks group only Gestión de Bebidas survives. Both panels and their loaders remain in the file, inert; reviving either is re-adding its `{ id, label }` to a group. The one thing that did **not** go with them is the Telegram bot's pending-invoice drawer, which moved to Pagos — leaving it inside an archived panel would have meant invoices arriving with nobody able to confirm them. The `badge` flag moved from `stocks` to `caja` for the same reason.
 
+### Servicios was downloading the bar's whole history to show one week (2026-09-05)
+
+`getServicios` filtered by date **on its last line**, after `loadRaw()` had pulled six full Fudo collections with no filter — every sale, item and payment since the bar opened. Measured against the live API: **13.1 s** for 1,653 sales and 11,092 items, to render seven days.
+
+**What makes it fixable is that `getServicios` barely needs Fudo at all.** Finished days live in the `Fudo Historico` snapshot, which wins for its dates; from Fudo it only needs days *after* the last snapshot — normally today, sometimes yesterday. It was downloading everything for that.
+
+**What the API actually supports, probed against it rather than assumed** (Fudo dictates the format in its own 400 message; it is not documented here from memory):
+
+| Resource | Date filter | Sort | Note |
+|---|---|---|---|
+| `sales` | `filter[createdAt]=gte.YYYY-MM-DDTHH:MM:SSZ` | `-createdAt` | the bare date is rejected; the full timestamp is required, and repeating the param to bound the other end is a 400 |
+| `items` | none | `-createdAt` | the biggest collection |
+| `payments` | none | `-id` only | ids grow with time, so `-id` stands in for recency |
+| `products`, `product-categories`, `payment-methods` | none | — | reference tables, small, fetched whole |
+
+So `loadRawVentana(desde)` filters `sales` and, for the two that cannot filter, pages newest-first and stops as soon as a whole page falls outside the window. Result, same measurement: **2.2 s**, and the days inside the window come out identical sale-for-sale and peso-for-peso against the full path. In production, with the snapshot current, the window is a day or two rather than seven — smaller still.
+
+**`loadRaw()` was deliberately left alone.** Fifteen call sites depend on it — vinos, stocks, cierres, arqueo, the reports — and several genuinely need the whole history. Narrowing it silently would break their analysis with no error visible, which is the worst failure mode available here. The windowed loader is a separate function with its own cache key; anything that wants everything still asks for everything, and a window that fails falls back to the full path: slower, never wrong.
+
+**The window starts one day before the range asked for**, and that is not paranoia: the service day cuts at 16:00 AR, so a sale at 02:00 belongs to the *previous* day's service. Without the margin the first day of the window would lose its after-midnight sales.
+
+**The same window was extended to every consumer that takes a range (2026-09-05).** They all shared one shape — `loadRaw()` and then `if ((desde && fecha < desde) || …) continue` — so passing the window is exactly equivalent with a fraction of the network. Measured against the live API, each returning **byte-identical output**:
+
+| | Section | Before | After |
+|---|---|---|---|
+| `getVentasItems` | Bebidas | 10.9 s | 2.9 s |
+| `getProductosConStock` | Bebidas | 9.8 s | **0.7 s** |
+| `getVentasConCosto` | Costos | 9.8 s | 2.8 s |
+| `getMesasPorDia` · `getTotalesDeVentas` · `getDetallesFrescos` | Restaurant, informes | ~10 s | ~3 s |
+
+`getProductosConStock` is the one worth naming: it returns the **catalogue**, and was pulling every sale, item and payment in the bar's history to keep `raw.prod`. It now calls `loadReferencias()` — the three small tables — and nothing else.
+
+**What still loads everything, correctly:** `resnapshotDia` / `resnapshotTodos` (rebuilding snapshots is the one job that needs the whole history), `getVentaDebugCrudo` (looks a sale up by id), and the ternary's own fallback when no `desde` is given.
+
+**Two traps found while doing it, both by measuring rather than reading:**
+
+1. **Order is part of the output.** `items` and `payments` come back newest-first because that is the only way to stop early without a filter, and that reversal reached the product lists inside a day. The contents were identical — same exact byte length — and only the sequence differed. `loadRawVentana` now re-sorts both by id ascending, so the window is *indistinguishable* from the full path. That is the condition that makes it safe to swap in fifteen places without auditing each consumer.
+2. **`clearFudoCache()` did not know about the new keys.** It deletes `fudo_raw` and `fudo_hist` by name, so the windows (`fudo_raw_v_<fecha>`, one per start date) and `fudo_ref` survived it. "Actualizar Fudo" exists to stop showing cached data — typically mid-arqueo, so the close counts the sales just rung up — and leaving them out would have made the button not do the one thing it is for. It now clears the windows by prefix.
+
+**The default range is 7 days, not 30 (owner's decision).** It is not cosmetic: the range is what sizes the Fudo window, so a short default is a short download. A week is five or six services — the bar opens Tuesday to Saturday — which fits on screen without scrolling. Looking further back is what the date inputs are for, and the historical analysis is Restaurant.
+
 ### A fixed grid inside a clipping card is invisible breakage (Servicios, 2026-09-04)
 
 `.serv-row` is `grid-template-columns: 130px 90px 1fr auto` and `.serv-cb` carries `min-width: 200px`, so the row's real minimum is ~570px. The card wrapping it is `overflow: hidden`. On a 390px phone that combination does not scroll and does not warn — it **clips**: the comida-vs-bebida bar and part of the total were cut off with no way to reach them. The owner reported it as "you have to scroll right and it gets cut"; there was nothing to scroll to.
@@ -643,7 +684,11 @@ All three analysts are **read-only**: no informe ever writes to `Movimientos`. T
 
 **"Limpiar todas" silences, it does not clear.** Opening the bell already switches the *events* off. What is left afterwards are the *states*, which are not notices but facts — "5 pagos vencidos" stays true whether you look at it or not — so a button that really deleted them would turn the bell into something that lies, and a bell that lies stops being read within a week. Instead it stores **which ids were lit and on what day** (columns D and E of `Notificaciones Vistas`); `silenciados()` only applies them while `silenciadoDia === hoy`, so it expires by itself with no cron and no cleanup. Tomorrow, if the payment is still overdue, it rings again — and the panel says so next to the button, which is what stops someone pressing it believing they settled the payment.
 
-**`src/avisos.js` is the one notification source that is stored rather than derived (2026-08-26).** Every other source in `src/notificaciones.js` recomputes its conclusion on each read — the payments, the orders, the kitchen checklist — which works while the conclusion stays true. Some facts do not survive that: "Juan received Thames and paid $14.700 more than the purchase said" is a fact *of a moment*, and once the row is written the old amount is overwritten and the difference is unrecoverable. Not recorded when it happens, never recorded. The `Avisos` sheet (`ID · Cuando · Tipo · Titulo · Detalle · Para · Severidad · Quien · Ir`, self-creating) is that logbook, and `deAvisos()` turns rows into ordinary **evento** notifications, so they go quiet when the bell is opened and the row stays as the record that it happened and that people were told.
+**"Falta cargar el cierre de cocina" was removed from the bell on 2026-09-05, at the owner's request, and the reasoning generalises.** It was an **estado**, so opening the panel did not quiet it: while last night's close was unloaded it stayed lit, and it came back every morning the kitchen had not yet loaded it. That is the failure this repo already documented when the weekly billing control was pulled out of the reports — *an alarm that rings every time stops being heard*, and worse, it spends the attention the ones that matter need. The bell keeps what is a fact of a moment (an overdue payment, something that broke, a directed aviso) and stops nagging about a daily routine the kitchen already knows it has.
+
+It was taken out **whole**, not left switched off: the source, its `VISIBLE_PARA` entry, `servicioAnteriorA` (which existed only for it) and — the part that actually buys something — the read of the kitchen-closes sheet that `getNotificaciones` did on *every* poll of the bell. The bell now makes one spreadsheet read fewer. `calendario.ultimoDiaDeServicio` is left in place: it is a general calendar question, not this feature's helper. The screen did not change — Operación › Cierre is still there and the post-arqueo summary still points at it. What stopped is the chasing.
+
+**`src/avisos.js` is the one notification source that is stored rather than derived (2026-08-26).** Every other source in `src/notificaciones.js` recomputes its conclusion on each read — the payments and the orders — which works while the conclusion stays true. Some facts do not survive that: "Juan received Thames and paid $14.700 more than the purchase said" is a fact *of a moment*, and once the row is written the old amount is overwritten and the difference is unrecoverable. Not recorded when it happens, never recorded. The `Avisos` sheet (`ID · Cuando · Tipo · Titulo · Detalle · Para · Severidad · Quien · Ir`, self-creating) is that logbook, and `deAvisos()` turns rows into ordinary **evento** notifications, so they go quiet when the bell is opened and the row stays as the record that it happened and that people were told.
 
 **It is also the only source addressed to *people* rather than a role.** `VISIBLE_PARA` filters everything else by `rol`, and that cannot separate `admin`, `pablo` and `tincho` — three logins with identical permissions, the same problem the daily report already solved by looking at `usuario`. An aviso is a directed question ("why was more paid?"), so the recipients are written **into the row** at emission (`Para`, pipe-separated, overridable via `AVISOS_DUENOS`), not resolved at read time: a notice written today must still say who it was for a year from now, whatever the owner list looks like by then. `registrar()` never throws — its callers have already done the real work (ledger written, order marked) and a reception cannot fail because a note could not be left; it returns `{ok:false}` instead and the receiving screen says the owners were *not* told, which is the only thing that makes someone mention it in person.
 

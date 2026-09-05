@@ -169,13 +169,40 @@ async function getToken() {
 }
 
 // ─── Fetch paginado de un recurso JSON:API ─────────────────────────────────────
-async function fetchAll(resource) {
+/**
+ * Pagina un recurso entero. Sin opciones se comporta EXACTAMENTE como siempre:
+ * de la primera página a la última, sin filtros. Es lo que usa `loadRaw()` y no
+ * cambió nada.
+ *
+ * ─── Las dos opciones nuevas (05/09/2026) ───────────────────────────────────
+ *
+ * `extra` agrega parámetros a la query y `cortar` es un predicado que mira cada
+ * página y decide si ya se puede parar. Existen para `loadRawVentana()`, que
+ * baja sólo los últimos días en vez del historial completo.
+ *
+ * Qué acepta la API de Fudo, medido contra ella el 05/09/2026 (la propia API
+ * dicta el formato en su mensaje de error, no está documentado acá de más):
+ *
+ *   sales      filter[createdAt]=gte.AAAA-MM-DDTHH:MM:SSZ   ✓   sort=-createdAt ✓
+ *              (la fecha SOLA no sirve: exige la hora entera)
+ *              (un solo valor: repetir el parámetro para acotar por arriba da 400)
+ *   items      sin filtro                                       sort=-createdAt ✓
+ *   payments   sin filtro                                       sort=-id        ✓
+ *   products / product-categories / payment-methods  ni filtro ni orden por fecha
+ *              (son tablas de referencia, chicas: se bajan enteras y listo)
+ *
+ * De ahí la mezcla: a `sales` se le pide el filtro, y a `items` y `payments`,
+ * que no lo tienen, se les pide el orden descendente y se corta al salir de la
+ * ventana. En `payments` el orden es por id, que crece con el tiempo y sirve de
+ * subrogante de la fecha.
+ */
+async function fetchAll(resource, { extra = '', cortar = null } = {}) {
   const token = await getToken();
   const size = 500;
   let page = 1;
   let all = [];
   while (true) {
-    const url = `${API_BASE}/${resource}?page[size]=${size}&page[number]=${page}`;
+    const url = `${API_BASE}/${resource}?page[size]=${size}&page[number]=${page}${extra}`;
     const res = await fetchRetry(url, {
       headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
     }, { label: `Fudo ${resource}` });
@@ -190,6 +217,11 @@ async function fetchAll(resource) {
     const data = json.data || [];
     all = all.concat(data);
     if (data.length < size) break;
+    // Con `cortar` la lista viene ordenada de lo más nuevo a lo más viejo, así
+    // que en cuanto una página entera cae fuera de la ventana no hace falta
+    // seguir: lo que viene atrás es todavía más viejo. Se corta DESPUÉS de
+    // concatenar, para no perder la página en la que está el límite.
+    if (cortar && cortar(data)) break;
     page++;
     // Tope de seguridad MUY alto. Antes era 50 (25.000 registros), lo que truncaba
     // los items/payments más nuevos cuando el histórico crecía y hacía que faltaran
@@ -266,6 +298,144 @@ async function loadRaw() {
   cache.set('fudo_raw', raw);
   cache.set('fudo_raw_backup', raw, 86_400);
   return raw;
+}
+
+// ─── Lo mismo, pero sólo los últimos días (05/09/2026) ──────────────────────
+//
+// EL PROBLEMA. `loadRaw()` baja SEIS colecciones enteras sin filtro, de la
+// primera venta del bar hasta hoy: ~9.500 ventas, ~9.500 pagos y MÁS DE 10.000
+// renglones de ítems, de a 500 por página y con 150 ms de espera entre recursos.
+// Son decenas de requests secuenciales. Y `getServicios` filtraba por fecha
+// RECIÉN AL FINAL, después de haber bajado y reconstruido todo.
+//
+// LO QUE HACE QUE SE PUEDA ARREGLAR. `getServicios` casi nunca necesita Fudo:
+// los días terminados están en el snapshot de la hoja `Fudo Historico`, que
+// manda. De Fudo sólo hacen falta los días POSTERIORES al último snapshot —
+// normalmente el de hoy, y a veces el de ayer. O sea que la ventana es de uno o
+// dos días y se estaba bajando todo el historial para eso.
+//
+// POR QUÉ NO SE TOCÓ `loadRaw()`. La usan quince lugares —vinos, stocks,
+// cierres, el arqueo, los informes— y varios necesitan el historial completo de
+// verdad. Angostarla en silencio les rompería el análisis sin ningún error a la
+// vista, que es la peor forma de romper algo acá. Así que ésta es una función
+// aparte, con su propia clave de caché, y quien quiera todo sigue pidiendo todo.
+//
+// LA VENTANA ARRANCA UN DÍA ANTES del que se pide, y no es paranoia: el día de
+// servicio corta a las 16:00 de Argentina (ver `fechaYTurno`), así que una venta
+// de las 02:00 pertenece al servicio del día ANTERIOR. Sin ese día de margen se
+// perderían las ventas de después de medianoche del primer día de la ventana.
+async function loadRawVentana(desdeISO) {
+  const clave = `fudo_raw_v_${desdeISO}`;
+  const cached = cache.get(clave);
+  if (cached) return cached;
+
+  // Un día de margen por el corte de las 16:00, y a medianoche UTC.
+  const desdeConMargen = new Date(Date.parse(`${desdeISO}T00:00:00Z`) - 86_400_000)
+    .toISOString().slice(0, 19) + 'Z';
+  const corteMs = Date.parse(desdeConMargen);
+  // `createdAt` fuera de la ventana en TODA la página → lo que sigue es más viejo.
+  const yaPaso = (data) => data.every(x => {
+    const c = x.attributes && x.attributes.createdAt;
+    return c && Date.parse(c) < corteMs;
+  });
+
+  let sales, items, payments;
+  try {
+    // sales SÍ filtra: se pide exactamente la ventana y no se pagina de más.
+    sales = await fetchAll('sales', { extra: `&filter[createdAt]=gte.${desdeConMargen}` });
+    await sleep(150);
+    // items y payments no filtran, pero sí ordenan: se piden de lo más nuevo a lo
+    // más viejo y se corta al salir de la ventana. `payments` sólo ordena por id,
+    // que crece con el tiempo y alcanza como subrogante.
+    items = await fetchAll('items', { extra: '&sort=-createdAt', cortar: yaPaso });
+    await sleep(150);
+    payments = await fetchAll('payments', { extra: '&sort=-id', cortar: yaPaso });
+  } catch (e) {
+    // Si la ventana falla por lo que sea, el camino viejo sigue existiendo y es
+    // correcto: más lento, nunca incorrecto.
+    console.warn('Fudo: la ventana falló, se cae al historial completo:', e.message);
+    return loadRaw();
+  }
+
+  // ─── Devolver el MISMO orden que el camino completo ───────────────────────
+  //
+  // `items` y `payments` se piden al revés (de lo más nuevo a lo más viejo)
+  // porque es la única forma de cortar temprano sin filtro. Pero `loadRaw` los
+  // trae ascendentes, y ese orden se filtra hasta la salida: los productos
+  // dentro de un día salían en otro orden. Medido, el contenido era idéntico
+  // —mismo largo exacto— y sólo cambiaba la secuencia. Se restituye acá para
+  // que la ventana sea indistinguible del camino completo, que es la condición
+  // para poder cambiarla sin revisar los quince consumidores uno por uno.
+  const porId = (a, b) => (Number(a.id) || 0) - (Number(b.id) || 0);
+  items.sort(porId);
+  payments.sort(porId);
+
+  // Las tablas de referencia son chicas y no cambian entre pedidos, así que se
+  // cachean aparte y las comparten todas las ventanas.
+  const ref = await loadReferencias();
+
+  const itemsBySale = {};
+  items.forEach(it => {
+    const saleRel = it.relationships && it.relationships.sale && it.relationships.sale.data;
+    if (!saleRel) return;
+    (itemsBySale[saleRel.id] = itemsBySale[saleRel.id] || []).push(it);
+  });
+
+  const paymentsBySale = {};
+  payments.forEach(pay => {
+    if (pay.attributes && pay.attributes.canceled) return;
+    const saleRel = pay.relationships && pay.relationships.sale && pay.relationships.sale.data;
+    if (!saleRel) return;
+    const mRel = pay.relationships && pay.relationships.paymentMethod && pay.relationships.paymentMethod.data;
+    (paymentsBySale[saleRel.id] = paymentsBySale[saleRel.id] || []).push({
+      amount: (pay.attributes && pay.attributes.amount) || 0,
+      metodo: mRel ? (ref.pmName[mRel.id] || 'Otro') : 'Otro',
+    });
+  });
+
+  const raw = { sales, prod: ref.prod, catName: ref.catName, itemsBySale, paymentsBySale };
+  cache.set(clave, raw);
+  return raw;
+}
+
+// Productos, categorías y medios de pago: las tres tablas que no filtran ni
+// ordenan por fecha, y que tampoco hace falta que lo hagan — son el catálogo del
+// bar, no el historial. Se bajan enteras una vez y se comparten.
+async function loadReferencias() {
+  const cached = cache.get('fudo_ref');
+  if (cached) return cached;
+
+  const products = await fetchAll('products');           await sleep(150);
+  const categories = await fetchAll('product-categories'); await sleep(150);
+  const paymentMethods = await fetchAll('payment-methods');
+
+  const catName = {};
+  categories.forEach(c => { catName[c.id] = (c.attributes && c.attributes.name) || 'Sin categoría'; });
+
+  const prod = {};
+  products.forEach(p => {
+    const catRel = p.relationships && p.relationships.productCategory && p.relationships.productCategory.data;
+    const at = p.attributes || {};
+    prod[p.id] = {
+      id: p.id,
+      name: at.name || 'Producto',
+      price: at.price || 0,
+      cost: (typeof at.cost === 'number') ? at.cost : null,
+      stock: (typeof at.stock === 'number') ? at.stock : null,
+      minStock: (typeof at.minStock === 'number') ? at.minStock : null,
+      stockControl: at.stockControl === true,
+      active: at.active !== false,
+      categoriaId: catRel ? catRel.id : null,
+      categoria: catRel ? (catName[catRel.id] || 'Sin categoría') : 'Sin categoría',
+    };
+  });
+
+  const pmName = {};
+  paymentMethods.forEach(m => { pmName[m.id] = (m.attributes && m.attributes.name) || 'Otro'; });
+
+  const ref = { prod, catName, pmName };
+  cache.set('fudo_ref', ref, 900);
+  return ref;
 }
 
 // ─── Monto de un ítem ───────────────────────────────────────────────────────────
@@ -560,7 +730,21 @@ async function getServicios({ desde, hasta } = {}) {
   let frescos = {};
   if (necesitaFudo) {
     try {
-      const raw = await loadRaw();
+      // ─── Sólo los días que al snapshot le faltan (05/09/2026) ────────────
+      //
+      // Acá iba `loadRaw()`, que baja las seis colecciones ENTERAS —más de
+      // 10.000 renglones de ítems, de a 500 por página— para que después esta
+      // misma función filtrara por fecha en la última línea. Con el snapshot al
+      // día, lo que Fudo tiene y la hoja no son uno o dos días.
+      //
+      // El arranque de la ventana es el más NUEVO entre el último día guardado
+      // y el `desde` que se pidió: si se pide una semana y el snapshot llega
+      // hasta ayer, alcanza con ayer. Sin snapshot no hay atajo y se baja todo,
+      // que es lo correcto — es la primera corrida y hay que llenar la hoja.
+      const inicioVentana = maxHist
+        ? (dDesde && dDesde > maxHist ? dDesde : maxHist)
+        : null;
+      const raw = inicioVentana ? await loadRawVentana(inicioVentana) : await loadRaw();
       frescos = buildDetalles(raw);
       // Snapshot de días finalizados que aún no están guardados
       const nuevos = Object.values(frescos)
@@ -599,7 +783,11 @@ async function getServicios({ desde, hasta } = {}) {
 async function getDetallesFrescos({ desde, hasta } = {}) {
   let frescos = {};
   try {
-    const raw = await loadRaw();
+      // La ventana en vez del historial entero: este bloque ya filtraba por
+      // `desde` más abajo, así que pedirle a Fudo sólo esa ventana da lo mismo
+      // con una fracción de la red. Sin `desde` no hay ventana posible y se
+      // baja todo, que sigue siendo correcto. Ver loadRawVentana (05/09/2026).
+    const raw = desde ? await loadRawVentana(desde) : await loadRaw();
     frescos = buildDetalles(raw);
   } catch (e) {
     // Si Fudo no responde, como último recurso usar histórico (mejor algo que nada)
@@ -624,7 +812,12 @@ async function getDetallesTodos({ desde, hasta } = {}) {
   let frescos = {};
   if (necesitaFudo) {
     try {
-      const raw = await loadRaw();
+      // Igual que getServicios: de Fudo sólo hacen falta los días que al
+      // snapshot le faltan. Ver el comentario largo allá.
+      const inicioVentana = maxHist
+        ? (dDesde && dDesde > maxHist ? dDesde : maxHist)
+        : null;
+      const raw = inicioVentana ? await loadRawVentana(inicioVentana) : await loadRaw();
       frescos = buildDetalles(raw);
     } catch (e) {
       if (!fechasHist.length) throw e;
@@ -648,7 +841,10 @@ async function getServicioDetalle(fecha) {
     return { ...hist[fecha].detalle, origen: 'historico' };
   }
 
-  const raw = await loadRaw();
+  // Un día suelto que todavía no está en el snapshot —típicamente el de hoy, al
+  // abrirlo desde la lista de Servicios. La ventana arranca en ESE día: antes se
+  // bajaba el historial entero para reconstruir uno solo.
+  const raw = await loadRawVentana(fecha);
   const detalles = buildDetalles(raw);
   const detalle = detalles[fecha];
   if (!detalle) return { fecha, encontrado: false };
@@ -729,7 +925,11 @@ const TRAMOS_MESA = [
 const tramoDeMesa = p => (TRAMOS_MESA.find(t => p >= t.min && p <= t.max) || {}).clave || null;
 
 async function getMesasPorDia({ desde, hasta } = {}) {
-  const { sales } = await loadRaw();
+      // La ventana en vez del historial entero: este bloque ya filtraba por
+      // `desde` más abajo, así que pedirle a Fudo sólo esa ventana da lo mismo
+      // con una fracción de la red. Sin `desde` no hay ventana posible y se
+      // baja todo, que sigue siendo correcto. Ver loadRawVentana (05/09/2026).
+  const { sales } = desde ? await loadRawVentana(desde) : await loadRaw();
   const dias = {};
 
   for (const s of sales) {
@@ -778,7 +978,11 @@ async function getMesasPorDia({ desde, hasta } = {}) {
 // pre-agregado, y los días históricos se sirven del snapshot de `Fudo Historico`,
 // que se escribió sin los totales por mesa.
 async function getTotalesDeVentas({ desde, hasta } = {}) {
-  const { sales } = await loadRaw();
+      // La ventana en vez del historial entero: este bloque ya filtraba por
+      // `desde` más abajo, así que pedirle a Fudo sólo esa ventana da lo mismo
+      // con una fracción de la red. Sin `desde` no hay ventana posible y se
+      // baja todo, que sigue siendo correcto. Ver loadRawVentana (05/09/2026).
+  const { sales } = desde ? await loadRawVentana(desde) : await loadRaw();
   const out = [];
   for (const s of sales) {
     const a = s.attributes || {};
@@ -926,14 +1130,29 @@ async function getVentaDebugCrudo(ventaId) {
 function clearFudoCache() {
   cache.del('fudo_raw');
   cache.del('fudo_hist');
+  // Las claves de las ventanas y del catálogo, que entraron el 05/09/2026. Se
+  // borran POR PREFIJO porque hay una por fecha de inicio: `fudo_raw_v_<fecha>`.
+  //
+  // Esto no es cosmético. Quien toca "Actualizar Fudo" lo hace justamente para
+  // dejar de ver lo cacheado —típicamente durante el arqueo, para que el cierre
+  // cuente las ventas de recién— y dejarlas afuera habría hecho que el botón no
+  // sirviera para lo único que sirve.
+  for (const k of cache.keys()) {
+    if (k.startsWith('fudo_raw_v_')) cache.del(k);
+  }
+  cache.del('fudo_ref');
 }
 
 // ─── Productos con datos de inventario (stock/cost/price) directo de Fudo ────────
 // Devuelve [{ id, name, price, cost, stock, minStock, stockControl, active,
 //            categoria, categoriaId }]. Lo usa el módulo de vinos.
 async function getProductosConStock() {
-  const raw = await loadRaw();
-  return Object.values(raw.prod || {});
+  // Devuelve el CATÁLOGO, no ventas: no hace falta una sola venta para armarlo.
+  // Bajaba las seis colecciones enteras —más de 10.000 renglones de ítems— para
+  // quedarse con `prod`. `loadReferencias` trae sólo las tres tablas chicas.
+  // Es lo que pide Gestión de Bebidas al abrir (05/09/2026).
+  const ref = await loadReferencias();
+  return Object.values(ref.prod || {});
 }
 
 // ─── Ventas por producto a lo largo del tiempo, CON la hora de cada venta ────────
@@ -965,7 +1184,11 @@ function esDescargaStock(a) {
 }
 
 async function getVentasItems({ desde, hasta, incluirDescargas = false } = {}) {
-  const raw = await loadRaw();
+      // La ventana en vez del historial entero: este bloque ya filtraba por
+      // `desde` más abajo, así que pedirle a Fudo sólo esa ventana da lo mismo
+      // con una fracción de la red. Sin `desde` no hay ventana posible y se
+      // baja todo, que sigue siendo correcto. Ver loadRawVentana (05/09/2026).
+  const raw = desde ? await loadRawVentana(desde) : await loadRaw();
   const { sales, prod, itemsBySale } = raw;
   const out = [];
   for (const sv of sales) {
@@ -1058,7 +1281,11 @@ async function probeStock() {
 // costoTotal = unidades * costoUnit (null si falta el costo).
 // Sirve para calcular el CMV real de bebida: Σ(vendidasBebida × costoUnit).
 async function getVentasConCosto({ desde, hasta } = {}) {
-  const raw = await loadRaw();
+      // La ventana en vez del historial entero: este bloque ya filtraba por
+      // `desde` más abajo, así que pedirle a Fudo sólo esa ventana da lo mismo
+      // con una fracción de la red. Sin `desde` no hay ventana posible y se
+      // baja todo, que sigue siendo correcto. Ver loadRawVentana (05/09/2026).
+  const raw = desde ? await loadRawVentana(desde) : await loadRaw();
   const { sales, prod, itemsBySale } = raw;
   const out = [];
   for (const sv of sales) {
@@ -1141,4 +1368,8 @@ module.exports = {
   getMesasPorDia, getTotalesDeVentas, TRAMOS_MESA, tramoDeMesa,
   clearFudoCache, grupoDeCategoria, fechaServicio, fechaServicioHoy,
   probeStock, probeStockMovements, getProductosConStock, getVentasItems, getVentasConCosto,
+  // Expuestas para poder MEDIRLAS uñá contra otra sin levantar el server, que es
+  // como se decidió el cambio del 05/09/2026. `loadRaw` es el historial entero y
+  // `loadRawVentana` los últimos días; la segunda es la que usa getServicios.
+  loadRaw, loadRawVentana,
 };

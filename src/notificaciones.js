@@ -69,7 +69,6 @@ const VISIBLE_PARA = {
   pagos: rol => rol === 'admin',
   mantenimiento: () => true,
   pedidos: () => true,
-  cocina: () => true,
   // Los avisos ya vienen filtrados por DESTINATARIO, que es más fino que el rol:
   // los tres logins de admin tienen los mismos permisos y un aviso va a personas,
   // no a un rol. Ver src/avisos.js. Volver a filtrar por rol acá sería aplicar
@@ -264,41 +263,34 @@ function deAvisos(avisos, { usuario, vistoHasta, ahora } = {}) {
   }));
 }
 
-// ── Checklist de cocina sin cargar: estado ──────────────────────────────────
-// El servicio de anoche ya terminó y nadie cargó qué hay que producir. Es el
-// "se pasó de largo" más caro de los que la app puede ver, porque la cocina
-// trabaja al día siguiente con esa lista.
-function deCocina(ultimoCierre, { servicioAnterior }) {
-  if (!servicioAnterior) return [];
-  const cargado = ultimoCierre && ultimoCierre.fechaServicio;
-  if (cargado && cargado >= servicioAnterior) return [];
-  return [nota({
-    id: 'cocina-sin-cargar', fuente: 'cocina', severidad: 'media',
-    titulo: 'Falta cargar el cierre de cocina',
-    detalle: cargado
-      ? `El último es del ${cargado}. El del ${servicioAnterior} todavía no está.`
-      : `Todavía no se cargó ninguno. El del ${servicioAnterior} está pendiente.`,
-    ir: { tab: 'cierre' },
-  })];
-}
-
-// El último servicio anterior al que está en curso. NO es "ayer": el bar abre de
-// martes a sábado, así que el martes el servicio anterior es el sábado y no el
-// lunes. Reclamar el cierre de una noche en la que el bar no abrió es la forma
-// más rápida de que la campanita pierda credibilidad. Ver src/calendario.js.
-function servicioAnteriorA(fechaServicioHoy) {
-  if (!fechaServicioHoy) return null;
-  return require('./calendario').ultimoDiaDeServicio(fechaServicioHoy);
-}
+// ── "Falta cargar el cierre de cocina": SE FUE (05/09/2026) ─────────────────
+//
+// Decisión de Gonzalo. Era un ESTADO, o sea que no se apagaba al abrir el panel:
+// mientras el cierre de anoche no estuviera cargado seguía ahí, y volvía cada
+// mañana en la que la cocina no lo hubiera cargado todavía.
+//
+// Es el mismo problema que este repo ya documentó al sacar el control semanal de
+// facturación de los informes: **una alarma que suena todas las veces deja de
+// escucharse**, y peor, se lleva puesta la atención de las que sí importan. La
+// campanita queda para lo que es un hecho puntual —un pago vencido, algo que se
+// rompió, un aviso dirigido— y no para recordar una rutina diaria que la cocina
+// ya sabe que tiene.
+//
+// Se sacó ENTERO y no se dejó apagado: la fuente, su entrada en `VISIBLE_PARA` y
+// —lo que de verdad se gana— la lectura de la planilla de cierres que hacía
+// `getNotificaciones` en cada consulta de la campanita, que ahora no compra nada.
+// Con ella se fue también `servicioAnteriorA`, que existía sólo para esto.
+//
+// La pantalla no cambió: Operación › Cierre sigue estando y el resumen posterior
+// al arqueo sigue apuntando ahí. Lo que se dejó de hacer es reclamarlo.
 
 // El armado, puro: entra lo que ya leyeron otros módulos, sale la lista.
-function armar({ pagos, mantenimiento, pedidos, ultimoCierre, avisos },
-               { rol, usuario, vistoHasta, hoy, servicioAnterior, callados = new Set() } = {}) {
+function armar({ pagos, mantenimiento, pedidos, avisos },
+               { rol, usuario, vistoHasta, hoy, callados = new Set() } = {}) {
   const todas = [
     ...dePagos(pagos, { rol }),
     ...deMantenimiento(mantenimiento, { vistoHasta }),
     ...dePedidos(pedidos, { hoy, vistoHasta }),
-    ...deCocina(ultimoCierre, { servicioAnterior }),
     ...deAvisos(avisos, { usuario, vistoHasta }),
   ].filter(n => VISIBLE_PARA[n.fuente] ? VISIBLE_PARA[n.fuente](rol) : true)
    // Sólo se silencian ESTADOS. Un evento ya se apaga solo al abrir el panel, y
@@ -472,7 +464,7 @@ async function getNotificaciones({ usuario, rol } = {}) {
   const esAdmin = rol === 'admin';
   const hoy = hoyAR();
 
-  const [marca, pagos, mantenimiento, pedidos, cocina, avisos] = await Promise.all([
+  const [marca, pagos, mantenimiento, pedidos, avisos] = await Promise.all([
     marcaDe(usuario),
     esAdmin ? seguro('pagos', async () => {
       const { getMovimientos, getComprasEnCuotas } = require('./sheets');
@@ -486,22 +478,19 @@ async function getNotificaciones({ usuario, rol } = {}) {
     // El objeto entero y no sólo `.dias`: `sinPago` vive al lado y no está
     // adentro de ningún día — justamente porque no traba ninguno.
     seguro('pedidos', async () => require('./pedidos').listPedidos({ dias: 1 }), {}),
-    seguro('cocina', async () => {
-      const cc = require('./cierre-cocina');
-      if (!cc.configurada()) return null;
-      const lista = await cc.listarCierres({ limite: 1 });
-      return { ultimo: lista[0] || null, servicioHoy: cc.fechaServicioActual() };
-    }, null),
+    // Acá había una quinta lectura, la de la planilla de cierres de cocina, que
+    // se hacía en CADA consulta de la campanita para poder decir "falta cargar
+    // el cierre". Con ese aviso fuera (05/09/2026) no compra nada, así que se
+    // fue con él: la campanita hace una lectura menos.
     seguro('avisos', async () => require('./avisos').listar(), []),
   ]);
 
   return armar(
-    { pagos, mantenimiento, pedidos, ultimoCierre: cocina && cocina.ultimo, avisos },
+    { pagos, mantenimiento, pedidos, avisos },
     {
       rol, usuario, hoy,
       vistoHasta: marca.vistoHasta,
       callados: silenciados(marca, hoy),
-      servicioAnterior: cocina ? servicioAnteriorA(cocina.servicioHoy) : null,
     },
   );
 }
@@ -511,7 +500,7 @@ function clearCache() { cache.flushAll(); }
 module.exports = {
   getNotificaciones, marcarVisto, limpiarTodas, vistoDe, marcaDe, clearCache,
   // Puras
-  armar, dePagos, deMantenimiento, dePedidos, dePedidosSinPago, deCocina, deAvisos,
-  servicioAnteriorA, silenciados,
+  armar, dePagos, deMantenimiento, dePedidos, dePedidosSinPago, deAvisos,
+  silenciados,
   HOJA, MAX_POR_FUENTE,
 };

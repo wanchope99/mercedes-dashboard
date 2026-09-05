@@ -10791,13 +10791,33 @@ async function guardarCompra(conEntrega) {
 // ─── SERVICIOS (Fudo) ───────────────────────────────────────────────────────────
 let _serviciosInit = false;
 
+// El rango con el que abre Servicios. Desde el 05/09/2026 son 7 días y no 30,
+// por decisión de Gonzalo: lo que se viene a mirar acá es cómo vinieron las
+// últimas noches, y el bar abre de martes a sábado — una semana son 5 o 6
+// servicios, que entran en la pantalla sin scrollear.
+//
+// Y no es sólo cosmético: el rango es lo que decide cuánto se le pide a Fudo.
+// Ver `loadRawVentana` en src/fudo.js — la ventana arranca en el más nuevo entre
+// el último día guardado y este `desde`, así que un rango corto es también una
+// bajada corta. Para mirar más atrás están los selectores, y para el análisis
+// histórico está Restaurant.
+const SERVICIOS_DIAS_DEFAULT = 7;
+
+// La fecha de ACÁ, no la UTC. `toISOString()` sobre la hora actual, después de
+// las 21:00 en Argentina, ya está en el día siguiente: es el bug que este repo
+// ya pagó con los atajos de fecha de Pedidos.
+function hoyISOLocal() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+}
+
 function initServiciosFilters() {
   if (_serviciosInit) return;
   _serviciosInit = true;
-  const hoy = new Date();
-  const hace30 = new Date(hoy); hace30.setDate(hoy.getDate() - 30);
-  document.getElementById('serv-desde').value = hace30.toISOString().split('T')[0];
-  document.getElementById('serv-hasta').value = hoy.toISOString().split('T')[0];
+  const hoy = hoyISOLocal();
+  const desde = new Date(Date.parse(hoy + 'T12:00:00Z') - (SERVICIOS_DIAS_DEFAULT - 1) * 86400000)
+    .toISOString().slice(0, 10);
+  document.getElementById('serv-desde').value = desde;
+  document.getElementById('serv-hasta').value = hoy;
 }
 
 const DOW = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
