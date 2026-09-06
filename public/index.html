@@ -2395,6 +2395,27 @@
     <div id="fisc-modos" class="cp-modos"></div>
 
     <div id="fisc-modo-mes">
+    <!-- ── La liquidación del mes: débito menos crédito ─────────────────────
+         Va PRIMERA porque es la pregunta que se hace un Responsable Inscripto:
+         cuánto IVA hay que pagar este mes. Las dos tarjetas de abajo son sus
+         dos mitades, y siguen estando porque cada una se completa por su lado —
+         el crédito cargando facturas, el débito no se carga: sale de Fudo.
+
+         El débito es medido, no simulado, desde el 06/09/2026. La regla la puso
+         el dueño: toda venta que NO se cobra en efectivo se factura, así que
+         lleva IVA. Se aplica POR PAGO y no por venta, porque un mismo ticket
+         puede pagarse con varios medios a la vez. Ver `debitoFiscalDeVentas`
+         en src/regimen-fiscal.js. -->
+    <div class="card" id="fac-liq-card">
+      <div class="card-title"><span>IVA del mes</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0"
+              id="fac-liq-subtitulo"></span>
+      </div>
+      <div id="fac-liq-total"><span class="num" style="color:var(--text-muted)">—</span></div>
+      <div id="fac-liq-detalle" class="fisc-nota" style="margin-top:12px"></div>
+      <div class="table-wrap" style="margin-top:14px"><table id="fac-medios"></table></div>
+    </div>
+
     <!-- ── El crédito IVA REAL del mes ──────────────────────────────────────
          Va con su COBERTURA pegada, porque el crédito solo no dice si está
          completo. La lista de gastos sin factura no es contexto: es la lista de
@@ -9486,8 +9507,20 @@ const RELEASE_LOG = [
     paraTodos: true,
     porque: 'Todo lo de esta tanda sale de mirar la app buscando dónde hace perder tiempo. '
       + 'Nada cambió de lugar: lo que cambió es que hay atajos donde antes había que tipear, '
-      + 'y que dos cosas que fallaban en silencio ahora no fallan.',
+      + 'y que dos cosas que fallaban en silencio ahora no fallan. Más el número que faltaba '
+      + 'para poder liquidar el IVA.',
     items: [
+      {
+        icono: '🧾',
+        titulo: 'Fiscal ahora dice cuánto IVA hay que pagar este mes',
+        desc: 'Faltaba la mitad de la cuenta: el IVA de las <b>compras</b> se venía midiendo factura '
+            + 'por factura, pero el de las <b>ventas</b> no existía, porque Fudo no informa qué venta '
+            + 'se facturó. Se resuelve con la regla de que <b>todo lo que no se cobra en efectivo está '
+            + 'facturado</b>, así que lleva IVA — debería dar alrededor del 80% de las ventas. La '
+            + 'pantalla abre con <b>IVA a pagar = débito − crédito</b>, y muestra el desglose por medio '
+            + 'de pago para que el supuesto se pueda revisar en vez de creerle.',
+        donde: 'Operación › Fiscal › Este mes',
+      },
       {
         icono: '💾',
         titulo: 'Si falla el guardado de una compra, los datos quedan',
@@ -13555,11 +13588,79 @@ async function loadFacturas() {
   }
 }
 
+// ─── La liquidación del mes ──────────────────────────────────────────────────
+// Débito menos crédito. No calcula nada: las dos mitades y la resta vienen
+// resueltas del servidor (`debitoFiscalDeVentas` y `liquidacionIVA`).
+function renderLiquidacionIVA(data) {
+  const d = data.debito, l = data.liquidacion;
+  const elTotal = document.getElementById('fac-liq-total');
+  const elDet = document.getElementById('fac-liq-detalle');
+  const elSub = document.getElementById('fac-liq-subtitulo');
+  const tabla = document.getElementById('fac-medios');
+  if (!elTotal) return;
+
+  // Sin la mitad de las ventas NO se muestra un número: un débito de cero se
+  // leería como "este mes no se vendió nada", que es falso y tiene cara de dato.
+  if (!d || !l) {
+    if (elSub) elSub.textContent = '';
+    elTotal.innerHTML = '<span class="num" style="color:var(--text-muted)">—</span>';
+    elDet.innerHTML = '<span style="color:var(--orange)">No se pudieron leer las ventas de Fudo, '
+      + 'así que falta la mitad del cálculo. El crédito de abajo sí está.</span>';
+    if (tabla) tabla.innerHTML = '';
+    return;
+  }
+
+  if (elSub) elSub.textContent = `${d.dias} día(s) de servicio · ${d.desde.split('-').reverse().join('/')} a ${d.hasta.split('-').reverse().join('/')}`;
+
+  const aFavor = l.saldoAFavorARS > 0;
+  elTotal.innerHTML =
+    `<span class="num"${aFavor ? ' style="color:var(--green)"' : ''}>${fmt(aFavor ? l.saldoAFavorARS : l.aPagarARS)}</span>`
+    + `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">`
+    + (aFavor ? 'de saldo técnico a favor — el crédito supera al débito y se arrastra al mes que viene'
+              : 'de IVA a pagar este mes')
+    + `</div>`
+    // La igualdad, escrita para que cierre leyéndola. Con saldo a favor NO se
+    // imprime el resultado en negativo —"$-2.000.000" se lee como un error de
+    // signo—: se dice que la resta da a favor, que es lo que significa.
+    + `<div style="font-size:12px;color:var(--text-muted);margin-top:2px">`
+    + `${fmt(l.debitoARS)} de débito (ventas) − ${fmt(l.creditoARS)} de crédito (compras) = `
+    + (aFavor ? `${fmt(l.saldoAFavorARS)} a favor` : fmt(l.aPagarARS))
+    + `</div>`;
+
+  const partes = [];
+  partes.push(`<b>${d.pctFacturado.toFixed(1)}%</b> de las ventas del mes no se cobró en efectivo `
+    + `(${fmt(d.facturadoARS)} de ${fmt(d.totalARS)}), y eso es lo que lleva IVA.`);
+  partes.push(`${fmt(d.netoGravadoARS)} de neto + ${fmt(d.debitoFiscalARS)} de IVA = ${fmt(d.facturadoARS)}.`);
+  // El supuesto se dice en voz alta, siempre. Es una regla de cómo se opera, no
+  // algo que el sistema pueda comprobar: Fudo no informa si una venta se facturó.
+  partes.push(`<span style="color:var(--text-muted)">Se asume que todo lo que no es efectivo está facturado — `
+    + `Fudo no informa cuáles se facturaron. El efectivo (${fmt(d.efectivoARS)}) queda afuera.</span>`);
+  // Las dos mitades no se agrupan igual, y quien mire el neto tiene que saberlo.
+  partes.push(`<span style="color:var(--text-muted)">El débito se cuenta por fecha de servicio y el crédito `
+    + `por el mes que se le puso a cada compra, así que los bordes del mes pueden no coincidir.</span>`);
+  elDet.innerHTML = partes.join(' ');
+
+  if (tabla) {
+    tabla.innerHTML = '<thead><tr><th>Medio de pago</th><th class="r">Cobrado</th>'
+      + '<th class="r">% del mes</th><th class="r">IVA que aporta</th></tr></thead><tbody>'
+      + d.porMedio.map(m => {
+          const pct = d.totalARS > 0 ? (m.montoARS / d.totalARS) * 100 : 0;
+          const gris = m.clase === 'efectivo' ? ' style="color:var(--text-muted)"' : '';
+          return `<tr${gris}><td>${escapeHtml(m.medio)}${m.clase === 'efectivo' ? ' <span style="font-size:11px">(no factura)</span>' : ''}</td>`
+            + `<td class="r">${fmt(m.montoARS)}</td><td class="r">${pct.toFixed(1)}%</td>`
+            + `<td class="r">${m.debitoARS > 0 ? fmt(m.debitoARS) : '—'}</td></tr>`;
+        }).join('')
+      + '</tbody>';
+  }
+}
+
 function renderFacturas(data) {
   const a = data.acumulado || {};
   const c = data.cobertura || {};
   const sub = document.getElementById('fac-subtitulo');
   if (sub) sub.textContent = `${a.facturas || 0} factura(s) en ${data.mes}`;
+
+  renderLiquidacionIVA(data);
 
   // La bajada muestra la SUMA, no la base. Decía "de crédito fiscal, sobre $X de
   // neto gravado" y eso se lee como si el crédito se sacara aplicando la alícuota

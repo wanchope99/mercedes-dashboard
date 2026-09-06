@@ -766,6 +766,26 @@ Config is per person — `TELEGRAM_CHAT_<USUARIO>`, same shape as the login pass
 
 It now fails closed, checks every handler that can write, and accepts a Telegram **user_id** as well as an `@username` (a username can be released and reclaimed; an id cannot). The startup log says how many users are enabled, or shouts when it is zero — from outside, "not answering" and "crashed" look identical. `ALLOWED_USERS` is documented in `SETUP.md` as of the same date; it never had been.
 
+### The other half of the tax: VAT on sales (2026-09-06)
+
+Credit — VAT on what is bought — has been measured invoice by invoice since 2026-09-03. On the **sales** side there was nothing measured, only the simulation, and the reason was hard: **Fudo's API does not report whether a sale was invoiced.** Probed thoroughly on 2026-08-12 — sale 1153 (which carries Factura C nº 483) and sale 1209 (no receipt) return exactly the same fields, with not one attribute separating them. The data exists only in the manual `ventas.xls` export.
+
+What unblocks it is an owner's rule, not an inference: **every sale not paid in cash is invoiced, so it carries VAT** — expected to be ~80% of sales. `debitoFiscalDeVentas` in `src/regimen-fiscal.js` applies it and `liquidacionIVA` does the subtraction; both are pure.
+
+**It is applied per PAYMENT, not per sale, and that is what makes the number close.** In Fudo one ticket can be split across methods — `Efectivo-Mercado Pago-QR-Tarj. Débito` is a real combination in the export — so "was this sale cash?" has no answer. Summing payments splits mixed tickets exactly where they belong and falls out for free. The method vocabulary is Fudo's: `Efectivo`, `Mercado Pago`, `QR`, `Tarj. Crédito`, `Tarj. Débito`, `Sena`.
+
+`esMedioEfectivo` matches on the whole name or a `"efectivo "` prefix, never a bare substring: a renamed till must not be able to turn undeclared cash into invoiced revenue silently. `Sena` falls on the invoiced side by literal application of the rule and is the one debatable case — a deposit does not say how it was paid — so it is listed separately in `porMedio` rather than hidden in a constant.
+
+The debit is **VAT contained**, never the rate applied to the total: on ARS 8,000,000 collected it is 1,388,429.75 (× 21/121), not 1,680,000. Same rule already written with numbers for the credit side. Credit exceeding debit is **not negative tax**: it is a technical balance in favour that carries forward.
+
+**Do not reuse `esBancarizado` from `informe-servicios.js` for this.** It exists for the weekly billing control and deliberately excludes Mercado Pago ("los medios que liquidan por Galicia"). For the tax, dropping Mercado Pago would undercount the debit.
+
+`GET /api/facturas` returns both halves in one trip — they are the two sides of one subtraction, and fetching them separately is how a screen ends up showing one month's credit against another's debit. The Fudo read runs in the same `Promise.all` and **degrades to `null`**: if it fails the credit panel still renders and the screen says the other half is missing, because a debit of zero would read as "nothing was sold this month".
+
+**The two halves are not grouped on the same basis, and the screen says so.** Debit aggregates by **service date** (Fudo has no `Mes` column); credit groups by the **`Mes`** the buyer chose. `facturas.rangoDelMes(nombre, hoyISO)` is the name→range converter and resolves to the most recent non-future year — asking for "Diciembre" in September 2026 gives December 2025, since a future range would return zero sales and read as a fact.
+
+**Monotributo's ceiling is deliberately not tracked.** It was already reached (owner, 2026-09-06), so the question stopped being "when am I forced out" and became "how much do I pay this month". `cuotaMonotributoMensual` stays a hand-entered parameter for the simulation's comparison line, and nothing computes a 12-month running total.
+
 ### Timezone
 
 The entire app treats "today" as Argentina local time (`America/Argentina/Buenos_Aires`), including the Fudo "service day" cutoff (16:00 AR) used to decide which calendar day a late-night close belongs to — see `fechaServicioDe`/`fechaServicioHoy` in `src/fudo.js`. Don't use naive `Date`/UTC-based day boundaries when touching service-day or cash-register logic.

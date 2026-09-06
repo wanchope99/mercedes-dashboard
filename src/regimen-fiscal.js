@@ -173,6 +173,120 @@ function netoDe(montoConIva, alicuotaPct) {
   return (Number(montoConIva) || 0) / (1 + a / 100);
 }
 
+// ─── Débito fiscal: el IVA de lo que se vende ────────────────────────────────
+//
+// La otra mitad del impuesto. El crédito —lo que se compra— se mide por
+// comprobante desde el 3/9/2026 en `src/facturas.js`. Del lado de las ventas no
+// había NADA medido: sólo la simulación, porque **la API de Fudo no informa si
+// una venta se facturó** (probado a fondo el 12/8/2026: una venta con Factura C
+// y una sin comprobante devuelven exactamente los mismos campos).
+//
+// LA REGLA ES DEL DUEÑO, y es lo que destraba el número (6/9/2026):
+//
+//     toda venta que NO se cobra en efectivo se factura, así que lleva IVA.
+//
+// No es una inferencia del sistema: es cómo se opera. Por eso se aplica y se
+// muestra como un número, no como un rango — pero el desglose por medio de pago
+// viaja siempre al lado, que es lo que permite comprobarla en vez de creerle.
+//
+// SE APLICA POR PAGO, NO POR VENTA, y esa distinción es la que hace que el
+// número cierre: en Fudo una misma venta puede pagarse con varios medios a la
+// vez —hay tickets `Efectivo-Mercado Pago-QR-Tarj. Débito`—, así que preguntar
+// "¿esta venta fue en efectivo?" no tiene respuesta. Sumar los PAGOS parte esos
+// tickets por donde corresponde y sale solo.
+//
+// Los nombres salen de Fudo tal cual: `Efectivo`, `Mercado Pago`, `QR`,
+// `Tarj. Crédito`, `Tarj. Débito`, `Sena`.
+//
+// `Sena` cae del lado facturado por aplicación literal de la regla —no es
+// efectivo—, y es el único caso donde eso es discutible, porque una seña no dice
+// con qué se pagó. Se lo deja adentro y se lo lista aparte en `porMedio`: si
+// alguna vez mueve plata que importe, se ve y se decide con el dato delante, en
+// vez de haberlo escondido en una constante.
+//
+// OJO CON EL MES. Esto agrega por FECHA DE SERVICIO, porque Fudo no tiene
+// columna `Mes` — es la misma razón por la que el analista del salón agrega por
+// fecha y el de la plata por `Mes`. El crédito, en cambio, se agrupa por el
+// `Mes` que eligió quien cargó la compra. Los dos lados de la liquidación no
+// están sobre exactamente la misma base, y quien mire el neto tiene que saberlo:
+// por eso `base` viaja en la respuesta.
+
+// Lo único que no se factura. Todo lo demás sí, por la regla de arriba.
+const MEDIOS_EFECTIVO = ['efectivo', 'cash', 'contado'];
+
+function esMedioEfectivo(nombre) {
+  const n = normNombre(nombre);
+  if (!n) return false;
+  // `startsWith` y no igualdad: Fudo admite renombrar una caja a "Efectivo
+  // Local" o "Efectivo mostrador", y un nombre nuevo NO puede convertir plata en
+  // negro en facturada sin que nadie lo note.
+  return MEDIOS_EFECTIVO.some(m => n === m || n.startsWith(m + ' '));
+}
+
+/**
+ * El IVA de las ventas de un período, a partir de lo cobrado por cada medio.
+ *
+ * @param mediosPago  { 'Efectivo': 123, 'Tarj. Crédito': 456, ... } ya sumado
+ *                    sobre el período. Sale de `fudo.getServicios()`.
+ * @param alicuota    21 por defecto (gastronomía).
+ * @returns el débito, con el desglose que permite auditar el supuesto.
+ */
+function debitoFiscalDeVentas({ mediosPago = {}, alicuota = 21 } = {}) {
+  const a = Number(alicuota) || 0;
+
+  const porMedio = Object.entries(mediosPago || {})
+    .map(([medio, monto]) => {
+      const montoARS = Number(monto) || 0;
+      const efectivo = esMedioEfectivo(medio);
+      return {
+        medio,
+        montoARS: round2(montoARS),
+        clase: efectivo ? 'efectivo' : 'facturado',
+        // El IVA que aporta este medio. Cero en efectivo, y se dice cero en vez
+        // de omitirlo: la fila tiene que poder leerse sola.
+        debitoARS: efectivo ? 0 : round2(ivaContenido(montoARS, a)),
+      };
+    })
+    .sort((x, y) => y.montoARS - x.montoARS);
+
+  const sumar = f => porMedio.filter(f).reduce((s, m) => s + m.montoARS, 0);
+  const totalARS = sumar(() => true);
+  const efectivoARS = sumar(m => m.clase === 'efectivo');
+  const facturadoARS = sumar(m => m.clase === 'facturado');
+
+  return {
+    base: 'fecha de servicio',   // ver la advertencia del encabezado
+    alicuota: a,
+    totalARS: round2(totalARS),
+    efectivoARS: round2(efectivoARS),
+    facturadoARS: round2(facturadoARS),
+    // Lo que el dueño espera que dé ~80%. Es la comprobación de la regla: si un
+    // mes se va lejos de ahí, cambió cómo cobra el bar, no la cuenta.
+    pctFacturado: totalARS > 0 ? round2((facturadoARS / totalARS) * 100) : 0,
+    netoGravadoARS: round2(netoDe(facturadoARS, a)),
+    debitoFiscalARS: round2(ivaContenido(facturadoARS, a)),
+    porMedio,
+  };
+}
+
+/**
+ * La liquidación del mes: lo que se debe menos lo que se computa.
+ *
+ * Un crédito mayor que el débito NO es un impuesto negativo: es saldo técnico a
+ * favor, que se arrastra al mes siguiente. Es la misma regla que ya aplica
+ * `simularMes`.
+ */
+function liquidacionIVA({ debitoARS = 0, creditoARS = 0 } = {}) {
+  const d = round2(debitoARS), c = round2(creditoARS);
+  const neto = round2(d - c);
+  return {
+    debitoARS: d,
+    creditoARS: c,
+    aPagarARS: neto > 0 ? neto : 0,
+    saldoAFavorARS: neto < 0 ? round2(-neto) : 0,
+  };
+}
+
 // Escala progresiva por tramos: fijo del tramo + pct sobre el excedente.
 function aplicarEscala(base, tramos) {
   const b = Number(base) || 0;
@@ -1160,6 +1274,8 @@ module.exports = {
   // Cálculo
   estimarCreditoFiscal, simularMes, simular, oportunidades, impactoPorCategoria, descuentoEfectivo,
   calibrarDesdeCompras, esMovimientoDeCaja,
+  // El otro lado del impuesto: el IVA de lo que se vende, y la resta del mes.
+  debitoFiscalDeVentas, liquidacionIVA, esMedioEfectivo, MEDIOS_EFECTIVO,
   // Helpers exportados para poder ejercitarlos sin montar el módulo entero
   ivaContenido, netoDe, aplicarEscala, tasaMarginal, normNombre, normalizarAlicuota, ALICUOTAS_CONOCIDAS,
 };

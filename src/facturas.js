@@ -123,6 +123,33 @@ function mesDeISO(iso) {
   return m ? MESES[Number(m[2]) - 1] || '' : '';
 }
 
+/**
+ * El camino de vuelta: del nombre del mes a su rango de fechas.
+ *
+ * Hace falta porque el crédito se agrupa por la columna `Mes` —un nombre suelto,
+ * sin año— y el débito sale de Fudo, que sólo entiende fechas. Es el mismo
+ * desambiguado que ya hace `delMesConAnio` en el informe mensual, y por la misma
+ * razón: la columna `Mes` dice "Julio" y nada más.
+ *
+ * **Se resuelve al año MÁS RECIENTE que no sea futuro.** Pedir "Diciembre"
+ * estando en septiembre de 2026 devuelve diciembre de 2025, no uno que todavía
+ * no pasó: un rango en el futuro daría cero ventas y se leería como "ese mes no
+ * se vendió nada", que es una respuesta falsa con cara de dato.
+ */
+function rangoDelMes(nombreMes, hoyISO) {
+  const idx = MESES.findIndex(m => norm(m) === norm(nombreMes));
+  if (idx === -1) return null;
+  const hoy = _txt(hoyISO) || hoyAR();
+  const m = /^(\d{4})-(\d{2})/.exec(hoy);
+  if (!m) return null;
+  const anioHoy = Number(m[1]), mesHoy = Number(m[2]);
+  const anio = (idx + 1) <= mesHoy ? anioHoy : anioHoy - 1;
+  const mm = String(idx + 1).padStart(2, '0');
+  // Día 0 del mes siguiente es el último de éste, y contempla febrero bisiesto.
+  const ultimo = new Date(Date.UTC(anio, idx + 1, 0)).getUTCDate();
+  return { desde: `${anio}-${mm}-01`, hasta: `${anio}-${mm}-${String(ultimo).padStart(2, '0')}`, anio };
+}
+
 /** La letra del comprobante, o '' si no se sabe. */
 function normalizarComprobante(v) {
   const s = _txt(v).toUpperCase().replace(/[^A-Z]/g, '');
@@ -741,6 +768,6 @@ module.exports = {
   desglosar, construirFila, parsearFila, acumuladoDelMes, cobertura,
   buscarCompraEnLibro,
   esComputable, normalizarComprobante, formatearNumero, claveDe,
-  acercarAlicuota, mesDeISO, norm, VENTANA_DIAS,
+  acercarAlicuota, mesDeISO, rangoDelMes, norm, VENTANA_DIAS,
   COMPROBANTES, COMPROBANTES_CON_CREDITO, ALICUOTAS_CONOCIDAS, HOJA, HEADER,
 };

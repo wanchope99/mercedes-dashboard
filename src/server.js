@@ -5123,13 +5123,54 @@ app.get('/api/facturas', authMiddleware, adminOnly, async (req, res) => {
     // El mes de ACÁ, no el UTC: después de las 21:00 el 30 de un mes, `new Date()`
     // en Londres ya está en el siguiente y el panel abriría en el mes que viene.
     const mes = (req.query.mes || '').toString().trim() || facturasReg.mesDeISO(pedidos.hoyAR());
-    const [todas, movimientos] = await Promise.all([facturasReg.listar(), getMovimientos()]);
+
+    // El débito —el IVA de lo que se vendió— va en el MISMO viaje que el crédito.
+    // Son las dos mitades de una resta, y pedirlas por separado es cómo se llega
+    // a una pantalla que muestra el crédito de un mes contra el débito de otro.
+    const rango = facturasReg.rangoDelMes(mes, pedidos.hoyAR());
+    const [todas, movimientos, ventas] = await Promise.all([
+      facturasReg.listar(),
+      getMovimientos(),
+      // Si Fudo no contesta, el panel del crédito NO se cae: `ventas` queda en
+      // null y la pantalla dice que esa mitad falta, en vez de mostrar un débito
+      // de cero, que se leería como "este mes no se vendió nada".
+      rango
+        ? getServicios({ desde: rango.desde, hasta: rango.hasta })
+            .catch(e => { console.warn('Débito fiscal: Fudo no contestó:', e.message); return null; })
+        : Promise.resolve(null),
+    ]);
+
     const acumulado = facturasReg.acumuladoDelMes(todas, mes);
     const cobertura = facturasReg.cobertura(todas, movimientos, mes);
+
+    // Los medios de pago del mes, sumados sobre los días de servicio. Se suma por
+    // PAGO y no por venta porque en Fudo un mismo ticket puede pagarse con varios
+    // medios a la vez (`Efectivo-Mercado Pago-QR-Tarj. Débito` es un caso real).
+    let debito = null;
+    if (Array.isArray(ventas)) {
+      const mediosPago = {};
+      for (const d of ventas) {
+        for (const [medio, monto] of Object.entries(d.mediosPago || {})) {
+          mediosPago[medio] = (mediosPago[medio] || 0) + (Number(monto) || 0);
+        }
+      }
+      debito = regimenFiscal.debitoFiscalDeVentas({ mediosPago });
+      debito.desde = rango.desde;
+      debito.hasta = rango.hasta;
+      debito.dias = ventas.length;
+    }
+
+    const liquidacion = debito
+      ? regimenFiscal.liquidacionIVA({
+          debitoARS: debito.debitoFiscalARS,
+          creditoARS: acumulado.credito,
+        })
+      : null;
+
     res.json({
       ok: true,
       data: {
-        configurada: true, mes, acumulado, cobertura,
+        configurada: true, mes, acumulado, cobertura, debito, liquidacion,
         // Los meses que ya tienen alguna factura cargada, para el selector.
         meses: [...new Set(todas.map(f => f.mes).filter(Boolean))],
         facturas: todas.filter(f => facturasReg.norm(f.mes) === facturasReg.norm(mes))
