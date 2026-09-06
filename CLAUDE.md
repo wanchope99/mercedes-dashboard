@@ -617,11 +617,19 @@ That idempotency is only as good as the read behind it, which is why `listarInfo
 
 Model: `claude-opus-5` with structured outputs (one schema for all three, so one screen renders all three) and server-side refusal fallbacks, wrapped so a beta-flag change degrades to a plain call instead of no report. **No prompt caching** — the cache lives 5 minutes and these run weekly, so it would only ever pay the write premium.
 
-**Visibility is per-user, not per-role** — the only such permission in the app. `INFORMES_DESTINATARIO` (default `tincho`) gates `soloDestinatarioInformes` on the server and `soloUsuario` in the browser; the three admin logins are otherwise identical, so `soloAdmin` could not distinguish them. Note this means the `admin` account does **not** see the reports, nor get the popup.
+**Visibility is by role, and the app no longer has any per-user permission (2026-09-06).** All three admin logins — `tincho`, `pablo`, `admin` — see the reports; the `encargado` does not, because `negocio` is `soloAdmin` end to end. Every `/api/informes/*` route is `adminOnly`.
 
-The section lives **inside Negocio** as a submenu (`negocio` → `informes`), not as a top-level tab — it is one more report, just written by an agent instead of a query. That makes it the only `soloUsuario` in the whole app, applied by the sub filter in `switchGroup`; the group-level filter in `gruposVisibles` is kept in step but no group uses it. The panel id stays `tab-informes`, which is what the submenu resolves to.
+Until this date there was a `soloDestinatarioInformes` middleware comparing `req.user.usuario` against `INFORMES_DESTINATARIO` (default `tincho`), mirrored by `soloUsuario` in the browser. It was **the only permission in the app that asked who you are instead of what role you have**, and it existed for one reason with an expiry date: the agents were in beta and the report went to one person while they were calibrated. A documented side effect was that the `admin` account did not see them either.
 
-**That single flag is the only thing separating the three admin logins.** Confirmed by the owner on 2026-08-12: `pablo` must see everything `tincho` sees, and the Sunday agent reports are the sole exception, held back only while they are in beta. Verified in the browser: Pablo resolves 19 submenus, Tincho 20, and the difference is exactly `negocio/informes`. Any change to the menu must preserve that — if a second `soloUsuario` ever appears, it is almost certainly a mistake.
+The owner asked on 2026-09-06 that `pablo` and `admin` see them permanently. That leaves the permission with nobody to exclude, so **it was deleted rather than widened** — a list that already contains everyone is a conditional that can only fail. `INFORMES_DESTINATARIO` is no longer read; a value left in Railway does nothing, and `SETUP.md` says so, so nobody hunts for what it governs.
+
+The section lives **inside Negocio** as a submenu (`negocio` → `informes`), not as a top-level tab — it is one more report, just written by an agent instead of a query. The panel id stays `tab-informes`, which is what the submenu resolves to.
+
+**The three admin logins now resolve identically: 20 submenus each** (Pablo used to resolve 19, and `negocio/informes` was the whole difference). Verified by running the real `TAB_GROUPS` through the role filters in `tests/permisos-informes.test.js`, which also pins that the encargado keeps his seven and still cannot reach the reports.
+
+`veInformes()` decides the entry popup and now checks the role, not the person. It still resolves the submenu with `subDeMenu()` rather than reading a group by name — when the `reportes` group stopped existing, a lookup by name switched the popup off for everyone with no error. Keep it that way.
+
+**If a per-user permission is ever needed again it is two lines** — the sub filter in `switchGroup` and the group filter in `gruposVisibles` — but the question to ask first is why the role is not enough.
 
 ### What the agent knows across runs
 

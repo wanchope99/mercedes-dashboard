@@ -165,7 +165,7 @@ Variables opcionales:
 | Variable | Para qué | Default |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | **Requerida.** Sin ella los informes no se generan (el extractor de facturas ya la usa) | — |
-| `INFORMES_DESTINATARIO` | Qué usuario los ve. **Ojo: `admin` no los ve** salvo que se ponga acá | `tincho` |
+| ~~`INFORMES_DESTINATARIO`~~ | **Ya no se usa** (06/09/2026). Los informes los ven los tres logins de admin. Si quedó seteada en Railway no hace nada: se puede borrar | — |
 | `INFORMES_MODEL` | Modelo | `claude-opus-5` |
 | `INFORMES_NOTAS_DIAS` | Cuánto tiempo una nota escrita sigue llegándole al agente | `240` |
 | `INFORMES_CONTEXTO_PREVIOS` | Cuántos informes anteriores lee antes de escribir el nuevo | `2` |

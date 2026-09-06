@@ -205,19 +205,27 @@ function adminOnly(req, res, next) {
   next();
 }
 
-// El informe diario va a UNA persona, no a un rol. Es el primer permiso de esta
-// app que mira quién es el usuario en vez de qué rol tiene: los tres logins de
-// admin tienen exactamente los mismos permisos, así que el rol no alcanza para
-// distinguirlos. Va por variable de entorno para poder cambiar el destinatario
-// sin tocar código.
-const INFORMES_DESTINATARIO = (process.env.INFORMES_DESTINATARIO || 'tincho').toLowerCase();
-
-function soloDestinatarioInformes(req, res, next) {
-  if (req.user?.usuario !== INFORMES_DESTINATARIO) {
-    return res.status(403).json({ ok: false, error: 'Sin permisos' });
-  }
-  next();
-}
+// ─── Los informes los ven los tres admins (06/09/2026) ───────────────────────
+//
+// Hasta hoy había acá un `soloDestinatarioInformes` que comparaba `req.user.usuario`
+// contra `INFORMES_DESTINATARIO` (por defecto `tincho`). Era el ÚNICO permiso de
+// toda la app que miraba QUIÉN sos en vez de QUÉ ROL tenés, y existía por una
+// razón con fecha de vencimiento: los agentes estaban en beta y el informe se le
+// mostraba a una sola persona mientras se calibraban. Consecuencia lateral que
+// este repo tenía documentada: la cuenta `admin` tampoco los veía.
+//
+// Gonzalo pidió el 06/09/2026 que los vean también `pablo` y `admin`, en forma
+// permanente. Con eso el permiso se queda sin nadie a quien excluir —los tres
+// logins de admin son los tres destinatarios— así que no se amplía la lista: se
+// borra el mecanismo. Una lista de un permiso que ya incluye a todos es un
+// condicional que sólo puede fallar.
+//
+// `adminOnly` es lo que corresponde: el encargado sigue sin verlos, que es lo
+// único que este permiso tiene que seguir garantizando.
+//
+// `INFORMES_DESTINATARIO` deja de leerse. Si quedó seteada en Railway no hace
+// nada; está anotado en SETUP.md para que nadie la busque creyendo que gobierna
+// algo.
 
 // ─── Login ────────────────────────────────────────────────────────────────────
 app.post('/api/login', (req, res) => {
@@ -4244,9 +4252,11 @@ app.delete('/api/pedidos/semanal/:id', authMiddleware, adminOnly, async (req, re
   catch (err) { res.status(400).json({ ok: false, error: err.message }); }
 });
 
-// ─── Informe diario ─────────────────────────────────────────────────────────
-// Va a una sola persona (INFORMES_DESTINATARIO). Ver src/informes.js.
-app.get('/api/informes', authMiddleware, soloDestinatarioInformes, async (req, res) => {
+// ─── Informes automáticos ───────────────────────────────────────────────────
+// Los ven los tres logins de admin desde el 06/09/2026; el encargado no. Cada
+// uno los marca leído por su cuenta: el estado vive en la columna `Leidos` de la
+// hoja, por usuario, así que tres lectores no se pisan. Ver src/informes.js.
+app.get('/api/informes', authMiddleware, adminOnly, async (req, res) => {
   try { res.json({ ok: true, data: await informes.listarInformes({ limite: 30 }) }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
@@ -4254,12 +4264,12 @@ app.get('/api/informes', authMiddleware, soloDestinatarioInformes, async (req, r
 // Lo que el destinatario todavía no vio. Lo consulta el aviso emergente al abrir
 // la app, al volver a la pestaña y cada media hora. La respuesta normal es una
 // lista vacía: sólo lee la hoja, nunca llama al modelo.
-app.get('/api/informes/pendientes', authMiddleware, soloDestinatarioInformes, async (req, res) => {
+app.get('/api/informes/pendientes', authMiddleware, adminOnly, async (req, res) => {
   try { res.json({ ok: true, data: await informes.pendientesPara(req.user.usuario) }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-app.post('/api/informes/leido', authMiddleware, soloDestinatarioInformes, async (req, res) => {
+app.post('/api/informes/leido', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { tipo, periodo } = req.body || {};
     res.json({ ok: true, data: await informes.marcarLeido({ tipo, periodo, usuario: req.user.usuario }) });
@@ -4268,12 +4278,12 @@ app.post('/api/informes/leido', authMiddleware, soloDestinatarioInformes, async 
 
 // ─── Notas al agente ────────────────────────────────────────────────────────
 // El feedback de los dueños sobre lo que el informe dice. Ver src/informes-notas.js.
-app.get('/api/informes/notas', authMiddleware, soloDestinatarioInformes, async (req, res) => {
+app.get('/api/informes/notas', authMiddleware, adminOnly, async (req, res) => {
   try { res.json({ ok: true, data: await informesNotas.listarNotas({}) }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
-app.post('/api/informes/notas', authMiddleware, soloDestinatarioInformes, async (req, res) => {
+app.post('/api/informes/notas', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { tipo, periodo, hallazgo, veredicto, texto, escalonConcepto, escalonDesde } = req.body || {};
     // El usuario lo pone el servidor, nunca el body: la nota queda firmada con
@@ -4290,7 +4300,7 @@ app.post('/api/informes/notas', authMiddleware, soloDestinatarioInformes, async 
 // siga siendo UN toque: se guarda primero y recién ahí se ofrece contar por qué
 // sirvió. El usuario sale de req.user por la misma razón que al crear la nota, y
 // el módulo además verifica que la fila sea suya.
-app.post('/api/informes/notas/:fila/texto', authMiddleware, soloDestinatarioInformes, async (req, res) => {
+app.post('/api/informes/notas/:fila/texto', authMiddleware, adminOnly, async (req, res) => {
   try {
     const data = await informesNotas.agregarTexto({
       rowIndex: req.params.fila, usuario: req.user.usuario, texto: (req.body || {}).texto,
@@ -4299,7 +4309,7 @@ app.post('/api/informes/notas/:fila/texto', authMiddleware, soloDestinatarioInfo
   } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
 });
 
-app.post('/api/informes/notas/:fila/archivar', authMiddleware, soloDestinatarioInformes, async (req, res) => {
+app.post('/api/informes/notas/:fila/archivar', authMiddleware, adminOnly, async (req, res) => {
   try { res.json({ ok: true, data: await informesNotas.archivarNota(req.params.fila) }); }
   catch (err) { res.status(400).json({ ok: false, error: err.message }); }
 });
@@ -4308,7 +4318,7 @@ app.post('/api/informes/notas/:fila/archivar', authMiddleware, soloDestinatarioI
 // de un mes viejo (`hasta` = cualquier día del mes SIGUIENTE al que se quiere
 // analizar). Sin `forzar` no regenera un período ya hecho, así apretar el botón
 // dos veces no gasta dos llamadas al modelo.
-app.post('/api/informes/generar', authMiddleware, soloDestinatarioInformes, async (req, res) => {
+app.post('/api/informes/generar', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { tipo, hasta, forzar } = req.body || {};
     if (!informes.TIPOS.includes(tipo)) {

@@ -4878,7 +4878,7 @@ async function checkSavedToken() {
 //   soloAdmin  el encargado no ve la sección
 //   phonePrio  posición en la barra de abajo
 //   badge      pinta el contador rojo de pendientes en esa sección
-//   subs       submenús (cada uno también puede ser soloAdmin / soloUsuario)
+//   subs       submenús (cada uno también puede ser soloAdmin)
 //
 // REGLA AL AGREGAR ALGO: un submenú nuevo es una línea acá + su panel `tab-<id>`
 // + su carga en cargarPanel(). Si un grupo pasa de 5 subs, es señal de que hay
@@ -4897,15 +4897,18 @@ const TAB_GROUPS = {
   // Antes se llamaban igual y por eso se confundían.
   //
   // El informe automático vive acá y no como sección propia: es un reporte más,
-  // sólo que lo escribe un agente. `soloUsuario` es el ÚNICO de toda la app y
-  // está mientras los agentes sigan en beta — es lo único que Pablo no ve. Si se
-  // saca, Pablo y Tincho pasan a ver exactamente lo mismo.
+  // sólo que lo escribe un agente. Hasta el 06/09/2026 llevaba `soloUsuario:
+  // 'tincho'` —el único permiso por PERSONA de toda la app, puesto mientras los
+  // agentes estaban en beta—. Gonzalo pidió que lo vean también Pablo y admin en
+  // forma permanente, así que ya no queda nadie a quien excluir y el permiso se
+  // borró en vez de ampliarse. Los tres logins de admin ven ahora exactamente lo
+  // mismo, que es lo que este archivo venía diciendo que debía pasar.
   negocio: { label: '📊 Negocio', icono: '📊', corto: 'Negocio', soloAdmin: true, phonePrio: 1, subs: [
     { id: 'dashboard',          label: '📊 Dashboard' },
     { id: 'reportes-balance',   label: '📈 Balance' },
     { id: 'servicios',          label: '🍽️ Servicios' },
     { id: 'reportes-servicios', label: '🏆 Restaurant' },
-    { id: 'informes',           label: '🔎 Informe', soloUsuario: 'tincho' },
+    { id: 'informes',           label: '🔎 Informe' },
   ] },
 
   // ── La plata que sale ─────────────────────────────────────────────────────
@@ -5039,11 +5042,10 @@ const TAB_GROUPS = {
 function gruposVisibles(incluirSoloPhone) {
   return Object.entries(TAB_GROUPS)
     .filter(([, cfg]) => !cfg.soloAdmin || getRol() === 'admin')
-    // soloUsuario: secciones de una persona, no de un rol. Los tres logins de
-    // admin tienen los mismos permisos, así que el rol no los distingue. Hoy
-    // ninguna sección entera lo usa — el Informe lo aplica a nivel submenú, en
-    // switchGroup — pero los dos niveles se filtran igual a propósito.
-    .filter(([, cfg]) => !cfg.soloUsuario || getUsuario() === cfg.soloUsuario)
+    // Acá había un filtro por USUARIO, no por rol. Lo usaba sólo el Informe y se
+    // fue con él el 06/09/2026: los tres logins de admin ven lo mismo. Si alguna
+    // vez hace falta un permiso por persona, son dos líneas —ésta y la de
+    // switchGroup— pero conviene preguntarse antes por qué el rol no alcanza.
     .filter(([, cfg]) => incluirSoloPhone || !cfg.soloPhone)
     .map(([id, cfg]) => ({ id, ...cfg }));
 }
@@ -5193,15 +5195,13 @@ function switchGroup(group, _btn) {
 
   const cfg = TAB_GROUPS[group];
   const subnav = document.getElementById('subtab-nav');
-  // Los submenús marcados soloAdmin no se le arman al encargado, y los marcados
-  // soloUsuario sólo a esa persona. soloUsuario es el único permiso de la app
-  // que mira quién sos y no qué rol tenés: los tres logins de admin son
-  // equivalentes, así que soloAdmin no alcanzaría para separarlos. Hoy lo usa
-  // sólo el Informe. Esconderlo acá es cosmética — quien decide de verdad es
-  // soloDestinatarioInformes en el servidor, igual que con todo lo de Charly.
+  // Los submenús marcados soloAdmin no se le arman al encargado. Acá había
+  // además un filtro por USUARIO —el único permiso por persona de la app, que
+  // usaba sólo el Informe— y se fue el 06/09/2026 cuando los tres logins de
+  // admin pasaron a verlo. Esconder un submenú es cosmética: quien decide de
+  // verdad es `adminOnly` en el servidor, igual que con todo lo de Charly.
   const subs = cfg && cfg.subs
-    ? cfg.subs.filter(s => (!s.soloAdmin || getRol() === 'admin') &&
-                           (!s.soloUsuario || getUsuario() === s.soloUsuario))
+    ? cfg.subs.filter(s => !s.soloAdmin || getRol() === 'admin')
     : null;
 
   if (subs && subs.length) {
@@ -9411,9 +9411,16 @@ function subDeMenu(id) {
   return null;
 }
 
+// ¿A esta persona le corresponde el informe? Es lo que decide si sale el popup
+// al entrar. Se resuelve buscando el submenú con `subDeMenu` y NO leyendo
+// `TAB_GROUPS.negocio` por nombre: cuando el grupo `reportes` dejó de existir,
+// una lectura por nombre apagó el popup para todos sin dar ningún error.
+//
+// Desde el 06/09/2026 alcanza con que el submenú exista, porque ya no hay
+// permiso por persona: si el rol lo ve, le toca. El encargado no llega acá
+// porque `negocio` entero es soloAdmin.
 function veInformes() {
-  const sub = subDeMenu('informes');
-  return !!sub && (!sub.soloUsuario || getUsuario() === sub.soloUsuario);
+  return !!subDeMenu('informes') && getRol() === 'admin';
 }
 
 async function checkAvisoInforme() {
@@ -9510,6 +9517,14 @@ const RELEASE_LOG = [
       + 'y que dos cosas que fallaban en silencio ahora no fallan. Más el número que faltaba '
       + 'para poder liquidar el IVA.',
     items: [
+      {
+        icono: '🔎',
+        titulo: 'El Informe del domingo ahora lo ven los tres dueños',
+        desc: 'Estaba a nombre de una sola persona mientras los agentes estaban en prueba. '
+            + 'Ahora <b>Pablo, Tincho y admin</b> ven la sección y reciben el aviso al entrar. '
+            + 'Cada uno lo marca leído por su cuenta, así que no se pisan.',
+        donde: 'Negocio › Informe',
+      },
       {
         icono: '🧾',
         titulo: 'Fiscal ahora dice cuánto IVA hay que pagar este mes',
