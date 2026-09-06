@@ -1971,12 +1971,71 @@ app.get('/api/movimientos', authMiddleware, adminOnly, async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// ─── Invalidación de cachés: UNA lista, no un llamado suelto por módulo ────────
+//
+// Cada módulo de este repo trae su propio NodeCache — son 22 instancias sin
+// coordinación. Hasta el 06/09/2026 "Actualizar" llamaba a DOS: el de las
+// planillas y el de vinos. Los otros veinte exportaban su `clearCache` y nadie
+// los llamaba, así que el botón dejaba stale pedidos, plan, propinas, nómina,
+// finanzas, mantenimiento, costos, facturas, saldos, avisos y bebidas-proveedor.
+// El usuario tocaba Actualizar, no pasaba nada, y no había forma de saber por qué.
+//
+// La lista de acá abajo es el arreglo, pero lo que evita la próxima vez es la
+// FORMA: un módulo nuevo con caché se agrega acá, y la suite de tests compara
+// esta lista contra los módulos que exportan un limpiador. Un llamado suelto es
+// exactamente lo que se olvida.
+//
+// El nombre va al lado de la función porque cuando uno falla hay que poder decir
+// cuál: un `Promise.all` que revienta sin nombre deja el mismo agujero silencioso.
+const LIMPIADORES_DE_CACHE = [
+  ['planillas',          clearCache],                    // sheets.js
+  ['vinos',              vinos.clearCache],
+  ['bebidas-proveedor',  bebidasProveedor.clearCache],
+  ['costos',             costos.clearCache],
+  ['costos-proveedores', costosProveedores.clearCache],
+  ['plan',               plan.clearCache],
+  ['tc',                 tc.clearCache],
+  ['finanzas',           finanzas.clearCache],
+  ['propinas',           propinas.clearCache],
+  ['mantenimiento',      mantenimiento.clearCache],
+  ['pedidos',            pedidos.clearCache],
+  ['nomina',             nomina.clearCache],
+  ['cierre-cocina',      cierreCocina.clearCache],
+  ['notificaciones',     notificaciones.clearCache],
+  ['avisos',             avisos.clearCache],
+  ['saldos',             saldos.clearCache],
+  ['facturas',           facturasReg.limpiarCache],      // el único que no se llama clearCache
+  ['stock-bebidas',      stockBebidas.clearCache],
+];
+
+// Limpia todo lo que se pueda y devuelve qué falló. Un módulo que tira NO puede
+// impedir que se limpien los demás: el botón existe justamente para cuando algo
+// está raro, y ahí es cuando peor sería abortar a la mitad.
+function limpiarTodosLosCaches() {
+  const fallaron = [];
+  for (const [nombre, fn] of LIMPIADORES_DE_CACHE) {
+    if (typeof fn !== 'function') { fallaron.push(nombre); continue; }
+    try { fn(); } catch (e) { console.warn(`refresh: no se pudo limpiar ${nombre}:`, e.message); fallaron.push(nombre); }
+  }
+  return fallaron;
+}
+
+// Fudo NO entra en esta lista, a propósito. Tiene su propio juego de claves y su
+// propia función (`clearFudoCache`, que además borra las ventanas por prefijo),
+// pero sobre todo tiene otro costo: volver a bajar la historia son segundos de
+// espera. Por eso vive detrás de su propio botón, "Actualizar Fudo"
+// (POST /api/servicios/refresh), que se toca sabiendo lo que cuesta —típicamente
+// en medio de un arqueo, para que el cierre cuente las ventas recién cargadas.
+// Meterlo acá convertiría un botón barato en uno lento y nadie lo usaría.
 app.post('/api/refresh', authMiddleware, adminOnly, (req, res) => {
-  clearCache();
-  // El análisis de bebidas tiene su propio caché (ver baseAnalisis en vinos.js);
-  // vaciar sólo el de las planillas lo dejaría contestando lo de hace 5 minutos.
-  vinos.clearCache();
-  res.json({ ok: true, message: 'Cache limpiado.' });
+  const fallaron = limpiarTodosLosCaches();
+  res.json({
+    ok: true,
+    message: fallaron.length
+      ? `Cache limpiado, menos: ${fallaron.join(', ')}.`
+      : 'Cache limpiado.',
+    fallaron,
+  });
 });
 
 // ─── Pagos (solo admin) ───────────────────────────────────────────────────────
@@ -2488,7 +2547,31 @@ app.get('/api/servicios', authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
+// ─── Servicios: agregado de productos multi-día (solo admin) ──────────────────
+// Responde "¿se vendió más PARA COMER o PARA PICAR en general?" sobre un rango.
+//
+// EL ORDEN DE ESTA RUTA ES LOAD-BEARING: tiene que ir ANTES de
+// `/api/servicios/:fecha`. Express resuelve por orden de declaración, así que
+// con `:fecha` declarada primero un GET a /api/servicios/agregado entra por el
+// detalle de un día con `fecha = 'agregado'`, y termina en
+// `loadRawVentana('agregado')` → `Date.parse('agregadoT00:00:00Z')` → NaN →
+// RangeError → 500. Vivió así entre el 04/09 y el 06/09/2026, declarada 1.843
+// líneas más abajo: la ventana "Productos vendidos en el período" no abrió
+// nunca. No es un caso de esta ruta sino de la forma: cualquier ruta literal
+// bajo un prefijo con parámetro va arriba del parámetro. Ver también
+// /api/pedidos/omitir.
+app.get('/api/servicios/agregado', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+    res.json({ ok: true, data: await getAgregadoProductos({ desde, hasta }) });
+  } catch (err) {
+    console.error('Error /api/servicios/agregado:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Detalle de un servicio (un día): productos por categoría + medios de pago
+// OJO: cualquier ruta literal nueva bajo /api/servicios/ va ARRIBA de ésta.
 app.get('/api/servicios/:fecha', authMiddleware, adminOnly, async (req, res) => {
   try {
     const data = await getServicioDetalle(req.params.fecha);
@@ -4328,18 +4411,6 @@ app.post('/api/finanzas/movimientos', authMiddleware, adminOnly, async (req, res
 app.delete('/api/finanzas/movimientos/:id', authMiddleware, adminOnly, async (req, res) => {
   try { await finanzas.borrarMovimiento(req.params.id); res.json({ ok: true, message: 'Movimiento eliminado' }); }
   catch (err) { res.status(400).json({ ok: false, error: err.message }); }
-});
-
-// ─── Servicios: agregado de productos multi-día (solo admin) ──────────────────
-// Responde "¿se vendió más PARA COMER o PARA PICAR en general?" sobre un rango.
-app.get('/api/servicios/agregado', authMiddleware, adminOnly, async (req, res) => {
-  try {
-    const { desde, hasta } = req.query;
-    res.json({ ok: true, data: await getAgregadoProductos({ desde, hasta }) });
-  } catch (err) {
-    console.error('Error /api/servicios/agregado:', err.message);
-    res.status(500).json({ ok: false, error: err.message });
-  }
 });
 
 // Diagnóstico CRUDO de una venta (items tal como vienen de Fudo)

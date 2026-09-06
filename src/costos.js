@@ -48,11 +48,29 @@ async function _ensureOverrideSheet(api) {
     });
   } catch (e) { if (!String(e.message||'').toLowerCase().includes('already exists')) throw e; }
 }
-let _overridesCargados = false;
-// Carga los overrides desde la hoja al Map (una vez por arranque; refrescable).
+// ─── Frescura de los tres mapas que se leen de la planilla ─────────────────────
+// Hasta el 06/09/2026 los tres loaders de este archivo (overrides de categoría,
+// proveedor→grupo CMV y composiciones de plato) guardaban un booleano "ya cargué"
+// que sólo se reseteaba REINICIANDO EL PROCESO. Aceptaban `{ force: true }`, pero
+// ningún call site lo pasó nunca: editar `Proveedor Grupo CMV` en la planilla no
+// tenía efecto hasta el próximo deploy, y no había forma de notarlo — la pantalla
+// contestaba con datos viejos sin decir que eran viejos.
+//
+// Ahora es un TTL como el del resto de la app, y `clearCache()` vence los tres de
+// una para que el botón "Actualizar" los alcance. El TTL sigue siendo largo a
+// propósito: son tablas de configuración que se editan a mano cada tanto, no
+// datos de operación.
+const CACHE_TTL_MS = Number(process.env.COSTOS_CACHE_TTL_MS || 5 * 60 * 1000);
+let _overridesEn = 0, _provGrupoEn = 0, _compEn = 0;
+const _fresco = (ts) => ts > 0 && (Date.now() - ts) < CACHE_TTL_MS;
+
+// Vence los tres mapas. No los recarga: el próximo lector los trae.
+function clearCache() { _overridesEn = 0; _provGrupoEn = 0; _compEn = 0; }
+
+// Carga los overrides desde la hoja al Map (cachea CACHE_TTL_MS; refrescable).
 async function cargarOverrides({ force = false } = {}) {
-  if (_overridesCargados && !force) return;
-  if (!SPREADSHEET_ID) { _overridesCargados = true; return; }
+  if (_fresco(_overridesEn) && !force) return;
+  if (!SPREADSHEET_ID) { _overridesEn = Date.now(); return; }
   try {
     const api = _sheetsClient();
     let rows = [];
@@ -66,8 +84,8 @@ async function cargarOverrides({ force = false } = {}) {
       const cat = (rows[i][1] || '').toString().trim();
       if (prod && cat) overrides.set(cats.norm(prod), cat);
     }
-    _overridesCargados = true;
-  } catch (e) { console.warn('Overrides categoria: no se pudo cargar', e.message); _overridesCargados = true; }
+    _overridesEn = Date.now();
+  } catch (e) { console.warn('Overrides categoria: no se pudo cargar', e.message); _overridesEn = Date.now(); }
 }
 // Persiste (upsert) un override en la hoja.
 async function _persistOverride(nombreProducto, categoria) {
@@ -93,7 +111,6 @@ async function _persistOverride(nombreProducto, categoria) {
 // hoja 'Proveedor Grupo CMV' (Proveedor | Grupo) sin redeployar.
 const PROV_GRUPO_SHEET = process.env.COSTOS_PROV_GRUPO_SHEET || 'Proveedor Grupo CMV';
 const provGrupo = new Map(); // norm(proveedor) -> 'Comida' | 'Bebida' | 'Insumos'
-let _provGrupoCargado = false;
 
 // Seed inicial (se escribe la primera vez que la hoja se crea vacia).
 const PROV_GRUPO_SEED = [
@@ -141,8 +158,8 @@ async function _ensureProvGrupoSheet(api) {
 }
 
 async function cargarProveedorGrupoCMV({ force = false } = {}) {
-  if (_provGrupoCargado && !force) return;
-  if (!SPREADSHEET_ID) { _provGrupoCargado = true; return; }
+  if (_fresco(_provGrupoEn) && !force) return;
+  if (!SPREADSHEET_ID) { _provGrupoEn = Date.now(); return; }
   try {
     const api = _sheetsClient();
     let rows = [];
@@ -159,8 +176,8 @@ async function cargarProveedorGrupoCMV({ force = false } = {}) {
       const grupo = _normGrupo(rows[i][1] || '');
       if (prov && grupo) provGrupo.set(cats.norm(prov), grupo);
     }
-    _provGrupoCargado = true;
-  } catch (e) { console.warn('Proveedor Grupo CMV: no se pudo cargar', e.message); _provGrupoCargado = true; }
+    _provGrupoEn = Date.now();
+  } catch (e) { console.warn('Proveedor Grupo CMV: no se pudo cargar', e.message); _provGrupoEn = Date.now(); }
 }
 
 // Devuelve 'Comida' | 'Bebida' | 'Insumos' | '' (vacio = no mapeado -> Otros)
@@ -180,7 +197,6 @@ function getProveedorGrupoMap() {
 // (clasificarProducto). Persistido en hoja 'Plato Composicion' (Plato | Categoria | Pct).
 const COMPOSICION_SHEET = process.env.COSTOS_COMPOSICION_SHEET || 'Plato Composicion';
 const composiciones = new Map(); // norm(plato) -> { nombre, partes: [{categoria, pct}] }
-let _compCargadas = false;
 
 async function _ensureCompSheet(api) {
   try {
@@ -196,8 +212,8 @@ async function _ensureCompSheet(api) {
 }
 
 async function cargarComposiciones({ force = false } = {}) {
-  if (_compCargadas && !force) return;
-  if (!SPREADSHEET_ID) { _compCargadas = true; return; }
+  if (_fresco(_compEn) && !force) return;
+  if (!SPREADSHEET_ID) { _compEn = Date.now(); return; }
   try {
     const api = _sheetsClient();
     let rows = [];
@@ -216,8 +232,8 @@ async function cargarComposiciones({ force = false } = {}) {
       e.partes.push({ categoria: cat, pct });
       composiciones.set(key, e);
     }
-    _compCargadas = true;
-  } catch (e) { console.warn('Composiciones: no se pudo cargar', e.message); _compCargadas = true; }
+    _compEn = Date.now();
+  } catch (e) { console.warn('Composiciones: no se pudo cargar', e.message); _compEn = Date.now(); }
 }
 
 // Devuelve el reparto de categorías para un plato: [{categoria, pct(0..1)}].
@@ -707,4 +723,5 @@ module.exports = {
   cargarProveedorGrupoCMV, grupoCMVPorProveedor, getProveedorGrupoMap,
   mismoProveedor,
   resumenCostosSimplificado,
+  clearCache,
 };

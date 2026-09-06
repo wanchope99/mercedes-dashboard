@@ -135,11 +135,30 @@ async def get_arreglos_pendientes() -> list:
 
 
 # ── Auth ──────────────────────────────────────────────────────────────
+#
+# Quien pasa por acá puede escribir una fila de gasto en Movimientos, elegir de
+# qué caja sale la plata y registrar el IVA de una factura. En la app eso está
+# detrás de un login con JWT y de `adminOnly`; acá está detrás de esta función.
+#
+# Hasta el 06/09/2026 fallaba ABIERTA: sin ALLOWED_USERS, `is_allowed` devolvía
+# True para cualquiera que encontrara el bot. Una variable de entorno que se
+# olvida de setear no puede ser la diferencia entre un bot privado y uno público
+# — es la misma razón por la que en la app una cuenta sin su variable no existe
+# en vez de quedar sin contraseña.
 def is_allowed(update: Update) -> bool:
     if not ALLOWED_USERS:
+        return False
+    user = update.effective_user
+    if user is None:
+        return False
+    # Se acepta por user_id o por @username. El id es el que vale: un username
+    # se libera y lo reclama otra persona, y el id no cambia nunca. El username
+    # se sigue aceptando porque es lo que hay cargado hoy y sacarlo de golpe
+    # dejaría al bot sin atender a nadie.
+    if str(user.id) in ALLOWED_USERS:
         return True
-    username = (update.effective_user.username or "").lower()
-    return username in {u.lower() for u in ALLOWED_USERS}
+    username = (user.username or "").lower()
+    return bool(username) and username in {u.lower() for u in ALLOWED_USERS}
 
 
 # ── La conversación de una factura ────────────────────────────────────
@@ -507,6 +526,14 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    # También acá. En la práctica hay que haber pasado por una foto para tener
+    # `chat_data["pend"]`, pero eso es una consecuencia del flujo y no un
+    # permiso: los botones de prioridad de mantenimiento no dependen de nada
+    # previo, y un chequeo que se apoya en el orden de los mensajes no es un
+    # chequeo.
+    if not is_allowed(update):
+        return
+
     # Mantenimiento primero: su callback_data tiene 3 partes, no 4, así que el
     # split de abajo reventaría. Además no depende de chat_data, así que sigue
     # funcionando aunque el chat esté en medio de confirmar una factura.
@@ -541,6 +568,9 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update):
+        return
+
     # "/arreglo" sin texto deja el chat esperando el próximo mensaje. Se chequea
     # antes que las dudas de factura porque es lo que se acaba de pedir.
     if context.chat_data.pop("esperando_arreglo", False):
@@ -576,7 +606,20 @@ def main():
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 
-    log.info("Bot (cliente delgado) iniciado. App: %s", APP_BASE_URL)
+    # Si ALLOWED_USERS no está seteada el bot no atiende a nadie, así que hay que
+    # decirlo fuerte al arrancar: desde afuera "no contesta" se ve igual que "está
+    # caído", y ésa es la confusión que este log evita. Mismo criterio que el
+    # arranque de la app, que lista qué cuentas quedaron habilitadas y qué
+    # variable le falta a cada una que no.
+    if ALLOWED_USERS:
+        log.info("Bot (cliente delgado) iniciado. App: %s | %d usuario(s) habilitado(s)",
+                 APP_BASE_URL, len(ALLOWED_USERS))
+    else:
+        log.error(
+            "ALLOWED_USERS esta vacia: el bot NO va a atender a nadie. "
+            "Seteala con los @username o los user_id separados por coma."
+        )
+        log.info("Bot (cliente delgado) iniciado, pero sin usuarios. App: %s", APP_BASE_URL)
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

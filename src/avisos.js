@@ -53,6 +53,9 @@
 
 const { google } = require('googleapis');
 const NodeCache = require('node-cache');
+// El aviso se anota acá y, si es grave, sale por Telegram. Ver src/telegram.js
+// para por qué sólo los graves y por qué el emisor no puede tirar.
+const telegram = require('./telegram');
 
 const cache = new NodeCache({ stdTTL: 60 });
 const CACHE_KEY = 'avisos';
@@ -228,6 +231,16 @@ async function registrar({ tipo, titulo, detalle = '', para = DUENOS, severidad 
       },
     });
     cache.del(CACHE_KEY);
+
+    // El aviso ya está escrito: acá arranca el intento de que además LLEGUE.
+    // Va sin await a propósito. Quien llamó a registrar() ya escribió la fila
+    // del libro y marcó el pedido, y está con el proveedor en la puerta: no
+    // puede quedarse esperando a Telegram. Si falla, el aviso igual quedó en la
+    // hoja y en la campanita — se pierde la inmediatez, nunca el registro. El
+    // .catch está para que un rechazo no se vuelva un unhandledRejection: este
+    // módulo tiene escrito que nunca tira, y eso incluye lo que dispara.
+    telegram.avisar(aviso).catch(e => console.warn('Telegram: falló el aviso', e.message));
+
     return { ok: true, aviso, para: aviso.para };
   } catch (e) {
     console.error(`Avisos: no se pudo registrar "${titulo}" (${e.message})`);

@@ -19,7 +19,15 @@ npm run dev      # nodemon src/server.js — local dev, http://localhost:3000
 npm start        # node src/server.js — production
 ```
 
-No test suite, linter, or build step exists. There is no `.env.example` in the repo; required env vars are documented inline in `SETUP.md` and at the top of each `src/*.js` file that reads them.
+```bash
+npm test         # node tests/run.js — las suites del repo, sin dependencias
+```
+
+**There is a test suite since 2026-09-06, and it is deliberately not a framework.** Verification in this repo was already being written as loose Node scripts run against in-memory data, touching no real spreadsheet — the only thing missing was not throwing them away afterwards. `tests/run.js` discovers every `tests/*.test.js`, each exporting `{ nombre, run(t) }` and using `t.ok` / `t.eq` / `t.throws` from `tests/_harness.js`. A suite may return a promise and it is awaited. Nothing talks to Google, Fudo, Telegram or the model: `envFalso()` sets throwaway env vars so modules load, and anything that tried to reach the network would fail there, which is the point.
+
+Several suites read `public/index.html` **as text** rather than executing it — there is no build and no DOM here, so what gets pinned is the shape of the thing that broke: the order of two statements, a listener that must not exist, a flag that must be gone. Where a function is pure it is extracted and actually run (`validarCompra`, `rangoDePreset`). `tests/bot.test.js` is text-only for a harder reason: **there is no Python on the machine this repo is developed on**, so `bot.py` cannot even be compiled here — a `//` comment slipping into a Python block would only surface on Railway, with the bot down.
+
+No linter or build step exists. There is no `.env.example` in the repo; required env vars are documented inline in `SETUP.md` and at the top of each `src/*.js` file that reads them.
 
 The bot (`bot/`) is a separate Python app: `pip install -r bot/requirements.txt`, run with `python bot/bot.py`. Requires `TELEGRAM_TOKEN`, `APP_BASE_URL` (pointing at the App), and `PROVEEDORES_INGEST_TOKEN` (shared secret validated by the App via the `X-Ingest-Token` header).
 
@@ -701,6 +709,62 @@ JWT-based (`JWT_SECRET`), two roles and one account per person, each read from i
 **Cash-register state (`estadoCaja`) lives in memory but is mirrored to the spreadsheet, so a restart does NOT lose an open session.** This paragraph said the opposite until 2026-09-02, and it was the fact a deploy decision hinged on. `src/estado-caja.js` writes the whole object as JSON into cell B2 of a hidden `Estado Caja` sheet on every change that matters — opening, closing, and any expense pushed into `gastosSesion` — and `cargarEstadoCaja()` restores it **before `app.listen`**, so no request ever sees "cerrada" while the turn is still running. Without it, every redeploy during service left that night unarqueada, silently.
 
 Two limits worth knowing rather than discovering. The save is **best-effort and not awaited** (the call sites say "no bloquea la respuesta"): it never throws, so a Sheets outage at that instant leaves the backup stale instead of failing the operation — the right trade, since losing the backup must not break the real flow. And the restore only applies when the saved state says `abierta`, so a closed register leaves its stale JSON in the cell, ignored.
+
+### Route order is load-bearing, and it failed silently once (2026-09-06)
+
+`GET /api/servicios/agregado` was declared 1.843 lines **below** `GET /api/servicios/:fecha`. Express resolves by declaration order, so every call landed on the day-detail handler with `fecha = 'agregado'`, reached `loadRawVentana('agregado')`, and died on `Date.parse('agregadoT00:00:00Z')` → `RangeError` → 500. The "Productos vendidos en el período" modal added on 2026-09-04 never opened once, and nothing anywhere said so.
+
+**Any literal route under a parameterised prefix goes above the parameter.** `tests/rutas.test.js` enumerates all 150 routes from the file text and fails on any literal shadowed by an earlier parameter — it also catches duplicate declarations, where the second is dead code. Run against the pre-fix file it reports exactly one conflict and no false positives.
+
+### Caches: one list, not a call per module
+
+There are 22 independent `NodeCache` instances in `src/`. Until 2026-09-06 `POST /api/refresh` cleared **two** of them — sheets and vinos. The other twenty exported a `clearCache` nobody called, so the button left pedidos, plan, propinas, nómina, finanzas, mantenimiento, costos, facturas, saldos, avisos and bebidas-proveedor stale, with no way to tell.
+
+`LIMPIADORES_DE_CACHE` in `server.js` is the list; `limpiarTodosLosCaches()` walks it, names whatever failed and never lets one module stop the rest. **`tests/caches.test.js` compares that list against the repo** — every module whose `module.exports` mentions `clearCache`/`limpiarCache` must appear — so the fix is the shape, not the list. Fudo is the one deliberate exclusion: re-downloading it costs seconds, so it stays behind its own "Actualizar Fudo" button.
+
+`src/costos.js` had a second flavour of the same bug: `cargarOverrides`, `cargarProveedorGrupoCMV` and `cargarComposiciones` cached behind a process-level boolean and accepted `{ force: true }` that **no call site ever passed**. Editing `Proveedor Grupo CMV` in the spreadsheet did nothing until the next deploy. They are TTL-cached now, and the module exports `clearCache`.
+
+### The purchase form does not close until the spreadsheet says yes (2026-09-06)
+
+`guardarCompra` called `closeModal()` **before** its `await`. When the POST failed, the dialog said "la compra NO quedó registrada, volvé a intentarlo" and there was nothing left to retry — `openModal()` had already blanked all eighteen fields. Combined with the overlay closing on a backdrop click, there were two ways to lose a whole purchase.
+
+Now the modal closes **after** a successful POST, inside the `try`; the `catch` leaves it open with the data in place and writes the error into `modal-status` rather than stacking another overlay on top. The buttons (`BOTONES_COMPRA`) are disabled while the request is in flight — two taps were two ledger rows. `modal-overlay` no longer closes on backdrop click and is the single entry in `ESC_NO_CIERRA`: it is the only eighteen-field form in the app, and both gestures are ones people make by accident.
+
+**Escape closes the topmost overlay**, found by walking `[id$="-overlay"]` backwards and undoing whichever mechanism made it visible (`open` class or inline `display`) — that is why nothing had to be registered, and why the 33rd overlay cannot be forgotten. `login-screen` is safe by construction: its id does not end in `-overlay`.
+
+Validation stopped being a chain of `alert()`s. `validarCompra(d)` is pure and returns **every** error at once; `marcarErroresCompra` paints the fields, lists the messages above the buttons, and focuses the first **visible** one — some fields live in blocks that only appear for instalments or "queda a pagar", and focusing a hidden input moves nothing and reads as a dead button. Each marked field clears itself on the next `input`.
+
+### One period for Dashboard and Balance (2026-09-06)
+
+Both read `/api/resumen` and `/api/actividad-diaria`, and Balance's own comment said it was so "para que los números no puedan divergir". They diverged anyway: each had its own month select and date pair, and Balance copied the Dashboard's **once**, on first open, guarded by `state.repBal.inicializado`. After that, looking at July in one and August in the other was one click and nothing on screen said so.
+
+The period now lives in `state.modo/mes/desde/hasta` and nowhere else. Each screen *paints* it into its own controls through `pintarPeriodo(pfx)` — the two use identical ids under prefixes `''` and `'rep-'`. `buildRepQS` is now an alias of `buildQS`; it had been a copy over a second state object. Restaurant keeps its own range on purpose: it reads Fudo, not the ledger.
+
+`clavePeriodo()` is the identity of the selected period, and both loaders stamp it **inside themselves** (`state.dashPeriodoCargado`, `state.repBal.periodoCargado`) rather than in a caller — marked in one caller, the guard starts lying the moment someone enters another way. Entering and leaving without changing anything now costs zero requests; it used to cost two Sheets round-trips. A load that **fails** clears the stamp, so it can be retried — same rule as the fiscal simulation.
+
+### The submenu bar wraps instead of clipping (2026-09-06)
+
+`.subtab-nav` was `overflow-x: auto` with a **hidden** scrollbar — the same mechanism that silently swallowed sections off the top bar in August. With Operación's seven subs it clipped the last one below ~850px, and nothing indicated there was more. On the phone `switchSub` scrolls the chosen one into view, which helps you return to what you already know and not at all to *discover* what you never saw; on the desktop there was no rescue either way.
+
+It now wraps on the desktop: two rows are visible, a clip is not. That also defuses the trap this file already recorded — "an eighth sub would break this in silence" — since an eighth now drops to a second line. The phone keeps the sliding strip (`flex-wrap: nowrap` in the ≤640px block): swiping chips is the gesture there, and two rows of submenus eat the screen.
+
+**Operación stays at seven subs.** The plan for this session proposed moving one out, and it was not done: the measured failure was the invisible clipping, not the count, and the owner had explicitly chosen that order and that content two days earlier. Fixing the clipping costs nobody a relearned menu.
+
+### Avisos leave the app (2026-09-06)
+
+Until this date **nothing was ever sent**. Five crons, four notification sources and two `severidad: alta` avisos, and all of it waited for someone to open the screen. The Telegram bot had been an input channel for months; `origen.chatId` was being stored "para poder responder por el bot" and there was no sender anywhere in `src/`.
+
+`src/telegram.js` is that sender, and it is deliberately small. It fires **only** from `avisos.registrar()` and **only** for `severidad: 'alta'` — today two cases, both money, both from `POST /api/pedidos/:id/recibir`. Nothing periodic, no digests, no reminders: this repo has already dismantled three alarms for being noisy, and a Telegram message has less right to ring than a bell inside a screen it interrupts nothing to open.
+
+It **never throws and is never awaited**. `registrar()`'s callers have already written the ledger row and marked the order, with the supplier at the door; a reception cannot wait on Telegram, and a failure loses the immediacy and never the record — the aviso is already in the sheet and in the bell. No `parse_mode` is sent: supplier names and amounts are written by people, and one underscore would break the message (the bot already learned this the hard way and retries without Markdown; here the problem is simply not entered).
+
+Config is per person — `TELEGRAM_CHAT_<USUARIO>`, same shape as the login passwords, because a chat id is somebody's data and this repository is public. Missing token or missing variable means silence, not an error. `TELEGRAM_BOT_TOKEN` and `TELEGRAM_TOKEN` are both accepted: the bot service calls it the latter, and a deploy that is silently mute because the name was copied from the other half of the repo is worse than a redundant `||`.
+
+### The bot fails closed (2026-09-06)
+
+`is_allowed` returned `True` for **anyone** when `ALLOWED_USERS` was unset, and `on_button` / `on_text` did not call it at all. Whoever gets past that filter writes a `Movimientos` row, picks which caja the money leaves and registers VAT — in the app all of that is behind a JWT login and `adminOnly`.
+
+It now fails closed, checks every handler that can write, and accepts a Telegram **user_id** as well as an `@username` (a username can be released and reclaimed; an id cannot). The startup log says how many users are enabled, or shouts when it is zero — from outside, "not answering" and "crashed" look identical. `ALLOWED_USERS` is documented in `SETUP.md` as of the same date; it never had been.
 
 ### Timezone
 

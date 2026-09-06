@@ -56,8 +56,22 @@
     /* El display lo maneja la clase .has-subs y no un style inline, para que las
        media queries puedan gobernarlo (un inline les gana siempre). Lo pone y lo
        saca switchGroup(). */
+    /* EL RECORTE SILENCIOSO, Y POR QUÉ ESTA BARRA AHORA ENVUELVE EN VEZ DE CORTAR.
+       Esta barra era `overflow-x: auto` con la scrollbar OCULTA. Es el mismo
+       mecanismo por el que en agosto se perdieron secciones enteras de la barra
+       de arriba: lo que no entra no se ve, y NADA dice que hay más. Con los
+       siete submenús de Operación empieza a cortar el último abajo de ~850px.
+       En el teléfono `switchSub` centra el elegido, así que se puede volver a lo
+       que ya se conoce — pero eso no ayuda a DESCUBRIR lo que nunca se vio, y en
+       la computadora no hay ni ese rescate.
+       Envolver es la respuesta honesta: dos renglones se ven, un recorte no. Y
+       saca el filo del problema que este archivo ya tenía anotado —"si aparece
+       un octavo, esto se rompe en silencio"—: con wrap, un octavo baja de línea.
+       Se conserva el scroll horizontal SÓLO en el teléfono (ver el bloque de
+       ≤640px), donde deslizar chips es el gesto esperado y dos renglones de
+       submenús se comen la pantalla. */
     .subtab-nav { background: var(--surface2); border-bottom: 1px solid var(--border); padding: 0 32px; display: none; align-items: center; gap: 0;
-      overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+      flex-wrap: wrap; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
     .subtab-nav.has-subs { display: flex; }
     .subtab-nav::-webkit-scrollbar { display: none; }
     .subtab-btn { padding: 11px 18px; cursor: pointer; font-size: 12px; font-weight: 500; color: var(--text-muted); border-bottom: 2px solid transparent; transition: all 0.15s; background: none; border-top: none; border-left: none; border-right: none; font-family: inherit; white-space: nowrap; flex: 0 0 auto; }
@@ -76,6 +90,14 @@
     input[type="text"]::placeholder { color: var(--text-muted); }
     .filter-mode-btn { padding: 6px 14px; border-radius: 6px; font-size: 12px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer; font-family: inherit; transition: all 0.2s; }
     .filter-mode-btn.active { background: var(--accent); color: #f0e6d3; border-color: var(--accent); font-weight: 600; }
+    /* Atajos de rango: "Hoy · 7 días · Este mes · Mes pasado".
+       Más chicos que .filter-mode-btn a propósito — son un acelerador, no el
+       control principal de la barra; el rango sigue siendo el par de fechas. */
+    .rango-presets { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+    .rango-preset-btn { padding: 5px 10px; border-radius: 6px; font-size: 11px; border: 1px solid var(--border);
+      background: transparent; color: var(--text-muted); cursor: pointer; font-family: inherit; transition: all 0.15s; white-space: nowrap; }
+    .rango-preset-btn:hover { color: var(--text); border-color: var(--text-muted); }
+    .rango-preset-btn.active { background: var(--accent); color: #f0e6d3; border-color: var(--accent); font-weight: 600; }
     #range-filters { display: none; align-items: center; gap: 8px; }
     #mes-filters { display: flex; align-items: center; gap: 8px; }
     /* Switch Gráfico/Datos de Reportes: pegado a la derecha de la barra de filtros */
@@ -327,6 +349,14 @@
     .form-group textarea { resize: vertical; min-height: 72px; }
     .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
     #modal-status { font-size: 12px; color: var(--text-muted); padding: 8px 0; display: none; }
+    /* Un campo que falta se marca EN el campo, no en un alert que hay que cerrar
+       para poder verlo. El borde y el fondo son la señal; el resumen de arriba
+       dice qué falta, todo junto y no de a uno. */
+    .campo-error { border-color: var(--red) !important; background: var(--red-dim) !important; }
+    .modal-errores { display: none; font-size: 12px; color: var(--red); background: var(--red-dim);
+      border: 1px solid var(--red); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
+    .modal-errores ul { margin: 4px 0 0; padding-left: 18px; }
+    .modal-errores li { margin: 2px 0; }
 
     /* ── Propinas ── */
     #prop-persona-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 320; align-items: center; justify-content: center; }
@@ -1550,6 +1580,13 @@
 
       .filters-bar, .pagos-filters { padding: 10px 14px; gap: 8px; }
 
+      /* En el teléfono los submenús vuelven a ser una tira que se desliza, no
+         dos renglones: deslizar chips es el gesto de acá, y dos filas de
+         submenús encima del header y la barra de filtros dejan la pantalla sin
+         contenido. El recorte silencioso que motivó el wrap no aplica en este
+         ancho porque `switchSub` centra el elegido con scrollIntoView. */
+      .subtab-nav { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+
       /* ── Servicios: la fila NO entra en un teléfono ──────────────────────
          `.serv-row` es una grilla de cuatro columnas (130px 90px 1fr auto) y
          `.serv-cb` pide 200px de mínimo: el ancho mínimo real de la fila son
@@ -1606,7 +1643,8 @@
          hace falta: min-height y min-width son OTRAS propiedades, así que el
          padding inline no las pisa. */
       .btn, .filter-mode-btn, .subtab-btn, .pv-btn, .prov-copy-btn, .btn-close,
-      .proy-var-del, .prop-persona-acciones button, .prov-notif-btn {
+      .proy-var-del, .prop-persona-acciones button, .prov-notif-btn,
+      .rango-preset-btn {
         min-height: 44px; min-width: 44px;
         display: inline-flex; align-items: center; justify-content: center;
       }
@@ -1739,6 +1777,7 @@
       <input type="date" id="filter-desde" onchange="onFilterChange()" />
       <span class="filter-label">Hasta</span>
       <input type="date" id="filter-hasta" onchange="onFilterChange()" />
+      <span id="dash-presets"></span>
     </div>
   </div>
 
@@ -1811,6 +1850,7 @@
       <input type="date" id="rep-filter-desde" onchange="onRepFilterChange()" />
       <span class="filter-label">Hasta</span>
       <input type="date" id="rep-filter-hasta" onchange="onRepFilterChange()" />
+      <span id="rep-presets"></span>
     </div>
     <div class="rep-view-switch">
       <button class="filter-mode-btn active" id="rep-btn-view-grafico" onclick="setRepView('grafico')">📈 Gráfico</button>
@@ -1868,6 +1908,7 @@
       <input type="date" id="rsv-filter-desde" onchange="onRepServPeriodoChange()" />
       <span class="filter-label">Hasta</span>
       <input type="date" id="rsv-filter-hasta" onchange="onRepServPeriodoChange()" />
+      <span id="rsv-presets"></span>
     </div>
     <div class="filter-sep"></div>
     <span class="filter-label">Día de la semana</span>
@@ -3288,9 +3329,10 @@
 <div id="tab-costos-resumen" class="tab-panel">
   <div class="filters-bar">
     <span class="filter-label">Desde</span>
-    <input type="date" id="costos-desde" onchange="loadCostos()" />
+    <input type="date" id="costos-desde" onchange="onRangoManual('costos-desde','costos-hasta',loadCostos)" />
     <span class="filter-label">Hasta</span>
-    <input type="date" id="costos-hasta" onchange="loadCostos()" />
+    <input type="date" id="costos-hasta" onchange="onRangoManual('costos-desde','costos-hasta',loadCostos)" />
+    <span id="costos-presets"></span>
     <button class="btn" style="padding:6px 12px;font-size:12px" onclick="spinRefresh(this, loadCostos)"><span class="refresh-icon">↻</span> Actualizar</button>
     <span id="costos-periodo-label" style="font-size:12px;color:var(--text-muted);margin-left:8px"></span>
   </div>
@@ -3790,9 +3832,10 @@
        abre en una ventana cuando se lo pide. -->
   <div class="filters-bar">
     <span class="filter-label">Desde</span>
-    <input type="date" id="serv-desde" onchange="loadServicios()" />
+    <input type="date" id="serv-desde" onchange="onRangoManual('serv-desde','serv-hasta',loadServicios)" />
     <span class="filter-label">Hasta</span>
-    <input type="date" id="serv-hasta" onchange="loadServicios()" />
+    <input type="date" id="serv-hasta" onchange="onRangoManual('serv-desde','serv-hasta',loadServicios)" />
+    <span id="serv-presets"></span>
     <button class="btn" onclick="abrirServAgg()">📦 Productos vendidos</button>
     <div style="flex:1"></div>
     <button class="btn" onclick="spinRefresh(this, refreshServicios)"><span class="refresh-icon">↻</span> Actualizar Fudo</button>
@@ -4041,6 +4084,7 @@
         </div>
       </div>
     </div>
+    <div class="modal-errores" id="modal-errores"></div>
     <div id="modal-status"></div>
     <div class="modal-actions">
       <button class="btn" onclick="closeModal()">Cancelar</button>
@@ -4082,7 +4126,7 @@
       <div class="modal-actions">
         <button class="btn" onclick="volverAPaso1()">← Volver</button>
         <button class="btn" id="f-sin-entrega" onclick="guardarCompra(false)">No lleva entrega</button>
-        <button class="btn btn-accent" onclick="guardarCompra(true)">Guardar</button>
+        <button class="btn btn-accent" id="f-btn-guardar" onclick="guardarCompra(true)">Guardar</button>
       </div>
     </div>
   </div>
@@ -4333,6 +4377,146 @@ const TZ_AR = 'America/Argentina/Buenos_Aires';
 const fechaAR = (d = new Date(), opts = {}) => new Date(d).toLocaleDateString('es-AR', { timeZone: TZ_AR, ...opts });
 const horaAR = (d = new Date(), opts = {}) => new Date(d).toLocaleTimeString('es-AR', { timeZone: TZ_AR, ...opts });
 const fechaHoraAR = (d = new Date(), opts = {}) => new Date(d).toLocaleString('es-AR', { timeZone: TZ_AR, ...opts });
+
+// ─── Un solo juego de atajos de rango, para todas las pantallas ──────────────
+//
+// Había siete pares de "Desde / Hasta" en esta app —Dashboard, Balance,
+// Restaurant, Servicios, Costos y los dos paneles archivados— con prefijos
+// distintos, ninguno sincronizado con otro y NINGUNO con atajos. Para mirar el
+// mes pasado había que tipear dos fechas; en el teléfono, dos selectores
+// nativos, uno de los cuales hay que llevar al mes anterior a mano. Es la
+// fricción más barata de sacar de toda la app: la pregunta que se hace todos los
+// días es "esta semana" o "el mes pasado", no una fecha puntual.
+//
+// El rango elegido se recuerda por pantalla. Hasta ahora sobrevivía sólo porque
+// el panel se esconde con display:none en vez de destruirse, así que un F5 lo
+// perdía y había que volver a tipear.
+
+const PRESETS_RANGO = [
+  { id: 'hoy', label: 'Hoy' },
+  { id: '7d', label: '7 días' },
+  { id: 'mes', label: 'Este mes' },
+  { id: 'mespas', label: 'Mes pasado' },
+];
+
+// La fecha de ACÁ, no la UTC: después de las 21:00 en Argentina `toISOString()`
+// ya está en el día siguiente. Ver hoyISOLocal(), que es de donde sale.
+function rangoDePreset(id, hoy) {
+  const hoyISO = hoy || hoyISOLocal();
+  const [y, m] = hoyISO.split('-').map(Number);
+  const dosD = n => String(n).padStart(2, '0');
+  const arma = (yy, mm, dd) => `${yy}-${dosD(mm)}-${dosD(dd)}`;
+  // El mediodía UTC evita que restar días cruce un cambio de día por husos.
+  const menosDias = n => new Date(Date.parse(hoyISO + 'T12:00:00Z') - n * 86400000).toISOString().slice(0, 10);
+
+  if (id === 'hoy') return { desde: hoyISO, hasta: hoyISO };
+  if (id === '7d') return { desde: menosDias(6), hasta: hoyISO };
+  if (id === 'mes') return { desde: arma(y, m, 1), hasta: hoyISO };
+  if (id === 'mespas') {
+    const ay = m === 1 ? y - 1 : y;
+    const am = m === 1 ? 12 : m - 1;
+    // Día 0 del mes siguiente = último día de éste. Sirve para febrero también.
+    const ultimo = new Date(Date.UTC(ay, am, 0)).getUTCDate();
+    return { desde: arma(ay, am, 1), hasta: arma(ay, am, ultimo) };
+  }
+  return null;
+}
+
+// Qué preset describe un rango, si alguno. Sirve para encender el botón correcto
+// cuando el rango viene de localStorage o de tipear las fechas a mano: un atajo
+// prendido que no corresponde al rango en pantalla es peor que ninguno.
+function presetDeRango(desde, hasta) {
+  if (!desde || !hasta) return null;
+  for (const p of PRESETS_RANGO) {
+    const r = rangoDePreset(p.id);
+    if (r && r.desde === desde && r.hasta === hasta) return p.id;
+  }
+  return null;
+}
+
+// El HTML de la tirita de atajos. `nombreRecargar` es el NOMBRE de la función que
+// ya usa el `onchange` de los inputs de esa pantalla ('loadServicios'), no la
+// función: lo que se arma es un atributo onclick, así que ahí va un identificador
+// que el navegador resuelve al tocar el botón. Interpolar la función misma
+// pegaría su código fuente adentro del HTML.
+function presetsHTML(idDesde, idHasta, nombreRecargar) {
+  return `<span class="rango-presets" data-desde="${idDesde}" data-hasta="${idHasta}">`
+    + PRESETS_RANGO.map(p =>
+        `<button class="rango-preset-btn" data-preset="${p.id}" `
+        + `onclick="aplicarPreset(this,'${idDesde}','${idHasta}','${p.id}',${nombreRecargar})">${p.label}</button>`
+      ).join('')
+    + '</span>';
+}
+
+function aplicarPreset(btn, idDesde, idHasta, preset, recargar) {
+  const r = rangoDePreset(preset);
+  if (!r) return;
+  const dEl = document.getElementById(idDesde), hEl = document.getElementById(idHasta);
+  if (!dEl || !hEl) return;
+  dEl.value = r.desde;
+  hEl.value = r.hasta;
+  recordarRango(idDesde, idHasta);
+  marcarPresetActivo(idDesde, idHasta);
+  if (typeof recargar === 'function') recargar();
+}
+
+// Cuando se tipea una fecha a mano: se recuerda y se apaga el atajo que ya no
+// describe lo que hay en pantalla.
+function onRangoManual(idDesde, idHasta, recargar) {
+  recordarRango(idDesde, idHasta);
+  marcarPresetActivo(idDesde, idHasta);
+  if (typeof recargar === 'function') recargar();
+}
+
+// Dibuja los atajos dentro de su contenedor y enciende el que corresponda.
+function montarPresets(idContenedor, idDesde, idHasta, recargar) {
+  const cont = document.getElementById(idContenedor);
+  if (!cont || cont.dataset.montado === '1') return;
+  cont.innerHTML = presetsHTML(idDesde, idHasta, recargar);
+  cont.dataset.montado = '1';
+  marcarPresetActivo(idDesde, idHasta);
+}
+
+function marcarPresetActivo(idDesde, idHasta) {
+  const cont = document.querySelector(`.rango-presets[data-desde="${idDesde}"][data-hasta="${idHasta}"]`);
+  if (!cont) return;
+  const dEl = document.getElementById(idDesde), hEl = document.getElementById(idHasta);
+  const activo = presetDeRango(dEl && dEl.value, hEl && hEl.value);
+  cont.querySelectorAll('.rango-preset-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.preset === activo);
+  });
+}
+
+// ─── El rango se recuerda, por pantalla ──────────────────────────────────────
+// Clave por los ids de los inputs: son distintos en cada pantalla, así que no
+// hay forma de que el rango de Costos se le aplique a Servicios.
+function claveRango(idDesde, idHasta) { return `mb_rango_${idDesde}_${idHasta}`; }
+
+function recordarRango(idDesde, idHasta) {
+  try {
+    const d = document.getElementById(idDesde), h = document.getElementById(idHasta);
+    if (!d || !h) return;
+    localStorage.setItem(claveRango(idDesde, idHasta), JSON.stringify({ desde: d.value, hasta: h.value }));
+  } catch (e) { /* modo privado, cuota llena: el rango simplemente no se recuerda */ }
+}
+
+/**
+ * Rellena los dos inputs con lo último que se miró en esa pantalla.
+ * Devuelve true si había algo guardado, para que quien llama sepa si tiene que
+ * aplicar su default. Un rango guardado gana sobre el default, que es el punto.
+ */
+function restaurarRango(idDesde, idHasta) {
+  try {
+    const crudo = localStorage.getItem(claveRango(idDesde, idHasta));
+    if (!crudo) return false;
+    const { desde, hasta } = JSON.parse(crudo) || {};
+    if (!desde || !hasta) return false;
+    const d = document.getElementById(idDesde), h = document.getElementById(idHasta);
+    if (!d || !h) return false;
+    d.value = desde; h.value = hasta;
+    return true;
+  } catch (e) { return false; }
+}
 
 // ─── Un solo lector de importes, el mismo que el server ──────────────────────
 //
@@ -4910,6 +5094,19 @@ function abrirMasSheet() {
 // Carga de cada panel cuando se activa.
 function cargarPanel(tab) {
   if (tab === 'inicio') renderInicio();
+  // El Dashboard no tenía rama acá: se cargaba una sola vez al entrar a la app.
+  // Ahora que comparte el período con Balance, volver puede encontrarlo mostrando
+  // otro mes del que dicen sus filtros. Se repinta siempre y se recarga sólo si
+  // el período cambió — entrar y salir no cuesta un viaje a la planilla.
+  else if (tab === 'dashboard') {
+    montarPresets('dash-presets', 'filter-desde', 'filter-hasta', 'onFilterChange');
+    pintarPeriodo('');
+    const clave = clavePeriodo();
+    if (state.dashPeriodoCargado !== clave) {
+      state.dashPeriodoCargado = clave;
+      loadAll().catch(() => { state.dashPeriodoCargado = null; });
+    }
+  }
   else if (tab === 'pedidos') loadPedidos();
   // Los dos "Más" sólo tienen botones, pero la grilla se arma acá porque se
   // filtra por rol: dibujarla en el HTML la haría igual para todos.
@@ -4926,17 +5123,16 @@ function cargarPanel(tab) {
   else if (tab === 'vinos') loadVinos();
   else if (tab === 'finanzas') loadFinanzas();
   else if (tab === 'costos-resumen') {
-    // Pre-fill período a mes en curso si están vacíos
+    // El rango: lo último que se miró, y si no hay nada guardado, el mes en curso.
     const desdeEl = document.getElementById('costos-desde');
     const hastaEl = document.getElementById('costos-hasta');
-    if (desdeEl && !desdeEl.value) {
-      const hoy = new Date();
-      desdeEl.value = hoy.getFullYear() + '-' + String(hoy.getMonth()+1).padStart(2,'0') + '-01';
-    }
-    if (hastaEl && !hastaEl.value) {
-      const hoy = new Date();
-      hastaEl.value = hoy.toISOString().slice(0,10);
-    }
+    if (desdeEl && hastaEl && !desdeEl.value && !hastaEl.value) restaurarRango('costos-desde', 'costos-hasta');
+    // `hoyISOLocal()` y no `toISOString()`: después de las 21:00 en Argentina la
+    // fecha UTC ya es la de mañana, y el "hasta" quedaba un día adelantado.
+    const hoyISO = hoyISOLocal();
+    if (desdeEl && !desdeEl.value) desdeEl.value = hoyISO.slice(0, 8) + '01';
+    if (hastaEl && !hastaEl.value) hastaEl.value = hoyISO;
+    montarPresets('costos-presets', 'costos-desde', 'costos-hasta', 'loadCostos');
     // La configuración es ahora la segunda vista de esta misma pantalla, así
     // que se abre con `costosVerModo` y no con un panel propio. Ver más abajo.
     costosVerModo(_costosModo);
@@ -5885,12 +6081,56 @@ function renderResumenCierre(d, avisos = []) {
 }
 
 // ─── Filtros ──────────────────────────────────────────────────────────────────
+// ─── Dashboard y Balance miran el MISMO período ──────────────────────────────
+//
+// Las dos pantallas leen exactamente los mismos dos endpoints —`/api/resumen` y
+// `/api/actividad-diaria`— y el comentario de Balance dice que es así "para que
+// los números no puedan divergir". Divergían igual, por otro lado: cada una
+// tenía su propio par de fechas y su propio selector de mes, y Balance copiaba
+// los del Dashboard UNA SOLA VEZ, en su primera apertura. Después de eso, mirar
+// julio en una y agosto en la otra era un clic, y nada en la pantalla decía que
+// estabas comparando dos meses distintos del mismo dato.
+//
+// Ahora el período es uno y vive en `state` (modo, mes, desde, hasta). Cada
+// pantalla lo PINTA en sus controles al entrar. Es la misma decisión que se tomó
+// en Servicios cuando se sacó el segundo par de fechas: sin un segundo rango no
+// hay nada que sincronizar.
+//
+// Las dos usan los mismos ids con un prefijo: '' el Dashboard, 'rep-' Balance.
+const PREFIJOS_PERIODO = ['', 'rep-'];
+
+// Identidad del período elegido. Sirve para no volver a pedir lo mismo: entrar y
+// salir de una pantalla no tiene por qué costar dos viajes a Google Sheets.
+function clavePeriodo() {
+  return state.modo === 'mes'
+    ? 'mes:' + (state.mes || '')
+    : 'rango:' + (state.desde || '') + '..' + (state.hasta || '');
+}
+
+// Vuelca `state` a los controles de una pantalla. No dispara ninguna carga.
+function pintarPeriodo(pfx) {
+  const el = id => document.getElementById(pfx + id);
+  const modo = state.modo;
+  const bMes = el('btn-modo-mes'), bRango = el('btn-modo-rango');
+  if (!bMes || !bRango) return;   // esa pantalla no está en el DOM todavía
+  bMes.classList.toggle('active', modo === 'mes');
+  bRango.classList.toggle('active', modo === 'rango');
+  el('mes-filters').style.display = modo === 'mes' ? 'flex' : 'none';
+  el('range-filters').style.display = modo === 'rango' ? 'flex' : 'none';
+  const selMes = el('filter-mes');
+  // Sólo si esa opción existe: el selector de cada pantalla se puebla por su
+  // lado, y pisarlo con un mes que no tiene lo dejaría en blanco.
+  if (selMes && [...selMes.options].some(o => o.value === (state.mes || ''))) selMes.value = state.mes || '';
+  el('filter-desde').value = state.desde || '';
+  el('filter-hasta').value = state.hasta || '';
+  marcarPresetActivo(pfx + 'filter-desde', pfx + 'filter-hasta');
+}
+
+function pintarPeriodoEnTodas() { PREFIJOS_PERIODO.forEach(pintarPeriodo); }
+
 function setModo(modo) {
   state.modo = modo;
-  document.getElementById('btn-modo-mes').classList.toggle('active', modo === 'mes');
-  document.getElementById('btn-modo-rango').classList.toggle('active', modo === 'rango');
-  document.getElementById('mes-filters').style.display = modo === 'mes' ? 'flex' : 'none';
-  document.getElementById('range-filters').style.display = modo === 'rango' ? 'flex' : 'none';
+  pintarPeriodoEnTodas();
   onFilterChange();
 }
 
@@ -5937,6 +6177,10 @@ async function init() {
 }
 
 async function loadAll() {
+  // Se marca acá y no sólo en `cargarPanel` porque a `loadAll` también la llaman
+  // el login y `onFilterChange`. Marcar en un solo llamador dejaría el guard
+  // mintiendo apenas alguien entre por otro lado.
+  state.dashPeriodoCargado = clavePeriodo();
   const qs = buildQS();
   const [r1, r2, r3] = await Promise.all([
     api(`/api/resumen${qs}`),
@@ -7113,10 +7357,15 @@ function closeDrawer() {
   document.getElementById('drawer').classList.remove('open');
 }
 
+// El período cambió DESDE el Dashboard. Se guarda en `state`, se repinta en las
+// dos pantallas y se recarga sólo ésta: la otra se recarga al entrar, y sólo si
+// hace falta (ver clavePeriodo).
 function onFilterChange() {
   state.mes = document.getElementById('filter-mes').value;
   state.desde = document.getElementById('filter-desde').value;
   state.hasta = document.getElementById('filter-hasta').value;
+  recordarRango('filter-desde', 'filter-hasta');
+  pintarPeriodoEnTodas();
   loadAll();
 }
 
@@ -9229,6 +9478,73 @@ async function cerrarAvisoInforme(marcarLeido) {
 // misma computadora no se pisen.
 const RELEASE_LOG = [
   {
+    version: '2026-09-06-atajos-y-arreglos',
+    fecha: '6 de septiembre de 2026',
+    titulo: 'Atajos de fecha, y la compra ya no se pierde si falla el guardado',
+    // Va `paraTodos` por el cambio de la compra: es la pantalla que usa Charly
+    // todos los días y cambia cómo se comporta cuando algo sale mal.
+    paraTodos: true,
+    porque: 'Todo lo de esta tanda sale de mirar la app buscando dónde hace perder tiempo. '
+      + 'Nada cambió de lugar: lo que cambió es que hay atajos donde antes había que tipear, '
+      + 'y que dos cosas que fallaban en silencio ahora no fallan.',
+    items: [
+      {
+        icono: '💾',
+        titulo: 'Si falla el guardado de una compra, los datos quedan',
+        desc: 'Antes el formulario se cerraba apenas tocabas Guardar, así que cuando la planilla '
+            + 'no respondía el cartel decía "volvé a intentarlo" y no quedaba nada que reintentar: '
+            + 'había que cargar los dieciocho campos otra vez. Ahora <b>el formulario se cierra recién '
+            + 'cuando la planilla confirmó</b>, y si falla queda abierto con todo puesto para tocar '
+            + 'Guardar de nuevo. Tampoco se cierra más tocando afuera sin querer.',
+        donde: 'Compras › Pagos › Nueva compra',
+      },
+      {
+        icono: '⚠️',
+        titulo: 'Lo que falta se marca en el campo, y todo junto',
+        desc: 'Los avisos de "falta el proveedor" salían de a uno: corregías, guardabas, aparecía '
+            + 'el siguiente. Ahora <b>salen todos juntos</b>, con los campos marcados en rojo, y cada '
+            + 'campo se despinta apenas lo corregís.',
+        donde: 'Compras › Pagos › Nueva compra',
+      },
+      {
+        icono: '📅',
+        titulo: 'Atajos de fecha: Hoy · 7 días · Este mes · Mes pasado',
+        desc: 'En las pantallas con Desde y Hasta había que tipear las dos fechas, y en el teléfono '
+            + 'pelear con dos calendarios. Ahora hay cuatro botones. Además <b>el período te lo '
+            + 'recuerda</b>: si cerrás y volvés, sigue donde lo dejaste.',
+        donde: 'Negocio › Servicios, Restaurant y Balance · Operación › Costos',
+      },
+      {
+        icono: '🔗',
+        titulo: 'Dashboard y Balance miran siempre el mismo período',
+        desc: 'Son dos vistas del mismo dato, pero cada una tenía sus propias fechas: se podía estar '
+            + 'mirando julio en una y agosto en la otra sin darse cuenta. Ahora <b>el período es uno '
+            + 'solo</b>: lo cambiás en cualquiera de las dos y la otra acompaña.',
+        donde: 'Negocio › Dashboard y Balance',
+      },
+      {
+        icono: '🔄',
+        titulo: 'El botón Actualizar ahora actualiza todo',
+        desc: 'Limpiaba dos de los veintidós cachés, así que había pantallas que seguían mostrando '
+            + 'lo de hacía cinco minutos por más que lo tocaras. Ahora las limpia todas.',
+        donde: 'En el encabezado',
+      },
+      {
+        icono: '📦',
+        titulo: 'La ventana de "Productos vendidos" abre',
+        desc: 'Estaba rota desde que se agregó el 4 de septiembre: daba error siempre. Ya anda.',
+        donde: 'Negocio › Servicios',
+      },
+      {
+        icono: '⌨️',
+        titulo: 'Escape cierra las ventanas',
+        desc: 'Cualquier ventana que se abra encima se cierra con la tecla Escape, sin buscar la ✕. '
+            + 'La única que no es la de cargar una compra, justamente para no perderla sin querer.',
+        donde: 'En toda la app',
+      },
+    ],
+  },
+  {
     version: '2026-09-04-menu-ordenado',
     fecha: '4 de septiembre de 2026',
     titulo: 'El menú se ordenó: Compras, y Operación con Fiscal y Costos adentro',
@@ -10154,7 +10470,59 @@ function escAttr2(str){return String(str ?? '').replace(/&/g,'&amp;').replace(/"
 const MESES_NOMBRES_PAGO = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 function closeModal() { document.getElementById('modal-overlay').classList.remove('open'); }
-document.getElementById('modal-overlay').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
+// Este modal NO se cierra tocando afuera, y es el único de la app con esa
+// excepción. Son dieciocho campos y `openModal()` los limpia todos al abrir, así
+// que un clic mal puesto al costado borraba una compra entera sin preguntar. El
+// resto de los overlays son de lectura o de un campo: ahí cerrar tocando afuera
+// es lo cómodo. Por la misma razón queda fuera de Escape (ver ESC_NO_CIERRA):
+// para salir está Cancelar, que es el único gesto que no se hace sin querer.
+
+// ─── Escape cierra el overlay de arriba ───────────────────────────────────────
+//
+// Hay 32 overlays en esta pantalla y hasta el 06/09/2026 ninguno cerraba con
+// Escape: había que encontrar la × con el mouse. En el escritorio, que es donde
+// se trabaja con teclado, eso es una tecla que la gente aprieta esperando algo y
+// no pasa nada.
+//
+// Se cierran como se abrieron, porque en este archivo conviven tres mecanismos:
+// unos usan la clase `open`, otros `style.display`. Mirar cuál está visible y
+// deshacer ESO es lo que evita tener que registrar 32 funciones de cierre — y
+// que la número 33 se olvide.
+//
+// El de la compra queda afuera a propósito: son dieciocho campos que `openModal()`
+// limpia al abrir, así que perderlos por una tecla es el mismo accidente que
+// perderlos por un clic afuera. Ahí se sale por Cancelar.
+const ESC_NO_CIERRA = new Set(['modal-overlay']);
+
+function overlayVisible(el) {
+  if (!el) return false;
+  if (el.classList.contains('open')) return true;
+  const d = el.style.display;
+  return !!d && d !== 'none';
+}
+
+function cerrarOverlayDeArriba() {
+  // De atrás para adelante en el DOM: el último que se dibuja es el que está
+  // arriba, y es el que el usuario está mirando cuando aprieta Escape.
+  // `login-screen` no entra: no termina en -overlay, y cerrarlo sería sacar la
+  // pantalla de login de encima de una app sin sesión.
+  const todos = [...document.querySelectorAll('[id$="-overlay"]')].reverse();
+  for (const el of todos) {
+    if (ESC_NO_CIERRA.has(el.id) || !overlayVisible(el)) continue;
+    el.classList.remove('open');
+    if (el.style.display && el.style.display !== 'none') el.style.display = 'none';
+    return el.id;
+  }
+  return null;
+}
+
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  // No pisar los Escape que ya tienen dueño: la edición inline de Plan y de
+  // Finanzas los usa para cancelar el campo, no para cerrar la ventana.
+  if (e.defaultPrevented) return;
+  if (cerrarOverlayDeArriba()) e.preventDefault();
+});
 
 // Modal estándar de resultado: se muestra cuando una escritura a la planilla termina
 function showResultadoModal({ ok, titulo, detalle }) {
@@ -10184,6 +10552,11 @@ async function openModal() {
   document.getElementById('f-descripcion').value = '';
   resetFacturaCompra();
   document.getElementById('modal-status').style.display = 'none';
+  // Los campos en rojo y el resumen de lo que faltaba son del intento anterior:
+  // un formulario que abre marcando errores sobre campos vacíos es ruido.
+  marcarErroresCompra([]);
+  const st2 = document.getElementById('modal-status2');
+  if (st2) { st2.innerHTML = ''; st2.style.display = 'none'; }
   document.getElementById('f-entrega').value = '';
   state.vencManual = false;
   state.pagoPrevisto = 'pagado';
@@ -10677,23 +11050,74 @@ function datosDeCompra() {
   };
 }
 
+// ─── Lo que falta se marca en el campo, y se dice todo junto ─────────────────
+//
+// Esto era una cadena de `alert()`: corregías el primero, apretabas Guardar,
+// aparecía el segundo. Cinco reglas, hasta cinco viajes, y con el alert abierto
+// no se ve el formulario que hay que corregir. Ahora se evalúan todas, se marcan
+// los campos y el resumen se escribe arriba de los botones.
+//
+// El campo se despinta apenas se lo toca: dejarlo en rojo después de arreglarlo
+// es la otra mitad del mismo problema.
+function errorHTML(errores) {
+  return '<b>Falta completar:</b><ul>' + errores.map(e => `<li>${escapeHtml(e.msg)}</li>`).join('') + '</ul>';
+}
+
+function marcarErroresCompra(errores) {
+  document.querySelectorAll('#modal-overlay .campo-error').forEach(el => el.classList.remove('campo-error'));
+  const caja = document.getElementById('modal-errores');
+  if (!errores.length) { if (caja) caja.style.display = 'none'; return; }
+  for (const e of errores) {
+    const el = document.getElementById(e.campo);
+    if (!el) continue;
+    el.classList.add('campo-error');
+    // Un solo listener por campo: se limpia solo al corregirlo.
+    if (!el.dataset.limpiaError) {
+      el.dataset.limpiaError = '1';
+      const limpiar = () => el.classList.remove('campo-error');
+      el.addEventListener('input', limpiar);
+      el.addEventListener('change', limpiar);
+    }
+  }
+  if (caja) { caja.innerHTML = errorHTML(errores); caja.style.display = 'block'; }
+  // Se enfoca el primer campo que se pueda VER. Algunos viven en bloques que
+  // aparecen según lo elegido (el vencimiento sólo con cuotas o "queda a
+  // pagar"), y enfocar uno oculto no hace nada: el cursor no se mueve y parece
+  // que el botón no respondió. El mensaje igual se lista, que es lo que dice qué
+  // hay que destapar.
+  const visible = el => !!(el && el.offsetParent !== null);
+  const primero = errores.map(e => document.getElementById(e.campo)).find(visible);
+  if (primero && typeof primero.focus === 'function') primero.focus();
+}
+
+// Las reglas, separadas de cómo se muestran, para poder ejercitarlas sueltas.
+function validarCompra(d) {
+  const errores = [];
+  if (!d.fecha) errores.push({ campo: 'f-fecha', msg: 'La fecha de la compra.' });
+  if (!d.proveedor) errores.push({ campo: 'f-proveedor', msg: 'El proveedor.' });
+  // El monto dejó de ser opcional: la fila del libro se escribe por la misma
+  // puerta que el resto y ésa rechaza un gasto de cero. Mejor decirlo acá que
+  // hacer viajar algo que va a rebotar.
+  if (!d.salidaARS) {
+    errores.push({ campo: 'f-monto', msg: d.cuotas > 1 ? 'El monto TOTAL de la compra.' : 'El monto de la compra.' });
+  }
+  if (d.cuotas > 1 && !d.vencRaw) {
+    errores.push({ campo: 'f-vencimiento', msg: 'El vencimiento de la primera cuota.' });
+  }
+  if (d.previsto === 'pagado' && !d.conCuotas && !d.medioPago) {
+    errores.push({ campo: 'f-medio', msg: 'De qué caja salió la plata (el gasto figura como ya pagado).' });
+  }
+  return errores;
+}
+
 // Paso 1 → decide si hay que preguntar cuándo llega. NO guarda: el guardado es
 // uno solo, al final, porque el vencimiento de "se paga al recibir" es la fecha
 // de la entrega y la fila del libro no se puede escribir sin ella.
 function saveNewPago() {
   const d = datosDeCompra();
-
-  // Validaciones: el modal queda abierto para corregir
-  if (!d.fecha || !d.proveedor) { alert('Fecha y Proveedor son obligatorios.'); return; }
-  if (d.cuotas > 1 && !d.vencRaw) { alert('Para compras en cuotas indicá el vencimiento de la primera cuota.'); return; }
-  if (d.cuotas > 1 && !d.salidaARS) { alert('Para compras en cuotas indicá el monto TOTAL de la compra.'); return; }
-  // El monto dejó de ser opcional: la fila del libro se escribe por la misma
-  // puerta que el resto y ésa rechaza un gasto de cero. Mejor decirlo acá que
-  // hacer viajar algo que va a rebotar.
-  if (!d.salidaARS) { alert('Poné el monto de la compra.'); return; }
-  if (d.previsto === 'pagado' && !d.conCuotas && !d.medioPago) {
-    alert('Un gasto ya pagado tiene que decir de qué caja salió.'); return;
-  }
+  const errores = validarCompra(d);
+  marcarErroresCompra(errores);
+  if (errores.length) return;   // el modal queda abierto, con todo cargado
 
   if (!d.conCuotas && categoriaLlevaEntrega()) { irAPaso2(); return; }
   guardarCompra(false);
@@ -10701,14 +11125,51 @@ function saveNewPago() {
 
 // El guardado, con o sin entrega. Un solo POST: el server escribe la fila del
 // libro y, si hay entrega, crea el pedido con el mismo id adentro.
+// Los tres botones que disparan un guardado de compra. Se apagan mientras el
+// POST viaja: sin esto, dos toques son dos filas en el libro.
+const BOTONES_COMPRA = ['f-btn-seguir', 'f-sin-entrega', 'f-btn-guardar'];
+function compraGuardando(activo, texto) {
+  for (const id of BOTONES_COMPRA) {
+    const b = document.getElementById(id);
+    if (b) b.disabled = activo;
+  }
+  const st = document.getElementById(compraEnPaso2() ? 'modal-status2' : 'modal-status');
+  if (st) {
+    st.textContent = texto || '';
+    st.style.display = texto ? 'block' : 'none';
+  }
+}
+function compraEnPaso2() {
+  const p2 = document.getElementById('modal-paso2');
+  return !!p2 && p2.style.display !== 'none';
+}
+
 async function guardarCompra(conEntrega) {
   const d = datosDeCompra();
   const entregaISO = conEntrega ? document.getElementById('f-entrega').value : '';
-  if (conEntrega && !entregaISO) { alert('Poné el día en que llega.'); return; }
+  if (conEntrega && !entregaISO) {
+    // Mismo criterio que el paso 1: el campo se marca y el aviso va adentro del
+    // formulario. En el paso 2 el resumen es `modal-status2`, que ya existía.
+    const el = document.getElementById('f-entrega');
+    if (el) el.classList.add('campo-error');
+    compraGuardando(false, '');
+    const st = document.getElementById('modal-status2');
+    if (st) {
+      st.innerHTML = '<span style="color:var(--red)">Falta el día en que llega.</span>';
+      st.style.display = 'block';
+    }
+    if (el) el.focus();
+    return;
+  }
 
-  // Comportamiento estándar: cerrar el modal ya, avisar con modal al terminar
-  closeModal();
-  showToast('⏳ Guardando en planilla...');
+  // El modal se cierra DESPUÉS de que la planilla contesta, y sólo si contestó
+  // que sí. Hasta el 06/09/2026 se cerraba antes del await: cuando el POST
+  // fallaba, el cartel decía "la compra NO quedó registrada, volvé a intentarlo"
+  // y no quedaba nada que reintentar — `openModal()` ya había limpiado los
+  // dieciocho campos. Había que retipear la compra entera para descubrir si esta
+  // vez andaba. Mientras tanto los botones quedan apagados, que es lo que evita
+  // que dos toques escriban dos filas.
+  compraGuardando(true, '⏳ Guardando en planilla...');
 
   const fmtDate = iso => { if (!iso) return ''; const [y, m, d2] = iso.split('-'); return `${d2}/${m}/${y}`; };
   // `estado` viaja para el fallback del server; el que manda es pagoPrevisto.
@@ -10722,6 +11183,12 @@ async function guardarCompra(conEntrega) {
       entrega: entregaISO ? { fecha: entregaISO } : null,
       factura: datosDeFacturaCompra(),
     }) });
+
+    // La planilla ya contestó que sí: recién ACÁ se cierra el formulario. Lo que
+    // sigue (los renglones del remito) puede fallar sin que la compra se pierda,
+    // y esa diferencia se cuenta en el modal de resultado.
+    compraGuardando(false, '');
+    closeModal();
 
     // `enElLibro` es false cuando el gasto todavía NO se escribió: se paga al
     // recibir, o queda a pagar, y la fila la escribe la recepción. Decirlo es
@@ -10780,11 +11247,25 @@ async function guardarCompra(conEntrega) {
     });
     if (state.rol === 'admin') loadPagos();
   } catch (err) {
-    showResultadoModal({
-      ok: false,
-      titulo: 'No se pudo guardar',
-      detalle: `${escapeHtml(err.message)}<br><span style="font-size:11px">La compra de <b>${escapeHtml(d.proveedor)}</b> NO quedó registrada. Volvé a intentarlo.</span>`,
-    });
+    // El modal sigue abierto con todo lo cargado, así que "volvé a intentarlo"
+    // ahora quiere decir "tocá Guardar de nuevo" y no "retipeá los dieciocho
+    // campos". El error va adentro del formulario y no en un overlay encima:
+    // tapar el formulario con otra ventana es lo que hacía pensar que se había
+    // perdido.
+    compraGuardando(false, '');
+    const st = document.getElementById(compraEnPaso2() ? 'modal-status2' : 'modal-status');
+    if (st) {
+      st.innerHTML = `<span style="color:var(--red)">❌ No se pudo guardar: ${escapeHtml(err.message)}.<br>`
+        + `La compra de <b>${escapeHtml(d.proveedor)}</b> NO quedó registrada. `
+        + `Los datos están acá: tocá Guardar de nuevo.</span>`;
+      st.style.display = 'block';
+    } else {
+      showResultadoModal({
+        ok: false,
+        titulo: 'No se pudo guardar',
+        detalle: `${escapeHtml(err.message)}<br><span style="font-size:11px">La compra de <b>${escapeHtml(d.proveedor)}</b> NO quedó registrada. Volvé a intentarlo.</span>`,
+      });
+    }
   }
 }
 
@@ -10813,11 +11294,17 @@ function hoyISOLocal() {
 function initServiciosFilters() {
   if (_serviciosInit) return;
   _serviciosInit = true;
-  const hoy = hoyISOLocal();
-  const desde = new Date(Date.parse(hoy + 'T12:00:00Z') - (SERVICIOS_DIAS_DEFAULT - 1) * 86400000)
-    .toISOString().slice(0, 10);
-  document.getElementById('serv-desde').value = desde;
-  document.getElementById('serv-hasta').value = hoy;
+  // Lo último que se miró gana sobre el default. Si no hay nada guardado —o
+  // quedó ilegible— caen los 7 días de siempre, que además es lo que dimensiona
+  // la ventana de Fudo: un default corto es una descarga corta.
+  if (!restaurarRango('serv-desde', 'serv-hasta')) {
+    const hoy = hoyISOLocal();
+    const desde = new Date(Date.parse(hoy + 'T12:00:00Z') - (SERVICIOS_DIAS_DEFAULT - 1) * 86400000)
+      .toISOString().slice(0, 10);
+    document.getElementById('serv-desde').value = desde;
+    document.getElementById('serv-hasta').value = hoy;
+  }
+  montarPresets('serv-presets', 'serv-desde', 'serv-hasta', 'loadServicios');
 }
 
 const DOW = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
@@ -13997,16 +14484,16 @@ async function loadProyeccionMes() {
 // Gastos = "comprometidos" (todo lo registrado, pagado o no), que es la misma
 // base que usa el KPI de gastos del Dashboard. Las cuotas ya vienen excluidas
 // desde sheets.js: la compra computa entera en el mes en que se hizo.
-state.repBal = { modo: 'mes', mes: null, desde: null, hasta: null, view: 'grafico', inicializado: false };
+// El período de esta pantalla ES el del Dashboard: vive en `state.modo/mes/
+// desde/hasta` y no acá. Lo que queda propio es cómo se mira (gráfico o datos),
+// la lista de meses ya cargada, y cuál fue el último período que se dibujó.
+state.repBal = { view: 'grafico', selectPoblado: false, periodoCargado: null };
 
 const hoyISOAR = () => new Date().toLocaleDateString('en-CA', { timeZone: TZ_AR });
 
 function setRepModo(modo) {
-  state.repBal.modo = modo;
-  document.getElementById('rep-btn-modo-mes').classList.toggle('active', modo === 'mes');
-  document.getElementById('rep-btn-modo-rango').classList.toggle('active', modo === 'rango');
-  document.getElementById('rep-mes-filters').style.display = modo === 'mes' ? 'flex' : 'none';
-  document.getElementById('rep-range-filters').style.display = modo === 'rango' ? 'flex' : 'none';
+  state.modo = modo;
+  pintarPeriodoEnTodas();
   onRepFilterChange();
 }
 
@@ -14022,40 +14509,52 @@ function setRepView(view) {
 }
 
 function onRepFilterChange() {
-  state.repBal.mes = document.getElementById('rep-filter-mes').value;
-  state.repBal.desde = document.getElementById('rep-filter-desde').value;
-  state.repBal.hasta = document.getElementById('rep-filter-hasta').value;
+  state.mes = document.getElementById('rep-filter-mes').value;
+  state.desde = document.getElementById('rep-filter-desde').value;
+  state.hasta = document.getElementById('rep-filter-hasta').value;
+  recordarRango('rep-filter-desde', 'rep-filter-hasta');
+  pintarPeriodoEnTodas();
   loadReporteBalance();
 }
 
-function buildRepQS() {
-  const r = state.repBal;
-  if (r.modo === 'mes' && r.mes) return `?mes=${encodeURIComponent(r.mes)}`;
-  if (r.modo === 'rango' && r.desde && r.hasta) return `?desde=${r.desde}&hasta=${r.hasta}`;
-  return '';
-}
+// Era una copia de `buildQS` sobre otro objeto de estado. Con un solo período no
+// hay dos consultas que armar: se deja el nombre porque lo usan los llamadores.
+const buildRepQS = buildQS;
 
 // Primera apertura: llenar los selectores replicando el criterio del Dashboard
 // (mismo mes por defecto), después siempre recargar con lo que ya esté elegido.
 async function initReporteBalance() {
-  if (state.repBal.inicializado) { loadReporteBalance(); return; }
-
-  let meses = state.mesesDisponibles;
-  if (!meses || !meses.length) {
-    try { const r = await api('/api/meses'); meses = r.data; state.mesesDisponibles = meses; }
-    catch { meses = []; }
+  // El selector de meses se puebla una sola vez; el período se pinta siempre.
+  if (!state.repBal.selectPoblado) {
+    let meses = state.mesesDisponibles;
+    if (!meses || !meses.length) {
+      try { const r = await api('/api/meses'); meses = r.data; state.mesesDisponibles = meses; }
+      catch { meses = []; }
+    }
+    const sel = document.getElementById('rep-filter-mes');
+    sel.innerHTML = '<option value="">Todos</option>';
+    meses.forEach(m => { const o = document.createElement('option'); o.value = m; o.textContent = m; sel.appendChild(o); });
+    if (!state.mes && meses.length) state.mes = meses[meses.length - 1];
+    if (!state.desde || !state.hasta) {
+      const hoy = hoyISOAR();
+      state.desde = state.desde || (hoy.slice(0, 8) + '01');
+      state.hasta = state.hasta || hoy;
+    }
+    state.repBal.selectPoblado = true;
   }
-  const sel = document.getElementById('rep-filter-mes');
-  sel.innerHTML = '<option value="">Todos</option>';
-  meses.forEach(m => { const o = document.createElement('option'); o.value = m; o.textContent = m; sel.appendChild(o); });
-  sel.value = state.mes || (meses.length ? meses[meses.length - 1] : '');
 
-  const hoy = hoyISOAR();
-  document.getElementById('rep-filter-desde').value = state.desde || (hoy.slice(0, 8) + '01');
-  document.getElementById('rep-filter-hasta').value = state.hasta || hoy;
+  montarPresets('rep-presets', 'rep-filter-desde', 'rep-filter-hasta', 'onRepFilterChange');
+  pintarPeriodo('rep-');
 
-  state.repBal.inicializado = true;
-  onRepFilterChange();
+  // Volver a la pantalla con el mismo período no vuelve a pedir nada. Antes cada
+  // entrada era un viaje a Google Sheets aunque no hubiera cambiado nada.
+  const clave = clavePeriodo();
+  if (state.repBal.periodoCargado === clave) return;
+  state.repBal.periodoCargado = clave;
+  // Una carga que falló NO queda marcada como hecha, o la pantalla se quedaría
+  // vacía para siempre hasta cambiar el período. Es la misma regla que la
+  // simulación fiscal, que se puede reintentar.
+  loadReporteBalance().catch(() => { state.repBal.periodoCargado = null; });
 }
 
 // Rango de días a dibujar. Se toma de los datos, y si el período llega hasta el
@@ -14066,9 +14565,9 @@ function repRangoFechas(dias) {
   const fechas = dias.map(d => d.fecha).sort();
   let ini = fechas[0], fin = fechas[fechas.length - 1];
   const hoy = hoyISOAR();
-  if (state.repBal.modo === 'rango') {
-    if (state.repBal.desde && state.repBal.desde < ini) ini = state.repBal.desde;
-    const tope = (state.repBal.hasta && state.repBal.hasta < hoy) ? state.repBal.hasta : hoy;
+  if (state.modo === 'rango') {
+    if (state.desde && state.desde < ini) ini = state.desde;
+    const tope = (state.hasta && state.hasta < hoy) ? state.hasta : hoy;
     if (tope > fin) fin = tope;
   } else if (hoy.slice(0, 7) === fin.slice(0, 7) && hoy > fin) {
     fin = hoy;
@@ -14102,7 +14601,7 @@ function repSerieAcumulada(dias) {
     serie.push({
       fecha: iso,
       dia: cur.getDate(),
-      label: state.repBal.modo === 'mes' ? String(cur.getDate()) : `${cur.getDate()}/${cur.getMonth() + 1}`,
+      label: state.modo === 'mes' ? String(cur.getDate()) : `${cur.getDate()}/${cur.getMonth() + 1}`,
       ingresos: ing, gastos: gas, resultado: ing - gas,
       accIngresos: accIng, accGastos: accGas, accResultado: accIng - accGas,
       conMovimiento: !!d,
@@ -14113,6 +14612,10 @@ function repSerieAcumulada(dias) {
 }
 
 async function loadReporteBalance() {
+  // Igual que `loadAll` con el Dashboard: se marca acá y no en el llamador,
+  // porque a esta función también la llama el cambio de filtros. Marcado en un
+  // solo lado, volver a la pantalla pedía de nuevo lo que ya estaba en pantalla.
+  state.repBal.periodoCargado = clavePeriodo();
   const kpis = document.getElementById('rep-bal-kpis');
   kpis.innerHTML = '<div class="loading"><div class="spinner"></div> Cargando balance...</div>';
   const qs = buildRepQS();
@@ -14125,9 +14628,9 @@ async function loadReporteBalance() {
     return;
   }
 
-  const titulo = state.repBal.modo === 'mes'
-    ? (state.repBal.mes || 'todos los meses')
-    : `${state.repBal.desde || '?'} a ${state.repBal.hasta || '?'}`;
+  const titulo = state.modo === 'mes'
+    ? (state.mes || 'todos los meses')
+    : `${state.desde || '?'} a ${state.hasta || '?'}`;
   document.getElementById('rep-bal-titulo').textContent = titulo;
 
   const serie = repSerieAcumulada(dias);
@@ -14357,6 +14860,8 @@ function setRepServView(view) {
 function onRepServPeriodoChange() {
   state.repServ.desde = document.getElementById('rsv-filter-desde').value;
   state.repServ.hasta = document.getElementById('rsv-filter-hasta').value;
+  recordarRango('rsv-filter-desde', 'rsv-filter-hasta');
+  marcarPresetActivo('rsv-filter-desde', 'rsv-filter-hasta');
   loadReporteServicios();
 }
 
@@ -14367,11 +14872,18 @@ function onRepServDowChange() {
 }
 
 async function initReporteServicios() {
-  if (state.repServ.inicializado) { loadReporteServicios(); return; }
-  const hoy = hoyISOAR();
-  document.getElementById('rsv-filter-desde').value = hoy.slice(0, 8) + '01';
-  document.getElementById('rsv-filter-hasta').value = hoy;
-  state.repServ.inicializado = true;
+  // Restaurant NO comparte el período con el Dashboard, y es correcto: lee
+  // /api/servicios (Fudo), no el libro. Lo que sí gana es lo mismo que las
+  // demás: atajos, y que el rango sobreviva a un F5.
+  if (!state.repServ.inicializado) {
+    if (!restaurarRango('rsv-filter-desde', 'rsv-filter-hasta')) {
+      const hoy = hoyISOAR();
+      document.getElementById('rsv-filter-desde').value = hoy.slice(0, 8) + '01';
+      document.getElementById('rsv-filter-hasta').value = hoy;
+    }
+    state.repServ.inicializado = true;
+  }
+  montarPresets('rsv-presets', 'rsv-filter-desde', 'rsv-filter-hasta', 'onRepServPeriodoChange');
   loadReporteServicios();
 }
 

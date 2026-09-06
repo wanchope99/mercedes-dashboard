@@ -99,6 +99,61 @@ usuario (la segunda cubeta existe porque la IP se puede falsificar). Un login
 correcto borra lo acumulado.
 
 
+### El bot de Telegram
+
+El bot es la **otra puerta al libro**: quien lo puede usar carga una factura, y
+con eso escribe una fila de gasto en `Movimientos`, elige de qué caja sale la
+plata y registra el IVA. En la app eso está detrás de un login con JWT y de
+`adminOnly`; en el bot está detrás de una sola variable.
+
+| Variable | Servicio | Qué pasa si falta |
+|---|---|---|
+| `TELEGRAM_TOKEN` | bot | El bot no arranca |
+| `ALLOWED_USERS` | bot | **El bot no atiende a NADIE** |
+| `PROVEEDORES_INGEST_TOKEN` | bot y app | El bot no puede escribir en la app |
+| `MANTENIMIENTO_INGEST_TOKEN` | app | Se usa `PROVEEDORES_INGEST_TOKEN` (mismo bot, misma frontera) |
+
+**`ALLOWED_USERS` es obligatoria desde el 06/09/2026.** Antes, si estaba vacía el
+bot atendía a cualquiera que lo encontrara: fallaba abierta. Ahora falla cerrada,
+que es el mismo criterio que las contraseñas —una cuenta sin su variable no
+existe, en vez de quedar sin contraseña—. Al arrancar, el bot dice en el log
+cuántos usuarios quedaron habilitados, o grita si quedó en cero.
+
+Se cargan separados por coma, y vale tanto el `@username` como el **user id
+numérico** de Telegram. Conviene el id: un username se libera y lo puede reclamar
+otra persona, y el id no cambia nunca.
+
+```
+ALLOWED_USERS=gonzalo_ok,123456789,charly_bar
+```
+
+### Avisos por Telegram (los graves)
+
+Desde el 06/09/2026 los avisos de **severidad alta** —hoy son dos, y los dos son
+de plata: se pagó más de lo cargado, y se pagó algo que ya estaba pago— además de
+quedar en la campanita **salen por Telegram**. Hasta esa fecha la app no mandaba
+nada: un aviso esperaba a que alguien la abriera.
+
+| Variable | Servicio | Qué pasa si falta |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` (o `TELEGRAM_TOKEN`) | app | No sale ningún aviso. Todo lo demás sigue igual |
+| `TELEGRAM_CHAT_<USUARIO>` | app | Esa persona no recibe (no es un error) |
+| `TELEGRAM_TIMEOUT_MS` | app | 8000 |
+
+Es el **mismo token del bot** (mismo bot, misma frontera de confianza). Una
+variable por persona, en mayúsculas y con el nombre de usuario de la app:
+`TELEGRAM_CHAT_TINCHO`, `TELEGRAM_CHAT_PABLO`. Van así y no en una lista porque
+un chat id es un dato de alguien y este repositorio es público.
+
+**Nada periódico sale por acá, a propósito.** Ni resúmenes ni recordatorios: sólo
+lo grave. Una alarma que suena todos los días deja de escucharse, y por Telegram
+además interrumpe.
+
+Si Telegram falla, el aviso **igual quedó** en la hoja `Avisos` y en la
+campanita: se pierde la inmediatez, nunca el registro. Una recepción de pedido no
+puede fallar porque no se pudo mandar un mensaje.
+
+
 ### Informes automáticos
 
 Tres agentes escriben en **Reportes → Informe**. Al destinatario le salta una
