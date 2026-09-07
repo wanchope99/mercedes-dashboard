@@ -1440,15 +1440,10 @@ async function registrarCompra(datos = {}) {
         // pueden pasar días, y la recepción no tiene de dónde sacarlos.
         categoria,
         mes,
-        // Con qué se paga. Hasta el 07/09/2026 "se paga al recibir" forzaba
-        // Efectivo Local —"es la única caja que existe en la puerta"—, y eso
-        // dejaba sin poder expresar el caso que pidió cubrir Gonzalo: el
-        // proveedor que cobra en la puerta pero al que le transfiere Pablo o
-        // Tincho. Ahora se respeta lo que dijo la compra y Efectivo Local queda
-        // de respaldo, que es lo que manda el formulario cuando nadie lo toca.
-        // La recepción lee esto en vez de inventar el medio: ver
-        // `medioDeRecepcion`.
-        medioPrevisto: previsto === 'al-recibir' ? (medioPago || CAJA_EFECTIVO) : (medioPago || ''),
+        // En la puerta se paga siempre en efectivo del local; es la única caja
+        // que existe ahí, y por eso el formulario ni siquiera lo pregunta (ver
+        // setPagoPrevisto). En los otros dos casos, el medio elegido.
+        medioPrevisto: previsto === 'al-recibir' ? CAJA_EFECTIVO : (medioPago || ''),
         pagoPrevisto: previsto,
         vence: previsto === 'a-pagar' ? vencLibro : '',
         origen: 'compra',
@@ -3313,38 +3308,24 @@ const MODOS_RECIBIR = {
 /**
  * Con qué medio se anota lo que pasó en la puerta.
  *
- * NO SE PREGUNTA, y desde el 07/09/2026 tampoco es siempre Efectivo Local.
- * La regla que puso Gonzalo: **el dato de cómo se paga viene de la compra**
- * —del formulario de Nueva compra o de la foto al bot—, así que la recepción lo
- * usa en vez de volver a pedirlo o de inventarlo.
+ * NO SE PREGUNTA, y cuando salió plata es SIEMPRE Efectivo Local. Regla de
+ * Gonzalo, dicha así: *"si el pedido se paga en la entrega en el local, siempre
+ * se va a pagar con efectivo local"*. Es la única caja que existe en la puerta.
  *
- * Hasta hoy 'pague' escribía `Efectivo Local` fijo, con el argumento de que es
- * la única caja que existe en la puerta. Es cierto para el caso normal y falso
- * para uno real: la compra que se paga al recibir **por transferencia de Pablo**
- * (el proveedor cobra ahí mismo, pero la plata sale de otra cuenta). Escribir
- * `Efectivo Local` restaba de una caja que no se tocó y, con el arqueo abierto,
- * metía el gasto en `gastosSesion` inventando un faltante esa noche.
+ * Esto estuvo dos horas siendo otra cosa el 07/09/2026 y se revirtió el mismo
+ * día. La idea era cubrir "en la puerta cobra el proveedor pero transfiere
+ * Pablo" dejando que la compra eligiera el medio de un `al-recibir`. Está mal
+ * planteado: ese pago no ocurre en la puerta ni sale de la caja del local, así
+ * que no es un `al-recibir` — se carga como ya pagado, o como que queda a
+ * cuenta. Y el costo de permitirlo era el peor posible: un pago anotado contra
+ * una caja que nadie tocó, que es exactamente lo que descuadra un arqueo.
  *
- * La distinción es por `pagoPrevisto` y no por el modo:
- *
- *   · `al-recibir` — la compra AFIRMÓ que se paga en la puerta y con qué. Ése
- *     es el medio, y `Efectivo Local` queda de respaldo para las compras
- *     cargadas antes de que el formulario preguntara.
- *   · cualquier otro — la compra dijo otra cosa (ya está pago, o queda a
- *     cuenta) y esto es la EXCEPCIÓN: el proveedor cobró igual, en la puerta.
- *     Eso es efectivo del local. El medio de la compra acá describe otro pago
- *     —el que ya se hizo, o el que se iba a hacer— y usarlo restaría de la caja
- *     equivocada.
- *
- * Cuando nadie pagó, el medio es el que dijo la compra: si queda a cuenta es
+ * Cuando NADIE pagó, el medio es el que dijo la compra: si queda a cuenta es
  * por dónde se va a pagar, y si ya estaba pagada es por dónde salió. Vacío no
  * rompe nada — Pagos cae en la ficha del proveedor.
  */
 function medioDeRecepcion(pedido, modo) {
-  if (modo !== 'pague') return pedido.medioPrevisto || '';
-  return pedido.pagoPrevisto === 'al-recibir'
-    ? (pedido.medioPrevisto || CAJA_EFECTIVO)
-    : CAJA_EFECTIVO;
+  return modo === 'pague' ? CAJA_EFECTIVO : (pedido.medioPrevisto || '');
 }
 
 // Un navegador con la pantalla vieja abierta sigue mandando los tres nombres de

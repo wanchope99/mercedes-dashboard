@@ -93,14 +93,27 @@ function run(t) {
     + bloque(server, 'function medioDeRecepcion(pedido, modo) {') + '\n'
     + 'return medioDeRecepcion;')();
 
-  t.eq(medioDeRecepcion({ pagoPrevisto: 'al-recibir', medioPrevisto: 'Mercado Pago Tincho' }, 'pague'),
-    'Mercado Pago Tincho', 'se paga al recibir por transferencia → ese es el medio');
-  t.eq(medioDeRecepcion({ pagoPrevisto: 'al-recibir', medioPrevisto: '' }, 'pague'),
-    'Efectivo Local', 'sin medio cargado → efectivo del local, que es lo de siempre');
-  t.eq(medioDeRecepcion({ pagoPrevisto: 'a-pagar', medioPrevisto: 'Galicia' }, 'pague'),
-    'Efectivo Local', 'quedaba a cuenta y se pagó igual en la puerta → sale efectivo');
+  // SI SALIÓ PLATA EN LA PUERTA, ES EFECTIVO DEL LOCAL. Siempre, sin importar
+  // qué diga la compra: es la única caja que existe ahí. Un pago anotado contra
+  // otra caja es una caja que no se tocó y un arqueo que no cierra esa noche.
+  for (const previsto of ['al-recibir', 'a-pagar', 'pagado', '']) {
+    t.eq(medioDeRecepcion({ pagoPrevisto: previsto, medioPrevisto: 'Galicia' }, 'pague'),
+      'Efectivo Local', `se pagó en la puerta (compra "${previsto || 'sin dato'}") → efectivo del local`);
+  }
+
+  // Cuando NADIE pagó, el medio es el que dijo la compra: por dónde se va a
+  // pagar, o por dónde ya salió.
   t.eq(medioDeRecepcion({ pagoPrevisto: 'a-pagar', medioPrevisto: 'Galicia' }, 'no-pague'),
     'Galicia', 'nadie pagó → queda el medio que dijo la compra');
+  t.eq(medioDeRecepcion({ pagoPrevisto: '', medioPrevisto: '' }, 'no-pague'),
+    '', 'sin medio no se inventa uno: Pagos cae en la ficha del proveedor');
+
+  // Y el formulario no ofrece elegirlo en la puerta, que es de donde salía el
+  // medio raro. Las dos mitades de la misma regla.
+  t.ok(/f-medio-wrap'\)\.style\.display = v === 'al-recibir' \? 'none' : ''/.test(index),
+    'Nueva compra esconde el medio en "se paga al recibir"');
+  t.ok(/medioPrevisto: previsto === 'al-recibir' \? CAJA_EFECTIVO/.test(server),
+    'y el server lo fuerza a Efectivo Local igual, sin creerle al formulario');
 
   // ══ 4. Para qué lado va cada saldo ══════════════════════════════════════
   const saldos = bloque(server, 'async function saldosDeRecepcion({');

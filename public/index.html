@@ -9849,15 +9849,6 @@ const RELEASE_LOG = [
             + 'antes de recibir.',
         donde: 'Compras › Pedidos',
       },
-      {
-        icono: '🏦',
-        titulo: 'Si en la puerta paga otro, se dice al cargar la compra',
-        desc: 'En <b>Nueva compra</b>, "se paga al recibir" ahora pregunta <b>con qué se paga</b> '
-            + '(viene puesto Efectivo Local, que es lo de siempre). Sirve para el proveedor que '
-            + 'cobra en la puerta pero al que le transfiere Pablo o Tincho: antes eso se anotaba '
-            + 'como si hubiera salido de la caja del local y descuadraba el arqueo.',
-        donde: 'Compras › Pedidos › + Nueva compra',
-      },
     ],
   },
   {
@@ -11204,31 +11195,21 @@ function setPagoPrevisto(v) {
     if (b) b.classList.toggle('activo', k === v);
   }
   document.getElementById('f-previsto-hint').innerHTML = ppTexto(v, categoriaLlevaEntrega());
-  // EL MEDIO SE PREGUNTA SIEMPRE, TAMBIÉN EN LA PUERTA (07/09/2026).
+  // EL MEDIO NO SE PREGUNTA EN LA PUERTA: ahí es siempre efectivo del local.
+  // Regla de Gonzalo — "si el pedido se paga en la entrega en el local, siempre
+  // se va a pagar con efectivo local".
   //
-  // Hasta hoy este campo se escondía en "se paga al recibir", con el argumento
-  // de que en la puerta es siempre efectivo del local. Es cierto casi siempre y
-  // falso en un caso real que pidió cubrir Gonzalo: el proveedor que cobra en
-  // la puerta pero **le transfiere Pablo o Tincho**. La plata sale, y no de la
-  // caja del bar.
+  // Este campo estuvo visible para "se paga al recibir" durante dos horas el
+  // 07/09/2026, para cubrir "cobra el proveedor en la puerta pero transfiere
+  // Pablo". Está mal planteado: ese pago no sale de la caja del local, así que
+  // no es un `al-recibir` — se carga como ya pagado, o como que queda a cuenta.
+  // Permitirlo dejaba anotar un pago contra una caja que nadie tocó, que es
+  // justo lo que descuadra el arqueo de esa noche.
   //
-  // El costo de esconderlo no era cosmético: la recepción escribía `Efectivo
-  // Local` fijo, o sea que restaba de una caja que nadie tocó y, con el arqueo
-  // abierto, metía ese gasto en la sesión e inventaba un faltante esa noche.
-  // Ahora el dato viaja con el pedido (`medioPrevisto`) y la recepción lo usa
-  // — ver `medioDeRecepcion` en src/server.js.
-  //
-  // Sigue siendo OPCIONAL acá (`validarCompra` sólo lo exige en "ya está
-  // pagado"): vacío, el server cae en Efectivo Local, que es el caso normal.
-  document.getElementById('f-medio-wrap').style.display = '';
-  document.getElementById('f-medio-label').textContent =
-    v === 'pagado' ? 'Medio de pago'
-    : v === 'al-recibir' ? 'Con qué se paga en la puerta'
-    : 'Con qué se va a pagar';
-  // El caso normal, ya elegido: en la puerta se paga en efectivo del local. Se
-  // pone sólo si no hay nada, para no pisar lo que alguien acaba de elegir.
-  const medioEl = document.getElementById('f-medio');
-  if (v === 'al-recibir' && medioEl && !medioEl.value) medioEl.value = 'Efectivo Local';
+  // En "queda a pagar" se sigue preguntando —es con qué se va a pagar cuando
+  // venza— aunque el server no lo escriba en la columna L todavía.
+  document.getElementById('f-medio-wrap').style.display = v === 'al-recibir' ? 'none' : '';
+  document.getElementById('f-medio-label').textContent = v === 'pagado' ? 'Medio de pago' : 'Con qué se va a pagar';
   const conCuotas = document.getElementById('f-concuotas').checked;
   document.getElementById('f-venc-wrap').style.display = (conCuotas || v === 'a-pagar') ? '' : 'none';
   document.getElementById('f-btn-seguir').textContent =
