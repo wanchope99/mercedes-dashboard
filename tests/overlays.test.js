@@ -75,6 +75,36 @@ function run(t) {
   // en la salida cuando alguien la rompa.
   t.ok(/#ped-prov-overlay\.open/.test(css),
     '#ped-prov-overlay —el que se rompió— tiene su regla');
+
+  // ── Y que la grilla de los formularios no desborde el modal ───────────────
+  //
+  // `1fr` es `minmax(auto, 1fr)`: la columna nunca baja del min-content de lo
+  // que tiene adentro. Un `<input>` sin ancho declarado trae ~198px de
+  // min-content —el ancho por defecto de un campo de texto—, así que dos
+  // columnas pedían 412px de mínimo contra los 399px que tiene el modal por
+  // dentro. La grilla se desbordaba y aparecía una barra horizontal con media
+  // columna cortada afuera de la pantalla.
+  //
+  // Lo encontró Gonzalo el 07/09/2026 abriendo "Datos de la factura", donde la
+  // segunda columna es una fila flex (punto de venta + número) cuyo min-content
+  // daba 298px y sola ya no entraba. Es la misma familia que el bug de
+  // Servicios de septiembre: una grilla de ancho fijo adentro de algo que
+  // recorta se rompe sin avisar.
+  t.ok(/\.form-grid \{[^}]*grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\)/.test(css),
+    '.form-grid usa minmax(0, 1fr): las columnas pueden achicarse abajo del contenido');
+  t.ok(/\.form-group \{[^}]*min-width: 0/.test(css),
+    '.form-group no impone su min-content como ancho mínimo de la columna');
+  t.ok(/\.form-group input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\)/.test(css),
+    'los campos ocupan su celda…');
+  t.ok(/\.form-group input:not\(\[type="checkbox"\]\)[\s\S]{0,160}width: 100%; min-width: 0/.test(css),
+    '…con width:100% y min-width:0, que es lo que los saca de la ecuación del ancho');
+
+  // Los checkboxes quedan AFUERA de ese width, y tiene que seguir así: no son
+  // campos que llenen un renglón sino un cuadradito al lado de su texto.
+  // Estirarlos al 100% le come el ancho a la etiqueta y la parte en dos líneas
+  // — pasó en el primer intento del arreglo.
+  t.ok(!/\.form-group input \{[^}]*width: 100%/.test(css),
+    'no hay un width:100% suelto para TODOS los input del formulario');
 }
 
-module.exports = { nombre: 'Cada modal sabe esconderse', run };
+module.exports = { nombre: 'Los modales: esconderse y no desbordar', run };

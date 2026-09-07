@@ -339,11 +339,41 @@
     #modal-overlay.open { display: flex; }
     #modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 32px; width: 480px; max-width: 95vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 24px 64px rgba(0,0,0,0.5); }
     #modal h3 { font-size: 17px; font-weight: 600; margin-bottom: 24px; }
-    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    /* ── Por qué `minmax(0, 1fr)` y no `1fr` ────────────────────────────────
+       `1fr` es `minmax(auto, 1fr)`: la columna NUNCA se achica por debajo del
+       min-content de lo que tiene adentro. Y un `<input>` sin ancho declarado
+       trae un min-content de ~198px —el ancho por defecto de un campo de
+       texto—, así que dos columnas pedían 198+198+16 = 412px de mínimo contra
+       los 399px que tiene el modal por dentro. La grilla se desbordaba y, como
+       `#modal` scrollea, aparecía una barra horizontal con media columna
+       cortada afuera de la ventana.
+       Lo encontró Gonzalo el 07/09/2026 abriendo "Datos de la factura", que es
+       donde peor pegaba: ahí adentro el campo del número es una fila flex
+       (punto de venta + número) cuyo min-content daba 298px, y esa columna sola
+       ya no entraba.
+       Es el mismo error que este archivo ya tiene documentado para Servicios
+       (04/09/2026): una grilla de ancho fijo adentro de algo que recorta se
+       rompe sin avisar. `minmax(0, ...)` en las columnas y `min-width: 0` en
+       los campos es la forma de decir "achicate, que el contenedor manda".  */
+    .form-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+    .form-group { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
     .form-group.full { grid-column: 1 / -1; }
     .form-group label { font-size: 12px; font-weight: 500; color: var(--text-muted); }
     .form-group input, .form-group select, .form-group textarea { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family: inherit; outline: none; }
+    /* `width: 100%` + `min-width: 0`: el campo ocupa su celda y no impone su
+       ancho por defecto como mínimo de la columna. Sin esto, la grilla la
+       dimensiona el input y no el modal — ver el comentario de .form-grid.
+       `box-sizing: border-box` es global (línea 20), así que el 100% ya incluye
+       el padding y el borde.
+
+       CHECKBOXES Y RADIOS QUEDAN AFUERA, y hay que dejarlos afuera: no son
+       campos que llenen un renglón sino un cuadradito al lado de su texto, y
+       estirarlos al 100% le come el ancho a la etiqueta y la parte en dos
+       líneas. Pasó al primer intento de este arreglo, en "La compra es del día
+       de la fecha" y en "Compra en cuotas". */
+    .form-group input:not([type="checkbox"]):not([type="radio"]),
+    .form-group select,
+    .form-group textarea { width: 100%; min-width: 0; }
     .form-group input[type="date"] { color-scheme: dark; }
     .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: #5a5a7a; }
     .form-group textarea { resize: vertical; min-height: 72px; }
