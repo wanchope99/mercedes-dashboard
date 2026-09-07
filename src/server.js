@@ -1457,7 +1457,7 @@ async function registrarCompra(datos = {}) {
         };
       }
       aviso = `La compra quedó registrada en Movimientos, pero el pedido NO se pudo crear (${e.message}). `
-        + 'Cargalo a mano desde Operación › Pedidos.';
+        + 'Cargalo a mano desde Compras › Pedidos.';
     }
   }
 
@@ -4250,6 +4250,27 @@ app.put('/api/pedidos/semanal/:id', authMiddleware, async (req, res) => {
 app.delete('/api/pedidos/semanal/:id', authMiddleware, adminOnly, async (req, res) => {
   try { await pedidos.borrarSemanal(req.params.id); res.json({ ok: true, message: 'Ítem eliminado del cuadro' }); }
   catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+// Un pedido suelto, por id. Existe desde el 07/09/2026 para el camino de VUELTA
+// del circuito: una fila de Movimientos escrita por una entrega lleva el id del
+// pedido en la columna H, y desde el detalle de un pago hay que poder abrir la
+// entrega que la generó. La lista (`GET /api/pedidos`) no sirve para eso: son
+// hoy y siete días, y una fila a pagar puede ser de un pedido más viejo.
+//
+// VA DEBAJO DE `/api/pedidos/semanal`, y eso es obligatorio: declarado arriba,
+// `:id` se comería la palabra "semanal" y el cuadro semanal dejaría de cargar.
+// Ver tests/rutas.test.js, que falla si alguien lo sube.
+app.get('/api/pedidos/:id', authMiddleware, async (req, res) => {
+  try {
+    const p = await pedidos.getPedido(req.params.id);
+    if (!p) return res.status(404).json({ ok: false, error: 'No existe ese pedido' });
+    // Sin `rowIndex`, igual que todo lo que sale de este módulo: una fila se
+    // mueve cuando alguien edita la planilla a mano, así que un índice que viaja
+    // por la red es una pista y no una identidad. Ver _publico en src/pedidos.js.
+    const { rowIndex, ...publico } = p;
+    res.json({ ok: true, data: publico });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 // ─── Informes automáticos ───────────────────────────────────────────────────

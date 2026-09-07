@@ -760,6 +760,68 @@
     .ped-dia-fila.atrasado { border-left: 3px solid var(--red); }
     .ped-dia-fila .flecha { color: var(--text-muted); font-size: 13px; margin-left: auto; }
 
+    /* ── El día en foco ─────────────────────────────────────────────────────
+       UN día de la lista se dibuja grande y con su contenido a la vista, como
+       la semana de Teams le da columnas anchas a hoy y mañana. Es el que
+       contesta "¿qué llega ahora?": hoy, o el primer día de entregas si hoy es
+       domingo o lunes (ver diaEnFoco).
+
+       ES UNO SOLO, Y ESO ES LO QUE LO SEPARA DEL ACORDEÓN QUE SE SACÓ EL
+       21/08/2026. Aquel desplegaba CUALQUIER día y adentro traía los renglones
+       de cada entrega: un día con cuatro pedidos de doce productos eran
+       cincuenta líneas empujando los días siguientes fuera de la pantalla.
+       Acá se despliega uno, y lo que se ve de cada entrega es el encabezado
+       —proveedor, qué es, si hay que pagarlo y cuánto—, nunca sus renglones.
+       El techo es la cantidad de entregas del día, no la de productos.
+
+       Sigue abriendo el mismo modal al tocarlo: acá se MIRA, ahí se recibe. */
+    .ped-foco { background: var(--surface2); border: 1px solid var(--border);
+                border-left: 4px solid var(--orange); border-radius: 12px;
+                padding: 16px 18px; margin-bottom: 14px; cursor: pointer; }
+    .ped-foco:hover { border-color: var(--accent); border-left-color: var(--orange); }
+    .ped-foco-cab { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+    .ped-foco-ojo { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+                    color: var(--orange); font-weight: 700; }
+    .ped-foco-titulo { font-size: 20px; font-weight: 600; line-height: 1.25; margin-top: 2px; }
+    /* La plata que hay que tener a mano ese día. Es el único dato de esta
+       pantalla que pide una acción ANTES de que llegue nadie —ir a buscar el
+       efectivo—, así que es lo más grande después del día. */
+    .ped-foco-plata { margin-left: auto; text-align: right; line-height: 1.3; }
+    .ped-foco-plata b { display: block; font-size: 19px; color: var(--orange); font-weight: 700; }
+    .ped-foco-plata span { font-size: 11px; color: var(--text-muted); }
+    .ped-foco-lista { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+    .ped-foco-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+                    background: var(--surface); border: 1px solid var(--border);
+                    border-radius: 8px; padding: 10px 12px; }
+    /* Lo que ya llegó se apaga, no se esconde: sigue siendo parte de la
+       respuesta del día ("de los tres, dos ya están"). */
+    .ped-foco-row.llego { opacity: 0.65; }
+    .ped-foco-prov { font-size: 14px; font-weight: 600; }
+    .ped-foco-det { font-size: 12px; color: var(--text-muted); }
+    .ped-foco-monto { margin-left: auto; font-size: 13px; font-weight: 600; white-space: nowrap; }
+    .ped-foco-vacio { margin-top: 12px; font-size: 13px; color: var(--text-muted); }
+    .ped-foco-pie { margin-top: 12px; display: flex; align-items: center; gap: 10px;
+                    flex-wrap: wrap; font-size: 12px; color: var(--text-muted); }
+    .ped-foco-abrir { margin-left: auto; color: var(--orange); font-weight: 600; white-space: nowrap; }
+
+    /* ── Llegó y nadie dijo qué pasó con la plata ───────────────────────────
+       `sinPago` lo calcula el server desde siempre y no se dibujaba en ningún
+       lado: lo perseguía sólo la campanita, que se silencia por el día. Acá es
+       donde se arregla, así que acá tiene que decirse. */
+    .ped-sinpago-card { border-left: 3px solid var(--orange); }
+    .ped-sinpago-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+                       padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .ped-sinpago-row:last-child { border-bottom: 0; }
+    .ped-sinpago-fecha { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+    /* Los dos botones de recibir, a la derecha del renglón. Llevan también la
+       clase `.ped-acciones`, que es donde vive el estilo de esos botones: sin
+       ella salen sin borde ni color, porque toda esa hoja está scopeada a ese
+       contenedor. Acá sólo se los manda a la derecha — y es ESTE el que lleva
+       el `margin-left:auto`, no el monto, para que los botones queden pegados
+       al borde tanto si hay importe como si no. */
+    .ped-sinpago-acc { margin-left: auto; }
+    .ped-sinpago-row .ped-foco-monto { margin-left: 0; }
+
     /* El modal de un día. Alto acotado con el cuerpo scrolleando adentro: un día
        con seis pedidos y sus renglones no puede empujar los botones fuera de la
        pantalla de un teléfono. */
@@ -854,6 +916,13 @@
       .ped-acc-ppal { text-align: center; }
       .ped-acc-sec { text-align: center; padding: 4px 10px !important; }
       .ped-acc-menores { justify-self: end; border-left: none; padding-left: 0; margin-left: 0; }
+
+      /* En la tarjeta de "falta registrar el pago" los dos botones también se
+         apilan, y a propósito: son los mismos dos del modal y la jerarquía de
+         arriba es lo que evita tener que leerlos. Lo único que cambia es que
+         acá ocupan el renglón entero en vez de quedar pegados a la derecha —
+         apilados y angostos contra el borde no se parecen a nada. */
+      .ped-sinpago-acc { width: 100%; margin-left: 0; }
 
       /* El renglón de un producto: el nombre se queda con lo que sobra y los
          botones no se estiran. Sin esto "Agua sin gas 500ml" salía en dos
@@ -1580,6 +1649,15 @@
 
       .filters-bar, .pagos-filters { padding: 10px 14px; gap: 8px; }
 
+      /* El día en foco en el teléfono. El título baja de 20 a 17 y la plata deja
+         de ir a la derecha: con `margin-left:auto` en una columna angosta se
+         pegaba al borde y quedaba pisando el título en dos renglones. Acá va
+         debajo, alineada a la izquierda, que es como se lee. */
+      .ped-foco { padding: 14px; }
+      .ped-foco-titulo { font-size: 17px; }
+      .ped-foco-plata { margin-left: 0; text-align: left; width: 100%; }
+      .ped-foco-monto { margin-left: 0; }
+
       /* En el teléfono los submenús vuelven a ser una tira que se desliza, no
          dos renglones: deslizar chips es el gesto de acá, y dos filas de
          submenús encima del header y la barra de filtros dejan la pantalla sin
@@ -2225,7 +2303,32 @@
      "PEDIDOS X DIA". Un pedido NO se carga acá: nace al registrar la compra
      (🛒 Nueva compra) o del cuadro semanal. Ver src/pedidos.js y el JS de abajo. -->
 <div id="tab-pedidos" class="tab-panel">
+  <!-- "+ Nueva compra" está ACÁ desde el 07/09/2026, además de en Pagos. Es el
+       mismo openModal(), no una copia: el formulario es uno solo.
+       Está acá porque es donde EMPIEZA el circuito —se carga la compra, se dice
+       qué día llega, y el pedido aparece en la lista de abajo—, y porque para el
+       encargado es el único camino: Pagos pasó a ser soloAdmin el mismo día (ver
+       TAB_GROUPS), y antes esa pantalla existía para él sólo para llegar a este
+       botón, con todo lo demás escondido y un "🔔 Pendientes" que le contestaba
+       403. En el teléfono no cambia nada: ahí se llega por el botón de Inicio. -->
+  <div class="filters-bar">
+    <div style="flex:1"></div>
+    <button class="btn btn-accent" onclick="openModal()">+ Nueva compra</button>
+  </div>
   <main>
+    <!-- Entregas de días pasados que llegaron y nunca dijeron qué pasó con la
+         plata. El server las devuelve en `sinPago` desde siempre y hasta el
+         07/09/2026 no se dibujaban en ningún lado: lo único que las perseguía
+         era la campanita, que se silencia por el día y al otro día vuelve a
+         sonar sin decir dónde se arregla. Se arreglan ACÁ —cualquiera de los
+         dos botones de recibir cierra la fila—, así que acá tienen que estar.
+         La tarjeta entera se esconde cuando no hay ninguna: una tarjeta vacía
+         que dice "todo en orden" es una línea más para saltear todos los días. -->
+    <div class="card ped-sinpago-card" id="ped-sinpago-card" style="display:none;margin-bottom:24px">
+      <div class="card-title"><span id="ped-sinpago-tit">Llegaron y falta registrar el pago</span></div>
+      <div id="ped-sinpago"></div>
+    </div>
+
     <div class="card">
       <div class="card-title"><span>Los próximos días</span>
         <button class="btn" style="padding:4px 12px" onclick="loadPedidos(this)">↻ Actualizar</button>
@@ -4126,7 +4229,7 @@
         </div>
 
         <!-- El remito, acá y no después en Pedidos. Hasta el 25/08/2026 había
-             que guardar la compra, ir a Operación › Pedidos, abrir el día,
+             que guardar la compra, ir a Compras › Pedidos, abrir el día,
              abrir el pedido y recién ahí pegar el recorte — cinco pasos para
              algo que se tiene en el portapapeles justo en este momento.
              La imagen se lee ahora y los renglones se guardan al guardar la
@@ -4246,7 +4349,15 @@
     <div id="resultado-icono" style="font-size:42px;margin-bottom:10px">✅</div>
     <h3 id="resultado-titulo" style="margin-bottom:8px">Listo</h3>
     <div id="resultado-detalle" style="font-size:13px;color:var(--text-muted);line-height:1.7;margin-bottom:20px"></div>
-    <button class="btn btn-accent" style="min-width:140px" onclick="closeResultadoModal()">Entendido</button>
+    <!-- El botón que LLEVA a lo que se acaba de crear. Aparece sólo cuando hay
+         adónde ir (ver `ir` en showResultadoModal): una compra con entrega deja
+         un pedido, y hasta el 07/09/2026 lo único que decía dónde estaba era una
+         frase en prosa. Va a la IZQUIERDA de "Entendido" y sin acento: cerrar
+         sigue siendo lo normal, ver el pedido es la opción. -->
+    <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+      <button class="btn" id="resultado-ir" style="display:none"></button>
+      <button class="btn btn-accent" style="min-width:140px" onclick="closeResultadoModal()">Entendido</button>
+    </div>
   </div>
 </div>
 
@@ -4705,20 +4816,29 @@ function onLoginSuccess(rol, nombre) {
     checkGaliciaVencReminder(); // recordatorio de vencimiento de la tarjeta (1 vez por ciclo)
     iniciarAvisoInformes(); // el informe del domingo, si el destinatario no lo vio
   } else {
-    // Encargado: Cajas (con submenús Cajas / Arqueo) + Pagos + Stocks. Qué ve y
-    // qué no lo decide el soloAdmin de TAB_GROUPS, ya aplicado por renderNav().
+    // Encargado: Compras (Pedidos / Cajas / Arqueo) + Operación. Qué ve y qué no
+    // lo decide el soloAdmin de TAB_GROUPS, ya aplicado por renderNav().
     // Stocks se le abre sólo por Gestión de Bebidas: los otros dos submenús están
     // marcados soloAdmin y la tabla se recorta en renderVinos().
-    // Pagos visible solo para registrar una compra nueva: sin listado, KPIs ni "Pagar"
+    //
+    // Estas cuatro líneas esconden la mitad de Pagos que es del dueño. Desde el
+    // 07/09/2026 el sub `pagos` es soloAdmin, así que el encargado ya no tiene
+    // por dónde llegar a ese panel — se dejan igual porque son la única defensa
+    // del lado del navegador si alguna vez aparece un camino nuevo, y porque
+    // esconder algo es más barato que descubrir que se estaba viendo.
     document.getElementById('pagos-filtros-admin-label').style.display = 'none';
     document.getElementById('pagos-filtros-admin').style.display = 'none';
     document.getElementById('btn-pagar-pendiente').style.display = 'none';
     document.getElementById('pagos-admin-panel').style.display = 'none';
-    // Abrir Cajas → y dentro, el submenú Arqueo directamente. En el teléfono no:
-    // ahí se entra por Inicio, y Arqueo es uno de sus cuatro botones.
+    // Abrir Compras → y dentro, el Arqueo directamente. Sigue siendo Arqueo y no
+    // Pedidos por decisión de Gonzalo (07/09/2026): el que entra por la
+    // computadora a esta hora puede ser el cocinero de la mañana o Charly a la
+    // noche, y el que abre la caja no puede tener que buscar su pantalla. El
+    // cocinero llega a Pedidos con un toque, y además es lo que el grupo abre
+    // solo cada vez que se vuelve a entrar (ver `abre` en TAB_GROUPS).
+    // En el teléfono no: ahí se entra por Inicio, y Arqueo es uno de sus botones.
     if (!esPhone()) {
-      switchGroup('caja');
-      switchSub('arqueo');
+      switchGroup('caja', null, 'arqueo');
     }
     // Las novedades marcadas `paraTodos` también le llegan al encargado. El
     // resto de iniciarAvisoInformes() es del informe del domingo, que es de una
@@ -4922,33 +5042,74 @@ const TAB_GROUPS = {
   // nombre (ver veInformes / subDeMenu). Renombrar el id sería el cambio caro y
   // no compra nada.
   //
-  // ORDEN: Pagos primero, o sea que es lo que se abre al entrar al grupo
-  // (switchGroup abre subs[0]). Antes iba Arqueo, con el argumento de que era la
-  // pantalla con la que el encargado empieza el turno; eso sigue siendo cierto y
-  // sigue resuelto, pero por otro lado: Charly trabaja en el teléfono y ahí tiene
-  // Arqueo como PRIMER botón de su home (ver HOME_TELEFONO), así que no llega
-  // por acá. Historial lee /api/arqueo/historial, que es adminOnly: mostrárselo
-  // al encargado sólo le daba un error de permisos.
+  // PEDIDOS ENTRÓ ACÁ EL 07/09/2026, desde Operación, por decisión de Gonzalo.
+  // Es el cambio que este archivo venía pidiendo desde el 21/08/2026, cuando la
+  // compra y la entrega pasaron a ser un solo circuito: `POST /api/pagos` crea
+  // el pedido y `POST /api/pedidos/:id/recibir` escribe la fila del libro. El
+  // circuito era uno y el menú lo partía en dos grupos, al punto de que la app
+  // tenía que explicarlo en prosa —"aparece marcado PAGAR en Operación ›
+  // Pedidos"— en once carteles distintos. Ahora se carga, se espera, se recibe
+  // y se paga sin salir de Compras.
+  //
+  // De paso Operación baja a SEIS subs y se salda la deuda que este archivo
+  // tenía anotada: estaba en siete, uno más que su propia regla, y el costo
+  // medido era que el séptimo se recortaba abajo de ~850px.
+  //
+  // El ID DEL GRUPO SIGUE SIENDO `caja`, y a propósito. Cambia la etiqueta, no
+  // la identidad: `badge`, `phonePrio` y todo lo que resuelve submenús lo hace
+  // por id, y este archivo tiene escrito que a un grupo NUNCA se lo busca por
+  // nombre (ver veInformes / subDeMenu). Renombrar el id sería el cambio caro y
+  // no compra nada.
+  //
+  // ORDEN: el del circuito —se pide, se paga, de qué caja salió, se cierra el
+  // turno—. QUÉ SE ABRE al entrar ya no es subs[0] sino `abre`, porque los dos
+  // roles entran a este grupo a preguntar cosas distintas: ver el comentario de
+  // `abre` acá abajo y su uso en switchGroup.
+  //
+  // PAGOS ES soloAdmin DESDE EL 07/09/2026. Para el encargado esa pantalla era
+  // una pantalla rota: sin KPIs, sin tabla y sin "Pagar" (los esconde
+  // onLoginSuccess), le quedaban dos botones y uno de ellos —🔔 Pendientes—
+  // le contestaba 403, porque /api/proveedores/pendientes es soloAdmin. Existía
+  // sólo para llegar a "+ Nueva compra", y ese botón ahora está en Pedidos, que
+  // es donde empieza el circuito. Historial ya era soloAdmin por lo mismo:
+  // /api/arqueo/historial le daba un error de permisos.
   //
   // El badge de facturas pendientes vive acá porque las pendientes se confirman
-  // desde Pagos (antes estaba en Stocks, que es de donde se mudaron). Ahora ese
-  // badge además apunta al sub que se abre primero, que es lo que corresponde.
-  caja: { label: '🛒 Compras', icono: '🛒', corto: 'Compras', phonePrio: 2, badge: true, subs: [
-    { id: 'pagos',  label: '💳 Pagos' },
-    { id: 'cajas',  label: '🏦 Cajas' },
-    { id: 'arqueo', label: '🗃️ Arqueo de Caja' },
-    { id: 'historial-arqueos', label: '📋 Historial de Arqueos', soloAdmin: true },
-  ] },
+  // desde Pagos (antes estaba en Stocks, que es de donde se mudaron).
+  caja: { label: '🛒 Compras', icono: '🛒', corto: 'Compras', phonePrio: 2, badge: true,
+    // El sub que se abre al ENTRAR al grupo, por rol. No es el orden de la
+    // barra: la barra cuenta el circuito, esto contesta con qué se entra.
+    //
+    //   admin     → Pagos. El dueño entra a Compras a mirar lo que se debe;
+    //               es una pregunta de escritorio, no de puerta.
+    //   encargado → Pedidos. Es la pantalla del cocinero que llega a las 10 y
+    //               quiere saber qué esperar hoy y si hay que pagarlo.
+    //
+    // Un id que no exista, o que el rol no vea, cae en el primero de los subs
+    // que le quedan: `abre` es una preferencia, no una promesa, y un menú no se
+    // puede quedar sin nada abierto por un typo.
+    abre: { admin: 'pagos', encargado: 'pedidos' },
+    subs: [
+      { id: 'pedidos', label: '📦 Pedidos' },
+      { id: 'pagos',   label: '💳 Pagos', soloAdmin: true },
+      { id: 'cajas',   label: '🏦 Cajas' },
+      { id: 'arqueo',  label: '🗃️ Arqueo de Caja' },
+      { id: 'historial-arqueos', label: '📋 Historial de Arqueos', soloAdmin: true },
+    ] },
 
   // ── El bar funcionando ────────────────────────────────────────────────────
-  // Lo que llega (Pedidos), lo que se consume (Bebidas), lo que se cierra de
-  // noche (Cierre), lo que se le debe al fisco (Fiscal), lo que cuesta la gente
-  // (Nómina) y lo que cuesta la comida (Costos).
+  // Lo que se consume (Bebidas), lo que se cierra de noche (Cierre), lo que se
+  // le debe al fisco (Fiscal), lo que cuesta la gente (Nómina) y lo que cuesta
+  // la comida (Costos).
   //
-  // Pedidos, Bebidas y Cierre SIN soloAdmin a propósito: el encargado recibe al
-  // proveedor en la puerta y cierra el turno. Fiscal, Nómina y Costos son
-  // adminOnly del lado del servidor, así que se le esconden. Mantenimiento
-  // también es suyo y ahora vive adentro de Más — ver el comentario de ese sub.
+  // PEDIDOS SE FUE A COMPRAS el 07/09/2026 — ver el comentario del grupo `caja`.
+  // Lo que llega y lo que se paga por eso que llega son el mismo circuito, y
+  // acá estaba del otro lado del menú que la compra que lo genera.
+  //
+  // Bebidas y Cierre SIN soloAdmin a propósito: el encargado cierra el turno.
+  // Fiscal, Nómina y Costos son adminOnly del lado del servidor, así que se le
+  // esconden. Mantenimiento también es suyo y ahora vive adentro de Más — ver
+  // el comentario de ese sub.
   //
   // "Más" nació el 15/08/2026 con Config. de costos e Historial de propinas
   // adentro, bajo el criterio de que si un sub es el DETALLE de otro sub, va a
@@ -4967,21 +5128,17 @@ const TAB_GROUPS = {
   // dejó de ser una pregunta sobre el futuro (¿conviene pasar a RI?) y pasó a
   // ser la pantalla donde se mira el IVA del mes en curso, que es operación.
   //
-  // SIETE SUBS PARA EL ADMIN, y este archivo dice que a los seis hay que
-  // repensar el agrupamiento. Se dejó igual porque lo pidió el dueño, pero el
-  // costo está medido y hay que saberlo: la barra de submenús usa `overflow-x`
-  // con la scrollbar OCULTA (ver .subtab-nav), que es el mismo mecanismo por el
-  // que en agosto se perdían secciones de la barra de arriba. Con siete botones
-  // entra cómodo en una pantalla ancha y empieza a recortar el último abajo de
-  // ~850px. En el teléfono no es problema: switchSub centra el elegido. En la
-  // computadora no hay ese rescate, así que si aparece un octavo, esto se rompe
-  // en silencio.
+  // SEIS SUBS PARA EL ADMIN desde el 07/09/2026, que es lo que manda la regla
+  // de este archivo. Estuvo en siete tres días, con el costo anotado y medido:
+  // la barra de submenús se recortaba abajo de ~850px en la computadora. Eso ya
+  // está arreglado de otra forma (`.subtab-nav` envuelve en dos líneas en vez
+  // de recortar, 06/09/2026), así que esto no es la solución de aquel problema
+  // sino la consecuencia de mover Pedidos a donde vive su circuito.
   //
-  // Para el ENCARGADO son cuatro: Pedidos, Bebidas, Cierre y Más. Fiscal,
-  // Nómina y Costos son adminOnly del lado del servidor, así que llevan
-  // soloAdmin acá — sin eso, Charly vería tres pantallas que le contestan 403.
+  // Para el ENCARGADO son tres: Bebidas, Cierre y Más. Fiscal, Nómina y Costos
+  // son adminOnly del lado del servidor, así que llevan soloAdmin acá — sin
+  // eso, Charly vería tres pantallas que le contestan 403.
   operacion: { label: '🍽️ Operación', icono: '🍽️', corto: 'Operación', phonePrio: 3, subs: [
-    { id: 'pedidos',        label: '📦 Pedidos' },
     { id: 'vinos',          label: '🥂 Bebidas' },
     { id: 'cierre',         label: '🍳 Cierre' },
     // Fiscal llegó de Plan el 04/09/2026. Va acá y no al final porque desde que
@@ -5187,10 +5344,27 @@ function activarPanel(tab) {
   refrescarGraficosVisibles();
 }
 
+// En el teléfono la tira de submenús se desliza: si el elegido quedó fuera de
+// la vista, centrarlo. Sin esto se puede tocar un submenú y no ver cuál quedó
+// marcado. Lo usan switchSub y switchGroup, que desde el 07/09/2026 también
+// puede abrir un sub que no es el primero.
+function centrarSubEnTelefono(sub) {
+  if (!esPhone()) return;
+  const btn = document.getElementById('subtab-' + sub);
+  if (btn) btn.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+}
+
 // Clic en una tab PADRE. Sirve para las dos barras (arriba en la computadora,
 // abajo en el teléfono). El segundo parámetro se ignora — quedó por compatibilidad
 // con los onclick viejos que pasaban `this`; el activo se deriva del id.
-function switchGroup(group, _btn) {
+//
+// `subInicial` (07/09/2026) lo pasa switchTab cuando ya sabe a qué submenú va.
+// Sin él, ir a un sub que no era el primero abría DOS paneles: switchGroup
+// activaba el primero —con su carga a la planilla— y switchSub el que se
+// pedía. Con Pedidos adentro de Compras eso pasó a ser el camino normal (la
+// campanita, el botón de Inicio del teléfono, "Ver el pedido"), y para el dueño
+// significaba traerse la tabla de Pagos entera para no mirarla.
+function switchGroup(group, _btn, subInicial) {
   setNavActivo(group);
 
   const cfg = TAB_GROUPS[group];
@@ -5205,13 +5379,29 @@ function switchGroup(group, _btn) {
     : null;
 
   if (subs && subs.length) {
-    // Renderizar la sub-barra y abrir el primer submenú. Se usa la clase y no
+    // CUÁL SE ABRE. Hasta el 07/09/2026 era siempre subs[0], o sea que el orden
+    // de la barra decidía dos cosas a la vez: en qué secuencia se leen los
+    // submenús y con cuál se entra. Dejaron de ser la misma pregunta cuando
+    // Pedidos entró a Compras: la barra cuenta el circuito (se pide, se paga,
+    // de qué caja salió, se cierra el turno) y con qué se entra depende de a
+    // qué viene cada rol — el dueño a ver lo que se debe, el cocinero a ver qué
+    // llega hoy. `abre` es esa preferencia, POR ROL, y vive en TAB_GROUPS junto
+    // al grupo que gobierna.
+    //
+    // Si el id no existe o el rol no lo ve, se cae en el primero que le quedó:
+    // una preferencia mal escrita no puede dejar el grupo sin nada abierto.
+    const preferido = cfg.abre && cfg.abre[getRol()];
+    const inicial = subs.find(s => s.id === subInicial)
+                 || subs.find(s => s.id === preferido)
+                 || subs[0];
+    // Renderizar la sub-barra y abrir ese submenú. Se usa la clase y no
     // style.display para que el CSS pueda gobernar la barra en el teléfono.
     subnav.classList.add('has-subs');
-    subnav.innerHTML = subs.map((s, i) =>
-      `<button class="subtab-btn ${i === 0 ? 'active' : ''}" id="subtab-${s.id}" onclick="switchSub('${s.id}', this)">${s.label}</button>`
+    subnav.innerHTML = subs.map(s =>
+      `<button class="subtab-btn ${s.id === inicial.id ? 'active' : ''}" id="subtab-${s.id}" onclick="switchSub('${s.id}', this)">${s.label}</button>`
     ).join('');
-    activarPanel(subs[0].id);
+    activarPanel(inicial.id);
+    centrarSubEnTelefono(inicial.id);
   } else {
     // Sin submenús: ocultar sub-barra y abrir el panel directo.
     subnav.classList.remove('has-subs');
@@ -5224,13 +5414,8 @@ function switchGroup(group, _btn) {
 function switchSub(sub, btn) {
   document.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
   const activo = btn || document.getElementById('subtab-' + sub);
-  if (activo) {
-    activo.classList.add('active');
-    // En el teléfono la tira de submenús se desliza: si el elegido quedó fuera
-    // de la vista, centrarlo. Sin esto se puede tocar un submenú y no ver cuál
-    // quedó marcado.
-    if (esPhone()) activo.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
-  }
+  if (activo) activo.classList.add('active');
+  centrarSubEnTelefono(sub);
   activarPanel(sub);
 }
 
@@ -5239,11 +5424,13 @@ function switchSub(sub, btn) {
 function switchTab(tab, btn) {
   // ¿Es una tab padre directa?
   if (TAB_GROUPS[tab]) { switchGroup(tab); return; }
-  // ¿Es un submenú? Buscar su grupo padre.
+  // ¿Es un submenú? Buscar su grupo padre y abrirlo YA en ese sub. Hasta el
+  // 07/09/2026 eran dos pasos —switchGroup + switchSub— y eso activaba dos
+  // paneles: primero el que el grupo abre por defecto, con su carga a la
+  // planilla, y encima el que se pedía.
   for (const [group, cfg] of Object.entries(TAB_GROUPS)) {
     if (cfg.subs && cfg.subs.some(s => s.id === tab)) {
-      switchGroup(group);
-      switchSub(tab);
+      switchGroup(group, null, tab);
       return;
     }
   }
@@ -7555,12 +7742,53 @@ function openPagoDetalle(rowIndex) {
   }
   html += fila('Fila en Movimientos', `<span style="color:var(--text-muted)">${p.rowIndex}</span>`);
 
+  // ── De dónde salió esta fila ───────────────────────────────────────────────
+  // La columna H (`cuotaId` acá) lleva el id de lo que la escribió, y el prefijo
+  // dice qué fue: `ped…` una entrega, `cmp…` una compra sin entrega, `fac…` una
+  // factura del bot. Sólo la primera tiene adónde llevar — las otras dos ya
+  // están enteras en esta ventana.
+  //
+  // Es el camino de VUELTA del circuito, y hasta el 07/09/2026 no existía: se
+  // veía una deuda de Thames y no había forma de saber de qué entrega era ni
+  // qué había traído, aunque la app lo supiera.
+  const idPedido = /^ped/.test(p.cuotaId || '') ? p.cuotaId : '';
+  if (idPedido) {
+    html += fila('Origen', 'Un pedido — esta fila la escribió una entrega');
+  }
+
   html += `<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap">
+      ${idPedido ? `<button class="btn" style="margin-right:auto" onclick="verPedidoDeFila('${escapeHtml(idPedido)}', this)">📦 Ver el pedido</button>` : ''}
       <button class="btn" onclick="closeDetalleModal();openProvModal('${(p.proveedor||'').replace(/'/g, "\\'")}')">Ver proveedor</button>
       <button class="btn btn-accent" onclick="pagarDesdeDetalle(${p.rowIndex})">✓ Pagar este</button>
     </div>`;
 
   openDetalleModal(escapeHtml(p.proveedor || 'Pago pendiente'), html);
+}
+
+/**
+ * De una fila del libro a la entrega que la escribió.
+ *
+ * El id está en la fila, pero la FECHA no: la lista de días es lo que sabe abrir
+ * un día, y una fila a pagar puede ser de un pedido de hace tres semanas, fuera
+ * de esa lista. Por eso se le pregunta al server por el pedido (`GET
+ * /api/pedidos/:id`) en vez de buscarlo entre los días cargados.
+ *
+ * El botón se apaga mientras viaja: es un viaje a la planilla y sin eso son
+ * tres toques y tres pedidos iguales.
+ */
+async function verPedidoDeFila(id, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/api/pedidos/' + encodeURIComponent(id));
+    closeDetalleModal();
+    irAlPedido(r.data && r.data.fecha);
+  } catch (e) {
+    // El pedido puede haberse borrado y la fila seguir viva: eso se dice, no se
+    // disimula con un botón que no hace nada.
+    showToast('No se pudo abrir el pedido: ' + e.message, 4000);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // El modal de pagar tiene z-index 560 y este 850, así que abrirlo encima lo
@@ -9506,6 +9734,70 @@ async function cerrarAvisoInforme(marcarLeido) {
 // misma computadora no se pisen.
 const RELEASE_LOG = [
   {
+    version: '2026-09-07-pedidos-en-compras',
+    fecha: '7 de septiembre de 2026',
+    titulo: 'Pedidos se mudó a Compras, y lo próximo que llega se ve sin abrir nada',
+    // Le cambia la sección de todos los días a Juan, Eze y Charly, y les saca
+    // una pantalla del medio. Es exactamente lo que este mecanismo existe para
+    // avisar: algo que estaba en un lugar y ahora está en otro.
+    paraTodos: true,
+    porque: 'Cargar una compra, esperar la entrega y pagarla siempre fueron una sola cosa, '
+      + 'pero estaban en dos secciones distintas del menú: la compra se cargaba en '
+      + '<b>Compras</b> y el pedido aparecía en <b>Operación</b>. Ahora está todo junto, '
+      + 'en el orden en que pasa — y el día que importa se ve abierto, sin tocar nada.',
+    items: [
+      {
+        icono: '📅',
+        titulo: 'El día que llega se ve abierto, con lo que trae',
+        desc: 'Uno de los días de la lista se dibuja grande y con las entregas a la vista: quién '
+            + 'trae qué, si hay que pagarlo y <b>cuánta plata hay que tener en efectivo</b>, todo '
+            + 'junto arriba. Es <b>hoy</b>, salvo que sea domingo o lunes: ahí muestra el martes, '
+            + 'que es el próximo día en que llega algo. Los otros días siguen igual, en su renglón.',
+        donde: 'Compras › Pedidos',
+      },
+      {
+        icono: '💸',
+        titulo: 'Las entregas que llegaron y quedaron sin registrar el pago ahora se ven',
+        desc: 'Cuando algo se recibió y nunca se dijo qué pasó con la plata, aparece en una tarjeta '
+            + 'arriba de todo con los <b>dos botones para cerrarlo ahí mismo</b>. Antes sólo lo '
+            + 'avisaba la campanita, que se apaga por el día y al otro día vuelve a sonar sin decir '
+            + 'dónde se arregla. Si no hay ninguna, la tarjeta no aparece.',
+        donde: 'Compras › Pedidos',
+      },
+      {
+        icono: '📦',
+        titulo: 'Pedidos ahora está adentro de Compras',
+        desc: 'Es la misma pantalla de siempre, sin ningún cambio: los próximos días, el cuadro '
+            + 'semanal y los mismos botones para recibir. Lo único que cambió es por dónde se '
+            + 'llega. <b>En el teléfono no cambia nada</b>: sigue siendo uno de los botones de '
+            + 'la pantalla de inicio.',
+        donde: 'Compras › Pedidos',
+      },
+      {
+        icono: '🛒',
+        titulo: 'Nueva compra se carga desde Pedidos',
+        desc: 'El botón <b>+ Nueva compra</b> ahora también está arriba en Pedidos, que es donde '
+            + 'empieza todo: se carga la compra, se dice qué día llega, y el pedido aparece en la '
+            + 'lista de abajo. Es el mismo formulario de siempre.',
+        donde: 'Compras › Pedidos',
+      },
+      {
+        icono: '➡️',
+        titulo: 'Después de cargar una compra se puede ir directo al pedido',
+        desc: 'El cartel de <b>Compra registrada</b> tiene un botón <b>Ver el pedido</b> que abre el '
+            + 'día de la entrega. Antes había que acordarse de la fecha e ir a buscarlo.',
+        donde: 'Compras › Pedidos',
+      },
+      {
+        icono: '🔎',
+        titulo: 'Y desde un pago se puede ver de qué entrega salió',
+        desc: 'Al abrir una fila en <b>Pagos</b>, si esa deuda la generó una entrega, ahora lo dice y '
+            + 'ofrece <b>Ver el pedido</b>. Sirve para contestar "¿de qué es esto?" sin abrir la planilla.',
+        donde: 'Compras › Pagos',
+      },
+    ],
+  },
+  {
     version: '2026-09-06-atajos-y-arreglos',
     fecha: '6 de septiembre de 2026',
     titulo: 'Atajos de fecha, y la compra ya no se pierde si falla el guardado',
@@ -9656,7 +9948,7 @@ const RELEASE_LOG = [
         desc: 'Nada más. <b>Llegó y lo pagué</b> es el botón grande: la plata salió de la caja, en efectivo, '
             + 'en la puerta. <b>Llegó y no lo pagué</b> es el chico. Adónde va cada uno en la planilla —si '
             + 'queda una deuda o si ya estaba pago— lo resuelve el sistema con lo que se cargó al comprar.',
-        donde: 'Operación › Pedidos',
+        donde: 'Compras › Pedidos',
       },
       {
         icono: '🧾',
@@ -9664,7 +9956,7 @@ const RELEASE_LOG = [
         desc: 'Sale con <b>lo que se había cargado al hacer el pedido</b>, así que en general no hay nada que '
             + 'escribir. Si el proveedor trajo otra cosa, se corrige ahí. Y se puede poner <b>cuándo se paga</b>, '
             + 'que es opcional: en blanco vence el día de la entrega.',
-        donde: 'Operación › Pedidos',
+        donde: 'Compras › Pedidos',
       },
       {
         icono: '📅',
@@ -9672,7 +9964,7 @@ const RELEASE_LOG = [
         desc: 'Estaban en la misma fila y del mismo tamaño que los de recibir, y son lo contrario: con ésos el '
             + 'pedido <b>se va a otra fecha o se borra</b>. Ahora quedan detrás de una línea, chiquitos y '
             + 'apagados, para que la mano apurada no los encuentre buscando el de recibir.',
-        donde: 'Operación › Pedidos',
+        donde: 'Compras › Pedidos',
       },
       {
         icono: '⏩',
@@ -9680,7 +9972,7 @@ const RELEASE_LOG = [
         desc: 'El proveedor que avisa que pasa hoy en vez del jueves. <b>Otro día</b> ahora ofrece <b>Hoy</b> '
             + 'cuando el pedido era para más adelante — antes había que abrir el calendario para elegir el día '
             + 'en el que estás parado. Si esa compra tiene cuenta, pasa a vencer ese día.',
-        donde: 'Operación › Pedidos',
+        donde: 'Compras › Pedidos',
       },
     ],
   },
@@ -9718,7 +10010,7 @@ const RELEASE_LOG = [
         desc: 'Cada pedido dice si <b>hay que pagarlo</b> (con el monto, en naranja), si ya está pago o si no se '
             + 'paga ahí. El renglón del día lo suma: "1 para pagar · $47.300", <b>sin abrir el día</b>, así se '
             + 'sabe si hay que tener plata a mano antes de que toquen el timbre.',
-        donde: 'Operación › Pedidos',
+        donde: 'Compras › Pedidos',
       },
       {
         icono: '🧾',
@@ -9733,7 +10025,7 @@ const RELEASE_LOG = [
         desc: 'La lista de días quedó como índice: un renglón por día con lo que hay que saber. Tocarlo abre el '
             + 'día completo, y ahí adentro está todo — qué llega, qué trae cada entrega y los botones para recibir. '
             + 'Con las listas de productos adentro, el desplegable ya no entraba en la pantalla.',
-        donde: 'Operación › Pedidos',
+        donde: 'Compras › Pedidos',
       },
       {
         icono: '👆',
@@ -9741,7 +10033,7 @@ const RELEASE_LOG = [
         desc: 'Si al comprar dijiste cómo se paga, al recibir aparece <b>un solo botón</b>: el que corresponde. '
             + 'Los otros dos siguen estando atrás de <b>otra forma</b>, porque la realidad cambia — el proveedor '
             + 'viene sin remito, o cobra algo que iba a ser transferencia.',
-        donde: 'Operación › Pedidos',
+        donde: 'Compras › Pedidos',
       },
       {
         icono: '📋',
@@ -9750,7 +10042,7 @@ const RELEASE_LOG = [
             + 'hacé <b>Ctrl+V</b>: se leen los productos con su cantidad y quedan como una lista para ir tildando '
             + 'cuando llega. Desde el teléfono, el botón <b>Pegar remito</b> deja sacar la foto. '
             + '<b>La imagen no se guarda</b> — se lee y queda la lista, que es lo que se puede leer en un teléfono.',
-        donde: 'Operación › Pedidos',
+        donde: 'Compras › Pedidos',
       },
     ],
   },
@@ -9770,7 +10062,7 @@ const RELEASE_LOG = [
         desc: 'Cada día es un renglón que se despliega con lo que va a llegar: proveedor, qué trae, cuánto '
             + 'sale y con qué se paga. Los días que ya pasaron desaparecen solos — salvo que hayan quedado '
             + 'con algo <b>sin recibir o sin definir si se pagó</b>, y ésos suben arriba de todo en rojo.',
-        donde: 'Operación › Pedidos',
+        donde: 'Compras › Pedidos',
       },
       {
         icono: '💵',
@@ -9779,7 +10071,7 @@ const RELEASE_LOG = [
             + 'operación que el botón Pagar de la sección Pagos, así que no se duplica nada. Si no había ninguna, '
             + 'se agrega una fila nueva. También se puede dejar como <b>a pagar</b> y aparece en Pagos. '
             + 'Antes de confirmar, la ventana dice en una línea qué va a hacer.',
-        donde: 'Operación › Pedidos',
+        donde: 'Compras › Pedidos',
       },
       {
         icono: '🗓️',
@@ -9787,7 +10079,7 @@ const RELEASE_LOG = [
         desc: 'Abajo está la rutina fija (los jueves entrega Barracas, Coca y Bendito). Se cambia un proveedor '
             + 'de día <b>arrastrando el bloque</b>, o con el botón ⋮ desde el teléfono. Lo que dice el cuadro '
             + 'aparece solo en cada día como "previsto": no hay que volver a cargarlo todas las semanas.',
-        donde: 'Operación › Pedidos',
+        donde: 'Compras › Pedidos',
       },
       {
         icono: '⋯',
@@ -10573,10 +10865,28 @@ document.addEventListener('keydown', function (e) {
 });
 
 // Modal estándar de resultado: se muestra cuando una escritura a la planilla termina
-function showResultadoModal({ ok, titulo, detalle }) {
+/**
+ * El cartel de "quedó hecho".
+ *
+ * `ir` es opcional y es `{ label, hacer }`: el botón que lleva a lo que se
+ * acaba de crear. Se agregó el 07/09/2026 para la compra con entrega — el
+ * circuito termina en un pedido y la pantalla sólo sabía nombrarlo. El handler
+ * se guarda en una variable en vez de armarse como string en el onclick: lo que
+ * viaja son datos (una fecha, un id) y meterlos en HTML es la forma conocida de
+ * romper todo con un apóstrofo.
+ */
+let _resultadoIr = null;
+function showResultadoModal({ ok, titulo, detalle, ir }) {
   document.getElementById('resultado-icono').textContent = ok ? '✅' : '❌';
   document.getElementById('resultado-titulo').textContent = titulo;
   document.getElementById('resultado-detalle').innerHTML = detalle || '';
+  const btnIr = document.getElementById('resultado-ir');
+  _resultadoIr = ir && typeof ir.hacer === 'function' ? ir.hacer : null;
+  btnIr.textContent = _resultadoIr ? ir.label : '';
+  btnIr.style.display = _resultadoIr ? '' : 'none';
+  // El cartel se cierra ANTES de navegar: si no, el overlay queda encima de la
+  // pantalla a la que acaba de llevar.
+  btnIr.onclick = () => { const f = _resultadoIr; closeResultadoModal(); if (f) f(); };
   document.getElementById('resultado-modal-overlay').style.display = 'flex';
 }
 function closeResultadoModal() { document.getElementById('resultado-modal-overlay').style.display = 'none'; }
@@ -10809,7 +11119,7 @@ function irAPaso2() {
   document.getElementById('modal-titulo').textContent = '¿Cuándo llega?';
   document.getElementById('f-entrega-sub').innerHTML =
     'La compra de <b>' + escapeHtml(prov) + '</b> ya está lista para registrarse. '
-    + 'Decí qué día llega y aparece en Operación › Pedidos'
+    + 'Decí qué día llega y aparece en Compras › Pedidos'
     + (state.pagoPrevisto === 'al-recibir' ? ', marcada para <b>pagar en la puerta</b>.' : '.');
   // "No lleva entrega" no se ofrece cuando se paga al recibir: sin entrega no
   // hay día en que salga la plata, y la fila quedaría sin vencimiento.
@@ -11269,7 +11579,7 @@ async function guardarCompra(conEntrega) {
         lineaRemito = `<br>📋 <b>${nRemito} producto${nRemito !== 1 ? 's' : ''}</b> del remito, cargado${nRemito !== 1 ? 's' : ''} en el pedido.`;
       } catch (e) {
         lineaRemito = `<br><span style="color:var(--orange)">⚠ ${sinGuardar} `
-          + `(${escapeHtml(e.message)}). El pedido está: pegá el remito de nuevo desde Operación › Pedidos.</span>`;
+          + `(${escapeHtml(e.message)}). El pedido está: pegá el remito de nuevo desde Compras › Pedidos.</span>`;
       }
     } else if (nRemito) {
       lineaRemito = `<br><span style="color:var(--orange)">⚠ ${sinGuardar}: `
@@ -11283,11 +11593,20 @@ async function guardarCompra(conEntrega) {
       ? `<br><span style="color:var(--orange)">⚠ ${escapeHtml(r.aviso)}</span>`
       : r.pedido
         ? `<br>📦 Se anotó el pedido para el <b>${new Date(r.pedido.fecha + 'T12:00:00').toLocaleDateString('es-AR')}</b>`
-          + (d.previsto === 'al-recibir' ? ' — aparece marcado <b>PAGAR</b> en Operación › Pedidos.' : '.')
+          + (d.previsto === 'al-recibir' ? ' — queda marcado <b>PAGAR</b>.' : '.')
         : '';
     showResultadoModal({
       ok: true,
       titulo: 'Compra registrada',
+      // El botón que cierra el círculo hacia adelante: la compra acaba de crear
+      // un pedido y hasta hoy la única forma de verlo era buscarlo a mano en la
+      // otra punta del menú. Lleva al DÍA de la entrega abierto, que es donde se
+      // lo recibe. Sólo aparece si hubo pedido de verdad (`r.pedido`): un
+      // alquiler o un VEP no tienen puerta donde recibirse.
+      ir: r.pedido ? {
+        label: '📦 Ver el pedido',
+        hacer: () => irAlPedido(r.pedido.fecha),
+      } : null,
       detalle: `<b>${escapeHtml(d.proveedor)}</b> · ${fmt(d.salidaARS)}<br>` + linea2 + linea3 + lineaRemito
         + `<br><span style="font-size:11px">${enElLibro
             ? `Escrito en la hoja Movimientos ✓${r.registradoEnSesion ? ' · descontado del arqueo en curso ✓' : ''}`
@@ -17689,6 +18008,12 @@ const pedState = {
   // recarga de la página.
   plegados: new Set(),
   pegandoEn: null,        // a qué pedido va lo próximo que se pegue
+  // Qué día hay que abrir en cuanto termine de cargar la pantalla. Lo deja
+  // `irAlPedido` cuando se llega desde otro lado —el cartel de "Compra
+  // registrada", una notificación— y se consume una sola vez. Va acá y no como
+  // un await del que navega porque `cargarPanel` ya dispara `loadPedidos()`:
+  // esperar el dato desde afuera sería pedirle los mismos días dos veces.
+  abrirAlCargar: null,
   moviendo: null,         // el pedido que se está pasando a otro día
   recibiendo: null,       // el pedido que está en el modal
   modo: null,             // cuál de los dos botones lo abrió: ver PED_MODOS
@@ -17821,16 +18146,56 @@ async function loadPedidos(btn) {
     const [{ data }] = await Promise.all([api('/api/pedidos'), cargarSaldos()]);
     pedState.data = data;
     poblarPedidosSelects();
+    renderPedSinPago();
     renderPedidosDias();
     renderPedidosSemana();
     // Si hay un día abierto, se redibuja con lo nuevo en vez de cerrarse.
     refrescarPedDia();
+    abrirDiaPendiente();
   } catch (e) {
     document.getElementById('ped-dias').innerHTML =
       '<div class="prop-error">No se pudo cargar: ' + escapeHtml(e.message) + '</div>';
   } finally {
     if (btn) btn.classList.remove('spinning');
   }
+}
+
+/**
+ * Ir a Pedidos y abrir un día. Es el paso que cierra el circuito hacia adelante:
+ * se carga la compra, se dice qué día llega, y el cartel de "Compra registrada"
+ * lleva ACÁ en vez de nombrar una sección.
+ *
+ * No espera los datos: `switchTab` termina disparando `loadPedidos()`, así que
+ * lo único que hace falta es dejar dicho qué día abrir. Pedirlos desde acá sería
+ * el mismo viaje a la planilla dos veces.
+ */
+function irAlPedido(fecha) {
+  pedState.abrirAlCargar = fecha || null;
+  switchTab('pedidos');
+  // Ya estábamos parados en Pedidos: `switchTab` repinta el panel pero no
+  // vuelve a pedir los días si la carga en curso ya terminó, así que el día
+  // pendiente se abre acá con lo que hay.
+  if (pedState.data) abrirDiaPendiente();
+}
+
+/**
+ * Abre el día que dejó pedido `irAlPedido`, si lo hay, una sola vez.
+ *
+ * La lista muestra hoy y los siete días siguientes. Una entrega cargada para
+ * más adelante existe, pero no tiene renglón donde abrirse: eso SE DICE. Que no
+ * pase nada al tocar un botón es peor que la fecha lejana — quien lo apretó se
+ * queda pensando que la compra no anotó ningún pedido.
+ */
+function abrirDiaPendiente() {
+  const fecha = pedState.abrirAlCargar;
+  if (!fecha) return;
+  pedState.abrirAlCargar = null;
+  if ((pedState.data && pedState.data.dias || []).some(d => d.fecha === fecha)) {
+    abrirPedDia(fecha);
+    return;
+  }
+  const dia = new Date(fecha + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'long' });
+  showToast(`El pedido quedó para el ${dia}, más adelante de los días que muestra esta lista.`, 5000);
 }
 
 function poblarPedidosSelects() {
@@ -17853,14 +18218,41 @@ function poblarPedidosSelects() {
 
 // ─── Los días ───────────────────────────────────────────────────────────────
 
+/**
+ * Cuál de los días se dibuja grande.
+ *
+ * Uno solo, y es el que contesta "¿qué llega ahora?": HOY, salvo que hoy sea
+ * domingo o lunes —los dos días en que no entrega nadie, ver SIN_ENTREGA—, en
+ * cuyo caso es el primer día de entregas que viene, que en la práctica es el
+ * martes. Un domingo la respuesta útil no es "hoy no llega nada": es qué hay
+ * que esperar el martes, que es para lo que se abre la pantalla ese día.
+ *
+ * Los ATRASADOS quedan afuera del foco a propósito. Son días que ya pasaron con
+ * algo sin resolver: siguen primeros en la lista, en su renglón rojo, pero el
+ * foco es para lo que viene. Poner el foco en un jueves que ya pasó dejaría la
+ * pregunta de hoy sin contestar.
+ */
+function diaEnFoco(dias) {
+  const proximos = (dias || []).filter(d => !d.atrasado);
+  if (!proximos.length) return null;
+  const diaDeLaSemana = f => new Date(f + 'T12:00:00').getDay();
+  const hoy = proximos[0];
+  if (!SIN_ENTREGA.includes(diaDeLaSemana(hoy.fecha))) return hoy.fecha;
+  const conEntrega = proximos.find(d => !SIN_ENTREGA.includes(diaDeLaSemana(d.fecha)));
+  return (conEntrega || hoy).fecha;
+}
+
 function renderPedidosDias() {
   const cont = document.getElementById('ped-dias');
   const dias = pedState.data.dias || [];
+  const foco = diaEnFoco(dias);
 
   // Un día futuro sin nada no aporta: sería una lista de días vacíos donde hay
   // que buscar los que tienen algo. Hoy siempre se muestra — es donde se carga.
+  // El día en foco también, aunque esté vacío: "el martes no llega nada" es una
+  // respuesta, y es justamente la que se vino a buscar.
   const visibles = dias.filter(d =>
-    d.esHoy || d.atrasado || d.pedidos.length || d.previstos.length || d.paraPedir.length);
+    d.fecha === foco || d.esHoy || d.atrasado || d.pedidos.length || d.previstos.length || d.paraPedir.length);
 
   if (!visibles.length) {
     cont.innerHTML = '<div class="mant-vacio">No hay nada esperado para los próximos días.<br>'
@@ -17868,7 +18260,148 @@ function renderPedidosDias() {
       + 'desde el cuadro semanal de abajo.</div>';
     return;
   }
-  cont.innerHTML = visibles.map(diaPedidos).join('');
+  cont.innerHTML = visibles.map(d => d.fecha === foco ? bloqueFoco(d) : diaPedidos(d)).join('');
+}
+
+/**
+ * El día en foco: el mismo día de la lista, dibujado grande y con su contenido
+ * a la vista. Es la respuesta de las 10 de la mañana — qué llega, si hay que
+ * pagarlo y cuánta plata hay que tener — sin abrir nada.
+ *
+ * Lo que se muestra de cada entrega es SU ENCABEZADO, nunca sus renglones: el
+ * acordeón que se sacó en agosto se rompía justamente porque traía los doce
+ * productos de cada pedido. Tocarlo abre el mismo modal de siempre, que es
+ * donde se tilda y se recibe.
+ */
+function bloqueFoco(d) {
+  const faltan = d.pedidos.filter(p => p.estado !== 'recibido');
+  const llegaron = d.pedidos.filter(p => p.estado === 'recibido');
+  const nada = !d.pedidos.length && !d.previstos.length && !d.paraPedir.length;
+
+  // El título dice por qué este día y no otro. "Hoy" cuando es hoy; cuando el
+  // foco se corrió al martes porque es domingo, decirlo evita leer un día que
+  // no es el de hoy creyendo que sí.
+  const ojo = d.esHoy ? 'Hoy' : 'Lo próximo que llega';
+
+  // Los chips del renglón plegado (`chipsDelDia`) NO van acá, y es a propósito.
+  // Todos contestan lo que este bloque ya muestra: "3 pedidos · 2 sin recibir"
+  // son los renglones que están debajo, "hoy" lo dice el título, y el chip de
+  // plata sería el mismo número que ya está en grande a la derecha. Repetirlos
+  // es hacer leer dos veces lo mismo en la pantalla que existe para no tener
+  // que leer.
+
+  const plata = d.totalEnPuerta
+    ? `<div class="ped-foco-plata">
+         <b>${fmt(d.totalEnPuerta)}</b>
+         <span>en efectivo, para pagar en la puerta</span>
+       </div>`
+    : '';
+
+  const cuerpo = nada
+    ? `<div class="ped-foco-vacio">No llega nada${d.esHoy ? ' hoy' : ' este día'}.</div>`
+    : `<div class="ped-foco-lista">
+         ${faltan.map(renglonFoco).join('')}
+         ${d.previstos.map(previstoFoco).join('')}
+         ${llegaron.map(renglonFoco).join('')}
+       </div>`;
+
+  const pedir = d.paraPedir.length
+    ? `<span><b>Para pedir:</b> ${d.paraPedir.map(s => escapeHtml(s.proveedor)).join(' · ')}</span>`
+    : '';
+
+  return `<div class="ped-foco" onclick="abrirPedDia('${d.fecha}')"
+               title="Abrir el día para tildar y recibir">
+    <div class="ped-foco-cab">
+      <div style="min-width:0">
+        <div class="ped-foco-ojo">${ojo}</div>
+        <div class="ped-foco-titulo">${escapeHtml(d.label)}</div>
+      </div>
+      ${plata}
+    </div>
+    ${cuerpo}
+    <div class="ped-foco-pie">
+      ${pedir}
+      <span class="ped-foco-abrir">Abrir el día ›</span>
+    </div>
+  </div>`;
+}
+
+/** Una entrega adentro del bloque en foco: quién trae qué, y si hay que pagarlo. */
+function renglonFoco(p) {
+  const recibido = p.estado === 'recibido';
+  // Los mismos chips que el modal, para que las dos superficies no digan cosas
+  // distintas del mismo pedido.
+  const chips = [
+    chipPagoPrevisto(p),
+    p.pago === 'pagado' ? `<span class="ped-chip pagado">pagado ${fmt(p.montoPagado)}</span>` : '',
+    p.pago === 'a pagar' ? '<span class="ped-chip apagar">quedó a pagar</span>' : '',
+    recibido && p.pago === 'no' ? '<span class="ped-chip sinpago">falta registrar el pago</span>' : '',
+    chipSaldo(p),
+  ].filter(Boolean).join(' ');
+
+  // El monto sólo cuando ningún chip lo dijo ya: "💰 PAGAR $117.000" seguido de
+  // "$117.000" es el mismo número dos veces en el mismo renglón, y lo mismo
+  // pasa con "pagado $12.400". Los dos chips que llevan número adentro son
+  // justamente los dos que importan, así que sin esto el renglón se duplica en
+  // el caso normal y no en el raro.
+  const chipTraeMonto = (p.pagoPrevisto === 'al-recibir' && p.pago === 'no') || p.pago === 'pagado';
+  const monto = !chipTraeMonto && p.costoEstimado
+    ? `<span class="ped-foco-monto">${fmt(p.costoEstimado)}</span>` : '';
+
+  return `<div class="ped-foco-row ${recibido ? 'llego' : ''}">
+    <span class="ped-estado ${recibido ? 'llego' : 'esperando'}">${recibido ? '✓ llegó' : 'esperando'}</span>
+    <span class="ped-foco-prov">${escapeHtml(p.proveedor)}</span>
+    ${p.detalle ? `<span class="ped-foco-det">${escapeHtml(p.detalle)}</span>` : ''}
+    ${chips}
+    ${monto}
+  </div>`;
+}
+
+/** Un previsto del cuadro semanal, en el bloque en foco. Sin monto: no tiene. */
+function previstoFoco(s) {
+  return `<div class="ped-foco-row">
+    <span class="ped-estado esperando">previsto</span>
+    <span class="ped-foco-prov">${escapeHtml(s.proveedor)}</span>
+    ${s.nota ? `<span class="ped-foco-det">${escapeHtml(s.nota)}</span>` : ''}
+    <span class="ped-chip">del cuadro semanal</span>
+  </div>`;
+}
+
+/**
+ * Las que llegaron y nunca dijeron qué pasó con la plata.
+ *
+ * `sinPago` viene del server —entregas de días PASADOS, recibidas, con el pago
+ * sin definir— y no tenía dónde mostrarse. No traban ningún día (ver
+ * `estaAbierto` en src/pedidos.js) y por eso no aparecen en rojo en la lista;
+ * pero tampoco se resuelven solas, y la campanita que las perseguía se silencia
+ * por el día. Van arriba de todo y llevan al día donde se arreglan.
+ */
+function renderPedSinPago() {
+  const card = document.getElementById('ped-sinpago-card');
+  const cont = document.getElementById('ped-sinpago');
+  const filas = (pedState.data && pedState.data.sinPago) || [];
+  if (!filas.length) { card.style.display = 'none'; return; }
+
+  document.getElementById('ped-sinpago-tit').textContent =
+    `Llegaron y falta registrar el pago · ${filas.length}`;
+  // Los dos botones van ACÁ y no llevando al día: el día de una de estas
+  // entregas ya no está en la lista —pasó, y llegó, así que `armarDias` no lo
+  // devuelve— y un botón que lleva a una pantalla donde no está sería peor que
+  // no tenerlo. Son los mismos dos botones del modal, sin "otro día" ni el
+  // tacho: lo único que falta acá es decir qué pasó con la plata.
+  cont.innerHTML = filas.map(p => {
+    const fecha = new Date(p.fecha + 'T12:00:00')
+      .toLocaleDateString('es-AR', { day: 'numeric', month: 'short' });
+    return `<div class="ped-sinpago-row">
+      <span class="ped-sinpago-fecha">${escapeHtml(fecha)}</span>
+      <span class="ped-foco-prov">${escapeHtml(p.proveedor)}</span>
+      ${p.detalle ? `<span class="ped-foco-det">${escapeHtml(p.detalle)}</span>` : ''}
+      ${p.recibidoPor ? `<span class="ped-foco-det">✓ recibió ${escapeHtml(p.recibidoPor)}</span>` : ''}
+      ${p.costoEstimado ? `<span class="ped-foco-monto">${fmt(p.costoEstimado)}</span>` : ''}
+      <span class="ped-acciones ped-sinpago-acc">${botonesRecibir(p)}</span>
+    </div>`;
+  }).join('');
+  card.style.display = '';
 }
 
 // Los chips del renglón. Salen aparte porque los usan los dos: la lista de
@@ -18134,7 +18667,12 @@ function accionesMenores(p) {
   </span>`;
 }
 
-function accionesRecibir(p) {
+// Los DOS botones solos, sin "otro día" ni el tacho. Se separaron el 07/09/2026
+// para la tarjeta de "falta registrar el pago": ahí la única pregunta es qué
+// pasó con la plata —la mercadería llegó hace días— y mover a otro día es algo
+// que el server además rechaza para un pedido recibido. Ofrecerlo sería ofrecer
+// un botón que contesta que no.
+function botonesRecibir(p) {
   const id = escapeHtml(p.id);
   // Ya pago: se recibe y nada más, y poner plata pasa a ser la excepción.
   const orden = pedYaPago(p) ? ['recibi', 'pague'] : ['pague', 'no-pague'];
@@ -18149,8 +18687,11 @@ function accionesRecibir(p) {
     return `<button class="${color} ${cls}" onclick="${accion}">${b.txt}</button>`;
   };
   return boton(orden[0], 'ped-acc-ppal', 'plata')
-    + boton(orden[1], 'ped-acc-sec', 'cuenta')
-    + accionesMenores(p);
+    + boton(orden[1], 'ped-acc-sec', 'cuenta');
+}
+
+function accionesRecibir(p) {
+  return botonesRecibir(p) + accionesMenores(p);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -19263,7 +19804,11 @@ function pedBuscar(id) {
     const p = d.pedidos.find(x => x.id === id);
     if (p) return p;
   }
-  return null;
+  // Las de "falta registrar el pago" NO están en ningún día: son de fechas
+  // pasadas y ya recibidas, así que `armarDias` no las trae (un día pasado sólo
+  // vuelve si tiene algo sin recibir — ver estaAbierto en src/pedidos.js). Sin
+  // esta línea sus botones abrirían un modal vacío y no harían nada.
+  return (pedState.data?.sinPago || []).find(x => x.id === id) || null;
 }
 
 // ─── El cuadro semanal ──────────────────────────────────────────────────────

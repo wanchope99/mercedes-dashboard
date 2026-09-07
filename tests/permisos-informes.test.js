@@ -112,7 +112,9 @@ function run(t) {
   t.eq(b, c, 'pablo y admin resuelven los mismos submenús');
 
   // Y el encargado conserva los suyos: es lo que este cambio no podía tocar.
-  for (const s of ['operacion/pedidos', 'operacion/vinos', 'operacion/cierre', 'operacion/operacion-mas']) {
+  // `pedidos` se mudó a `caja` el 07/09/2026 (ver tests/menu-compras.test.js):
+  // lo que esta prueba sigue afirmando es que lo TIENE, no dónde.
+  for (const s of ['caja/pedidos', 'operacion/vinos', 'operacion/cierre', 'operacion/operacion-mas']) {
     t.ok(delEncargado.includes(s), `el encargado conserva ${s}`);
   }
 }

@@ -422,7 +422,7 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, r
           })), { origen: 'remito' });
           itemsPedido = (creados || []).length;
         } catch (e) {
-          avisos.push(`El pedido quedó sin la lista de productos (${e.message}). Se puede pegar el remito desde Operación › Pedidos.`);
+          avisos.push(`El pedido quedó sin la lista de productos (${e.message}). Se puede pegar el remito desde Compras › Pedidos.`);
         }
       }
     }
