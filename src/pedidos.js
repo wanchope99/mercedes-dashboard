@@ -23,7 +23,8 @@
 // "Pagar" de la sección Pagos (`marcarFilaPagada` / `registrarGastoEnLibro`).
 // Ver el comentario de la ruta POST /api/pedidos/:id/recibir.
 //
-// Persistencia: dos hojas en SPREADSHEET_ID, creadas automáticamente al primer
+// Persistencia: tres hojas en la planilla de PROVEEDORES (ver SHEET_ID), creadas
+// automáticamente al primer
 // uso, igual que Mantenimiento y Propinas.
 //
 //   Hoja "Pedidos" — un pedido esperado para una fecha concreta:
@@ -70,7 +71,32 @@ const cache = new NodeCache({ stdTTL: 300 });
 const CACHE_PEDIDOS = 'pedidos';
 const CACHE_SEMANAL = 'pedidos_semanal';
 
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+// ─── En qué planilla viven estas hojas ─────────────────────────────────────
+//
+// En la de PROVEEDORES (`PROVEEDORES_SHEET_ID`) desde el 07/09/2026, por
+// decisión de Gonzalo. Antes estaban en la de Gestión, al lado de Movimientos
+// y Cajas — que es plata — cuando lo que un pedido describe es un proveedor:
+// qué trae, qué día y por cuánto. Ahí ya viven `Compras`, `Facturas` y
+// `Proveedores Saldos`, o sea todo lo que se sabe del otro lado del mostrador.
+//
+// NO CAE A `SPREADSHEET_ID` SI FALTA LA VARIABLE, y eso es deliberado. Con el
+// fallback, una máquina sin la variable crearía las hojas de nuevo en Gestión
+// —exactamente de donde se las está sacando— y nadie se enteraría hasta
+// encontrarlas ahí. Es la misma decisión que ya tiene `saldos.js`, y por el
+// mismo motivo; `proveedores.js` sí cae, y ese fallback es viejo.
+//
+// Sin la variable el módulo se reporta apagado y la pantalla lo dice, en vez
+// de escribir en el lugar equivocado y quedarse callado.
+const SHEET_ID = process.env.PROVEEDORES_SHEET_ID || null;
+
+// La de Gestión sigue existiendo para UNA sola cosa: leer las hojas viejas
+// durante la mudanza. Ver `migrarDesdeGestion`. Nada más la usa.
+const SHEET_ID_VIEJA = process.env.SPREADSHEET_ID;
+
+// El error dice QUÉ falta y qué se rompe, no "falta una variable". Es el mensaje
+// que va a leer alguien parado en la pantalla de Pedidos sin saber de esto.
+const FALTA_SHEET = 'Pedidos no está configurado en el servidor: falta PROVEEDORES_SHEET_ID, '
+  + 'que es la planilla donde viven sus hojas.';
 const HOJA = process.env.PEDIDOS_SHEET || 'Pedidos';
 const HOJA_SEMANAL = process.env.PEDIDOS_SEMANAL_SHEET || 'Pedidos Semanal';
 const TZ = 'America/Argentina/Buenos_Aires';
@@ -341,12 +367,12 @@ async function _ensureHoja(api, titulo, header, ultimaCol) {
   let creada = false;
   try {
     await api.spreadsheets.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
+      spreadsheetId: SHEET_ID,
       requestBody: { requests: [{ addSheet: { properties: { title: titulo } } }] },
     });
     creada = true;
     await api.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
+      spreadsheetId: SHEET_ID,
       range: `${titulo}!A1:${ultimaCol}1`,
       valueInputOption: 'RAW',
       requestBody: { values: [header] },
@@ -375,12 +401,12 @@ async function _ensureHoja(api, titulo, header, ultimaCol) {
 async function _ensureEncabezado(api, titulo, header, ultimaCol) {
   try {
     const res = await api.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID, range: `${titulo}!A1:${ultimaCol}1`,
+      spreadsheetId: SHEET_ID, range: `${titulo}!A1:${ultimaCol}1`,
     });
     const fila = (res.data.values && res.data.values[0]) || [];
     if (fila.length >= header.length) return;
     await api.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
+      spreadsheetId: SHEET_ID,
       range: `${titulo}!A1:${ultimaCol}1`,
       valueInputOption: 'RAW',
       requestBody: { values: [header] },
@@ -394,7 +420,7 @@ async function _ensureEncabezado(api, titulo, header, ultimaCol) {
 async function _leerPedidos(api) {
   let rows;
   try {
-    const res = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${HOJA}!A:${ULTIMA_COL}` });
+    const res = await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${HOJA}!A:${ULTIMA_COL}` });
     rows = res.data.values || [];
   } catch (e) {
     await _ensureHoja(api, HOJA, HEADER, ULTIMA_COL);
@@ -437,7 +463,7 @@ async function _leerPedidos(api) {
 async function _leerSemanal(api) {
   let rows;
   try {
-    const res = await api.spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range: `${HOJA_SEMANAL}!A:I` });
+    const res = await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${HOJA_SEMANAL}!A:I` });
     rows = res.data.values || [];
   } catch (e) {
     await _ensureHoja(api, HOJA_SEMANAL, HEADER_SEMANAL, 'I');
@@ -475,7 +501,7 @@ async function _leerItems(api) {
   let rows;
   try {
     const res = await api.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID, range: `${HOJA_ITEMS}!A:${ULTIMA_COL_ITEMS}`,
+      spreadsheetId: SHEET_ID, range: `${HOJA_ITEMS}!A:${ULTIMA_COL_ITEMS}`,
     });
     rows = res.data.values || [];
   } catch (e) {
@@ -506,7 +532,7 @@ async function _leerItems(api) {
 async function _loadItems() {
   const cached = cache.get(CACHE_ITEMS);
   if (cached) return cached;
-  if (!SPREADSHEET_ID) return [];
+  if (!SHEET_ID) return [];
   const items = await _leerItems(_sheets());
   cache.set(CACHE_ITEMS, items);
   return items;
@@ -535,7 +561,7 @@ async function itemsDe(pedidoId) {
  * porque llegó algo nuevo es destruir lo que alguien ya tildó.
  */
 async function agregarItems(pedidoId, items = [], { origen = 'manual' } = {}) {
-  if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
+  if (!SHEET_ID) throw new Error(FALTA_SHEET);
   const pid = _txt(pedidoId);
   if (!pid) throw new Error('Falta el pedido');
   const limpios = (Array.isArray(items) ? items : [])
@@ -561,7 +587,7 @@ async function agregarItems(pedidoId, items = [], { origen = 'manual' } = {}) {
     motivo: MOTIVO_ITEM_DEFAULT,
   }));
   await api.spreadsheets.values.append({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: SHEET_ID,
     range: `${HOJA_ITEMS}!A:${ULTIMA_COL_ITEMS}`,
     valueInputOption: 'RAW',
     requestBody: { values: nuevos.map(_aFilaItem) },
@@ -587,7 +613,7 @@ async function agregarItems(pedidoId, items = [], { origen = 'manual' } = {}) {
  * se guardan igual — perder el tilde de once porque uno se borró sería peor.
  */
 async function marcarItems(cambios = []) {
-  if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
+  if (!SHEET_ID) throw new Error(FALTA_SHEET);
   const lista = (Array.isArray(cambios) ? cambios : []).filter(c => c && _txt(c.id));
   if (!lista.length) return { guardados: 0, faltantes: [] };
 
@@ -624,7 +650,7 @@ async function marcarItems(cambios = []) {
   }
   if (data.length) {
     await api.spreadsheets.values.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
+      spreadsheetId: SHEET_ID,
       requestBody: { valueInputOption: 'RAW', data },
     });
     cache.del(CACHE_ITEMS);
@@ -644,7 +670,7 @@ async function borrarItem(id) {
 async function _loadPedidos() {
   const cached = cache.get(CACHE_PEDIDOS);
   if (cached) return cached;
-  if (!SPREADSHEET_ID) return [];
+  if (!SHEET_ID) return [];
   const items = await _leerPedidos(_sheets());
   cache.set(CACHE_PEDIDOS, items);
   return items;
@@ -653,7 +679,7 @@ async function _loadPedidos() {
 async function _loadSemanal() {
   const cached = cache.get(CACHE_SEMANAL);
   if (cached) return cached;
-  if (!SPREADSHEET_ID) return [];
+  if (!SHEET_ID) return [];
   const items = await _leerSemanal(_sheets());
   cache.set(CACHE_SEMANAL, items);
   return items;
@@ -892,7 +918,7 @@ async function getPedido(id) {
 const nuevoId = () => `ped${Date.now()}${Math.floor(Math.random() * 100)}`;
 
 async function crearPedido(datos = {}) {
-  if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
+  if (!SHEET_ID) throw new Error(FALTA_SHEET);
   const proveedor = _txt(datos.proveedor);
   if (!proveedor) throw new Error('Falta el proveedor');
   const fecha = normalizarFecha(datos.fecha) || hoyAR();
@@ -929,7 +955,7 @@ async function crearPedido(datos = {}) {
   };
 
   await api.spreadsheets.values.append({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: SHEET_ID,
     range: `${HOJA}!A:${ULTIMA_COL}`,
     valueInputOption: 'RAW',
     requestBody: { values: [_aFila(item)] },
@@ -947,7 +973,7 @@ async function crearPedido(datos = {}) {
  * fila en el libro, que es el agujero que esta pantalla viene a tapar.
  */
 async function actualizarPedido(id, cambios = {}) {
-  if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
+  if (!SHEET_ID) throw new Error(FALTA_SHEET);
   const api = _sheets();
   const items = await _leerPedidos(api);
   const actual = items.find(p => p.id === _txt(id));
@@ -992,7 +1018,7 @@ async function actualizarPedido(id, cambios = {}) {
   nuevo.actualizado = new Date().toISOString();
 
   await api.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: SHEET_ID,
     range: `${HOJA}!A${actual.rowIndex}:${ULTIMA_COL}${actual.rowIndex}`,
     valueInputOption: 'RAW',
     requestBody: { values: [_aFila(nuevo)] },
@@ -1010,7 +1036,7 @@ async function actualizarPedido(id, cambios = {}) {
  * "pagado" sin ninguna fila que lo respalde.
  */
 async function marcarRecibido(id, { pago = 'no', monto = 0, medioPago = '', ref = '', usuario = '' } = {}) {
-  if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
+  if (!SHEET_ID) throw new Error(FALTA_SHEET);
   const api = _sheets();
   const items = await _leerPedidos(api);
   const actual = items.find(p => p.id === _txt(id));
@@ -1029,7 +1055,7 @@ async function marcarRecibido(id, { pago = 'no', monto = 0, medioPago = '', ref 
   };
 
   await api.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: SHEET_ID,
     range: `${HOJA}!A${actual.rowIndex}:${ULTIMA_COL}${actual.rowIndex}`,
     valueInputOption: 'RAW',
     requestBody: { values: [_aFila(nuevo)] },
@@ -1111,7 +1137,7 @@ function _diaDelCuadro(valor) {
 }
 
 async function crearSemanal(datos = {}) {
-  if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
+  if (!SHEET_ID) throw new Error(FALTA_SHEET);
   const dia = _diaDelCuadro(datos.dia);
   const proveedor = _txt(datos.proveedor);
   if (!proveedor) throw new Error('Falta el proveedor');
@@ -1134,7 +1160,7 @@ async function crearSemanal(datos = {}) {
   };
 
   await api.spreadsheets.values.append({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: SHEET_ID,
     range: `${HOJA_SEMANAL}!A:I`,
     valueInputOption: 'RAW',
     requestBody: { values: [_aFilaSemanal(item)] },
@@ -1152,7 +1178,7 @@ async function crearSemanal(datos = {}) {
  * orden y el cuadro los muestra en un orden que cambia entre recargas.
  */
 async function actualizarSemanal(id, cambios = {}) {
-  if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
+  if (!SHEET_ID) throw new Error(FALTA_SHEET);
   const api = _sheets();
   const items = await _leerSemanal(api);
   const actual = items.find(s => s.id === _txt(id));
@@ -1199,7 +1225,7 @@ async function actualizarSemanal(id, cambios = {}) {
     });
   }
   await api.spreadsheets.values.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: SHEET_ID,
     requestBody: { valueInputOption: 'RAW', data },
   });
   cache.del(CACHE_SEMANAL);
@@ -1214,7 +1240,7 @@ async function borrarSemanal(id) {
 // ─── Borrado (compartido por las dos hojas) ─────────────────────────────────
 
 async function _buscarFila(lector, id) {
-  if (!SPREADSHEET_ID) throw new Error('Falta SPREADSHEET_ID');
+  if (!SHEET_ID) throw new Error(FALTA_SHEET);
   const items = await lector(_sheets());
   const item = items.find(x => x.id === _txt(id));
   if (!item) throw new Error('No se encontró');
@@ -1223,11 +1249,11 @@ async function _buscarFila(lector, id) {
 
 async function _borrarFila(titulo, rowIndex) {
   const api = _sheets();
-  const meta = await api.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID, fields: 'sheets.properties' });
+  const meta = await api.spreadsheets.get({ spreadsheetId: SHEET_ID, fields: 'sheets.properties' });
   const sheet = (meta.data.sheets || []).find(s => s.properties && s.properties.title === titulo);
   if (!sheet) throw new Error(`No existe la hoja "${titulo}"`);
   await api.spreadsheets.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: SHEET_ID,
     requestBody: { requests: [{ deleteDimension: { range: {
       sheetId: sheet.properties.sheetId, dimension: 'ROWS',
       startIndex: rowIndex - 1, endIndex: rowIndex,
@@ -1258,7 +1284,7 @@ async function _borrarFila(titulo, rowIndex) {
 // NO devuelve el pedido al cuadro semanal ni toca la hoja Semanal: acá se
 // mueven filas reales, que son las únicas que existen.
 async function reprogramarNoRecibidos({ hoy = hoyAR() } = {}) {
-  if (!SPREADSHEET_ID) return { movidos: [], frenados: [] };
+  if (!SHEET_ID) return { movidos: [], frenados: [] };
   const todos = await _loadPedidos();
 
   // Los que quedaron abiertos en un día que ya pasó. `estaAbierto` es la misma
@@ -1283,11 +1309,110 @@ async function reprogramarNoRecibidos({ hoy = hoyAR() } = {}) {
   return { movidos, frenados };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// La mudanza de planilla
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Las tres hojas vivían en la planilla de Gestión y desde el 07/09/2026 viven en
+// la de Proveedores. Apuntar el código a la planilla nueva no mueve una sola
+// fila: las hojas se crearían vacías allá y todo lo cargado quedaría del otro
+// lado, invisible. Esto es lo que trae las filas.
+//
+// TRES REGLAS, Y LAS TRES SON SOBRE NO PERDER NADA:
+//
+//   1. COPIA, NUNCA BORRA. La hoja vieja queda intacta y la borra una persona
+//      cuando ya vio que el traspaso salió bien. Borrar acá sería jugarse todo
+//      el historial de pedidos a que esta función no tenga un bug.
+//   2. SE PUEDE CORRER DE NUEVO. Se saltean los ids que ya están del otro lado,
+//      así que una corrida a medias —se cortó la red, se acabó la cuota de la
+//      API— se termina corriéndola otra vez, y no duplica nada.
+//   3. `dryRun` POR DEFECTO. Contesta cuánto movería sin mover nada. Es el
+//      mismo criterio que `reset-aprendizaje`, y por el mismo motivo: lo que
+//      toca datos de verdad se mira antes.
+//
+// Las tres hojas se mudan juntas y no sólo `Pedidos`. `Pedidos Items` cuelga de
+// un pedido por su id y `Pedidos Semanal` alimenta los previstos de cada día:
+// dejarlas en planillas distintas serían dos clientes de API para contestar una
+// pregunta y ninguna forma de leerlas juntas.
+async function migrarDesdeGestion({ dryRun = true } = {}) {
+  if (!SHEET_ID) throw new Error(FALTA_SHEET);
+  if (!SHEET_ID_VIEJA) throw new Error('Falta SPREADSHEET_ID: no hay planilla vieja de donde traer.');
+  if (SHEET_ID === SHEET_ID_VIEJA) {
+    throw new Error('Las dos variables apuntan a la misma planilla: no hay nada que mudar.');
+  }
+  const api = _sheets();
+
+  // Qué mudar, con el rango y el ancho de cada hoja. El orden importa poco
+  // —nada referencia nada por fila— pero se hace Pedidos primero para que, si
+  // algo corta, lo que quede del otro lado sea lo que más se usa.
+  const HOJAS = [
+    { hoja: HOJA,         header: HEADER,         ultima: ULTIMA_COL },
+    { hoja: HOJA_SEMANAL, header: HEADER_SEMANAL, ultima: 'I' },
+    { hoja: HOJA_ITEMS,   header: HEADER_ITEMS,   ultima: ULTIMA_COL_ITEMS },
+  ];
+
+  const detalle = [];
+  for (const { hoja, header, ultima } of HOJAS) {
+    // La hoja vieja puede no existir —ya la borraron, o nunca se usó— y eso no
+    // es un error: es una mudanza que ya está hecha.
+    let viejas = [];
+    try {
+      const r = await api.spreadsheets.values.get({
+        spreadsheetId: SHEET_ID_VIEJA, range: `${hoja}!A:${ultima}`,
+      });
+      viejas = (r.data.values || []).slice(1).filter(f => f && _txt(f[0]));
+    } catch (e) {
+      detalle.push({ hoja, enLaVieja: 0, yaEstaban: 0, movidas: 0, nota: 'no existe en la planilla vieja' });
+      continue;
+    }
+
+    await _ensureHoja(api, hoja, header, ultima);
+    let nuevas = [];
+    try {
+      const r = await api.spreadsheets.values.get({
+        spreadsheetId: SHEET_ID, range: `${hoja}!A:${ultima}`,
+      });
+      nuevas = (r.data.values || []).slice(1).filter(f => f && _txt(f[0]));
+    } catch (e) { nuevas = []; }
+
+    // El id de la columna A es la identidad de la fila en las tres hojas. Es lo
+    // que hace que correr esto dos veces no duplique.
+    const yaEstan = new Set(nuevas.map(f => _txt(f[0])));
+    const faltan = viejas.filter(f => !yaEstan.has(_txt(f[0])));
+
+    if (faltan.length && !dryRun) {
+      await api.spreadsheets.values.append({
+        spreadsheetId: SHEET_ID,
+        range: `${hoja}!A:${ultima}`,
+        valueInputOption: 'RAW',
+        requestBody: { values: faltan },
+      });
+    }
+    detalle.push({
+      hoja,
+      enLaVieja: viejas.length,
+      yaEstaban: viejas.length - faltan.length,
+      movidas: faltan.length,
+    });
+  }
+
+  if (!dryRun) clearCache();
+  return {
+    dryRun,
+    total: detalle.reduce((s, d) => s + d.movidas, 0),
+    detalle,
+    // Se dice explícitamente porque es la pregunta que sigue: la hoja vieja
+    // quedó donde estaba y la borra una persona.
+    nota: 'La planilla vieja no se tocó. Borrá esas hojas a mano cuando confirmes que está todo.',
+  };
+}
+
 function clearCache() { cache.del(CACHE_PEDIDOS); cache.del(CACHE_SEMANAL); cache.del(CACHE_ITEMS); }
 
 module.exports = {
   listPedidos, getPedido, crearPedido, actualizarPedido, marcarRecibido, borrarPedido,
   reprogramarNoRecibidos,
+  migrarDesdeGestion,
   omitirPrevisto, restaurarOmitido,
   listSemanal, crearSemanal, actualizarSemanal, borrarSemanal,
   // Los renglones de un pedido: qué y cuánto llega, para tildarlo en la puerta.

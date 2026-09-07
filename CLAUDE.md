@@ -38,7 +38,7 @@ The bot (`bot/`) is a separate Python app: `pip install -r bot/requirements.txt`
 There is no database. All persistent state lives in Google Sheets, read/written directly via the `googleapis` package, and cached in-process with `node-cache` (`clearCache()` / `clearFudoCache()` invalidate on writes). Two spreadsheets are in play:
 
 - `SPREADSHEET_ID` — "Gestión Mercedes": the core ledger. Key sheets: `Movimientos` (every income/expense row, columns A–P — see the `buildFilasCierreServicio` comment block in `server.js` for the exact column layout), `Cajas`, `Arqueo de Cajas`, `Proveedores`, `Cierres`, `Proyeccion Variables`, `Costos Proveedores`, `Consumo Insumos`, `Stock Bebidas`, `Bebidas Proveedor`.
-- `PROVEEDORES_SHEET_ID` ("Comparación Proveedores", defaults to `SPREADSHEET_ID` if unset — **except in `src/saldos.js`, which refuses to fall back**) — the `Compras` sheet (ingredient-level purchase history used for cost analysis), `Proveedores Saldos`, plus its own config sheets.
+- `PROVEEDORES_SHEET_ID` ("Comparación Proveedores") — everything about the other side of the counter: the `Compras` sheet (ingredient-level purchase history used for cost analysis), `Facturas`, `Proveedores Saldos`, its own config sheets, and since 2026-09-07 the three Pedidos sheets. It **defaults to `SPREADSHEET_ID` if unset in `src/proveedores.js`, and deliberately does not in `src/saldos.js` or `src/pedidos.js`** — with the fallback, a server missing the variable would recreate those sheets in Gestión, which is exactly where they were moved away from, and nobody would notice until they found them there.
 
 Auth: a Google service account, credentials via `GOOGLE_CREDENTIALS_JSON` env var (production) or a local `credentials.json` file (dev, gitignored, never commit).
 
@@ -631,6 +631,20 @@ The corrections — move to a chosen date, wrong supplier, delete — still exis
 This was something else for two hours on 2026-09-07 and was reverted the same day. The idea had been to cover "the supplier collects at the door but Pablo transfers" by letting the purchase pick a medium for an `al-recibir`. It is the wrong framing: that payment does not happen at the door and does not leave the local register, so it is not an `al-recibir` — it is loaded as already paid, or as left on account. And the cost of allowing it was the worst available: a payment booked against a register nobody touched, which is exactly what breaks an arqueo. The purchase form hides the medium field for `al-recibir` again, and the server forces `CAJA_EFECTIVO` regardless of what the form sends.
 
 **Every modal needs its own CSS rule, and this file had said so twice before it happened again.** `#ped-prov-overlay` shipped with the class and no rule, and the "¿Quién trajo el pedido?" form drew itself in the middle of the page, in every section. There is no generic `.modal-overlay` style, so the class alone hides nothing. `tests/overlays.test.js` now walks every `id$="-overlay"` in the file and fails if any of them lacks a way to hide *and* a way to open — the written warning had already failed twice.
+
+### The Pedidos sheets moved to the Proveedores spreadsheet (2026-09-07)
+
+`Pedidos`, `Pedidos Semanal` and `Pedidos Items` left "Gestión Mercedes" — where they sat next to `Movimientos` and `Cajas`, which are money — for "Comparación Proveedores", where `Compras`, `Facturas` and `Proveedores Saldos` already live. Owner's decision, and the reasoning is what an order *is*: a supplier, what they bring, which day and for how much. The ledger row it eventually produces still lives in Gestión, written by the reception; that split is the point, not an accident.
+
+**All three moved, not just `Pedidos`.** `Pedidos Items` hangs off an order by its id and `Pedidos Semanal` feeds each day's previstos; leaving them in different spreadsheets would be two API clients to answer one question and no way to read them together.
+
+**`src/pedidos.js` does not fall back to `SPREADSHEET_ID`**, joining `saldos.js` in that. With the fallback, a server missing the variable would recreate the sheets in Gestión — exactly where they were moved from — and nobody would notice until they found them there. Without it, the module reports itself off and the screen says which variable is missing. `PROVEEDORES_SHEET_ID` therefore stopped being optional: before this it only switched off balances and the invoice registry.
+
+**Pointing the code at the new spreadsheet moves no rows**, so `migrarDesdeGestion` exists, exposed as `GET`/`POST /api/pedidos/migrar` (admin only, declared above `/api/pedidos/:id` or the parameter eats the word). Three rules, all of them about not losing anything: it **copies and never deletes** — a person removes the old sheets once they have seen it went well, because deleting here would bet the whole order history on this function having no bug; it **can be re-run**, skipping ids already on the other side, so a run cut short by the network or an API quota is finished by running it again; and **`dryRun` is the default**, the same criterion as `reset-aprendizaje`.
+
+**The button that triggers it hides itself.** It only appears when the old spreadsheet still holds rows the new one lacks, so once the migration is done and the old sheets are deleted it never comes back. A permanent button for a one-time operation is the kind of thing nobody later knows whether they are allowed to press.
+
+`tests/migracion-pedidos.test.js` runs the real function against a fake Sheets API: that a dry run writes nothing, that the old book is untouched afterwards, that a second run duplicates nothing, that a half-finished run is completed by re-running, that a missing old sheet is the expected end state rather than an error, and the two rejections (both variables pointing at the same book, and no new book configured).
 
 ### What nobody receives rolls to the next day, once (2026-09-07)
 

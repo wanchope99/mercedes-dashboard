@@ -2360,6 +2360,13 @@
        botón, con todo lo demás escondido y un "🔔 Pendientes" que le contestaba
        403. En el teléfono no cambia nada: ahí se llega por el botón de Inicio. -->
   <div class="filters-bar">
+    <!-- La mudanza de las hojas a la planilla de Proveedores (07/09/2026).
+         SE BORRA SOLO: sólo aparece si la planilla vieja todavía tiene filas que
+         no están del otro lado, o sea que después de mudar —y de que Gonzalo
+         borre esas hojas— no vuelve a mostrarse nunca. Un botón permanente para
+         una operación de una sola vez es exactamente la clase de cosa que
+         después nadie sabe si puede tocar. Sólo lo ve el admin. -->
+    <button class="btn" id="ped-migrar" style="display:none" onclick="migrarPedidos(this)"></button>
     <div style="flex:1"></div>
     <button class="btn btn-accent" onclick="openModal()">+ Nueva compra</button>
   </div>
@@ -18284,6 +18291,8 @@ async function loadPedidos(btn) {
     poblarPedidosSelects();
     renderPedSinPago();
     renderPedidosDias();
+    // Sólo el admin, y sólo si queda algo en la planilla vieja. Se esconde solo.
+    chequearMigracionPedidos();
     renderPedidosSemana();
     // Si hay un día abierto, se redibuja con lo nuevo en vez de cerrarse.
     refrescarPedDia();
@@ -18512,6 +18521,62 @@ function previstoFoco(s) {
  * pero tampoco se resuelven solas, y la campanita que las perseguía se silencia
  * por el día. Van arriba de todo y llevan al día donde se arreglan.
  */
+// ═══════════════════════════════════════════════════════════════════════════
+// La mudanza de las hojas a la planilla de Proveedores
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Botón de una sola vez, y por eso SE ESCONDE SOLO: pregunta cuánto habría para
+// traer y si no hay nada no se dibuja. Cuando la mudanza esté hecha y las hojas
+// viejas borradas, la respuesta es cero para siempre y el botón no vuelve.
+//
+// La consulta la hace sólo el admin y sólo estando en Pedidos: es un viaje a la
+// planilla que nadie más necesita.
+async function chequearMigracionPedidos() {
+  const btn = document.getElementById('ped-migrar');
+  if (!btn || !pedEsAdmin()) return;
+  try {
+    const { data } = await api('/api/pedidos/migrar');
+    if (!data.total) { btn.style.display = 'none'; return; }
+    btn.textContent = `📥 Traer ${data.total} fila${data.total !== 1 ? 's' : ''} de la planilla vieja`;
+    btn.title = data.detalle.map(d => `${d.hoja}: ${d.movidas} de ${d.enLaVieja}`).join(' · ');
+    btn.style.display = '';
+  } catch (e) {
+    // Si no se puede preguntar, no se ofrece: un botón que promete mover filas
+    // sin saber si hay algo que mover es peor que ningún botón.
+    btn.style.display = 'none';
+  }
+}
+
+async function migrarPedidos(btn) {
+  const { data: plan } = await api('/api/pedidos/migrar');
+  const resumen = plan.detalle.map(d => `· ${d.hoja}: ${d.movidas}`).join('\n');
+  if (!confirm(`Traer ${plan.total} fila(s) de la planilla de Gestión a la de Proveedores:\n\n`
+    + resumen + '\n\nNo se borra nada de la planilla vieja.')) return;
+  btn.disabled = true;
+  const antes = btn.textContent;
+  btn.textContent = '⏳ Trayendo…';
+  try {
+    const { data } = await api('/api/pedidos/migrar', {
+      method: 'POST', body: JSON.stringify({ dryRun: false }),
+    });
+    await loadPedidos();
+    showResultadoModal({
+      ok: true,
+      titulo: 'Pedidos mudados',
+      detalle: data.detalle.map(d =>
+        `<b>${escapeHtml(d.hoja)}</b>: ${d.movidas} traída${d.movidas !== 1 ? 's' : ''}`
+        + (d.yaEstaban ? ` · ${d.yaEstaban} ya estaban` : '')
+        + (d.nota ? ` · ${escapeHtml(d.nota)}` : '')).join('<br>')
+        + `<br><span style="font-size:11px">${escapeHtml(data.nota)}</span>`,
+    });
+  } catch (e) {
+    btn.textContent = antes;
+    showResultadoModal({ ok: false, titulo: 'No se pudo mudar', detalle: escapeHtml(e.message) });
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 // Abrir y cerrar la cola de 'falta registrar el pago'.
 function togglePedSinPago() {
   pedState.sinPagoAbierta = !pedState.sinPagoAbierta;

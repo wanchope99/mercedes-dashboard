@@ -40,7 +40,20 @@ npm run dev
      ```
    - `NOMINA_SHEET_ID` = id de la planilla de nómina (`10yDUZWZZl528NgrmmkIxfxFldOaVId38X3ayve5oBcM`)
    - `STOCKS_SHEET_ID` = id de la planilla de Stocks (`1gEt0H5Rou22jmtpiNFjH79oj8-n_b5azLXKJVZ_zgSk`)
+   - `PROVEEDORES_SHEET_ID` = id de la planilla *Comparación Proveedores*
 4. Railway detecta `railway.toml` y hace el deploy automáticamente
+
+### La planilla de proveedores
+
+`PROVEEDORES_SHEET_ID`. Ahí viven `Compras`, `Facturas`, `Proveedores Saldos` y
+—desde el 07/09/2026— las tres hojas de Pedidos: `Pedidos`, `Pedidos Semanal` y
+`Pedidos Items`. Todas se crean solas al primer uso.
+
+**Desde esa mudanza la variable dejó de ser opcional.** Sin ella la sección
+Pedidos no funciona y lo dice; antes sólo se apagaban los saldos y el registro de
+facturas. Y **no cae a `SPREADSHEET_ID`**: con el fallback, un servidor sin la
+variable volvería a crear las hojas en Gestión —justo de donde se las sacó— y
+nadie se enteraría hasta encontrarlas ahí.
 
 ### La planilla de nómina
 

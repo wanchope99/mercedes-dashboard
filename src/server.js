@@ -4370,6 +4370,29 @@ app.post('/api/saldos', authMiddleware, adminOnly, async (req, res) => {
   } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
 });
 
+// ─── La mudanza de las hojas de Pedidos a la planilla de Proveedores ────────
+//
+// El GET contesta cuánto habría para traer y el POST lo trae. Los dos corren la
+// misma función, así que lo que se mira antes es exactamente lo que va a pasar
+// — el mismo criterio que `GET /api/pedidos/:id/plan` frente a la recepción.
+//
+// COPIA Y NO BORRA: la hoja vieja queda intacta y la borra una persona cuando
+// ya vio que salió bien. Se puede correr de nuevo sin duplicar nada.
+//
+// adminOnly las dos: es una operación sobre la planilla entera, no algo de la
+// puerta. Y van ARRIBA de `/api/pedidos/:id`, o `:id` se comería la palabra
+// "migrar" y esto contestaría "no existe ese pedido" (ver tests/rutas.test.js).
+app.get('/api/pedidos/migrar', authMiddleware, adminOnly, async (req, res) => {
+  try { res.json({ ok: true, data: await pedidos.migrarDesdeGestion({ dryRun: true }) }); }
+  catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+app.post('/api/pedidos/migrar', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    res.json({ ok: true, data: await pedidos.migrarDesdeGestion({ dryRun: req.body.dryRun !== false }) });
+  } catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
 app.get('/api/pedidos/semanal', authMiddleware, async (req, res) => {
   try { res.json({ ok: true, data: await pedidos.listSemanal() }); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
