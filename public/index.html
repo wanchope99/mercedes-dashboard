@@ -10977,10 +10977,18 @@ function closeModal() { document.getElementById('modal-overlay').classList.remov
 // deshacer ESO es lo que evita tener que registrar 32 funciones de cierre — y
 // que la número 33 se olvide.
 //
-// El de la compra queda afuera a propósito: son dieciocho campos que `openModal()`
-// limpia al abrir, así que perderlos por una tecla es el mismo accidente que
-// perderlos por un clic afuera. Ahí se sale por Cancelar.
-const ESC_NO_CIERRA = new Set(['modal-overlay']);
+// Dos quedan afuera, y por la misma razón: adentro hay algo tipeado que no se
+// puede reconstruir solo, así que perderlo por una tecla es el mismo accidente
+// que perderlo por un clic al costado. De los dos se sale por Cancelar.
+//
+//   · `modal-overlay`      — Nueva compra. Dieciocho campos que `openModal()`
+//                            limpia al abrir.
+//   · `ped-recibir-overlay`— Recibir (07/09/2026, pedido por Gonzalo). Menos
+//                            campos, pero se usa CON EL PROVEEDOR EN LA PUERTA,
+//                            que es el peor momento para volver a empezar. Y
+//                            atrás queda abierto el modal del día, así que
+//                            cerrarlo parece que no hizo nada.
+const ESC_NO_CIERRA = new Set(['modal-overlay', 'ped-recibir-overlay']);
 
 function overlayVisible(el) {
   if (!el) return false;
@@ -20120,8 +20128,24 @@ async function borrarSemanal() {
   } catch (e) { document.getElementById('ped-sem-error').textContent = e.message; }
 }
 
+// EL MODAL DE RECIBIR NO CIERRA TOCANDO AFUERA, y desde el 07/09/2026 tampoco
+// con Escape. Lo pidió Gonzalo: "si clickeo sin querer fuera del modal cuando
+// entre en el flow de Recibir que NO se cierre todo".
+//
+// Es el segundo modal de la app con esta excepción y por la misma razón que el
+// primero (el de Nueva compra, 06/09/2026): adentro hay algo tipeado que no se
+// puede reconstruir solo. Acá son el monto que se pagó, la explicación escrita a
+// mano y la fecha del resto — y sobre todo, se usa **con el proveedor en la
+// puerta**, que es el peor momento posible para volver a empezar.
+//
+// El modal del día queda ATRÁS y abierto, así que un toque al costado parece que
+// no hace nada y en realidad borraba lo cargado. Para salir está Cancelar, que
+// es el único gesto que nadie hace sin querer.
+//
+// `ped-sem-overlay` sí sigue cerrando al tocar afuera: es el cuadro semanal, se
+// edita sentado y sin nadie esperando.
 document.addEventListener('DOMContentLoaded', () => {
-  [['ped-recibir-overlay', closePedRecibir], ['ped-sem-overlay', closePedSem]].forEach(([id, cerrar]) => {
+  [['ped-sem-overlay', closePedSem]].forEach(([id, cerrar]) => {
     const ov = document.getElementById(id);
     if (ov) ov.addEventListener('click', function (e) { if (e.target === this) cerrar(); });
   });

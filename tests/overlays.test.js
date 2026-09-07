@@ -105,6 +105,24 @@ function run(t) {
   // — pasó en el primer intento del arreglo.
   t.ok(!/\.form-group input \{[^}]*width: 100%/.test(css),
     'no hay un width:100% suelto para TODOS los input del formulario');
+
+  // ── Los dos que NO se cierran sin querer ─────────────────────────────────
+  //
+  // Adentro de los dos hay algo tipeado que no se reconstruye solo, así que un
+  // clic al costado o un Escape lo borran entero. El de la compra son sus
+  // dieciocho campos; el de recibir se usa CON EL PROVEEDOR EN LA PUERTA, que
+  // es el peor momento para volver a empezar — y además queda el modal del día
+  // abierto detrás, así que cerrarlo parece que no hizo nada. De los dos se
+  // sale por Cancelar.
+  t.ok(/const ESC_NO_CIERRA = new Set\(\['modal-overlay', 'ped-recibir-overlay'\]\)/.test(index),
+    'Escape no cierra ni Nueva compra ni Recibir');
+
+  // Y que no vuelva el listener de clic al fondo sobre el de recibir, que es
+  // por donde entraba el accidente.
+  t.ok(!/\['ped-recibir-overlay', closePedRecibir\]/.test(index),
+    'el modal de recibir no cierra tocando afuera');
+  t.ok(/\['ped-sem-overlay', closePedSem\]/.test(index),
+    'el del cuadro semanal sí sigue cerrando: se edita sentado y sin nadie esperando');
 }
 
 module.exports = { nombre: 'Los modales: esconderse y no desbordar', run };

@@ -66,7 +66,12 @@ function run(t) {
 
   // 6. Escape cierra overlays, pero no el de la compra.
   t.ok(src.includes('ESC_NO_CIERRA'), 'existe la lista de overlays que Escape no cierra');
-  t.ok(src.includes("ESC_NO_CIERRA = new Set(['modal-overlay'])"), 'el de la compra está exceptuado de Escape');
+  // Lo que importa acá es que la compra esté en la lista, no quién más. Decía
+  // `new Set(['modal-overlay'])` literal y se rompió el 07/09/2026 al sumar el
+  // modal de recibir por la misma razón — una prueba que falla porque OTRO
+  // formulario también se protegió está midiendo la lista y no la regla.
+  const esc = (src.match(/const ESC_NO_CIERRA = new Set\(\[([^\]]*)\]\)/) || [])[1] || '';
+  t.ok(esc.includes("'modal-overlay'"), 'el de la compra está exceptuado de Escape');
   t.ok(src.includes("e.key !== 'Escape'"), 'hay un listener global de Escape');
   t.ok(src.includes('e.defaultPrevented'), 'Escape respeta a quien ya lo manejó (edición inline de Plan y Finanzas)');
   t.ok(src.includes('login-screen') && !src.includes("ESC_NO_CIERRA.add('login"),
