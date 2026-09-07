@@ -3496,11 +3496,8 @@ function _elegirCandidata(cands, { monto = 0, fechaRef, pedidoId = '', detalle =
  *   'vincular-fila'  → ya está anotado como corresponde: NO se escribe nada.
  *   'crear-pagado'   → no había nada: se escribe una fila Pagado.
  *   'crear-a-pagar'  → no había nada: se escribe una fila "A pagar".
- *
- * `segundoPago` es la única entrada que puede hacer que se escriba una fila
- * para un pedido que YA tiene la suya pagada — ver el corte al principio.
  */
-async function planificarAsiento({ pedido, modo, monto = 0, segundoPago = false }) {
+async function planificarAsiento({ pedido, modo, monto = 0 }) {
   const nombre = (pedido.proveedor || '').trim().toLowerCase();
   const fechaRef = new Date(pedido.fecha + 'T12:00:00');
   const movs = await getMovimientos();
@@ -3525,36 +3522,6 @@ async function planificarAsiento({ pedido, modo, monto = 0, segundoPago = false 
   });
 
   const pistas = { monto, fechaRef, pedidoId: pedido.id, detalle: pedido.detalle || '' };
-
-  // ─── El proveedor cobró otra vez algo que ya estaba pago ──────────────────
-  //
-  // Va PRIMERO y corta, antes de mirar ninguna fila, porque acá no hay nada que
-  // buscar: la fila de este pedido existe y está Pagada, y justamente por eso
-  // no sirve. La plata salió de nuevo y tiene que quedar escrita, o el arqueo de
-  // esta noche cierra con un faltante que nadie va a poder explicar.
-  //
-  // La contrapartida NO va en el libro sino en los saldos: el proveedor pasa a
-  // deber esa plata (ver `saldosDeRecepcion`). Es exactamente el mecanismo que
-  // este sistema ya usa para un vuelto —se pagaron $120.000 de un pedido de
-  // $117.000 y los $3.000 quedan a favor—, sólo que del 100%. Decisión de
-  // Gonzalo (07/09/2026), con el costo medido y aceptado: el mes muestra ese
-  // proveedor por el doble hasta que el saldo se use, y se corrige solo cuando
-  // se usa, porque ese pago va a ser más chico por la misma plata.
-  //
-  // `idAsiento` es lo único que hace posible escribirla: `registrarGastoEnLibro`
-  // es idempotente sobre la columna H con el id del pedido, así que una segunda
-  // fila con el MISMO id no se escribiría nunca — la protección contra el doble
-  // toque taparía el pago real. El sufijo la distingue y sigue siendo
-  // idempotente para su propio caso: dos toques escriben una sola fila.
-  if (segundoPago) {
-    return {
-      accion: 'crear-pagado',
-      fila: null,
-      otrasPendientes: aPagar.length,
-      segundoPago: true,
-      idAsiento: `${pedido.id}-r2`,
-    };
-  }
 
   // ─── "No pagué" son dos cosas, y la diferencia ya estaba escrita ──────────
   //
@@ -3721,8 +3688,7 @@ const AVISO_DIFERENCIA_MIN = 1000;
  * este aviso, esa afirmación no queda escrita en ningún lado.
  */
 async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario,
-                                   saldoNuevo = 0, excepcional = false, detalleExcepcional = '',
-                                   segundoPago = false }) {
+                                   saldoNuevo = 0, excepcional = false, detalleExcepcional = '' }) {
   const out = [];
 
   // Contra qué se compara. Primero lo que decía el pedido —es lo que quien
@@ -3773,36 +3739,25 @@ async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario,
   // `pago`, que es el hecho y que en este punto todavía era 'no' (la ruta
   // rechaza cualquier pedido que ya tenga pago registrado).
   //
-  // DESDE EL 07/09/2026 EL AVISO SABE QUÉ PASÓ, y eso cambia lo que pide. Antes
-  // decía "hay que revisar si la plata salió dos veces", porque el sistema no
-  // podía distinguir el cobro repetido del toque equivocado: los dos llegaban
-  // acá idénticos. Ahora quien está en la puerta lo contesta en el modal, y el
-  // aviso deja de pedir una investigación para informar un hecho con su número
-  // — que es lo que hace que alguien lo reclame en vez de anotarlo.
-  //
-  // El toque equivocado ya no llega: contestarlo manda la recepción por
-  // 'no-pague', o sea que no se marca ningún pago y esto no se emite. Sigue
-  // habiendo un caso sin `segundoPago`: una pestaña vieja, que manda 'pague'
-  // sin la respuesta. Ése conserva el texto de antes, porque de ése sigue sin
-  // saberse cuál de los dos fue.
+  // DESDE LA TARDE DEL 07/09/2026 LA PANTALLA NO PUEDE PRODUCIR ESTO: si la
+  // compra dice que está pagada, el modal no ofrece pagar — decisión de Gonzalo,
+  // "si estaba pago, en la puerta no sale plata". Queda igual, y a propósito:
+  // una pestaña vieja abierta desde ayer sigue pudiendo mandar 'pague', y ése es
+  // exactamente el caso en que hace falta que alguien mire. Un aviso que ya no
+  // se puede disparar desde la pantalla no cuesta nada; el hueco de no tenerlo
+  // el día que llega uno, sí.
   if (pedido.pagoPrevisto === 'pagado' && modo === 'pague') {
     out.push(await avisos.registrar({
       tipo: 'pedido-pagado-cobrado-en-puerta',
       severidad: 'alta',
       quien: usuario,
       ir: 'pedidos',
-      titulo: segundoPago
-        ? `Cobraron de nuevo algo que ya estaba pago: ${pedido.proveedor}`
-        : `Se pagó en efectivo algo que figuraba pago: ${pedido.proveedor}`,
+      titulo: `Se pagó en efectivo algo que figuraba pago: ${pedido.proveedor}`,
       detalle: `Al cargar la compra se dijo que ya estaba pagada`
         + (pedido.medioPrevisto ? ` (${pedido.medioPrevisto})` : '')
-        + (segundoPago
-            ? `, y en la puerta el proveedor cobró${montoDicho > 0 ? ` ${fmtARS(montoDicho)}` : ''} otra vez. `
-              + `Está escrito en Movimientos y quedó como saldo a favor: `
-              + `${pedido.proveedor} debe esa plata y hay que reclamarla o descontarla del próximo pedido. `
-            : `, pero al recibirla se marcó pago en efectivo en la puerta`
-              + (montoDicho > 0 ? ` por ${fmtARS(montoDicho)}` : '')
-              + `. Hay que revisar si la plata salió dos veces. `)
+        + `, pero al recibirla se marcó pago en efectivo en la puerta`
+        + (montoDicho > 0 ? ` por ${fmtARS(montoDicho)}` : '')
+        + `. Hay que revisar si la plata salió dos veces. `
         + `Lo recibió ${usuario || 'alguien'} el ${fechaHoraAR()}.`,
     }));
   }
@@ -3817,25 +3772,23 @@ async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario,
 // Dos cosas independientes que pueden pasar en la misma entrega, y por eso son
 // dos parámetros y no uno:
 //
-//   · `pagoTipo` + `pagoMotivo` — cómo cerró la plata de HOY. La pantalla manda
-//     el TOTAL pagado y estos dos; **la diferencia la saca acá**, contra lo que
-//     dijo la compra. Que la reste el navegador sería tener la misma cuenta en
-//     dos lugares, y acá la cuenta es plata.
+//   · `monto` — el TOTAL pagado, o el valor de lo que llegó cuando ya estaba
+//     pago. **La diferencia contra lo que dijo la compra se saca ACÁ**. Que la
+//     reste el navegador sería tener la misma cuenta en dos lugares, y acá la
+//     cuenta es plata.
 //   · `saldoUsado` — se descontó un saldo que YA existía. El renglón que se
 //     escribe es el opuesto, porque lo cancela: usar $3.000 que nos debían
 //     escribe −$3.000 y el saldo queda en cero.
 //
-// ─── "Pagué de menos" son DOS cosas opuestas, y las separa el motivo ────────
+// ─── Dos situaciones distintas, dos ramas ──────────────────────────────────
 //
-//   pago-parcial → llegó todo y se pagó de menos. La diferencia SE DEBE: nace
-//                  un saldo a favor del proveedor (negativo).
-//   reduccion    → no se aceptó parte de la mercadería (los langostinos
-//                  estaban podridos). La diferencia NO se debe: el pedido valía
-//                  menos. No nace ningún saldo.
+//   ya estaba pago  → la plata ya salió y no vuelve a salir. Lo que puede
+//                     cambiar es cuánto VALIÓ lo que llegó, y esa diferencia va
+//                     a saldos para los dos lados.
+//   no estaba pago  → se pagó (o no) en la puerta. Si lo pagado no coincide con
+//                     lo cargado, esa diferencia va a saldos y se avisa.
 //
-// Confundirlas dejaría al bar debiendo plata por mercadería que devolvió. Por
-// eso el default de la pantalla es `pago-parcial` —el que sí deja deuda— y
-// soltar la deuda exige elegir la otra opción y escribir por qué.
+// Ninguna de las dos toca `Movimientos`. Ver abajo.
 //
 // LO QUE ESTO NO HACE: tocar `Movimientos`. La fila del libro lleva SIEMPRE la
 // plata que se movió —los $120.000 que salieron de la caja, no los $117.000 que
@@ -3849,53 +3802,11 @@ async function avisosDeRecepcion({ pedido, modo, montoDicho, plan, usuario,
 // Qué motivo, de cada lado, deja deuda. Fuera de la función para poder mirarlo
 // de un vistazo: es la tabla de la que depende que el bar no quede debiendo
 // plata por mercadería que devolvió.
-// Cuáles de los "pagué de menos" dejan una deuda. Los dos que NO la dejan
-// tienen la misma forma: la mercadería que falta **no está adentro del bar**,
-// así que no se debe. Lo que los separa es si va a llegar:
-//
-//   · `reduccion`     — no se aceptó, y no va a venir. Se termina acá.
-//   · `viene-el-resto`— no vino todavía y llega otro día. Se termina en un
-//                       pedido nuevo para esa fecha (ver `restoFecha`).
-//
-// `pago-parcial` es el que sí deja deuda —llegó todo y se pagó de menos— y por
-// eso es el default: soltar una deuda tiene que ser deliberado.
-const SALDO_DEJA_DEUDA = {
-  demas: () => true,                     // el vuelto se debe, sea cual sea el porqué
-  menos: (motivo) => motivo !== 'reduccion' && motivo !== 'viene-el-resto',
-};
-
-async function saldosDeRecepcion({ pedido, monto = 0, modo, pagoTipo, pagoMotivo, pagoDetalle,
-                                   saldoUsado = 0, usuario, segundoPago = false }) {
+async function saldosDeRecepcion({ pedido, monto = 0, modo, pagoDetalle,
+                                   restoFecha = '', saldoUsado = 0, usuario }) {
   const out = [];
   const usado = centavos(leerMonto(saldoUsado));
   let usadoReal = 0;
-
-  // ─── Lo pagaron dos veces: TODO lo que salió queda a favor ────────────────
-  //
-  // Sale antes que nada y devuelve sin mirar `pagoTipo`, porque acá no hay una
-  // diferencia contra lo esperado que calcular: lo esperado ya se había pagado.
-  // La plata que acaba de salir es, entera, plata que el proveedor debe — sea
-  // el pedido completo o sólo una parte que exigió cobrar.
-  //
-  // Su fila en Movimientos la escribió `planificarAsiento`; esto es la otra
-  // mitad, y es la que hace que el mes vuelva a cuadrar cuando el proveedor lo
-  // descuente del próximo pedido.
-  if (segundoPago) {
-    const pagado = centavos(leerMonto(monto));
-    if (pagado > 0) {
-      out.push(await saldos.registrar({
-        proveedor: pedido.proveedor,
-        monto: pagado,
-        motivo: 'doble-pago',
-        detalle: `Ya estaba pago${pedido.medioPrevisto ? ` por ${pedido.medioPrevisto}` : ''} y en la puerta `
-          + `cobró ${fmtARS(pagado)} otra vez. Esa plata la debe.`
-          + ((pagoDetalle || '').toString().trim() ? ` ${String(pagoDetalle).trim()}` : ''),
-        pedidoId: pedido.id,
-        usuario,
-      }));
-    }
-    return { movimientos: out, saldoNuevo: pagado, diferencia: pagado, usado: 0 };
-  }
 
   if (usado) {
     const actual = centavos(await saldos.saldoDe(pedido.proveedor));
@@ -3928,7 +3839,7 @@ async function saldosDeRecepcion({ pedido, monto = 0, modo, pagoTipo, pagoMotivo
   // pagó de más, y el sentido de la deuda es el CONTRARIO al del caso normal:
   // acá el proveedor debe, no el bar.
   //
-  // Por eso tiene su propia rama y no entra por `pagoTipo`: ahí la diferencia
+  // Por eso tiene su propia rama y no entra por la de abajo: ahí la diferencia
   // se saca contra lo que hay que pagar HOY, y hoy no hay que pagar nada. Con
   // aquella fórmula, "llegó de menos" habría anotado que el bar le debe plata a
   // quien acaba de quedarse con la suya.
@@ -3938,21 +3849,28 @@ async function saldosDeRecepcion({ pedido, monto = 0, modo, pagoTipo, pagoMotivo
   // esto no escribe nada. Sólo aparece cuando alguien la bajó a propósito.
   const esperadoYaPago = centavos(leerMonto(pedido.costoEstimado));
   if (pedido.pagoPrevisto === 'pagado' && modo === 'no-pague' && esperadoYaPago > 0) {
-    const llego = centavos(leerMonto(monto));
-    const aFavor = centavos(esperadoYaPago - llego);
-    if (aFavor > 0) {
+    const valio = centavos(leerMonto(monto));
+    // Positivo = a favor del bar (se pagó de más y lo deben). Negativo = valió
+    // más de lo pagado y esa parte se le debe. Los dos lados existen: un
+    // producto que no vino baja el valor, un precio que subió lo sube.
+    const dif = centavos(esperadoYaPago - valio);
+    if (dif !== 0) {
+      const texto = (pagoDetalle || '').toString().trim();
       out.push(await saldos.registrar({
         proveedor: pedido.proveedor,
-        monto: aFavor,
-        motivo: 'reduccion',
-        detalle: `La compra se pagó por ${fmtARS(esperadoYaPago)} y llegó por ${fmtARS(llego)}: `
-          + `${fmtARS(aFavor)} pagados de más. Los debe.`
-          + ((pagoDetalle || '').toString().trim() ? ` ${String(pagoDetalle).trim()}` : ''),
+        monto: dif,
+        motivo: dif > 0 ? 'reduccion' : 'ajuste',
+        detalle: `La compra se pagó por ${fmtARS(esperadoYaPago)} y lo que llegó valió `
+          + `${fmtARS(valio)}: `
+          + (dif > 0
+              ? `${fmtARS(dif)} pagados de más. Los debe.`
+              : `${fmtARS(Math.abs(dif))} de más que se le deben.`)
+          + (texto ? ` ${texto}` : ''),
         pedidoId: pedido.id,
         usuario,
       }));
     }
-    return { movimientos: out, saldoNuevo: aFavor > 0 ? aFavor : 0, diferencia: 0, usado: usadoReal };
+    return { movimientos: out, saldoNuevo: dif > 0 ? dif : 0, diferencia: dif, usado: usadoReal };
   }
 
   // ─── La diferencia, sacada acá y no en el navegador ───────────────────────
@@ -3963,21 +3881,38 @@ async function saldosDeRecepcion({ pedido, monto = 0, modo, pagoTipo, pagoMotivo
   const esperado = centavos(leerMonto(pedido.costoEstimado));
   const aPagar = centavos(esperado - usadoReal);
   const diferencia = centavos(leerMonto(monto) - aPagar);
-  const tipo = pagoTipo === 'demas' || pagoTipo === 'menos' ? pagoTipo : null;
 
-  // El signo tiene que coincidir con lo que dijo el botón. Si no coincide, no se
-  // anota nada: es mejor perder el saldo que anotarlo del lado equivocado, y el
-  // aviso a los dueños igual va a saltar por la diferencia sin explicar.
-  const coincide = tipo === 'demas' ? diferencia > 0 : tipo === 'menos' ? diferencia < 0 : false;
-  const dejaDeuda = tipo && SALDO_DEJA_DEUDA[tipo](pagoMotivo);
-  const nuevo = (esperado > 0 && coincide && dejaDeuda) ? diferencia : 0;
+  // ─── Se pagó algo distinto de lo que decía la compra ─────────────────────
+  //
+  // Desde la tarde del 07/09/2026 esto NO se clasifica más. Antes había que
+  // contestar "¿de más o de menos?" y después "¿por qué?", y de esas dos
+  // respuestas salía si la diferencia dejaba deuda. Eran dos preguntas con el
+  // proveedor en la puerta para una situación que ya se ve en el número.
+  //
+  // Ahora la regla es una sola: **se anota la diferencia, con el signo que
+  // tenga, y se avisa a los dueños** — con la explicación que quien recibe
+  // quiera escribir. Positivo = pagó de más y el proveedor lo debe; negativo =
+  // pagó de menos y se le debe.
+  //
+  // Lo que se pierde y hay que saberlo: el sistema ya no distingue "pagué de
+  // menos porque rebotó un renglón" (donde no se debe nada) de "pagué de menos
+  // y quedo debiendo". Las dos dejan un saldo en contra. Eso ahora lo resuelve
+  // el texto libre y el aviso a los tres dueños, que son quienes pueden ponerlo
+  // en cero desde Saldos. Se eligió la pantalla de un toque por sobre la
+  // clasificación exacta en la puerta, que era donde se equivocaba.
+  //
+  // `restoFecha` es la única excepción y por eso viaja hasta acá: si lo que
+  // falta llega otro día, esa mercadería NO está adentro del bar y no se debe.
+  // El pedido del resto es lo que lo persigue.
+  const parteQueFalta = !!pedidos.normalizarFecha(restoFecha);
+  const nuevo = (esperado > 0 && diferencia !== 0 && !parteQueFalta) ? diferencia : 0;
 
   if (nuevo) {
     const texto = (pagoDetalle || '').toString().trim();
     out.push(await saldos.registrar({
       proveedor: pedido.proveedor,
       monto: nuevo,
-      motivo: pagoMotivo === 'sin-cambio' ? 'vuelto' : (pagoMotivo || 'otros'),
+      motivo: nuevo > 0 ? 'vuelto' : 'pago-parcial',
       detalle: (nuevo > 0
         ? `Se pagaron ${fmtARS(monto)} de un pedido de ${fmtARS(aPagar)}: ${fmtARS(nuevo)} de más. Nos lo debe.`
         : `Se pagaron ${fmtARS(monto)} de un pedido de ${fmtARS(aPagar)}: quedaron ${fmtARS(Math.abs(nuevo))} sin pagar. Se le deben.`)
@@ -3988,11 +3923,10 @@ async function saldosDeRecepcion({ pedido, monto = 0, modo, pagoTipo, pagoMotivo
   }
 
   // `saldoNuevo` sale de acá para que el aviso a los dueños mire exactamente lo
-  // mismo que se anotó, y no lo que el navegador dijo que iba a anotar.
-  // `reduccion` devuelve la diferencia igual aunque no genere saldo: el pedido
-  // valió menos y eso también es una explicación válida de por qué la plata no
-  // coincide con la compra.
-  return { movimientos: out, saldoNuevo: nuevo, diferencia: coincide ? diferencia : 0, usado: usadoReal };
+  // mismo que se anotó, y no lo que el navegador dijo que iba a anotar. La
+  // `diferencia` se devuelve aunque no haya dejado saldo: "el resto llega otro
+  // día" también explica por qué la plata no coincide con la compra.
+  return { movimientos: out, saldoNuevo: nuevo, diferencia, usado: usadoReal };
 }
 
 /**
@@ -4067,10 +4001,10 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
     // sistema elegía siempre el segundo —`vincular-fila`, no escribe nada— y la
     // plata que de verdad salió no quedaba en ningún lado: ni en Movimientos ni
     // en el arqueo, que esa noche cerraba con un faltante sin explicación.
-    const segundoPago = req.body.segundoPago === true && pedido.pagoPrevisto === 'pagado' && modo === 'pague';
+
 
     // Se decide contra qué fila va ANTES de tocar nada.
-    let plan = await planificarAsiento({ pedido, modo, monto, segundoPago });
+    let plan = await planificarAsiento({ pedido, modo, monto });
     let ref = '', asiento = null;
 
     // Cerrar una fila es lo único que puede fallar por culpa de la fila y no del
@@ -4100,7 +4034,7 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
       cerrada = await cerrar();
       if (!cerrada.ok) {
         clearCache();
-        plan = { ...await planificarAsiento({ pedido, modo, monto, segundoPago }), replanificado: true };
+        plan = { ...await planificarAsiento({ pedido, modo, monto }), replanificado: true };
         cerrada = plan.accion === 'cerrar-fila' ? await cerrar() : null;
         if (cerrada && !cerrada.ok) {
           return res.status(cerrada.status).json({ ok: false, error: cerrada.error });
@@ -4136,10 +4070,7 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
         });
       }
       const r = await registrarGastoEnLibro({
-        // Normalmente el id del pedido, que es la clave de idempotencia contra
-        // el doble toque. Un segundo pago trae el suyo, o su fila no se
-        // escribiría nunca: ver `idAsiento` en planificarAsiento.
-        facturaId: plan.idAsiento || pedido.id,
+        facturaId: pedido.id,
         fecha: pedido.fecha,
         proveedor: pedido.proveedor,
         // La categoría y el mes los eligió quien compró y viajaron con el
@@ -4148,19 +4079,14 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
         categoria: req.body.categoria || pedido.categoria || 'Mercaderia',
         mes: pedido.mes || '',
         monto,
-        // La descripción de un segundo pago DICE que lo es. Sin eso quedan dos
-        // filas idénticas del mismo proveedor y el mismo día en Movimientos, y
-        // el que las mire dentro de un mes sólo puede concluir que alguien
-        // cargó la compra dos veces — que es justo lo contrario de lo que pasó.
-        descripcion: (pedido.detalle || `Pedido ${pedido.proveedor}`)
-          + (plan.segundoPago ? ' (cobrado de nuevo en la puerta — queda a favor)' : ''),
+        descripcion: pedido.detalle || `Pedido ${pedido.proveedor}`,
         medioPago,
         estado: plan.accion === 'crear-a-pagar' ? 'A pagar' : 'Pagado',
         vencimiento: req.body.vencimiento || pedido.vence || pedido.fecha,
         usuario: req.user.nombre,
       });
       if (!r.ok) return res.status(400).json({ ok: false, error: r.error });
-      ref = plan.idAsiento || pedido.id;
+      ref = pedido.id;
       asiento = { ...plan, escribio: !r.yaExistia, yaEstaba: !!r.yaExistia, registradoEnSesion: r.registradoEnSesion };
     }
     // En qué queda el pedido lo dice la fila del libro, no el botón que se
@@ -4180,12 +4106,10 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
         pedido,
         monto: montoDicho,
         modo,
-        pagoTipo: req.body.pagoTipo,
-        pagoMotivo: req.body.pagoMotivo,
         pagoDetalle: req.body.pagoDetalle,
+        restoFecha: req.body.restoFecha,
         saldoUsado: req.body.saldoUsado,
         usuario: req.user.nombre,
-        segundoPago,
       });
       saldosEscritos = saldoResuelto.movimientos;
     } catch (e) {
@@ -4246,9 +4170,11 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
         // Un vuelto por falta de cambio es rutina y no tiene que sonar. Un
         // "pagué de más" con un motivo escrito a mano es, por definición, el
         // caso raro — y ése es justamente el que los dueños quieren mirar.
-        excepcional: req.body.pagoTipo === 'demas' && req.body.pagoMotivo !== 'sin-cambio',
+        // Cualquier explicación escrita a mano es, por definición, el caso raro:
+        // el que llegó y pagó lo esperado no escribe nada. Antes esto miraba una
+        // clasificación que la pantalla ya no pide.
+        excepcional: !!String(req.body.pagoDetalle || '').trim(),
         detalleExcepcional: req.body.pagoDetalle,
-        segundoPago,
       });
     } catch (e) {
       console.error(`Pedidos: no se pudieron emitir los avisos de la recepción (${e.message})`);
@@ -4273,14 +4199,7 @@ app.get('/api/pedidos/:id/plan', authMiddleware, async (req, res) => {
     const pedido = await pedidos.getPedido(req.params.id);
     if (!pedido) return res.status(404).json({ ok: false, error: 'No se encontró ese pedido' });
     const modo = normalizarModoRecibir(req.query.modo) || 'pague';
-    // La respuesta a "ya estaba pago, ¿te lo cobraron igual?" cambia el plan por
-    // completo —de no escribir nada a escribir una fila—, así que la vista
-    // previa tiene que recibirla o mostraría lo contrario de lo que va a pasar.
-    const segundoPago = req.query.segundoPago === '1'
-      && pedido.pagoPrevisto === 'pagado' && modo === 'pague';
-    const plan = await planificarAsiento({
-      pedido, modo, monto: Number(req.query.monto) || 0, segundoPago,
-    });
+    const plan = await planificarAsiento({ pedido, modo, monto: Number(req.query.monto) || 0 });
     res.json({ ok: true, data: plan });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });

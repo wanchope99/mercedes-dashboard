@@ -87,8 +87,12 @@ const TZ = 'America/Argentina/Buenos_Aires';
 const HEADER = ['ID', 'Fecha', 'Proveedor', 'Detalle', 'CostoEstimado', 'MedioPrevisto',
                 'Estado', 'RecibidoPor', 'RecibidoEl', 'Pago', 'MontoPagado', 'MedioPagoReal',
                 'RefMovimiento', 'Origen', 'Notas', 'Actualizado',
-                'PagoPrevisto', 'Vence', 'Categoria', 'Mes'];
-const ULTIMA_COL = 'T';
+                'PagoPrevisto', 'Vence', 'Categoria', 'Mes', 'Reprogramado'];
+// Reprogramado (columna U, 07/09/2026) se agrega sola a las hojas que ya
+// existen, igual que Categoria y Mes: ver _ensureEncabezado. Guarda la fecha
+// ORIGINAL de un pedido que nadie recibio y que el sistema paso de dia solo,
+// y es lo que hace que eso pase UNA vez y no todas las noches.
+const ULTIMA_COL = 'U';
 const HEADER_SEMANAL = ['ID', 'Dia', 'Orden', 'Tipo', 'Proveedor', 'Nota', 'MedioPrevisto',
                         'Activo', 'Actualizado'];
 const HOJA_ITEMS = process.env.PEDIDOS_ITEMS_SHEET || 'Pedidos Items';
@@ -420,6 +424,7 @@ async function _leerPedidos(api) {
       actualizado: _txt(r[15]),
       pagoPrevisto: normalizarPagoPrevisto(r[16]),
       vence: normalizarFecha(r[17]),
+      reprogramado: normalizarFecha(r[20]),
       // Lo que decidió la compra y va a escribir la recepción.
       categoria: _txt(r[18]),
       mes: _txt(r[19]),
@@ -658,7 +663,8 @@ function _aFila(p) {
   return [p.id, p.fecha, p.proveedor, p.detalle, p.costoEstimado || '', p.medioPrevisto,
           p.estado, p.recibidoPor, p.recibidoEl, p.pago, p.montoPagado || '', p.medioPagoReal,
           p.refMovimiento, p.origen, p.notas, p.actualizado,
-          p.pagoPrevisto || '', p.vence || '', p.categoria || '', p.mes || ''];
+          p.pagoPrevisto || '', p.vence || '', p.categoria || '', p.mes || '',
+          p.reprogramado || ''];
 }
 
 function _aFilaSemanal(s) {
@@ -969,6 +975,9 @@ async function actualizarPedido(id, cambios = {}) {
   if (tiene('pagoPrevisto')) nuevo.pagoPrevisto = normalizarPagoPrevisto(cambios.pagoPrevisto);
   if (tiene('vence')) nuevo.vence = normalizarFecha(cambios.vence);
   if (tiene('notas')) nuevo.notas = _txt(cambios.notas).slice(0, NOTAS_MAX);
+  // La fecha original de un pedido que se paso de dia solo. La escribe
+  // reprogramarNoRecibidos y es la marca que hace que eso pase una sola vez.
+  if (tiene('reprogramado')) nuevo.reprogramado = normalizarFecha(cambios.reprogramado);
   if (tiene('estado')) {
     const e = normalizarEstado(cambios.estado);
     // Volver un pedido a "esperado" después de haberlo pagado dejaría la fila
@@ -1226,10 +1235,59 @@ async function _borrarFila(titulo, rowIndex) {
   });
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Lo que nadie recibió pasa de día solo
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Decisión de Gonzalo (07/09/2026): con un solo botón en el renglón, **no
+// tocarlo significa que el pedido no llegó**. Y lo que no llegó no hay que
+// gestionarlo: tiene que aparecer al día siguiente sin que nadie haga nada.
+//
+// Antes eso costaba un "📅 Otro día" por pedido, todas las mañanas, para
+// registrar algo que ya se sabía por omisión.
+//
+// SE MUEVE UNA SOLA VEZ, y ése es el freno que hace que esto sea seguro. Un
+// pedido que se arrastra solo, día tras día, es un pedido que nunca va a
+// llegar y del que nadie se entera nunca: siempre aparece "para hoy" y jamás
+// como problema. Con el freno, la segunda vez se queda quieto y el día pasado
+// lo muestra en rojo como atrasado, que es cuando alguien tiene que mirarlo.
+//
+// La columna `Reprogramado` guarda la fecha ORIGINAL, así que además de ser la
+// marca del freno es lo que deja decir "esto se esperaba el 8".
+//
+// NO devuelve el pedido al cuadro semanal ni toca la hoja Semanal: acá se
+// mueven filas reales, que son las únicas que existen.
+async function reprogramarNoRecibidos({ hoy = hoyAR() } = {}) {
+  if (!SPREADSHEET_ID) return { movidos: [], frenados: [] };
+  const todos = await _loadPedidos();
+
+  // Los que quedaron abiertos en un día que ya pasó. `estaAbierto` es la misma
+  // pregunta que usa la lista de días: ¿todavía pide algo de alguien?
+  const candidatos = todos.filter(p => p.fecha && p.fecha < hoy && estaAbierto(p));
+
+  const movidos = [], frenados = [];
+  for (const p of candidatos) {
+    // Ya se movió solo una vez y tampoco llegó. Se queda donde está: a partir
+    // de acá es un problema, no una demora.
+    if (p.reprogramado) { frenados.push(_publico(p)); continue; }
+    try {
+      const data = await actualizarPedido(p.id, { fecha: hoy, reprogramado: p.fecha });
+      movidos.push({ ...data, desde: p.fecha });
+    } catch (e) {
+      // Uno que falla no puede dejar sin mover a los demás: son filas
+      // independientes y la tarea corre sin nadie mirando.
+      console.error(`Pedidos: no se pudo reprogramar ${p.id} (${e.message})`);
+    }
+  }
+  if (movidos.length) clearCache();
+  return { movidos, frenados };
+}
+
 function clearCache() { cache.del(CACHE_PEDIDOS); cache.del(CACHE_SEMANAL); cache.del(CACHE_ITEMS); }
 
 module.exports = {
   listPedidos, getPedido, crearPedido, actualizarPedido, marcarRecibido, borrarPedido,
+  reprogramarNoRecibidos,
   omitirPrevisto, restaurarOmitido,
   listSemanal, crearSemanal, actualizarSemanal, borrarSemanal,
   // Los renglones de un pedido: qué y cuánto llega, para tildarlo en la puerta.

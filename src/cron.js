@@ -8,6 +8,7 @@ const cron = require('node-cron');
 const stockBebidas = require('./stock-bebidas');
 const informes = require('./informes');
 const tcMovimientos = require('./tc-movimientos');
+const pedidos = require('./pedidos');
 
 // 09:00 hora Argentina, todos los días, antes del servicio.
 const STOCK_BEBIDAS_CRON = process.env.STOCK_BEBIDAS_CRON || '0 9 * * *';
@@ -19,6 +20,10 @@ const STOCK_BEBIDAS_CRON = process.env.STOCK_BEBIDAS_CRON || '0 9 * * *';
 // TODAS las filas vacías, así que una corrida perdida la recupera la siguiente
 // sola. Es idempotente por naturaleza — nunca pisa una celda que ya tiene valor.
 const TC_MOVIMIENTOS_CRON = process.env.TC_MOVIMIENTOS_CRON || '5 9 * * *';
+
+// 07:00: los pedidos que nadie recibio ayer pasan a hoy. El bar ya cerro y el
+// cocinero todavia no llego, asi que la lista no cambia debajo de nadie.
+const PEDIDOS_REPROGRAMAR_CRON = process.env.PEDIDOS_REPROGRAMAR_CRON || '0 7 * * *';
 
 const TZ_AR = 'America/Argentina/Buenos_Aires';
 
@@ -94,6 +99,37 @@ function iniciarCron() {
   }, { timezone: TZ_AR, name: 'stock-bebidas-diario', noOverlap: true });
 
   console.log(`Cron: snapshot diario de Stock Bebidas programado (${STOCK_BEBIDAS_CRON} ${TZ_AR})`);
+
+  // Los pedidos que nadie recibió pasan al día siguiente, solos.
+  //
+  // Con un solo botón en el renglón, no tocarlo significa que el pedido no
+  // llegó — y lo que no llegó no hay que gestionarlo, tiene que aparecer al
+  // otro día sin que nadie haga nada. Ver `reprogramarNoRecibidos`, que además
+  // explica por qué se mueve UNA sola vez.
+  //
+  // A las 07:00: el bar ya cerró (el arqueo se hace de madrugada) y todavía no
+  // llegó el cocinero de las 10, así que nadie ve la lista cambiar debajo de
+  // sus manos. Va antes que el snapshot de las 09:00 y no compite con nada.
+  cron.schedule(PEDIDOS_REPROGRAMAR_CRON, async () => {
+    try {
+      const r = await pedidos.reprogramarNoRecibidos();
+      if (r.movidos.length) {
+        console.log(`Cron Pedidos: ${r.movidos.length} pedido(s) sin recibir pasaron a hoy`);
+      }
+      // Los frenados son los que ya se habían movido solos y tampoco llegaron.
+      // Se registran porque a partir de acá quedan en rojo como atrasados y
+      // alguien tiene que mirarlos: es el caso que el freno existe para hacer
+      // visible.
+      if (r.frenados.length) {
+        console.warn(`Cron Pedidos: ${r.frenados.length} pedido(s) llevan dos días sin llegar `
+          + `y quedan como atrasados: ${r.frenados.map(p => p.proveedor).join(', ')}`);
+      }
+    } catch (e) {
+      console.error('Cron Pedidos: error reprogramando los no recibidos:', e.message);
+    }
+  }, { timezone: TZ_AR, name: 'pedidos-reprogramar-diario', noOverlap: true });
+
+  console.log(`Cron: pase de día de los pedidos sin recibir programado (${PEDIDOS_REPROGRAMAR_CRON} ${TZ_AR})`);
 
   // Tipo de cambio de las filas nuevas de Movimientos.
   cron.schedule(TC_MOVIMIENTOS_CRON, async () => {
