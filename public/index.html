@@ -2361,6 +2361,31 @@
          Cancelar todavía a mano, y no en el informe de después. -->
     <div id="ped-r-ojo" style="font-size:12px;color:var(--orange);line-height:1.6;margin-bottom:14px"></div>
 
+    <!-- ── "Ya estaba pago": qué pasó de verdad ────────────────────────────
+         La única pregunta que se agregó a esta ventana, y aparece SÓLO cuando
+         se toca "lo pagué" sobre algo que la compra ya había dejado pagado.
+         Dos mundos opuestos que hasta el 07/09/2026 llegaban al server
+         idénticos, y el sistema elegía siempre el mismo:
+
+           · el proveedor cobró otra vez  → salió plata que no estaba anotada
+             en NINGÚN lado. El arqueo de esa noche cerraba con un faltante.
+           · el toque fue un error        → no salió nada, y está bien que no
+             se escriba nada.
+
+         Es la misma forma que ya tiene "pagué de menos" acá abajo: mismo
+         toque, dos significados opuestos, separados por una elección explícita
+         con la consecuencia escrita al lado. -->
+    <div class="form-group full" id="ped-r-doble-wrap" style="display:none;margin-bottom:12px">
+      <label>Esta compra ya figuraba pagada. ¿Qué pasó?</label>
+      <div class="pp-grupo" id="ped-r-doble-opts">
+        <button type="button" class="pp-btn activo" data-doble="1" onclick="setSegundoPago(true)">
+          Me la cobraron igual<small>la plata salió ahora</small></button>
+        <button type="button" class="pp-btn" data-doble="0" onclick="setSegundoPago(false)">
+          Ya estaba pago, sólo llegó<small>no salió plata</small></button>
+      </div>
+      <div id="ped-r-doble-resumen" style="font-size:11.5px;color:var(--text-muted);margin-top:6px"></div>
+    </div>
+
     <div>
       <!-- Lo que el proveedor ya debía (o se le debía) antes de esta entrega. -->
       <div id="ped-r-saldo-tiene" style="margin-bottom:12px"></div>
@@ -2402,6 +2427,23 @@
         <input type="text" id="ped-r-motivo-texto" maxlength="200" style="display:none;width:100%;margin-top:8px"
                placeholder="Ej: los langostinos estaban podridos">
       </div>
+      <!-- ── Vino una parte y el resto llega otro día ──────────────────────
+           Va en los DOS modos, porque la entrega se puede partir se haya
+           pagado o no. Sin esto había que elegir entre dos mentiras: marcar
+           recibido todo —dando por llegada mercadería que no está— o no marcar
+           nada y dejar el día trabado con lo que sí llegó adentro.
+           Lo que falta se convierte en un pedido nuevo para esa fecha. -->
+      <div class="form-group full" id="ped-r-resto-wrap" style="margin-bottom:12px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:400">
+          <input type="checkbox" id="ped-r-resto" onchange="onRestoOtroDia()" style="width:auto;margin:0">
+          <span>Vino sólo una parte — el resto llega otro día</span>
+        </label>
+        <div id="ped-r-resto-fecha-wrap" style="display:none;margin-top:8px">
+          <input type="date" id="ped-r-resto-fecha" style="width:100%">
+          <div id="ped-r-resto-resumen" style="font-size:11.5px;color:var(--text-muted);margin-top:6px"></div>
+        </div>
+      </div>
+
       <!-- Sólo cuando nadie pagó, y opcional: vacío significa el día de la
            entrega. El medio ya no se pregunta — lo dijo la compra. -->
       <div class="form-group full" id="ped-r-venc-wrap" style="display:none;margin-bottom:12px">
@@ -2416,6 +2458,33 @@
     <div class="modal-actions">
       <button class="btn" onclick="closePedRecibir()">Cancelar</button>
       <button class="btn btn-accent" onclick="confirmarPedRecibir()">✓ Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: el que llegó no es el proveedor del pedido.
+     Pasa cuando la compra se cargó con un nombre y viene otro —la misma empresa
+     con otra razón social, o simplemente se eligió mal en el formulario—. Se
+     corrige ANTES de recibir, porque el proveedor es lo que decide contra qué
+     fila de Movimientos se busca: recibir con el nombre equivocado escribe el
+     gasto a nombre de alguien que no lo cobró.
+     Es una corrección del pedido, no parte de recibir, y por eso vive con
+     "Otro día" y el tacho y no entre los botones de recepción. -->
+<div class="modal-overlay" id="ped-prov-overlay">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-title">¿Quién trajo el pedido?</div>
+    <div id="ped-prov-cabecera" style="font-size:13px;color:var(--text-muted);margin-bottom:14px"></div>
+    <div class="form-group full">
+      <label>Proveedor</label>
+      <input type="text" id="ped-prov-nombre" list="proveedores-datalist" autocomplete="off" style="width:100%" />
+    </div>
+    <!-- Cuando la compra ya escribió su fila, cambiar el pedido no la mueve.
+         Se dice: media corrección silenciosa es peor que ninguna. -->
+    <div id="ped-prov-ojo" style="font-size:12px;color:var(--orange);line-height:1.6;margin-top:10px"></div>
+    <div id="ped-prov-error" style="color:var(--red);font-size:13px;margin-top:10px;text-align:center"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closePedProv()">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarPedProv()">Guardar</button>
     </div>
   </div>
 </div>
@@ -9734,6 +9803,71 @@ async function cerrarAvisoInforme(marcarLeido) {
 // misma computadora no se pisen.
 const RELEASE_LOG = [
   {
+    version: '2026-09-07-recibir-los-casos-raros',
+    fecha: '7 de septiembre de 2026',
+    titulo: 'Recibir: un toque para lo normal, y una respuesta para cada imprevisto',
+    // Es LA pantalla de Juan, Eze y Charly, y cambia el botón que tocan todos
+    // los días. Va a todos, sin discusión.
+    paraTodos: true,
+    porque: 'Recibir andaba bien con la entrega normal y se quedaba corto con las raras, que son '
+      + 'las que hacen que después no cierre la caja. Ahora <b>el botón grande siempre es lo que '
+      + 'va a pasar</b> con ese pedido, y cada imprevisto tiene dónde anotarse.',
+    items: [
+      {
+        icono: '👆',
+        titulo: 'Los pedidos que no se pagan en la puerta se reciben de un toque',
+        desc: 'Si la compra dijo <b>"no se paga acá"</b>, el botón grande ahora es <b>Llegó y no lo '
+            + 'pagué</b> y no abre nada: el monto y el vencimiento ya los dijo la compra. Antes el '
+            + 'botón grande era "lo pagué", que era justo lo que no pasaba, y había que elegir el '
+            + 'chico. Lo mismo que ya pasaba con los que están pagos.',
+        donde: 'Compras › Pedidos',
+      },
+      {
+        icono: '💸',
+        titulo: 'Si ya estaba pago y te lo cobran igual, ahora se puede anotar',
+        desc: 'Antes esa plata <b>no quedaba registrada en ningún lado</b> y el arqueo de esa noche '
+            + 'cerraba con un faltante sin explicación. Ahora se pregunta qué pasó: si te lo '
+            + 'cobraron igual, se anota el gasto y <b>queda a favor tuyo</b> —el proveedor te lo '
+            + 'debe— y se les avisa a los dueños. Si fue un toque equivocado, se elige la otra '
+            + 'opción y no se escribe nada.',
+        donde: 'Compras › Pedidos',
+      },
+      {
+        icono: '📦',
+        titulo: 'Vino sólo una parte: el resto queda anotado para otro día',
+        desc: 'Una casilla en la ventana de recibir. Se paga lo que llegó, <b>no queda deuda por lo '
+            + 'que falta</b>, y lo que falta aparece como un pedido nuevo para el día que elijas. '
+            + 'Antes había que elegir entre dar por recibido todo o no marcar nada.',
+        donde: 'Compras › Pedidos',
+      },
+      {
+        icono: '↩️',
+        titulo: 'Si estaba pago y llegó de menos, esa plata la debe el proveedor',
+        desc: 'Cuando hay renglones marcados como que no llegaron, el toque directo ya no resuelve '
+            + 'solo: se abre la ventana y se puede bajar cuánto valía lo que llegó. La diferencia '
+            + 'queda como <b>saldo a favor</b>, para descontarla del próximo pedido.',
+        donde: 'Compras › Pedidos',
+      },
+      {
+        icono: '🏦',
+        titulo: 'Si en la puerta paga otro, ahora se dice al cargar la compra',
+        desc: 'En <b>Nueva compra</b>, "se paga al recibir" ahora pregunta <b>con qué se paga</b> '
+            + '(viene puesto Efectivo Local, que es lo de siempre). Sirve para el proveedor que '
+            + 'cobra en la puerta pero al que le transfiere Pablo o Tincho: antes eso se anotaba '
+            + 'como si hubiera salido de la caja del local y descuadraba el arqueo.',
+        donde: 'Compras › Pedidos › + Nueva compra',
+      },
+      {
+        icono: '✏️',
+        titulo: 'Si el que llega no es el del pedido, se corrige antes de recibir',
+        desc: 'Un botón <b>Proveedor</b> al lado de "Otro día". Importa hacerlo antes: el nombre es '
+            + 'lo que usa el sistema para encontrar la cuenta en la planilla, así que recibir con '
+            + 'el equivocado anota el gasto a nombre de quien no cobró.',
+        donde: 'Compras › Pedidos',
+      },
+    ],
+  },
+  {
     version: '2026-09-07-pedidos-en-compras',
     fecha: '7 de septiembre de 2026',
     titulo: 'Pedidos se mudó a Compras, y lo próximo que llega se ve sin abrir nada',
@@ -11077,11 +11211,31 @@ function setPagoPrevisto(v) {
     if (b) b.classList.toggle('activo', k === v);
   }
   document.getElementById('f-previsto-hint').innerHTML = ppTexto(v, categoriaLlevaEntrega());
-  // El medio se pregunta salvo en la puerta, donde es siempre el mismo. En
-  // "queda a pagar" se sigue preguntando —es con qué se va a pagar cuando
-  // venza— aunque el server no lo escriba en la columna L todavía.
-  document.getElementById('f-medio-wrap').style.display = v === 'al-recibir' ? 'none' : '';
-  document.getElementById('f-medio-label').textContent = v === 'pagado' ? 'Medio de pago' : 'Con qué se va a pagar';
+  // EL MEDIO SE PREGUNTA SIEMPRE, TAMBIÉN EN LA PUERTA (07/09/2026).
+  //
+  // Hasta hoy este campo se escondía en "se paga al recibir", con el argumento
+  // de que en la puerta es siempre efectivo del local. Es cierto casi siempre y
+  // falso en un caso real que pidió cubrir Gonzalo: el proveedor que cobra en
+  // la puerta pero **le transfiere Pablo o Tincho**. La plata sale, y no de la
+  // caja del bar.
+  //
+  // El costo de esconderlo no era cosmético: la recepción escribía `Efectivo
+  // Local` fijo, o sea que restaba de una caja que nadie tocó y, con el arqueo
+  // abierto, metía ese gasto en la sesión e inventaba un faltante esa noche.
+  // Ahora el dato viaja con el pedido (`medioPrevisto`) y la recepción lo usa
+  // — ver `medioDeRecepcion` en src/server.js.
+  //
+  // Sigue siendo OPCIONAL acá (`validarCompra` sólo lo exige en "ya está
+  // pagado"): vacío, el server cae en Efectivo Local, que es el caso normal.
+  document.getElementById('f-medio-wrap').style.display = '';
+  document.getElementById('f-medio-label').textContent =
+    v === 'pagado' ? 'Medio de pago'
+    : v === 'al-recibir' ? 'Con qué se paga en la puerta'
+    : 'Con qué se va a pagar';
+  // El caso normal, ya elegido: en la puerta se paga en efectivo del local. Se
+  // pone sólo si no hay nada, para no pisar lo que alguien acaba de elegir.
+  const medioEl = document.getElementById('f-medio');
+  if (v === 'al-recibir' && medioEl && !medioEl.value) medioEl.value = 'Efectivo Local';
   const conCuotas = document.getElementById('f-concuotas').checked;
   document.getElementById('f-venc-wrap').style.display = (conCuotas || v === 'a-pagar') ? '' : 'none';
   document.getElementById('f-btn-seguir').textContent =
@@ -18021,9 +18175,13 @@ const pedState = {
   saldos: [],             // lo que cada proveedor debe o se le debe: ver src/saldos.js
   saldosConfigurados: false,
   pagoTipo: 'esperado',   // 'esperado' | 'demas' | 'menos' — cómo se pagó hoy
+  // Sólo vive mientras el modal está abierto sobre un pedido que la compra dejó
+  // pagado: dice si el proveedor cobró otra vez. Ver setSegundoPago.
+  segundoPago: false,
   pagoMotivo: '',         // por qué, y en "de menos" decide si nace un saldo
   saldoUsar: 0,           // cuánto del saldo viejo se está descontando
   editandoSem: null,
+  editandoProv: null,   // el pedido al que se le está corrigiendo el proveedor
   arrastrando: null,
 };
 
@@ -18081,7 +18239,7 @@ const PED_MODOS = {
     // sí deja deuda, y le pedía "cuánto queda pendiente" por algo que no debe
     // nada. Desde el 30/08/2026 el mismo modo cambia de nombre y de campos.
     //
-    // Este camino es el RESPALDO: lo normal es recibirYaPago, que no abre
+    // Este camino es el RESPALDO: lo normal es recibirDirecto, que no abre
     // ningún modal. Se llega acá sólo cuando falta el importe de la compra y
     // por eso hay que preguntarlo.
     yaPago: {
@@ -18628,10 +18786,18 @@ function togglePedido(pedidoId) {
 // mismo para contestarlo igual.
 //
 // EL BOTÓN GRANDE ES SIEMPRE LO QUE MÁS PROBABLEMENTE PASE CON ESE PEDIDO, y
-// eso son dos cosas distintas según la compra:
+// eso lo dice la compra. Son TRES casos, uno por cada valor de `pagoPrevisto`:
 //
-//   · lo normal            → "Llegó y lo pagué". La plata sale en la puerta.
-//   · la compra ya está paga → "Llegó y lo recibí". No hay nada que pagar.
+//   · se paga al recibir → "Llegó y lo pagué". La plata sale en la puerta.
+//   · ya está paga       → "Llegó y lo recibí". No hay nada que pagar.
+//   · queda a cuenta     → "Llegó y no lo pagué". Se paga cuando venza.
+//
+// EL TERCERO FALTABA HASTA EL 07/09/2026, y era el error más caro de los tres
+// porque pasa todos los días: la jerarquía sólo miraba si la compra estaba
+// pagada, así que a un pedido cargado como **"no se paga acá"** le ofrecía en
+// verde grande "Llegó y lo pagué" — exactamente lo que no va a pasar. Había que
+// leer los dos botones, elegir el chico, y el modal después preguntaba el monto
+// y el vencimiento que la compra ya había contestado.
 //
 // Hasta el 30/08/2026 la jerarquía era FIJA, con el argumento de que un botón
 // que cambia de tamaño obliga a leer antes de tocar. El argumento era bueno y
@@ -18644,11 +18810,17 @@ function togglePedido(pedidoId) {
 // ("lo pagué" contra "lo recibí"), y el renglón ya viene marcado con el chip
 // "✓ ya está pago". No hay que leer para distinguirlos, y el que igual pagó de
 // su bolsillo tiene el otro botón al lado.
+// `directo` es lo que hace que un caso normal cueste UN toque: no abre el
+// modal, manda la recepción con lo que la compra ya dijo. Sólo lo llevan los
+// dos caminos donde no queda ninguna pregunta de plata — ver recibirDirecto.
 const PED_BOTONES = {
   'pague':    { modo: 'pague',    txt: '💵 Llegó y lo pagué' },
   'no-pague': { modo: 'no-pague', txt: 'Llegó y no lo pagué' },
-  // `directo`: no abre el modal. Ver recibirYaPago.
   'recibi':   { modo: 'no-pague', txt: '📦 Llegó y lo recibí', directo: true },
+  // Mismo modo y mismo texto que 'no-pague': lo único que cambia es que no
+  // abre el modal. No es una tercera respuesta —sería vocabulario nuevo para
+  // decir lo mismo—, es la misma respuesta cuando ya está todo contestado.
+  'a-cuenta': { modo: 'no-pague', txt: '📦 Llegó y no lo pagué', directo: true },
 };
 
 // Mover de día y borrar NO son parte de recibir, y por eso se ven distinto.
@@ -18662,9 +18834,67 @@ function accionesMenores(p) {
   return `<span class="ped-acc-menores">
     <button class="ped-acc-menor" onclick="abrirPedMover('${id}')"
             title="No vino, o se adelanta: pasarlo a otro día">📅 Otro día</button>
+    <button class="ped-acc-menor" onclick="abrirPedProv('${id}')"
+            title="El que llegó no es el proveedor del pedido">✏️ Proveedor</button>
     ${pedEsAdmin() ? `<button class="ped-acc-menor" onclick="borrarPedido('${id}')"
             title="Sacar este pedido de la lista">🗑️</button>` : ''}
   </span>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// El que llegó no es el del pedido
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Se corrige ANTES de recibir y no después, porque el proveedor no es una
+// etiqueta: es con lo que `planificarAsiento` busca la fila del libro. Recibir
+// con el nombre equivocado escribe el gasto a nombre de alguien que no cobró y
+// deja abierta la cuenta del que sí — dos errores de una.
+//
+// Usa `PUT /api/pedidos/:id`, que existía desde el principio y no lo llamaba
+// nadie: este archivo lo tenía anotado como pendiente desde el 19/08/2026.
+function abrirPedProv(id) {
+  const p = pedBuscar(id);
+  if (!p) return;
+  pedState.editandoProv = id;
+  document.getElementById('ped-prov-cabecera').innerHTML =
+    `El pedido está cargado a nombre de <b>${escapeHtml(p.proveedor)}</b>`
+    + (p.detalle ? ` · ${escapeHtml(p.detalle)}` : '') + '.';
+  document.getElementById('ped-prov-nombre').value = p.proveedor || '';
+  // La compra ya escribió su fila y esa fila lleva el proveedor viejo. Cambiar
+  // el pedido no la mueve, y decir que sí sería mentir sobre lo que quedó
+  // anotado.
+  document.getElementById('ped-prov-ojo').innerHTML = pedYaPago(p)
+    ? '⚠ Esta compra ya está anotada en Movimientos con el proveedor de arriba. '
+      + 'Cambiarlo acá arregla el pedido, <b>no la fila del libro</b>: ésa se corrige desde la planilla.'
+    : '';
+  document.getElementById('ped-prov-error').textContent = '';
+  document.getElementById('ped-prov-overlay').classList.add('open');
+  ensureSugerencias();
+}
+
+function closePedProv() {
+  pedState.editandoProv = null;
+  document.getElementById('ped-prov-overlay').classList.remove('open');
+}
+
+async function guardarPedProv() {
+  const id = pedState.editandoProv;
+  const nombre = document.getElementById('ped-prov-nombre').value.trim();
+  const err = document.getElementById('ped-prov-error');
+  if (!id) return;
+  if (!nombre) { err.textContent = 'Poné el nombre del proveedor.'; return; }
+  try {
+    await api('/api/pedidos/' + encodeURIComponent(id), {
+      method: 'PUT',
+      body: JSON.stringify({ proveedor: nombre }),
+    });
+    closePedProv();
+    await loadPedidos();
+    showToast('✓ Pedido a nombre de ' + nombre);
+  } catch (e) {
+    // El modal NO se cierra: cerrarlo dejaría creyendo que quedó corregido.
+    err.textContent = e.message;
+  }
 }
 
 // Los DOS botones solos, sin "otro día" ni el tacho. Se separaron el 07/09/2026
@@ -18672,18 +18902,37 @@ function accionesMenores(p) {
 // pasó con la plata —la mercadería llegó hace días— y mover a otro día es algo
 // que el server además rechaza para un pedido recibido. Ofrecerlo sería ofrecer
 // un botón que contesta que no.
+/**
+ * Los dos botones, en el orden que dice la compra.
+ *
+ * El primero es siempre lo que va a pasar y el segundo la excepción, así que
+ * cuál va primero lo decide `pagoPrevisto` y nada más. `a-cuenta` y `recibi`
+ * sólo pueden ir de primeros: son directos, y un toque directo tiene que ser
+ * el que casi seguro corresponde.
+ */
+function ordenBotones(p) {
+  if (pedYaPago(p)) return ['recibi', 'pague'];
+  // "No se paga acá": lo que va a pasar es que llegue y no se pague. Va derecho
+  // si la compra dejó el monto —que es lo que hay que escribir en el libro—; sin
+  // monto no se puede resolver sin preguntar, y entonces abre el modal.
+  if (p.pagoPrevisto === 'a-pagar') {
+    return [p.costoEstimado > 0 ? 'a-cuenta' : 'no-pague', 'pague'];
+  }
+  return ['pague', 'no-pague'];
+}
+
 function botonesRecibir(p) {
   const id = escapeHtml(p.id);
-  // Ya pago: se recibe y nada más, y poner plata pasa a ser la excepción.
-  const orden = pedYaPago(p) ? ['recibi', 'pague'] : ['pague', 'no-pague'];
+  const orden = ordenBotones(p);
   // El COLOR va con la posición y no con el botón: verde es lo que va a pasar
   // casi seguro con este pedido y naranja la excepción. Así "lo pagué" es verde
-  // en una entrega normal y naranja en una que la compra ya dejó paga, que es
-  // exactamente lo que significa en cada caso — y es el mismo naranja que ya
-  // usaba "no lo pagué", el botón que puede escribir algo inesperado.
+  // en una entrega normal y naranja en una que la compra ya dejó paga o a
+  // cuenta, que es exactamente lo que significa en cada caso — y es el mismo
+  // naranja que ya usaba "no lo pagué", el botón que puede escribir algo
+  // inesperado.
   const boton = (clave, cls, color) => {
     const b = PED_BOTONES[clave];
-    const accion = b.directo ? `recibirYaPago('${id}')` : `openPedRecibir('${id}','${b.modo}')`;
+    const accion = b.directo ? `recibirDirecto('${id}','${clave}')` : `openPedRecibir('${id}','${b.modo}')`;
     return `<button class="${color} ${cls}" onclick="${accion}">${b.txt}</button>`;
   };
   return boton(orden[0], 'ped-acc-ppal', 'plata')
@@ -19259,43 +19508,123 @@ async function openPedRecibir(id, modo) {
   // con vencimiento. Es opcional — vacía, la fila vence el día de la entrega.
   document.getElementById('ped-r-venc-wrap').style.display = m.pideVencimiento ? '' : 'none';
 
-  // El único caso en que el botón grande puede estar diciendo algo que la
-  // compra ya contradijo. No se bloquea —puede haber pasado de verdad, y quien
-  // está en la puerta es el que sabe— pero se dice antes de confirmar, con la
-  // consecuencia incluida.
-  document.getElementById('ped-r-ojo').innerHTML =
-    (pedState.modo === 'pague' && p.pagoPrevisto === 'pagado')
-      ? `⚠ Esta compra ya figuraba <b>pagada</b>`
-        + (p.medioPrevisto ? ` por ${escapeHtml(p.medioPrevisto)}` : '')
-        + `. Si el proveedor te la cobró igual en la puerta, confirmá: se les avisa `
-        + `a los dueños para que revisen si la plata salió dos veces. Si sólo la recibiste, `
-        + `cancelá y usá <b>Llegó y lo recibí</b>.`
-      : '';
-
-  // Los tres botones de cómo se pagó sólo tienen sentido con un monto esperado
-  // contra el cual comparar, y sólo cuando la plata la puso quien recibe: en
-  // "no lo pagué" no hay un "de más" posible.
+  // Antes de cualquier otra cosa: si la compra ya la había dejado pagada, esta
+  // ventana no puede seguir hasta saber cuál de los dos mundos es. Ver
+  // setSegundoPago — es la única pregunta que se agregó, y sólo sale acá.
   //
-  // Arranca en "lo esperado", que es lo que pasa casi siempre: para el caso
-  // normal no hay nada que tocar.
+  // Hasta el 07/09/2026 esto era un cartel naranja que decía "si te la cobraron
+  // igual, confirmá" y mandaba a cancelar para el otro caso. Confirmar no
+  // escribía nada igual, así que la plata que de verdad había salido no quedaba
+  // en ningún lado — el cartel pedía algo que el sistema no sabía hacer.
+  const yaPagoYPaga = pedState.modo === 'pague' && pedYaPago(p);
+  document.getElementById('ped-r-doble-wrap').style.display = yaPagoYPaga ? '' : 'none';
+  document.getElementById('ped-r-ojo').innerHTML = '';
+
   pedState.saldoUsar = 0;
   pedState.pagoMotivo = '';
+  pedState.segundoPago = false;
   document.getElementById('ped-r-motivo-texto').value = '';
-  const comparable = pedState.modo === 'pague' && pedEsperado() > 0;
-  document.getElementById('ped-r-pago-wrap').style.display = comparable ? '' : 'none';
-  if (comparable) {
-    setPagoTipo('esperado');
+  // El check de 'vino sólo una parte' es del pedido anterior: arranca limpio.
+  document.getElementById('ped-r-resto').checked = false;
+  document.getElementById('ped-r-resto-fecha').value = '';
+  document.getElementById('ped-r-resto-fecha-wrap').style.display = 'none';
+  document.getElementById('ped-r-resto-resumen').innerHTML = '';
+
+  if (yaPagoYPaga) {
+    // El default es el que respeta lo que la persona acaba de tocar: apretó
+    // "lo pagué" sobre un renglón marcado "✓ ya está pago", que es un acto
+    // deliberado. El otro camino existe para el toque equivocado, y rescata sin
+    // tener que cancelar y volver a empezar.
+    setSegundoPago(true);
   } else {
-    pedState.pagoTipo = 'esperado';
-    document.getElementById('ped-r-monto-wrap').style.display = '';
-    document.getElementById('ped-r-monto-label').textContent = m.montoLabel;
-    document.getElementById('ped-r-motivo-wrap').style.display = 'none';
+    // Los tres botones de cómo se pagó sólo tienen sentido con un monto
+    // esperado contra el cual comparar, y sólo cuando la plata la puso quien
+    // recibe: en "no lo pagué" no hay un "de más" posible.
+    //
+    // Arranca en "lo esperado", que es lo que pasa casi siempre: para el caso
+    // normal no hay nada que tocar.
+    const comparable = pedState.modo === 'pague' && pedEsperado() > 0;
+    document.getElementById('ped-r-pago-wrap').style.display = comparable ? '' : 'none';
+    if (comparable) {
+      setPagoTipo('esperado');
+    } else {
+      pedState.pagoTipo = 'esperado';
+      document.getElementById('ped-r-monto-wrap').style.display = '';
+      document.getElementById('ped-r-monto-label').textContent = m.montoLabel;
+      document.getElementById('ped-r-motivo-wrap').style.display = 'none';
+    }
+    // Un pedido que la compra dejó PAGO y que llega incompleto: la plata ya
+    // salió entera, así que bajar este número es decir que el proveedor debe la
+    // diferencia. Se dice con todas las letras, porque el campo por defecto
+    // trae lo que se pagó y tocarlo tiene consecuencia. El server saca el saldo
+    // —ver saldosDeRecepcion— y no lo hace la pantalla.
+    if (pedYaPago(p) && pedState.modo === 'no-pague' && pedEsperado() > 0) {
+      document.getElementById('ped-r-monto-label').textContent = 'Cuánto valía lo que llegó';
+      document.getElementById('ped-r-ojo').innerHTML =
+        'Esta compra ya está pagada. Si llegó de menos, bajá este número: la diferencia queda '
+        + 'anotada como <b>saldo a favor</b> y el proveedor te la debe.';
+    }
   }
   pintarSaldoDelProveedor();
 
   document.getElementById('ped-recibir-overlay').classList.add('open');
   pedPlanCargando();
   await pedCargarPlan();
+}
+
+/**
+ * "Ya estaba pago": el proveedor cobró otra vez, o el botón fue un error.
+ *
+ * Es la única pregunta agregada a esta ventana y cambia TODO lo que sigue,
+ * porque las dos respuestas son recepciones distintas:
+ *
+ *   true  → sigue siendo 'pague'. Se pregunta cuánto salió —puede ser el pedido
+ *           entero o sólo una parte que el proveedor exigió cobrar— y el server
+ *           escribe esa fila y anota que el proveedor debe esa plata.
+ *   false → pasa a ser 'no-pague', que es exactamente el botón "Llegó y lo
+ *           recibí" que se quiso tocar. No se escribe nada.
+ *
+ * Los tres botones de "de más / de menos" NO se muestran acá, y no es un olvido:
+ * comparan contra lo que decía la compra, y en un segundo pago lo que decía la
+ * compra ya se pagó. Toda la plata que salga ahora queda a favor, sea cuanta
+ * sea, así que no hay diferencia que clasificar — sólo un monto.
+ */
+function setSegundoPago(v) {
+  pedState.segundoPago = !!v;
+  document.querySelectorAll('#ped-r-doble-opts .pp-btn').forEach(b => {
+    b.classList.toggle('activo', (b.dataset.doble === '1') === !!v);
+  });
+
+  const p = pedState.recibiendo;
+  // El modo REAL cambia con la respuesta: decir que no salió plata es recibir
+  // sin pagar, que es lo que hace `no-pague`. Así el server recibe la verdad y
+  // no un 'pague' con una bandera que lo desmiente.
+  pedState.modo = v ? 'pague' : 'no-pague';
+  const m = pedModo(p);
+  document.getElementById('ped-r-titulo').textContent = v ? 'Te lo cobraron otra vez' : m.titulo;
+
+  // Los de "de más / de menos" no aplican en ninguna de las dos ramas.
+  document.getElementById('ped-r-pago-wrap').style.display = 'none';
+  document.getElementById('ped-r-motivo-wrap').style.display = 'none';
+  document.getElementById('ped-r-venc-wrap').style.display = 'none';
+  pedState.pagoTipo = 'esperado';
+  pedState.pagoMotivo = '';
+
+  const campo = document.getElementById('ped-r-monto');
+  document.getElementById('ped-r-monto-wrap').style.display = v ? '' : 'none';
+  if (v) {
+    document.getElementById('ped-r-monto-label').textContent = '¿Cuánto te cobraron?';
+    if (!pedNumero(campo.value)) campo.value = Math.round(pedEsperado()) || '';
+  }
+
+  const res = document.getElementById('ped-r-doble-resumen');
+  res.innerHTML = v
+    ? 'Se anota el gasto en Movimientos —así el arqueo de esta noche cierra— y queda '
+      + 'como <b>saldo a favor</b>: el proveedor te debe esa plata.'
+    : 'No se escribe nada: el pedido queda vinculado a la fila que ya estaba paga.';
+
+  pintarSaldoDelProveedor();
+  onPedMontoChange();
 }
 
 // Lo que no se aceptó, dicho en el modal ANTES de confirmar.
@@ -19309,7 +19638,8 @@ function pedRechazados(p) {
   if (!r || !r.falta) return '';
   const porMotivo = Object.entries(r.motivos || {})
     .map(([m, n]) => `${n} ${PED_MOTIVO_TXT[m] || m}`).join(', ');
-  return `<br><span style="color:var(--red)">✕ ${r.falta} renglón${r.falta !== 1 ? 'es' : ''} `
+  // "renglón" pierde el acento en plural: renglones. Decía "2 renglónes".
+  return `<br><span style="color:var(--red)">✕ ${r.falta} ${r.falta !== 1 ? 'renglones' : 'renglón'} `
     + `sin aceptar${porMotivo ? ` — ${escapeHtml(porMotivo)}` : ''}</span>`;
 }
 
@@ -19322,7 +19652,11 @@ function pintarSaldoDelProveedor() {
   const el = document.getElementById('ped-r-saldo-tiene');
   const p = pedState.recibiendo;
   const saldo = p ? pedSaldoDe(p.proveedor) : 0;
-  if (!p || !saldo) { el.innerHTML = ''; return; }
+  // En un segundo pago no se ofrece usar el saldo: la plata que sale AHORA queda
+  // entera a favor (ver saldosDeRecepcion), así que descontar un saldo viejo en
+  // el mismo acto sería anotar dos movimientos opuestos sobre el mismo importe.
+  // Se cobra, queda a favor, y el saldo se usa en la próxima entrega normal.
+  if (!p || !saldo || pedState.segundoPago) { el.innerHTML = ''; return; }
 
   const favor = saldo > 0;
   const puesto = pedState.saldoUsar !== 0;
@@ -19397,8 +19731,18 @@ const PED_PAGO_MOTIVOS = {
   menos: [
     ['pago-parcial', 'Pago parcial', 'llegó todo, queda debiendo', false],
     ['reduccion', 'Se redujo el pedido', 'no se debe la diferencia', true],
+    // Lo elige solo el check de "vino sólo una parte", y no se muestra si no
+    // está tildado: es una respuesta que ya se dio arriba. Tampoco deja deuda
+    // —la mercadería que falta no está adentro del bar— pero a diferencia de
+    // `reduccion` no se termina acá: sigue en el pedido del otro día.
+    ['viene-el-resto', 'Vino sólo una parte', 'el resto llega otro día', false],
   ],
 };
+
+// El motivo que corresponde cuando se tildó "vino sólo una parte": la
+// diferencia no se debe. Se elige solo, para que nadie tenga que contestar dos
+// veces la misma cosa con el proveedor en la puerta.
+const PED_MOTIVO_RESTO = 'viene-el-resto';
 
 // El motivo con texto libre es, por definición, el caso raro. En "pagué de más"
 // eso es justamente lo que los dueños quieren mirar: "no había cambio" es
@@ -19440,9 +19784,62 @@ function setPagoTipo(tipo) {
   onPedMontoChange();
 }
 
+/**
+ * "Vino sólo una parte": lo que falta se convierte en un pedido para otro día.
+ *
+ * Vale en los dos modos —una entrega se parte se haya pagado o no— y en el modo
+ * "lo pagué" además elige solo el motivo `viene-el-resto`, que es el único que
+ * describe esta diferencia: no se debe, porque esa mercadería todavía no está
+ * adentro del bar, pero tampoco se perdió como en `reduccion`.
+ */
+function onRestoOtroDia() {
+  const on = document.getElementById('ped-r-resto').checked;
+  document.getElementById('ped-r-resto-fecha-wrap').style.display = on ? '' : 'none';
+  const campoFecha = document.getElementById('ped-r-resto-fecha');
+  // Mañana, que es lo que pasa casi siempre cuando el proveedor dice "el resto
+  // te lo traigo". Se calcula en local: con toISOString(), después de las 21:00
+  // en Argentina "mañana" es pasado mañana. Ya pasó en esta pantalla.
+  if (on && !campoFecha.value) {
+    const d = new Date(); d.setDate(d.getDate() + 1);
+    campoFecha.value = [d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, '0'),
+      String(d.getDate()).padStart(2, '0')].join('-');
+  }
+  // En "lo pagué" el monto ya no es lo esperado: es lo que se pagó por lo que
+  // llegó. Se pasa a "de menos" con el motivo puesto, para que la diferencia no
+  // se anote como deuda.
+  if (on && pedState.modo === 'pague' && pedEsperado() > 0 && !pedState.segundoPago) {
+    if (pedState.pagoTipo !== 'menos') setPagoTipo('menos');
+    setPagoMotivo(PED_MOTIVO_RESTO);
+  } else if (!on && pedState.pagoMotivo === PED_MOTIVO_RESTO) {
+    setPagoMotivo(PED_PAGO_MOTIVOS.menos[0][0]);
+  }
+  // Con el check tildado la sección de motivos sobra: la pregunta '¿por qué de
+  // menos?' ya está contestada, y dejarla mostraría dos botones sin ninguno
+  // marcado (el motivo elegido no se dibuja como botón, a propósito).
+  const mw = document.getElementById('ped-r-motivo-wrap');
+  if (on && pedState.pagoTipo === 'menos') mw.style.display = 'none';
+  pintarResumenResto();
+}
+
+function pintarResumenResto() {
+  const el = document.getElementById('ped-r-resto-resumen');
+  if (!el) return;
+  const on = document.getElementById('ped-r-resto').checked;
+  if (!on) { el.innerHTML = ''; return; }
+  const falta = Math.max(0, Math.round(pedEsperado()
+    - pedNumero(document.getElementById('ped-r-monto').value)));
+  el.innerHTML = 'Se anota un pedido nuevo para ese día'
+    + (falta ? ` por <b>${fmt(falta)}</b>, que es lo que falta.` : '.')
+    + ' Este queda cerrado por lo que llegó.';
+}
+
 function pintarMotivosPago() {
   const tipo = pedState.pagoTipo;
-  const opciones = PED_PAGO_MOTIVOS[tipo] || [];
+  // `viene-el-resto` no se ofrece como botón: lo elige el check de arriba. Un
+  // motivo que contesta lo mismo que una casilla ya tildada es una pregunta de
+  // más y una forma de que las dos se contradigan.
+  const opciones = (PED_PAGO_MOTIVOS[tipo] || []).filter(o => o[0] !== PED_MOTIVO_RESTO);
   document.getElementById('ped-r-motivo-opts').innerHTML = opciones.map(([v, txt, sub]) =>
     `<button type="button" class="pp-btn ${pedState.pagoMotivo === v ? 'activo' : ''}"
       data-motivo="${escAttr2(v)}" onclick="setPagoMotivo('${v}')">${escapeHtml(txt)}${
@@ -19496,7 +19893,9 @@ function pintarResumenPago() {
   el.innerHTML = dif < 0
     ? (pedState.pagoMotivo === 'pago-parcial'
         ? `→ Quedan <b style="color:var(--orange)">${fmt(Math.abs(dif))}</b> que le debés a este proveedor.`
-        : `→ El pedido valió ${fmt(pagado)}. <b>No queda deuda</b>: la diferencia no se debe.`)
+        : pedState.pagoMotivo === PED_MOTIVO_RESTO
+          ? `→ Se pagó ${fmt(pagado)} por lo que llegó. <b>No queda deuda</b>: el resto se paga cuando llegue.`
+          : `→ El pedido valió ${fmt(pagado)}. <b>No queda deuda</b>: la diferencia no se debe.`)
     : `<span style="color:var(--orange)">Ese monto es MAYOR que lo esperado (${fmt(aPagar)}).</span>`;
 }
 
@@ -19508,6 +19907,7 @@ function onPedMontoChange() {
   // El renglón de qué va a pasar con la plata se repinta en el acto: es lo que
   // hace que un cero de más se vea mientras se tipea, no después de confirmar.
   pintarResumenPago();
+  pintarResumenResto();
   clearTimeout(_pedPlanTimer);
   pedPlanCargando();
   _pedPlanTimer = setTimeout(pedCargarPlan, 500);
@@ -19525,7 +19925,8 @@ async function pedCargarPlan() {
   const monto = pedNumero(document.getElementById('ped-r-monto').value);
   try {
     const { data } = await api(`/api/pedidos/${encodeURIComponent(p.id)}/plan`
-      + `?modo=${encodeURIComponent(modo)}&monto=${monto}`);
+      + `?modo=${encodeURIComponent(modo)}&monto=${monto}`
+      + (pedState.segundoPago ? '&segundoPago=1' : ''));
     // Puede haber llegado tarde: si el usuario ya cerró o cambió de modo, se tira.
     if (pedState.recibiendo !== p || pedState.modo !== modo) return;
     pedState.plan = data;
@@ -19577,7 +19978,10 @@ function pedExplicar() {
     // nada y es esta recepción la que mete el gasto en el libro— y por eso no
     // dice nada: un cartel que aparece siempre deja de leerse y le saca lugar a
     // los que sí avisan de algo. Lo que hizo se informa igual al confirmar.
-    'crear-pagado': () => plan.deCompra ? ''
+    'crear-pagado': () => plan.segundoPago
+      ? '→ Se agrega una <b>segunda fila Pagado</b> por lo que te cobraron ahora, y esa plata '
+        + 'queda anotada como <b>saldo a favor</b> del bar: el proveedor te la debe.'
+      : plan.deCompra ? ''
       : '→ No hay ninguna fila cargada para esto, así que se agrega una nueva como <b>Pagado</b>.',
     'crear-a-pagar': () => plan.deCompra ? ''
       : '→ No hay ninguna fila cargada para esto, así que se agrega una nueva como '
@@ -19596,6 +20000,7 @@ function closePedRecibir() {
   pedState.pagoTipo = 'esperado';
   pedState.pagoMotivo = '';
   pedState.saldoUsar = 0;
+  pedState.segundoPago = false;
 }
 
 async function confirmarPedRecibir() {
@@ -19609,6 +20014,12 @@ async function confirmarPedRecibir() {
   // esto es para no hacer viajar algo que va a rebotar.
   const vaAEscribir = !pedState.plan || pedState.plan.accion.startsWith('crear');
   if (vaAEscribir && monto <= 0) { err.textContent = 'Poné el monto.'; return; }
+
+  // Un segundo pago no se compara contra nada: lo esperado ya estaba pagado y
+  // todo lo que salga ahora queda a favor. Lo único que no puede ser es cero.
+  if (pedState.segundoPago && monto <= 0) {
+    err.textContent = 'Poné cuánto te cobraron.'; return;
+  }
 
   // El botón dice una cosa y el número dice otra. No se puede dejar pasar: el
   // server sacaría la diferencia con el signo al revés y anotaría el saldo del
@@ -19638,6 +20049,14 @@ async function confirmarPedRecibir() {
     pagoMotivo: pedState.pagoMotivo,
     pagoDetalle: document.getElementById('ped-r-motivo-texto').value.trim(),
     saldoUsado: pedState.saldoUsar,
+    // La respuesta a "ya estaba pago, ¿te lo cobraron igual?". Es lo único que
+    // autoriza al server a escribir una SEGUNDA fila para este pedido, y por eso
+    // viaja como una afirmación explícita y no se deduce de nada.
+    segundoPago: pedState.segundoPago === true,
+    // Qué día llega lo que faltó. Vacío = no se parte nada. Con fecha, el server
+    // crea el pedido del resto y este queda cerrado por lo que llegó.
+    restoFecha: document.getElementById('ped-r-resto').checked
+      ? document.getElementById('ped-r-resto-fecha').value : '',
   };
   closePedRecibir();
   await pedEnviarRecibir(p, cuerpo);
@@ -19649,17 +20068,29 @@ async function confirmarPedRecibir() {
 async function pedEnviarRecibir(p, cuerpo) {
   showToast('⏳ Actualizando planilla...');
   try {
-    const { asiento, avisados, saldos: saldosEscritos } = await api(
+    const { asiento, avisados, saldos: saldosEscritos, restoPedido, restoError } = await api(
       '/api/pedidos/' + encodeURIComponent(p.id) + '/recibir', {
         method: 'POST',
         body: JSON.stringify(cuerpo),
       });
     await loadPedidos();
+    // El pedido del resto se informa igual que el asiento: qué se hizo, no qué
+    // se iba a hacer. Y si no se pudo crear se dice, porque entonces lo que
+    // falta no está anotado en ningún lado y hay que cargarlo a mano.
+    const resto = restoPedido
+      ? `<br>📦 Lo que faltó quedó como un pedido nuevo para el `
+        + `<b>${new Date(restoPedido.fecha + 'T12:00:00').toLocaleDateString('es-AR')}</b>`
+        + (restoPedido.costoEstimado ? ` por ${fmt(restoPedido.costoEstimado)}` : '') + '.'
+      : restoError
+        ? `<br><span style="color:var(--orange)">⚠ No se pudo anotar el pedido del resto `
+          + `(${escapeHtml(restoError)}). Cargalo a mano.</span>`
+        : '';
     showResultadoModal({
       ok: true,
       titulo: 'Pedido recibido',
       detalle: `<b>${escapeHtml(p.proveedor)}</b><br>${pedQueHizo(asiento)}`
-        + pedSaldosQueHizo(saldosEscritos, p) + pedAvisos(avisados),
+        + resto + pedSaldosQueHizo(saldosEscritos, p) + pedAvisos(avisados),
+      ir: restoPedido ? { label: '📦 Ver ese día', hacer: () => irAlPedido(restoPedido.fecha) } : null,
     });
   } catch (e) {
     showResultadoModal({
@@ -19670,31 +20101,55 @@ async function pedEnviarRecibir(p, cuerpo) {
   }
 }
 
-// ─── "Llegó y lo recibí": un toque y listo ──────────────────────────────────
+// ─── Un toque y listo ───────────────────────────────────────────────────────
 //
-// No abre el modal, y ésa es toda la idea. Ese modal existe para preguntar
-// plata —cuánto se pagó, cuándo vence, si se pagó de más o de menos— y en un
-// pedido que la compra ya dejó pagado no hay ninguna de esas preguntas: la
-// plata salió al comprarlo y la fila del libro ya está escrita. Abrirlo era
-// hacer confirmar dos veces que no pasa nada, con el proveedor en la puerta.
+// No abre el modal, y ésa es toda la idea. El modal existe para preguntar plata
+// —cuánto se pagó, cuándo vence, si se pagó de más o de menos— y hay DOS casos
+// donde la compra ya contestó todo eso:
 //
-// Lo que pasó igual se informa: el mismo cartel de siempre, al terminar.
+//   · `recibi`   — la compra dijo que ya estaba pagada. La plata salió al
+//                  comprarla y su fila del libro ya está escrita: no hay ni
+//                  monto ni vencimiento que preguntar.
+//   · `a-cuenta` — la compra dijo que queda a cuenta, por cuánto y para cuándo.
+//                  La fila se escribe acá, con esos dos datos. Preguntarlos de
+//                  nuevo es pedirle a quien recibe que repita lo que ya está
+//                  cargado, con el proveedor en la puerta.
 //
-// El monto viaja aunque nadie lo tipee, y no es de adorno: si la fila de la
-// compra ya no estuviera, el server tiene que escribirla y necesita saber de
-// cuánto. Sale de lo que se cargó al comprar, que es el número correcto.
-async function recibirYaPago(id) {
+// Abrir el modal en cualquiera de los dos era hacer confirmar dos veces que no
+// pasa nada. Lo que pasó igual se informa: el mismo cartel de siempre, al
+// terminar, con lo que de verdad se escribió.
+//
+// EL ÚNICO CASO QUE NO PASA POR ACÁ es el que mueve plata en la puerta
+// ('pague'): ahí el modal sí tiene algo que preguntar —cuánto salió de verdad—
+// y además es donde se ofrece descontar el saldo del proveedor. Un toque que
+// saca plata de la caja sin confirmación es lo único que no se quiso.
+//
+// El monto viaja aunque nadie lo tipee, y no es de adorno: en `recibi` la fila
+// de la compra podría no estar y el server tendría que escribirla, y en
+// `a-cuenta` es lo que se escribe. Sale de lo que se cargó al comprar.
+async function recibirDirecto(id, clave) {
   const p = pedBuscar(id);
   if (!p) return;
-  // Sin monto cargado esto no se puede resolver solo. No debería pasar —un
-  // pedido sólo queda "ya pago" viniendo de una compra, y una compra tiene su
-  // importe— pero si pasa, cae al modal de siempre, que sí lo pregunta.
-  if (!(p.costoEstimado > 0)) return openPedRecibir(id, 'no-pague');
+  const b = PED_BOTONES[clave];
+  if (!b || !b.directo) return;
+  // Sin monto cargado esto no se puede resolver solo: cae al modal, que sí lo
+  // pregunta. `ordenBotones` ya evita ofrecer `a-cuenta` en ese caso; acá queda
+  // igual el respaldo, porque el botón lo dibujó otra función.
+  if (!(p.costoEstimado > 0)) return openPedRecibir(id, b.modo);
+  // Y si los renglones ya dicen que algo NO llegó, tampoco hay atajo: el toque
+  // directo manda "llegó todo por lo que se cargó", que en ese caso es falso.
+  // El sistema lo sabe —alguien lo tildó— y callárselo dejaría sin registrar
+  // una entrega incompleta: o el resto llega otro día, o esa plata la debe el
+  // proveedor. Las dos se contestan en el modal.
+  if (p.itemsResumen && p.itemsResumen.falta > 0) return openPedRecibir(id, b.modo);
   await pedEnviarRecibir(p, {
-    modo: 'no-pague',
+    modo: b.modo,
     monto: p.costoEstimado,
-    // Ni vencimiento ni saldo: no hay deuda que fechar ni diferencia que saldar.
-    vencimiento: '',
+    // El vencimiento que dijo la compra: es una deuda que nace con fecha. En
+    // `recibi` va vacío porque no nace ninguna deuda que fechar.
+    vencimiento: clave === 'a-cuenta' ? (p.vence || '') : '',
+    // Ninguna diferencia que saldar: se recibe lo que se cargó, por lo que se
+    // cargó. Cualquier otra cosa es el modal.
     pagoTipo: 'esperado',
     pagoMotivo: '',
     pagoDetalle: '',
@@ -19711,6 +20166,9 @@ function pedQueHizo(a) {
   const cuando = f && f.fecha ? ` del ${escapeHtml(f.fecha)}` : '';
   const base =
     a.yaEstaba ? 'Este pedido ya tenía su fila en Movimientos: <b>no se duplicó</b>.'
+    : a.segundoPago ? 'Se agregó una <b>segunda fila Pagado</b> por lo que te cobraron en la puerta, '
+        + 'así que el arqueo de esta noche cierra. Esa plata quedó como <b>saldo a favor</b>: '
+        + 'el proveedor te la debe. Se les avisó a los dueños.'
     : a.accion === 'cerrar-fila' ? `Se cerró la fila <b>A pagar</b> de ${fmt(f.monto)}${cuando}: `
         + 'ahora figura <b>Pagado</b>. No se agregó ninguna fila.'
     : a.accion === 'vincular-fila' ? `Ya estaba cargado en Movimientos: la fila de ${fmt(f.monto)}${cuando}, `
