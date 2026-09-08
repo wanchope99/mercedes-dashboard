@@ -1325,7 +1325,8 @@ async function reprogramarNoRecibidos({ hoy = hoyAR() } = {}) {
 //      el historial de pedidos a que esta función no tenga un bug.
 //   2. SE PUEDE CORRER DE NUEVO. Se saltean los ids que ya están del otro lado,
 //      así que una corrida a medias —se cortó la red, se acabó la cuota de la
-//      API— se termina corriéndola otra vez, y no duplica nada.
+//      API— se termina corriéndola otra vez, y no duplica nada. Regla que sólo
+//      vale de a una por vez: ver `migrarDesdeGestion` acá abajo.
 //   3. `dryRun` POR DEFECTO. Contesta cuánto movería sin mover nada. Es el
 //      mismo criterio que `reset-aprendizaje`, y por el mismo motivo: lo que
 //      toca datos de verdad se mira antes.
@@ -1334,7 +1335,46 @@ async function reprogramarNoRecibidos({ hoy = hoyAR() } = {}) {
 // un pedido por su id y `Pedidos Semanal` alimenta los previstos de cada día:
 // dejarlas en planillas distintas serían dos clientes de API para contestar una
 // pregunta y ninguna forma de leerlas juntas.
-async function migrarDesdeGestion({ dryRun = true } = {}) {
+// ─── De a una por vez (08/09/2026) ─────────────────────────────────────────
+//
+// PASÓ DE VERDAD el 07/09/2026: la mudanza corrió dos veces superpuestas y
+// duplicó `Pedidos` (39 filas) y `Pedidos Semanal` (10), no `Pedidos Items` —
+// que va última y para entonces la primera corrida ya había escrito. Ese patrón
+// es la firma del problema: no se rompió la regla 2, se rompió la suposición de
+// que hay una sola corrida.
+//
+// El motivo es que saltear por id es LEER y DESPUÉS ESCRIBIR, y entre las dos
+// cosas hay un viaje a Google. Dos corridas a la vez leen las dos "no está" y
+// las dos escriben. Ninguna hizo nada mal por su cuenta.
+//
+// Así que se hacen de a una: la segunda espera a que la primera termine y recién
+// ahí mira la planilla, que es cuando ve lo que la otra escribió. No se rechaza
+// la segunda —se encola— porque con la mudanza terminada no hace nada, y un
+// error donde el usuario esperaba un resultado invita justamente al reintento
+// que causó esto. Vale igual para `dryRun`: en el medio de una corrida real
+// contaría filas que están a punto de existir.
+//
+// LO QUE ESTE CANDADO NO CUBRE, dicho en voz alta: vive en la memoria del
+// proceso. Dos instancias del servidor a la vez volverían a poder duplicar. Hoy
+// Railway corre una sola, y la mudanza es un botón que se toca una vez en la
+// vida — el caso real era el doble toque, y ése queda cerrado.
+let _migracionEnCurso = null;
+
+function migrarDesdeGestion(opts = {}) {
+  const anterior = _migracionEnCurso;
+  const mia = (async () => {
+    // Si la anterior falló, ésta corre igual: es justamente la corrida a medias
+    // que la regla 2 existe para completar.
+    if (anterior) await anterior;
+    return _migrarDesdeGestion(opts);
+  })();
+  // La cola guarda una promesa que NUNCA rechaza: un fallo no puede dejar
+  // trabada la migración siguiente.
+  _migracionEnCurso = mia.catch(() => {});
+  return mia;
+}
+
+async function _migrarDesdeGestion({ dryRun = true } = {}) {
   if (!SHEET_ID) throw new Error(FALTA_SHEET);
   if (!SHEET_ID_VIEJA) throw new Error('Falta SPREADSHEET_ID: no hay planilla vieja de donde traer.');
   if (SHEET_ID === SHEET_ID_VIEJA) {

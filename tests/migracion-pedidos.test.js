@@ -20,7 +20,13 @@ const path = require('path');
 // ─── La planilla de mentira ────────────────────────────────────────────────
 // Dos libros con hojas y filas, y un cliente que se comporta como el de Google
 // para las cuatro llamadas que usa el módulo.
-function planillaFalsa(libros) {
+//
+// `demoraAppend` es lo único que no es instantáneo, y existe para un solo caso.
+// Saltear por id es LEER y DESPUÉS ESCRIBIR, con un viaje a Google en el medio;
+// una planilla que contesta al instante cierra ese hueco sola y hace pasar la
+// prueba de concurrencia hasta al código sin candado — que es exactamente lo
+// que pasó al escribirla. La demora es el viaje.
+function planillaFalsa(libros, { demoraAppend = 0 } = {}) {
   const llamadas = { appends: [], addSheet: [] };
   const api = {
     spreadsheets: {
@@ -41,6 +47,7 @@ function planillaFalsa(libros) {
         },
         async append({ spreadsheetId, range, requestBody }) {
           const hoja = range.split('!')[0];
+          if (demoraAppend) await new Promise(r => setTimeout(r, demoraAppend));
           libros[spreadsheetId][hoja].push(...requestBody.values);
           llamadas.appends.push({ spreadsheetId, hoja, filas: requestBody.values.length });
         },
@@ -157,6 +164,40 @@ function correr(t) {
       () => t.ok(false, 'sin PROVEEDORES_SHEET_ID tiene que rechazar'),
       e => t.ok(/PROVEEDORES_SHEET_ID/.test(e.message),
         'sin la planilla nueva configurada, lo dice por su nombre'));
+
+  // ── Dos corridas a la vez (el caso que pasó de verdad) ────────────────────
+  //
+  // El 07/09/2026 la mudanza corrió dos veces superpuestas en producción y
+  // duplicó `Pedidos` y `Pedidos Semanal` — no `Pedidos Items`, que va última y
+  // para entonces la primera corrida ya había escrito. Saltear por id es leer y
+  // después escribir, con un viaje a Google en el medio: dos corridas a la vez
+  // leen las dos "no está" y las dos escriben.
+  //
+  // Se prueba con las tres hojas y mirando las DOS cosas: cuántas filas quedaron
+  // y cuántos appends se hicieron. Sin el candado, `Pedidos` termina con las dos
+  // filas repetidas y hay dos appends por hoja.
+  }).then(() => {
+    const libros2 = {
+      VIEJA: {
+        'Pedidos': [['ID', 'Fecha'], fila('ped1', 'Thames'), fila('ped2', 'Yerson')],
+        'Pedidos Semanal': [['ID', 'Dia'], ['sem1', 'jueves']],
+        'Pedidos Items': [['ID', 'PedidoID'], ['it1', 'ped1']],
+      },
+      NUEVA: {},
+    };
+    const { api: api2, llamadas: l2 } = planillaFalsa(libros2, { demoraAppend: 5 });
+    const p4 = cargarPedidos({ nueva: 'NUEVA', vieja: 'VIEJA', api: api2 });
+    return Promise.all([
+      p4.migrarDesdeGestion({ dryRun: false }),
+      p4.migrarDesdeGestion({ dryRun: false }),
+    ]).then(([a, b]) => {
+      t.eq(libros2.NUEVA['Pedidos'].length, 3, 'Pedidos: encabezado + 2 filas, sin duplicar');
+      t.eq(libros2.NUEVA['Pedidos Semanal'].length, 2, 'Semanal tampoco se duplica');
+      t.eq(libros2.NUEVA['Pedidos Items'].length, 2, 'Items tampoco');
+      t.eq(l2.appends.length, 3, 'escribe una sola vez por hoja: la segunda corrida no tiene nada que traer');
+      t.eq(a.total + b.total, 4, 'entre las dos traen las 4 filas UNA vez (2 + 1 + 1)');
+      t.eq(b.total, 0, 'la segunda encuentra todo ya del otro lado');
+    });
   });
 }
 
