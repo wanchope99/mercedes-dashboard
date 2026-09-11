@@ -16,3 +16,11 @@ progress.json
 ventas.xls
 *.xls
 *.xlsx
+
+# Las facturas del experimento del extractor y sus lecturas crudas, por la misma
+# razón que las dos de arriba: el repositorio es PÚBLICO y una factura real trae
+# razón social, CUIT, domicilio y lo que el bar le compró a quién. La carpeta de
+# fotos es del que corre el experimento; lo que se ignora es lo que el script
+# escribe solo, más los nombres de carpeta razonables para dejar las fotos.
+_experimento/
+facturas-prueba/

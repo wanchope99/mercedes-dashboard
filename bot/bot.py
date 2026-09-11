@@ -66,6 +66,62 @@ ALLOWED_USERS = set(u.strip() for u in os.environ.get("ALLOWED_USERS", "").split
 
 HTTP_TIMEOUT = float(os.environ.get("BOT_HTTP_TIMEOUT", "120"))
 
+# ── El tamaño de foto que se le pide a Telegram ───────────────────────
+#
+# Telegram guarda cada foto en varios tamaños y los manda TODOS en
+# `message.photo`, del más chico al más grande. Hasta ahora se agarraba
+# `photo[-1]`, el mayor.
+#
+# Eso se paga dos veces por factura: la imagen viaja al modelo una vez para la
+# cabecera y otra para los renglones (ver el encabezado de src/extractor.js), y
+# el costo de una imagen es proporcional a los píxeles. Elegir el tamaño más
+# chico que siga siendo LEGIBLE es plata que no se gasta, sin librerías, sin
+# redimensionar y sin gastar CPU: es otro elemento de una lista que ya llegó.
+#
+# SE MIDIÓ EL 11/09/2026 Y EL DEFAULT QUEDÓ EN 0 — o sea, el mayor, igual que
+# antes. Sobre siete facturas reales del chat, CINCO YA VENÍAN a 1280 de lado
+# largo: Telegram comprime la foto antes de que el bot elija nada. Las otras dos
+# quedaban en 1200x1600, apenas encima del techo de 1568 px al que la API escala
+# todo igual. El ahorro medido fue de un décimo de centavo sobre siete facturas,
+# y la foto chica encima PERDIÓ una lectura de proveedor que la grande tenía.
+#
+# La estimación de 2 a 5 USD al mes del análisis del 9/9 suponía que Telegram
+# servía variantes grandes. No las sirve.
+#
+# Entonces por qué queda el código en vez de volver a `photo[-1]`: por el log de
+# abajo. Es lo único que puede decir, con volumen real y a lo largo del tiempo,
+# qué tamaños manda Telegram de verdad — y el día que mande fotos grandes, esto
+# ya está escrito y probado, y se prende con una variable. Con `photo[-1]` no
+# hay ni número que mirar.
+#
+# El piso lo pone la letra chica, no la foto: una factura A4 impresa se lee bien
+# a 1280 px, un ticket térmico con el total en 6 puntos no siempre. Si alguna vez
+# se sube este número, se decide MIDIENDO con `scripts/comparar-extractor.js`.
+FOTO_LADO_MINIMO = int(os.environ.get("FOTO_LADO_MINIMO", "0"))
+
+
+def elegir_foto(tamanos, lado_minimo=None):
+    """De los tamaños que ofrece Telegram, el más chico que siga siendo legible.
+
+    Devuelve el primero cuyo lado largo llegue a `lado_minimo`. Si ninguno
+    llega —una foto original chica, de la que Telegram no pudo generar nada
+    grande— devuelve el MAYOR, nunca la miniatura: quedarse con el thumbnail de
+    90 px para ahorrar dos centavos es mandarle al modelo una imagen donde no
+    hay un total que leer, y el ahorro se paga en una pregunta al que sacó la
+    foto o, peor, en un total inventado.
+
+    No se confía en que la lista venga ordenada: se ordena acá.
+    """
+    if not tamanos:
+        return None
+    ordenados = sorted(tamanos, key=lambda p: max(p.width or 0, p.height or 0))
+    minimo = FOTO_LADO_MINIMO if lado_minimo is None else lado_minimo
+    if minimo > 0:
+        for p in ordenados:
+            if max(p.width or 0, p.height or 0) >= minimo:
+                return p
+    return ordenados[-1]
+
 
 # ── Helpers HTTP ──────────────────────────────────────────────────────
 def _headers():
@@ -470,7 +526,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         if update.message.photo:
-            tg_file = await update.message.photo[-1].get_file()
+            elegida = elegir_foto(update.message.photo)
+            log.info(
+                "Foto: elegida %sx%s de %s tamaños ofrecidos",
+                elegida.width, elegida.height, len(update.message.photo),
+            )
+            tg_file = await elegida.get_file()
             mime = "image/jpeg"
             nombre = "foto.jpg"
         else:

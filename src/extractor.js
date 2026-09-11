@@ -10,7 +10,35 @@ const Anthropic = require('@anthropic-ai/sdk');
 const cats = require('./proveedores-categorias');
 const fechas = require('./fecha-factura');
 
-const MODEL = process.env.EXTRACTOR_MODEL || 'claude-opus-4-6';
+// ─── Dos llamadas, dos modelos, y por qué no es el mismo ───────────────────────
+//
+// Medido el 11/09/2026 con `scripts/comparar-extractor.js` sobre facturas reales
+// del historial (tickets térmicos arrugados, un presupuesto manuscrito, una
+// factura de once renglones). Las dos mitades NO se comportan igual:
+//
+// · LA CABECERA la lee Haiku igual que Opus. Seis de siete totales idénticos, y
+//   en el séptimo —un presupuesto a mano sin renglón de TOTAL— Haiku contestó
+//   "no sé" con confianza 0 donde Opus afirmó con 0,65. Eso es exactamente lo
+//   que esta app quiere: lo que duda se convierte en una pregunta al que sacó
+//   la foto, no en una fila mal escrita.
+//
+// · LOS RENGLONES no. En la única factura densa de la muestra Haiku fusionó dos
+//   productos y CORRIÓ CINCO PRECIOS un renglón hacia arriba. La plata no corre
+//   peligro —el cruce suma-de-líneas contra total de cabecera en
+//   `proveedores-routes.js` dispara la pregunta— pero `chequearTotalLinea` marcó
+//   uno solo de diez: los otros cierran su propia aritmética con el precio de
+//   OTRO producto. Eso entra a `Compras`, que es de donde salen el CMV y el
+//   `precio_unitario_movido` de los informes, y nadie lo pregunta.
+//
+// Así que la cabecera va en el modelo barato y los renglones en el caro. Cuesta
+// la mitad que todo en Opus, y de paso la llamada que la persona ESPERA pasó de
+// 10,6 a 5,2 segundos, que era la razón de partirlas en dos.
+//
+// EXTRACTOR_MODEL pisa las dos: es la marcha atrás sin deploy.
+const MODELO_CABECERA = process.env.EXTRACTOR_MODEL
+  || process.env.EXTRACTOR_MODEL_CABECERA || 'claude-haiku-4-5';
+const MODELO_ITEMS = process.env.EXTRACTOR_MODEL
+  || process.env.EXTRACTOR_MODEL_ITEMS || 'claude-opus-4-6';
 
 function client() {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -34,8 +62,15 @@ function client() {
 // segundos y desbloquea la conversación, y los renglones terminan de leerse
 // mientras la persona toca botones.
 //
-// Las dos usan el mismo modelo. Bajar de Opus para leer plata de una foto no
-// estaba sobre la mesa.
+// Hasta el 11/09/2026 las dos usaban el mismo modelo, y la razón escrita acá era
+// que bajar de Opus para leer plata de una foto no estaba sobre la mesa. Se
+// midió y resultó al revés de lo que parecía: la mitad que lee la plata es
+// justamente la que Haiku hace igual de bien —y donde duda, pregunta—, y la que
+// no se puede bajar es la de los renglones. Ver el bloque de los dos modelos
+// arriba de `client()`.
+//
+// Partirlas en dos llamadas, que se hizo por latencia, terminó habilitando esto:
+// con una sola llamada el modelo sería uno solo y habría que elegir el caro.
 function buildPromptCabecera(hoy) {
   const dia = hoy || fechas.hoyAR();
   return `Sos un asistente que procesa facturas y remitos de un bar-restaurante en Argentina.
@@ -82,6 +117,23 @@ Reglas IMPORTANTES:
   sin guion, poné todo en numero_comprobante y dejá punto_venta = "".
   Es lo que identifica a esta factura y a ninguna otra: sirve para no cargar dos
   veces la misma. Si no lo ves, poné "" — no lo inventes ni lo deduzcas.
+- proveedor = el nombre de QUIEN EMITE el comprobante y nos vende. Casi siempre
+  es el membrete: el logo y la razón social arriba de todo.
+  OJO, mismo error que el CUIT: un comprobante tiene los datos del EMISOR y los
+  del COMPRADOR, y los del comprador aparecen bajo rótulos como "Señores:",
+  "Cliente", "Consumidor Final" o "Domicilio". Ésos NO son el proveedor.
+  · Un DOMICILIO NUNCA es un nombre de proveedor. "LISANDRO DE LA TORRE 2020,
+    Capital Federal" es una dirección, no una empresa, aunque esté sola en el
+    renglón y aunque no haya otro nombre en el papel.
+  · Un nombre de PERSONA que figura como cajero, vendedor o quien atendió
+    tampoco: eso va en "vendedor", que se pide aparte.
+  · Un teléfono, un CUIT o un número de pedido no son un nombre.
+  · Si el papel NO IMPRIME el nombre de quien vende —pasa en tickets de control
+    de caja y en comandas—, poné "" con confianza 0. Un humano lo va a
+    completar, y eso es MUCHO mejor que un proveedor inventado: con un nombre
+    que no existe la compra se le atribuye a alguien que no vendió nada, ensucia
+    la ficha y el aprendizaje, y nadie se entera porque nadie preguntó.
+  NO lo deduzcas del domicilio, del CUIT ni de los productos.
 - cuit_proveedor = el CUIT de QUIEN EMITE la factura (el proveedor), con guiones
   (ej "30-71234567-8"). OJO: una factura tiene DOS CUIT, el del emisor arriba y
   el del comprador. Queremos el del EMISOR. Si dudás cuál es, poné "".
@@ -245,11 +297,14 @@ Reglas IMPORTANTES:
 }
 
 // Una llamada al modelo con la imagen y un prompt. `maxTokens` se ajusta a lo
-// que se pide: la cabecera nunca necesita 3000.
-async function pedirAlModelo({ base64, mime, prompt, maxTokens }) {
+// que se pide: la cabecera nunca necesita 3000. `modelo` es obligatorio y no
+// tiene default a propósito: cuál de los dos se usa es la decisión medida que
+// explica el bloque de arriba, y un default acá la volvería invisible.
+async function pedirAlModelo({ base64, mime, prompt, maxTokens, modelo }) {
+  if (!modelo) throw new Error('pedirAlModelo: falta el modelo');
   const anthropic = client();
   const resp = await anthropic.messages.create({
-    model: MODEL,
+    model: modelo,
     max_tokens: maxTokens,
     messages: [{
       role: 'user',
@@ -271,7 +326,7 @@ async function pedirAlModelo({ base64, mime, prompt, maxTokens }) {
 // eso es la llamada que la persona espera. ~82 tokens de salida.
 async function extraerCabecera({ base64, mime = 'image/jpeg', hoy } = {}) {
   const { parsed, raw } = await pedirAlModelo({
-    base64, mime, prompt: buildPromptCabecera(hoy), maxTokens: 420,
+    base64, mime, prompt: buildPromptCabecera(hoy), maxTokens: 420, modelo: MODELO_CABECERA,
   });
   const factura = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
   factura.vendedor = factura.vendedor || '';
@@ -343,7 +398,7 @@ function normalizarCuit(v) {
 // que es lo que espera el resto del pipeline.
 async function extraerItems({ base64, mime = 'image/jpeg', factura = {} }) {
   const { parsed, raw } = await pedirAlModelo({
-    base64, mime, prompt: buildPromptItems(), maxTokens: 3000,
+    base64, mime, prompt: buildPromptItems(), maxTokens: 3000, modelo: MODELO_ITEMS,
   });
   const lineas = Array.isArray(parsed) ? parsed : (Array.isArray(parsed && parsed.items) ? parsed.items : []);
   return { items: aplanar(lineas, factura), rawText: raw };
@@ -405,7 +460,7 @@ Reglas:
 // remito medio borroso tiene que dar una lista para corregir, no un error.
 async function extraerItemsRemito({ base64, mime = 'image/jpeg' }) {
   const { parsed, raw } = await pedirAlModelo({
-    base64, mime, prompt: buildPromptRemito(), maxTokens: 2000,
+    base64, mime, prompt: buildPromptRemito(), maxTokens: 2000, modelo: MODELO_ITEMS,
   });
   const lineas = Array.isArray(parsed) ? parsed : (Array.isArray(parsed && parsed.items) ? parsed.items : []);
   const items = lineas
@@ -425,7 +480,7 @@ async function extraerItemsRemito({ base64, mime = 'image/jpeg' }) {
 // atrás sin tocar nada más; el circuito del bot usa las dos llamadas separadas.
 async function extraerDeImagen({ base64, mime = 'image/jpeg' }) {
   const { parsed, raw } = await pedirAlModelo({
-    base64, mime, prompt: buildPrompt(), maxTokens: 3000,
+    base64, mime, prompt: buildPrompt(), maxTokens: 3000, modelo: MODELO_ITEMS,
   });
 
   // Soportar dos formas: { factura, items } (nueva) o un array suelto (compat).
@@ -480,7 +535,7 @@ function aplanar(lineas, factura = {}) {
 }
 
 module.exports = {
-  extraerDeImagen, buildPrompt, MODEL,
+  extraerDeImagen, buildPrompt, MODELO_CABECERA, MODELO_ITEMS,
   // Las dos mitades, para pedirlas en paralelo.
   extraerCabecera, extraerItems, buildPromptCabecera, buildPromptItems, aplanar,
   // El remito de un pedido: qué y cuánto llega, sin precios. Ver su comentario.

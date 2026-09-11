@@ -129,6 +129,7 @@ plata y registra el IVA. En la app eso está detrás de un login con JWT y de
 | `ALLOWED_USERS` | bot | **El bot no atiende a NADIE** |
 | `PROVEEDORES_INGEST_TOKEN` | bot y app | El bot no puede escribir en la app |
 | `MANTENIMIENTO_INGEST_TOKEN` | app | Se usa `PROVEEDORES_INGEST_TOKEN` (mismo bot, misma frontera) |
+| `FOTO_LADO_MINIMO` | bot | `0` — el tamaño de foto que se le pide a Telegram (0 = el mayor) |
 
 **`ALLOWED_USERS` es obligatoria desde el 06/09/2026.** Antes, si estaba vacía el
 bot atendía a cualquiera que lo encontrara: fallaba abierta. Ahora falla cerrada,
@@ -143,6 +144,61 @@ otra persona, y el id no cambia nunca.
 ```
 ALLOWED_USERS=gonzalo_ok,123456789,charly_bar
 ```
+
+**`FOTO_LADO_MINIMO` está en 0, y eso es un resultado medido, no un pendiente.**
+Telegram guarda cada foto en varios tamaños y los manda todos; el bot puede tomar
+el más chico cuyo lado largo llegue a ese número, y con 0 se queda con el mayor,
+que es lo que hizo siempre.
+
+Parecía la palanca fácil —la imagen viaja al modelo **dos veces** por factura y
+se paga por píxel—, pero el 11/09/2026 se midió sobre siete facturas reales del
+chat y **el ahorro fue cero**: cinco de las siete ya venían a 1280 px porque
+Telegram las comprime antes de que el bot elija nada, y las otras dos quedaban
+apenas encima del techo de 1568 px al que la API escala todo igual. La foto chica
+encima *perdió* una lectura de proveedor que la grande tenía.
+
+Lo que quedó es el log: el bot dice en cada foto qué tamaño eligió de cuántos le
+ofrecieron. Es lo único que puede decir, con volumen real, si esto alguna vez
+cambia — y si cambia, subir el número es una variable, no un deploy.
+
+### El modelo que lee las facturas: uno por mitad
+
+| Variable | Servicio | Default |
+|---|---|---|
+| `EXTRACTOR_MODEL_CABECERA` | app | `claude-haiku-4-5` |
+| `EXTRACTOR_MODEL_ITEMS` | app | `claude-opus-4-6` |
+| `EXTRACTOR_MODEL` | app | — pisa las dos anteriores |
+| `PROVEEDORES_UMBRAL_CONFIANZA` | app | `0.6` |
+
+Leer facturas es cerca del 60% del costo de una instancia y la única línea que
+crece con el uso. El extractor hace **dos llamadas** —cabecera y renglones, en
+paralelo, ver el encabezado de `src/extractor.js`— y el 11/09/2026 se midió que
+no se comportan igual:
+
+- **La cabecera, que es donde está la plata, la lee Haiku igual que Opus.** Seis
+  de siete totales idénticos; en el séptimo —un presupuesto manuscrito sin
+  renglón de TOTAL— Haiku contestó "no sé" donde Opus afirmó con confianza 0,65.
+  Y tarda la mitad: 5,2 s contra 10,6 s, en la llamada que la persona espera.
+- **Los renglones no.** En una factura de once renglones Haiku fusionó dos
+  productos y corrió cinco precios. La plata no corre peligro (el cruce de la
+  suma de líneas contra el total de cabecera dispara la pregunta), pero esas
+  líneas entran a `Compras`, de donde salen el CMV y el análisis de precios, y
+  eso no se pregunta.
+
+Sale cerca de **la mitad** que todo en Opus. `EXTRACTOR_MODEL` pisa las dos y es
+la marcha atrás sin deploy.
+
+Lo que hace defendible bajar de modelo no es el precio: es que la app ya está
+preparada para que el extractor dude. Todo lo que vuelve con confianza menor a
+`PROVEEDORES_UMBRAL_CONFIANZA` se convierte en una pregunta al que sacó la foto
+en vez de escribirse. Un modelo menos preciso degrada en **más preguntas**, no en
+datos mal cargados — y por eso el único resultado que veta un cambio es un total
+mal leído **con confianza alta**, que es el que se escribe solo y nadie mira.
+
+**No se cambia a ciegas:** `scripts/comparar-extractor.js` corre las
+combinaciones sobre facturas reales y aplica ese criterio. Fue lo que encontró
+que el prompt del proveedor no tenía la regla que sí tenía el del CUIT, y que por
+eso Haiku leía el domicilio del comprador como proveedor, con confianza 0,9.
 
 ### Avisos por Telegram (los graves)
 
