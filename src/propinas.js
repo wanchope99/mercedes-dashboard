@@ -57,7 +57,7 @@ const HEADER_DETALLE = ['RepartoID', 'Orden', 'Persona', 'Total', 'Galicia', 'Br
 
 // Las dos cuentas donde caen las propinas digitales. El orden importa: es el
 // orden en que se vacían (ver calcularReparto).
-const CUENTAS = ['Galicia', 'Brubank'];
+const CUENTAS = require('./config-negocio').CUENTAS_PROPINAS;
 
 // Unidad de redondeo por defecto para la parte de cada persona: $100. Ver
 // calcularReparto para por qué se redondea para abajo y no para el más cercano.
@@ -67,6 +67,10 @@ const REDONDEOS_VALIDOS = [1, 100, 1000];
 // El equipo que cobra propina siempre es el mismo, así que la hoja arranca ya
 // cargada y no hay que dar de alta a nadie a mano. Se escribe UNA sola vez,
 // cuando la hoja se crea: si después se saca a alguien, no vuelve a aparecer.
+// Son los nombres del equipo de Mercedes, así que se siembran SÓLO en Mercedes
+// (ver _sembrarPersonas). Sin ese filtro, otro negocio que abriera Propinas
+// encontraría en su planilla seis personas que no trabajan ahí — y como la
+// siembra ocurre al CREAR la hoja, borrarlas después no explica de dónde salieron.
 const PERSONAS_DEFAULT = [
   { nombre: 'Ezequiel', prefiere: '' },
   { nombre: 'Juan', prefiere: '' },
@@ -321,6 +325,11 @@ async function _ensureHoja(api, titulo, header, rango) {
 
 // Carga el equipo por defecto en una hoja recién creada.
 async function _sembrarPersonas(api) {
+  // Fuera de Mercedes no se siembra nada: la hoja se crea vacía y el equipo se
+  // carga desde la pantalla. Una lista vacía es una respuesta correcta ("todavía
+  // no hay nadie"); seis nombres ajenos no lo son, y como esto corre UNA sola vez
+  // —al crear la hoja— borrarlos después no deja rastro de por qué estaban.
+  if (!require('./config-negocio').esMercedes()) return [];
   const ahora = new Date().toISOString();
   await api.spreadsheets.values.append({
     spreadsheetId: SPREADSHEET_ID,

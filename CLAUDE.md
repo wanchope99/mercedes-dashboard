@@ -33,6 +33,98 @@ The bot (`bot/`) is a separate Python app: `pip install -r bot/requirements.txt`
 
 ## Architecture
 
+### This repo runs more than one business (2026-09-09)
+
+It was Bar Mercedes' app for a year and now it is also Pulpería Soler's, a
+one-person wine bar in Palermo. **One repo, deployed twice with different env
+vars** — not a fork. A fork diverges on day two and every fix has to be made
+twice; the cost of the shared repo is the other side of the same coin, and it is
+accepted: **a bug now breaks both bars**, so `npm test` before a deploy stopped
+being optional.
+
+**`src/config-negocio.js` is the only place that answers "whose instance is
+this?"**, and one rule governs the whole file: **every default is Mercedes'.** An
+instance with none of the new variables set behaves exactly as the app behaved
+before that file existed — byte for byte, including the order of every dropdown
+and the wording of the agents' system prompt. That is not politeness: Mercedes is
+in production with the register open some nights, and parametrising it cannot
+require touching its Railway variables. A default that looks cleaner ("Mi
+Negocio", an empty caja list) is how Mercedes breaks in silence; the correct
+default is the value the code had hardcoded.
+
+**The caja names were the hard coupling, and they lived in four places.**
+`MEDIOS_CANONICOS` in `medios-pago.js`, copied into `proveedores-categorias.js`,
+`finanzas.js` and `propinas.js` — four lists describing one reality that could
+disagree. They now all read `config-negocio`. It matters more than it looks:
+`server.js` rejects any medio outside that list, so without this a second bar
+could not record a single expense.
+
+**Two derivations are deliberately conditional on `CAJAS` being set** — i.e. they
+never run in Mercedes. `CAJA_EFECTIVO`/`CAJA_MP` fall back to their literals
+(Mercedes has three cash boxes and two Mercado Pago accounts; guessing which one
+the arqueo counts is exactly the error), and `MEDIOS_LIBRO` keeps its literal
+order, which is by real usage in the historical expenses (215/201/176/58/22) —
+deriving it would silently reorder the dropdown the encargado uses every night.
+
+**What is gated by `esMercedes()` rather than parametrised**, because it is
+Mercedes' data and not configuration: the 14 suppliers `costos.js` seeds into
+`Proveedor Grupo CMV`, the six people `propinas.js` seeds into
+`Propinas Personas`, the supplier aliases (two of which are real people's
+names), `regimen-fiscal.js`'s per-supplier VAT rate, and the 2026-05-25 event in
+`informes-excepciones.js`. All of them run **once, when the sheet is created** —
+so another business would find them in its own spreadsheet with no way to learn
+where they came from.
+
+**The operating context never falls back.** `src/contexto-operativo.md` goes into
+the agents' system prompt whole, and it talks about Mercado Pago Pablo, Galicia
+and Brubank, the July headcount. Serving it to another business is not a
+reasonable default: the model has no way to know those facts are not its own and
+would use them to explain that bar's numbers. Each instance has
+`src/contexto-<NEGOCIO_ID>.md`; the one that lacks it runs with no context at
+all, which is what the app did before 2026-08-09 — naive reports, never foreign
+ones.
+
+**`GET /api/config` is unauthenticated on purpose.** The login screen needs it,
+and that screen by definition runs before there is a token. It carries only what
+anyone opening the URL already sees written on it; `paraElNavegador()` builds the
+object precisely so adding a field is a decision rather than an oversight.
+`public/index.html` has no build, so the five caja dropdowns used to be written by
+hand — they now fill themselves from it, keeping each one's shape (the empty
+"todas"/"sin cambio" option first, `Echeq` last) and its default option.
+**`NEGOCIO` starts as `null` and that is the fallback**: if the call fails nothing
+is touched and the HTML renders as written, because a form with no payment
+methods cannot be used while one with the usual ones can.
+
+**`MODULOS_OFF` hides tabs AND makes their routes answer 404**, and both halves
+matter — hiding a button was never a permission, which is the rule this file
+already states for the kitchen close and for Pagos. It answers 404 and not 403
+because in that instance the module does not exist; 403 would say "it exists but
+you may not", a different and false claim. **The middleware must be declared above
+every route**: the first version sat next to `/api/health`, below the six
+`/api/arqueo` routes, and covered none of them — the module looked off in the menu
+and answered anyway. Same failure this file documents for
+`/api/servicios/agregado`. Three routes are deliberately left out despite sounding
+like the Plan group (`/api/proyecciones`, `/api/calculadora`,
+`/api/punto-equilibrio`): Servicios consumes them too.
+
+**Three modules already switch themselves off** without being on that list — not
+setting `NOMINA_SHEET_ID` or `STOCKS_SHEET_ID` reports them unconfigured and
+nothing else breaks. That mechanism predates all of this and was left alone.
+
+**localStorage was deliberately NOT prefixed.** Each instance is a different
+Railway domain, so browser storage is already isolated per origin; prefixing
+would only have logged every Mercedes user out once, which is precisely what this
+repo warns against doing mid-service.
+
+`scripts/bootstrap-planillas.js` builds the five sheets the app cannot create
+itself, `--aplicar` off by default like every other destructive path here. The
+two that fail silently without it are the reason it exists: `Movimientos` is
+detected **by content** (the row where A says `Fecha` and B says `Mes`) and
+without it `getMovimientos()` throws and the whole app falls over; `Cajas` needs
+the `SUMIFS` in column F, and without it every balance reads zero with no error —
+it looks like a bar that never moved any money.
+
+
 ### Data sources — everything is Google Sheets + Fudo, no database
 
 There is no database. All persistent state lives in Google Sheets, read/written directly via the `googleapis` package, and cached in-process with `node-cache` (`clearCache()` / `clearFudoCache()` invalidate on writes). Two spreadsheets are in play:
@@ -83,7 +175,11 @@ The two arqueo cajas are `CAJA_EFECTIVO` / `CAJA_MP` in `server.js`, overridable
 
 **A cambio out of an arqueo caja with the register open adjusts the close.** If `Efectivo Local` or `Mercado Pago Tincho` is involved while `estadoCaja.abierta`, the movement is pushed into `gastosSesion` — an **entrada goes in negative**, since the expected close is `inicial + Fudo − sesión`. Without this, taking cash out of the drawer at 8pm shows up at close as a faltante nobody lost, and the close writes a "delta efectivo (faltante)" row against money that is sitting in another caja with its own row.
 
-**`Mercado Pago Pablo` is a payment option in the purchase forms since 2026-08-20.** It follows from the 2026-08-08 decision that the account stays a daily working account: Pablo pays bar expenses out of it, so the compra has to be loadable that way instead of being a row to correct in the sheet afterwards. It was added to "Registrar nueva compra" and "Pagar registro pendiente" only — **the invoice circuit (`MEDIOS_PAGO` / `MEDIOS_LIBRO` in `proveedores-categorias.js`) deliberately still does not offer it**, since that flow asks whoever photographed the invoice, and the encargado has no visibility into that account. A free-text "Mercado Pago" in a supplier's data still maps to the operating account: choosing Pablo's is a decision, not something to infer from an ambiguous string.
+**`Mercado Pago Pablo` is a payment option in the purchase forms since 2026-08-20.** It follows from the 2026-08-08 decision that the account stays a daily working account: Pablo pays bar expenses out of it, so the compra has to be loadable that way instead of being a row to correct in the sheet afterwards. It was added to "Registrar nueva compra" and "Pagar registro pendiente" first, and **since 2026-09-10 the Telegram bot offers it too** — the owner asked for it after paying an invoice from that account and having no way to say so. The bot's buttons are now `MEDIOS_COMPRA` (`config-negocio.js`) instead of `MEDIOS_LIBRO`: the same five as before, in the same order, plus the pot at the end. The reception modal offers the same six.
+
+**`MEDIOS_COMPRA` keeps `MEDIOS_LIBRO`'s order with the pot appended, and does not derive it from `CAJAS`.** Deriving it would have silently reshuffled five buttons that people read in a chat every day — the same reason `MEDIOS_LIBRO` is a literal list.
+
+**Two things deliberately did not change.** `MEDIOS_LIBRO` — the quick-expense dropdown, and what may be written to column L by that path — still excludes it. And `MEDIOS_PAGO`, the short list that reaches the `Compras` sheet, is untouched. A free-text "Mercado Pago" in a supplier's data still maps to the operating account: choosing Pablo's is a decision someone makes by tapping it, never something inferred from an ambiguous string or read off a photo.
 
 ### Finanzas: the recovery capital sits in one account
 
@@ -443,6 +539,18 @@ Single-payment purchases from "Nueva compra" now go through `registrarGastoEnLib
 
 **`construirFilaGasto` now accepts an empty medio, but only on `A pagar`.** The `Saldo Calculado` of the `Cajas` sheet is a `SUMIFS` over column L, so a medio written before the money moves subtracts from a caja that still holds it. The instalment branch already did this right and said so; the single-payment branch did not. A non-empty medio must still be an exact caja name, and `Pagado` still requires one — a paid expense that does not say which caja it left is money no balance subtracts.
 
+**And since 2026-09-08 it accepts an empty AMOUNT, under the same rule and for the same reason: only on `A pagar`.** Owner's request — *"a veces pasa que no es claro o es a definir el monto pero ya se hizo el pedido"*. The alternative to recording it without an amount was not recording it with one; it was not recording it at all, and the delivery arriving with nothing anywhere to say it was coming. Column O is left **empty, never zero**: zero asserts the expense was zero, which is a different claim and a false one.
+
+`Pagado` still requires an amount, and that is not symmetry: that row is written against a caja, and a paid outflow with no figure is money no `SUMIFS` ever subtracts — invisible, permanently, with no error in sight. So the amount has to arrive, and it arrives where the number does:
+
+- **with a delivery**, nothing is written today anyway (the 2026-08-25 rule) and the reception asks for it — exactly what already happens with weekly-grid previstos, which never had an amount. The guard in `registrarCompra` that rejected this was removed.
+- **without one**, the row is written now as `A pagar` with an empty O, shows in Pagos as **"sin monto"** in orange rather than a `—`, and `marcarFilaPagada` takes an optional `monto` that it writes into column O **only when the row has none** — a row that already states its amount is a recorded fact, and a different figure typed at payment time is either a partial payment or a typo, neither of which is resolved by overwriting the original in silence. Paying an amountless row without giving one is rejected. Both callers pass it: the Pagar button and the pedido reception.
+- **in cuotas**, the mother row and all N children are written with their vencimientos and empty amounts — splitting an unknown total in three gives three zeros, and a zero says "this installment is zero". **The cost is stated in the form itself**: the mother row is what carries the expense into the month (every aggregation skips `esCuota` rows), so until someone writes that total the purchase does not count in the month's P&L.
+
+**The bot is the deliberate exception** (`proveedores-routes.js`, and the pre-existing guard in `escribirGastoDeFactura`): nobody leaves that amount blank on purpose — it is read off a photo, so a zero total means *could not read*, not *to be defined*. Writing it anyway would turn a reading error into a mute row, which is the signal that must not be lost.
+
+`tests/compra-sin-monto.test.js` runs both halves for real — `validarCompra` extracted from `index.html`, `construirFilaGasto` extracted from `server.js` with its dependencies injected (requiring `server.js` starts the server). Note its `cuerpoEntre` helper: `construirFilaGasto`'s parameter list spans lines and closes with a `}` in column 0, so the usual "cut at the next `\n}`" returns the header alone — silently.
+
 **`normalizarCategoriaGasto` validates against `CATEGORIAS_COLUMNA_J` (13), not `CATEGORIAS_GASTO` (9).** One list was answering two questions. `CATEGORIAS_GASTO` is what the *bot* offers a person over Telegram, narrowed to what appears on supplier invoices — it is unchanged, and adding to it would put four more buttons in a chat for no reason. But the sheet's validation accepts more, and the purchase modal offers those more: **Alquiler, Personal, Legal / Escribano and Fiscales** returned `''` and were silently downgraded to `Otros`. Harmless while only the bot came through that door (a bot never sends a rent payment); a silent hole in the P&L the moment the purchase form did.
 
 ### The delivery's line items, and why the image is not kept (2026-08-21)
@@ -626,9 +734,13 @@ The corrections — move to a chosen date, wrong supplier, delete — still exis
 
 **`restoFecha` is the only thing that leaves a difference without a debt**: if what is missing arrives another day, that merchandise is not inside the bar, so nothing is owed for it — what chases it is the follow-up order, created for the chosen date with `origen: 'parcial'`.
 
-**The medium is never asked, and when money moved at the door it is always `Efectivo Local`** (`medioDeRecepcion`). Owner's rule, in his words: *"si el pedido se paga en la entrega en el local, siempre se va a pagar con efectivo local"* — it is the only register that exists there. When **nobody** paid, the medium is the one the purchase gave: how it will be paid, or how it already was.
+**The medium is asked only when money moved, and it comes pre-filled with `Efectivo Local`** (`medioDeRecepcion`). It is the register that exists at the door and it stays the default, so the normal case still costs no extra tap. When **nobody** paid, the medium is the one the purchase gave — how it will be paid, or how it already was — and whatever the browser sends is ignored: if no money left, there is no register it left from, and booking one would invent a payment.
 
-This was something else for two hours on 2026-09-07 and was reverted the same day. The idea had been to cover "the supplier collects at the door but Pablo transfers" by letting the purchase pick a medium for an `al-recibir`. It is the wrong framing: that payment does not happen at the door and does not leave the local register, so it is not an `al-recibir` — it is loaded as already paid, or as left on account. And the cost of allowing it was the worst available: a payment booked against a register nobody touched, which is exactly what breaks an arqueo. The purchase form hides the medium field for `al-recibir` again, and the server forces `CAJA_EFECTIVO` regardless of what the form sends.
+**Being able to change it is the owner's decision of 2026-09-10**, made with the case in front of him: *"que exista la opción de cambiar de medio de pago; en este caso por ejemplo se pagó con Galicia"* — the transfer made from a phone with the supplier standing there. Booking **that** money as leaving the bar's cash drawer is precisely what breaks the night's arqueo, so this closes the gap from the other side rather than reopening it.
+
+Only the cajas the screen offers are accepted (`MEDIOS_COMPRA`, the same six as the purchase form), normalised to their exact name first. Anything else **falls back to the default instead of being rejected** — the goods are at the door, and a stale tab sending an odd medium cannot be the reason a delivery can't be received; same rule as `MODOS_VIEJOS`. The result modal names the caja only when it was not the default: announcing the normal case every time is how a notice stops being read.
+
+**This does not reopen what was reverted on 2026-09-07.** That day removed a medium chosen **at purchase time** for an `al-recibir`, and removing it was right: there the medium was the prediction of someone who would not be at the door, and the cost was the worst available — a payment booked against a register nobody had touched yet. Here it is asserted by whoever just paid, after the money left. The purchase form still hides the medium field for `al-recibir`, and the server still forces `CAJA_EFECTIVO` there regardless of what the form sends.
 
 **Every modal needs its own CSS rule, and this file had said so twice before it happened again.** `#ped-prov-overlay` shipped with the class and no rule, and the "¿Quién trajo el pedido?" form drew itself in the middle of the page, in every section. There is no generic `.modal-overlay` style, so the class alone hides nothing. `tests/overlays.test.js` now walks every `id$="-overlay"` in the file and fails if any of them lacks a way to hide *and* a way to open — the written warning had already failed twice.
 

@@ -94,6 +94,8 @@ if (!JWT_SECRET) {
 // su cuenta por la misma razón —lo que se marca en Pedidos y en Mantenimiento
 // queda firmado con el nombre de quien lo marcó, y con un login compartido eso
 // sería una firma que no dice nada.
+const negocio = require('./config-negocio');
+
 const USUARIOS = Object.create(null);
 
 function _registrarUsuario(clave, { password, rol, nombre }) {
@@ -108,6 +110,49 @@ _registrarUsuario('tincho', { password: process.env.TINCHO_PASSWORD, rol: 'admin
 _registrarUsuario('juan',   { password: process.env.JUAN_PASSWORD,   rol: 'encargado', nombre: 'Juan' });
 _registrarUsuario('ezequiel', { password: process.env.EZEQUIEL_PASSWORD, rol: 'encargado', nombre: 'Ezequiel' });
 
+// ─── Cuentas declaradas por entorno (09/09/2026) ─────────────────────────────
+//
+// Los seis de arriba son las personas de Mercedes y se quedan escritos: son
+// cuentas reales, en producción, y convertirlas en configuración no arregla
+// nada y puede apagarle el login a alguien un martes a la noche.
+//
+// Lo que se agrega es la puerta para las demás instancias, que no tienen ni a
+// Charly ni a Tincho. Se declaran en `USUARIOS`, y la contraseña de cada una
+// sigue viniendo en SU PROPIA variable — igual que las seis de arriba, y por la
+// misma razón: este repositorio es público y una lista con contraseñas adentro
+// las pondría todas en el mismo string.
+//
+//   USUARIOS=pulpo:admin:Pulpo,barra:encargado:Barra
+//   USUARIO_PULPO_PASSWORD=...
+//   USUARIO_BARRA_PASSWORD=...
+//
+// El nombre para mostrar es opcional; sin él se usa la clave capitalizada.
+// Un rol que no sea `admin` o `encargado` se rechaza en vez de asumirse: asumir
+// `encargado` le daría a alguien menos permisos de los que se le quisieron dar y
+// asumir `admin` le daría de más, y la segunda es la que no se puede deshacer.
+//
+// Una clave repetida NO pisa a las de arriba: son cuentas de personas reales, y
+// un typo en esta variable no puede cambiar quién es 'pablo'.
+const ROLES_VALIDOS = ['admin', 'encargado'];
+const _envDeUsuario = clave => `USUARIO_${clave.toUpperCase().replace(/[^A-Z0-9]/g, '')}_PASSWORD`;
+const _declarados = [];
+
+for (const entrada of String(process.env.USUARIOS || '').split(',').map(s => s.trim()).filter(Boolean)) {
+  const [claveCruda, rolCrudo, ...resto] = entrada.split(':').map(s => s.trim());
+  const clave = (claveCruda || '').toLowerCase();
+  const rol = (rolCrudo || '').toLowerCase();
+  if (!clave) continue;
+  if (USUARIOS[clave]) { console.warn(`  · USUARIOS: "${clave}" ya existe y no se pisa`); continue; }
+  if (!ROLES_VALIDOS.includes(rol)) {
+    console.error(`  · USUARIOS: "${clave}" ignorado, rol "${rolCrudo || ''}" no es admin ni encargado`);
+    continue;
+  }
+  const nombre = resto.join(':').trim() || (clave.charAt(0).toUpperCase() + clave.slice(1));
+  const envVar = _envDeUsuario(clave);
+  _declarados.push([clave, envVar]);
+  _registrarUsuario(clave, { password: process.env[envVar], rol, nombre });
+}
+
 // Se listan al arrancar (sin las claves). Una cuenta sin su variable no se crea,
 // y eso desde afuera se ve igual que una contraseña mal tipeada: este log es la
 // diferencia entre "me equivoqué al escribirla" y "esa cuenta no existe acá".
@@ -119,6 +164,7 @@ if (!_cuentas.length) {
   for (const [clave, envVar] of [
     ['admin', 'ADMIN_PASSWORD'], ['charly', 'CHARLY_PASSWORD'], ['pablo', 'PABLO_PASSWORD'],
     ['tincho', 'TINCHO_PASSWORD'], ['juan', 'JUAN_PASSWORD'], ['ezequiel', 'EZEQUIEL_PASSWORD'],
+    ..._declarados,
   ]) {
     if (!USUARIOS[clave]) console.warn(`  · "${clave}" deshabilitado: falta ${envVar}`);
   }
@@ -228,6 +274,48 @@ function adminOnly(req, res, next) {
 // algo.
 
 // ─── Login ────────────────────────────────────────────────────────────────────
+// ─── ORDEN: esto va ARRIBA DE TODAS LAS RUTAS, y es la única posición válida ──
+//
+// Express resuelve por orden de declaración. La primera versión de este guard
+// quedó junto a /api/health, o sea DEBAJO de las seis rutas de /api/arqueo, y
+// no tapaba ninguna: el módulo se veía apagado en el menú y contestaba igual.
+// Mismo modo de fallar que este archivo ya documenta para /api/servicios/agregado.
+// ─── Un módulo apagado tampoco contesta ──────────────────────────────────────
+//
+// `MODULOS_OFF` saca las pestañas del menú, y eso es cosmética: el navegador que
+// no las dibuja es el mismo que podría pedir la ruta igual. Acá se cierra del
+// lado que decide. Es la regla que este archivo ya tiene escrita para el cierre
+// de cocina y para Pagos — esconder un botón no es un permiso.
+//
+// Devuelve 404 y no 403 a propósito: en esta instancia ese módulo no existe, y
+// un 403 diría "existe pero no podés", que es una afirmación distinta y falsa.
+//
+// El mapa es CONSERVADOR y lista sólo lo que el módulo posee entero. Tres rutas
+// quedan deliberadamente afuera aunque suenen del grupo Plan:
+// `/api/proyecciones`, `/api/calculadora` y `/api/punto-equilibrio` las consume
+// también Servicios, que puede estar encendido — apagarlas dejaría a la pantalla
+// de Servicios sin su objetivo por noche, que es de lo primero que se mira.
+const RUTAS_POR_MODULO = {
+  propinas: ['/api/propinas'],
+  nomina:   ['/api/nomina'],
+  cierre:   ['/api/cierre-cocina'],
+  arqueo:   ['/api/arqueo'],
+  plan:     ['/api/plan', '/api/finanzas', '/api/roi'],
+};
+
+const _rutasApagadas = Object.entries(RUTAS_POR_MODULO)
+  .filter(([modulo]) => !negocio.moduloActivo(modulo))
+  .flatMap(([, rutas]) => rutas);
+
+if (_rutasApagadas.length) {
+  console.log(`Módulos apagados en esta instancia: ${[...negocio.MODULOS_OFF].join(', ')}`);
+  app.use((req, res, next) => {
+    const apagada = _rutasApagadas.some(r => req.path === r || req.path.startsWith(r + '/'));
+    if (!apagada) return next();
+    res.status(404).json({ ok: false, error: 'Ese módulo no está habilitado en esta instancia' });
+  });
+}
+
 app.post('/api/login', (req, res) => {
   const { usuario, password } = req.body;
   const nombreUsuario = (usuario || '').toString().toLowerCase();
@@ -1118,13 +1206,35 @@ function construirFilaGasto({
   // el importe como texto tipeado. Lo ilegible sigue dando 0 y lo rechaza el
   // mismo guard de siempre.
   const montoNum = centavos(leerMonto(monto));
-  if (!Number.isFinite(montoNum) || montoNum <= 0) {
+  const estadoRow = estado === 'A pagar' ? 'A pagar' : 'Pagado';
+
+  // ─── Una cuenta puede nacer sin monto; una salida pagada, nunca (08/09/2026) ─
+  //
+  // Se pide algo sin saber cuánto va a costar —el precio se define después, o lo
+  // dice el proveedor al entregar— y hasta hoy eso no se podía anotar en ningún
+  // lado: la compra no se guardaba y el pedido no llegaba a existir. Decisión de
+  // Gonzalo. La columna O queda VACÍA, que es "no se sabe"; un cero diría que el
+  // gasto fue de cero, que es otra cosa y es falsa.
+  //
+  // Es la misma forma que la regla del medio, tres párrafos más abajo, y por el
+  // mismo motivo: vacío vale sólo mientras la plata no se haya movido. Una fila
+  // `Pagado` sin importe es plata que salió de una caja y que ningún saldo resta
+  // nunca — invisible, para siempre y sin ningún error a la vista. El importe se
+  // completa donde aparece el número: al recibir la entrega, o al pagar la
+  // cuenta (ver marcarFilaPagada).
+  const sinMonto = !(montoNum > 0);
+  if (!Number.isFinite(montoNum) || montoNum < 0) {
     return { ok: false, motivo: 'monto', error: 'El total del gasto tiene que ser un número mayor que cero.' };
+  }
+  if (sinMonto && estadoRow !== 'A pagar') {
+    return {
+      ok: false, motivo: 'monto',
+      error: 'Falta el monto. Un gasto ya pagado tiene que decir cuánto salió, '
+        + 'o ninguna caja lo resta del saldo.',
+    };
   }
   if (!proveedor) return { ok: false, motivo: 'proveedor', error: 'Falta el proveedor.' };
   if (!facturaId) return { ok: false, motivo: 'id', error: 'Falta el identificador de la factura.' };
-
-  const estadoRow = estado === 'A pagar' ? 'A pagar' : 'Pagado';
 
   // ─── El medio, y por qué una fila "A pagar" no lleva ninguno ───────────────
   //
@@ -1189,12 +1299,12 @@ function construirFilaGasto({
     descripcion || '',                     // K Descripción
     medioRow,                              // L Medio de pago (vacío si "A pagar")
     '', '',                                // M/N Entradas
-    montoNum,                              // O Salida ARS
+    sinMonto ? '' : montoNum,              // O Salida ARS (vacía = todavía no se sabe)
     '',                                    // P Salida USD
   ];
   // `medio` es el que se ELIGIÓ (lo usa el bot para decir "sale de X" en su
   // mensaje); `medioRow` es el que se ESCRIBIÓ. Sólo difieren en "A pagar".
-  return { ok: true, row, medio, medioRow, montoNum, estadoRow, categoria: categoriaRow, fechaRow, mes };
+  return { ok: true, row, medio, medioRow, montoNum, sinMonto, estadoRow, categoria: categoriaRow, fechaRow, mes };
 }
 
 async function registrarGastoEnLibro(datos = {}) {
@@ -1391,16 +1501,22 @@ async function registrarCompra(datos = {}) {
   // así que ahí se escribe ahora como siempre — la regla es de los pedidos.
   const escribeAhora = previsto === 'pagado' || !entregaFecha;
 
-  // El monto lo validaba `registrarGastoEnLibro` al escribir la fila. Cuando
-  // la fila no se escribe hoy, esa validación no corre, y un pedido sin monto
-  // llega a la puerta sin poder recibirse ("poné cuánto es") justo cuando no
-  // hay tiempo. Se rechaza acá, que es donde se puede corregir.
-  if (!escribeAhora && !(leerMonto(salidaARS) > 0)) {
-    return {
-      ok: false, status: 400,
-      error: 'Poné el monto de la compra: es lo que se va a registrar cuando llegue el pedido.',
-    };
-  }
+  // ─── Un pedido puede nacer sin monto (08/09/2026) ────────────────────────
+  //
+  // Acá había un rechazo: sin fila escrita hoy, `registrarGastoEnLibro` no
+  // valida el importe, y un pedido sin monto llegaba a la puerta pidiendo
+  // "poné cuánto es" justo cuando no hay tiempo. Gonzalo pidió lo contrario, y
+  // tiene razón sobre el caso real: a veces el precio está a definir y el
+  // pedido YA se hizo, así que la alternativa a un pedido sin monto no era uno
+  // con monto — era ninguno, y la entrega llegaba sin estar anotada.
+  //
+  // Lo que se pierde es el prellenado del modal de recepción, que es una
+  // molestia; lo que se gana es que la entrega exista. El importe se pide igual
+  // en la puerta, que es exactamente lo que ya pasa con los previstos del
+  // cuadro semanal, que nunca tuvieron monto.
+  //
+  // "Ya está pago" sigue siendo la excepción, y la rechaza construirFilaGasto:
+  // esa plata ya salió de una caja y su fila no puede quedar sin importe.
 
   let r = { ok: true, registradoEnSesion: false };
   if (escribeAhora) {
@@ -1598,6 +1714,24 @@ app.get('/api/fudo/probe-stock', authMiddleware, adminOnly, async (req, res) => 
 });
 
 app.get('/api/health', (req, res) => res.json({ ok: true, status: 'ok' }));
+
+// ─── Quién es este negocio, para el navegador ────────────────────────────────
+//
+// `public/index.html` no tiene build: los desplegables de caja estaban escritos
+// a mano, 151 literales repartidos por el archivo, y la marca también. Esto es lo
+// que les permite armarse solos.
+//
+// **Va SIN autenticar, y es deliberado.** Lo necesita la pantalla de login, que
+// por definición corre antes de que haya token: el nombre y el logo del negocio
+// se dibujan ahí. Lo que devuelve es lo que cualquiera que abra la URL ya ve
+// escrito en la pantalla —cómo se llama el bar, cómo se llaman sus cuentas— y no
+// hay ningún secreto adentro; `paraElNavegador()` arma el objeto justamente para
+// que agregar un campo sea una decisión y no un descuido.
+//
+// Lo que NO decide este endpoint es quién ve qué. Los módulos apagados viajan
+// para que el menú no dibuje pestañas muertas, pero los permisos los sigue
+// resolviendo el server en cada ruta: una pantalla oculta nunca fue la frontera.
+app.get('/api/config', (req, res) => res.json({ ok: true, ...negocio.paraElNavegador() }));
 
 // ─── Filtro de fecha ──────────────────────────────────────────────────────────
 function parseFiltro(query) {
@@ -2190,7 +2324,18 @@ app.post('/api/pagos', authMiddleware, async (req, res) => {
       // computa completa en el estado de resultados del mes de compra) + una fila por cuota.
       if (!vencimiento) return res.status(400).json({ ok: false, error: 'Para cuotas indicá el vencimiento de la primera cuota' });
       const total = centavos(leerMonto(salidaARS));
-      const montoCuota = Math.round(total / nCuotas);  // cuotas enteras (ARS)
+      // Sin total no hay cuotas que calcular, y NO se inventan: partir en tres
+      // algo que no se sabe da tres ceros, y un cero dice "esta cuota es de
+      // cero" en vez de "todavía no se sabe". Se escriben las cuatro filas con
+      // sus vencimientos —que es lo que sí se sabe y lo que hay que recordar— y
+      // el importe vacío. Cada cuota recibe el suyo al pagarse (marcarFilaPagada).
+      //
+      // LO QUE ESTO CUESTA, dicho en voz alta: la fila madre es la que lleva el
+      // gasto al mes (las cuotas se saltean en toda agregación, ver `esCuota`),
+      // así que mientras esté vacía esa compra NO suma en el resultado del mes.
+      // Se completa escribiendo el total en la fila madre cuando se sepa.
+      const sinTotal = !(total > 0);
+      const montoCuota = sinTotal ? '' : Math.round(total / nCuotas);  // cuotas enteras (ARS)
       const cuotaId = `${proveedor}-${fecha}`.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '');
       const descBase = descripcion || proveedor;
       // El Mes (col B) de TODAS las filas de la compra es el de la compra, no el del
@@ -2200,14 +2345,15 @@ app.post('/api/pagos', authMiddleware, async (req, res) => {
       // Agosto/Septiembre/Octubre e inventaba meses futuros en los filtros.
       const mesCompra = mes || mesDeFecha(fecha);
       // Fila madre: estado "En cuotas", medio de pago vacío, col F = total de cuotas, col H = ID
-      values = [[fecha, mesCompra, 'Gasto', 'En cuotas', '', String(nCuotas), '', cuotaId, proveedor, categoria||'', `${descBase} — Total en ${nCuotas} cuotas`, '', '', '', total, '']];
+      values = [[fecha, mesCompra, 'Gasto', 'En cuotas', '', String(nCuotas), '', cuotaId, proveedor, categoria||'', `${descBase} — Total en ${nCuotas} cuotas`, '', '', '', sinTotal ? '' : total, '']];
       for (let i = 1; i <= nCuotas; i++) {
         const venc = addMonthsDDMM(vencimiento, i - 1);
         // Ajuste última cuota para que la suma cierre exacta con el total
         // Los centavos del total viven enteros en la última cuota, y pasan por
         // `centavos` porque la resta arrastra el ruido del punto flotante:
         // 200000,93 en tres cuotas daba una última de 66666,929999999999.
-        const monto = i === nCuotas ? centavos(total - montoCuota * (nCuotas - 1)) : montoCuota;
+        const monto = sinTotal ? ''
+          : (i === nCuotas ? centavos(total - montoCuota * (nCuotas - 1)) : montoCuota);
         // Medio de pago vacío hasta que se pague (las fórmulas de Cajas suman por medio):
         // al marcarla Pagado se completa el medio. El mes NO se toca al pagar.
         values.push([venc, mesCompra, 'Gasto', 'A pagar', venc, `${i}/${nCuotas}`, '', cuotaId, proveedor, categoria||'', `${descBase} — Cuota ${i}/${nCuotas}${medioPago ? ' ('+medioPago+')' : ''}`, '', '', '', monto, '']);
@@ -2337,16 +2483,40 @@ async function verificarFilaPendiente({ rowIndex, proveedor } = {}) {
   return { ok: true, m, idx };
 }
 
-async function marcarFilaPagada({ rowIndex, proveedor, medioPago, usuario, descripcionSesion } = {}) {
+async function marcarFilaPagada({ rowIndex, proveedor, medioPago, usuario, descripcionSesion, monto } = {}) {
   const v = await verificarFilaPendiente({ rowIndex, proveedor });
   if (!v.ok) return v;
   const { m, idx } = v;
 
   const medio = normalizarMedio(medioPago);
+
+  // ─── La cuenta que se cargó sin monto se completa acá (08/09/2026) ─────────
+  //
+  // Desde hoy una compra puede anotarse sin importe (ver construirFilaGasto), y
+  // ésta es la otra mitad: el momento en que se paga es cuando el número existe,
+  // así que es donde se escribe. Sin esto, esa fila pasaría a `Pagado` con la
+  // columna O vacía — plata que salió de una caja y que ningún saldo resta.
+  //
+  // Sólo se escribe si la fila NO tiene importe. Una fila que ya dice cuánto es
+  // un hecho registrado, y un monto distinto tipeado al pagar es un pago parcial
+  // o un error de tipeo: ninguno de los dos se resuelve pisando el original en
+  // silencio.
+  const montoFila = Number(m.salidaTotal || m.salidaARS || 0);
+  const montoDicho = centavos(leerMonto(monto));
+  const completaMonto = !(montoFila > 0) && montoDicho > 0;
+  if (!(montoFila > 0) && !completaMonto) {
+    return {
+      ok: false, status: 400,
+      error: 'Esa cuenta se cargó sin monto. Poné cuánto se pagó: una salida sin importe '
+        + 'no la resta ninguna caja.',
+    };
+  }
+
   const auth = getAuth();
   const sheets = google.sheets({ version: 'v4', auth });
   const data = [{ range: `Movimientos!D${idx}`, values: [['Pagado']] }];
   if (medio) data.push({ range: `Movimientos!L${idx}`, values: [[medio]] });
+  if (completaMonto) data.push({ range: `Movimientos!O${idx}`, values: [[montoDicho]] });
   await sheets.spreadsheets.values.batchUpdate({
     spreadsheetId: SPREADSHEET_ID,
     requestBody: { valueInputOption: 'USER_ENTERED', data },
@@ -2359,7 +2529,9 @@ async function marcarFilaPagada({ rowIndex, proveedor, medioPago, usuario, descr
   // Caso real: pagar a un proveedor "A pagar" con MP estando la caja abierta.
   let registradoEnSesion = false;
   const medioEfectivoPago = (medio || m.medioPago || '').toLowerCase();
-  const montoSalida = Number(m.salidaTotal || m.salidaARS || 0);
+  // El que se acaba de escribir manda: si la fila estaba sin monto, el esperado
+  // del arqueo tiene que descontar lo que de verdad salió, no un cero.
+  const montoSalida = completaMonto ? montoDicho : Number(m.salidaTotal || m.salidaARS || 0);
   if (estadoCaja.abierta && montoSalida > 0) {
     // Match exacto: sólo las dos cajas que se arquean afectan el esperado del
     // turno. Mercado Pago Pablo es la cuenta del recupero y no se arquea.
@@ -2381,14 +2553,23 @@ async function marcarFilaPagada({ rowIndex, proveedor, medioPago, usuario, descr
       guardarEstadoCaja(estadoCaja);
     }
   }
-  return { ok: true, proveedor: m.proveedor, monto: m.salidaARS, medio, registradoEnSesion, rowIndex: idx };
+  return {
+    ok: true, proveedor: m.proveedor,
+    monto: completaMonto ? montoDicho : m.salidaARS,
+    completoMonto: completaMonto,
+    medio, registradoEnSesion, rowIndex: idx,
+  };
 }
 
 // POST /api/pagos/pagar — el botón "Pagar" de la sección Pagos.
 app.post('/api/pagos/pagar', authMiddleware, adminOnly, async (req, res) => {
   try {
     const { rowIndex, proveedor, medioPago } = req.body;
-    const r = await marcarFilaPagada({ rowIndex, proveedor, medioPago, usuario: req.user.nombre });
+    // `monto` sólo se usa si la fila NO tiene importe: es la cuenta que se cargó
+    // sin monto y que recién ahora sabe cuánto fue. Ver marcarFilaPagada.
+    const r = await marcarFilaPagada({
+      rowIndex, proveedor, medioPago, monto: req.body.monto, usuario: req.user.nombre,
+    });
     if (!r.ok) return res.status(r.status).json({ ok: false, error: r.error });
     res.json({ ok: true, message: `${r.proveedor} marcado como Pagado`, ...r });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
@@ -3308,24 +3489,39 @@ const MODOS_RECIBIR = {
 /**
  * Con qué medio se anota lo que pasó en la puerta.
  *
- * NO SE PREGUNTA, y cuando salió plata es SIEMPRE Efectivo Local. Regla de
- * Gonzalo, dicha así: *"si el pedido se paga en la entrega en el local, siempre
- * se va a pagar con efectivo local"*. Es la única caja que existe en la puerta.
+ * Cuando salió plata el DEFAULT es Efectivo Local —es la caja que hay en la
+ * puerta y sigue siendo el caso normal— pero desde el 10/09/2026 se puede
+ * cambiar, pedido de Gonzalo con el caso a la vista: *"que exista la opción de
+ * cambiar de medio de pago; en este caso por ejemplo se pagó con Galicia"*. Es
+ * la transferencia que se hace desde el teléfono con el proveedor enfrente.
  *
- * Esto estuvo dos horas siendo otra cosa el 07/09/2026 y se revirtió el mismo
- * día. La idea era cubrir "en la puerta cobra el proveedor pero transfiere
- * Pablo" dejando que la compra eligiera el medio de un `al-recibir`. Está mal
- * planteado: ese pago no ocurre en la puerta ni sale de la caja del local, así
- * que no es un `al-recibir` — se carga como ya pagado, o como que queda a
- * cuenta. Y el costo de permitirlo era el peor posible: un pago anotado contra
- * una caja que nadie tocó, que es exactamente lo que descuadra un arqueo.
+ * ─── Por qué esto NO reabre lo que se revirtió el 07/09/2026 ────────────────
+ *
+ * Aquel día se sacó un medio configurado AL COMPRAR para los `al-recibir`, y se
+ * sacó bien: ahí el medio era la previsión de alguien que no iba a estar en la
+ * puerta, y anotaba un pago contra una caja que nadie había tocado todavía. Acá
+ * el medio lo afirma quien ACABA DE PAGAR, después de que la plata salió. Lo que
+ * descuadra un arqueo es anotar contra el cajón del bar una plata que salió del
+ * banco — que es exactamente lo que pasaba mientras esto no se podía elegir.
+ *
+ * ─── Qué se acepta ─────────────────────────────────────────────────────────
+ *
+ * Sólo las cajas que la pantalla ofrece (`MEDIOS_COMPRA`, las mismas del
+ * formulario de compra), ya normalizadas a su nombre exacto: un texto cualquiera
+ * en la columna L es plata que el SUMIFS de la hoja Cajas no resta nunca.
+ * Cualquier otra cosa CAE al default en vez de rechazarse — la mercadería está
+ * en la puerta, y una pestaña vieja que manda un medio raro no puede ser el
+ * motivo por el que no se pueda recibir. Es la misma regla que `MODOS_VIEJOS`.
  *
  * Cuando NADIE pagó, el medio es el que dijo la compra: si queda a cuenta es
  * por dónde se va a pagar, y si ya estaba pagada es por dónde salió. Vacío no
- * rompe nada — Pagos cae en la ficha del proveedor.
+ * rompe nada — Pagos cae en la ficha del proveedor. Y no se pregunta: si no
+ * salió plata, no hay ninguna caja de la que haya salido.
  */
-function medioDeRecepcion(pedido, modo) {
-  return modo === 'pague' ? CAJA_EFECTIVO : (pedido.medioPrevisto || '');
+function medioDeRecepcion(pedido, modo, elegido) {
+  if (modo !== 'pague') return pedido.medioPrevisto || '';
+  const m = normalizarMedio(elegido);
+  return negocio.MEDIOS_COMPRA.some(c => c === m) ? m : CAJA_EFECTIVO;
 }
 
 // Un navegador con la pantalla vieja abierta sigue mandando los tres nombres de
@@ -3964,11 +4160,12 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
     // comprar — ver avisosDeRecepcion, que explica por qué el descarte importa.
     const montoDicho = monto;
 
-    // El medio no se pregunta (26/08/2026) y sale de la compra (07/09/2026):
-    // ver `medioDeRecepcion`, que es donde está la regla y por qué. Un selector
-    // de seis opciones para que el cocinero repita un dato que ya está cargado
-    // es un paso de más en el peor momento posible.
-    const medioPago = medioDeRecepcion(pedido, modo);
+    // El medio sólo se pregunta cuando salió plata, y viene con Efectivo Local
+    // puesto (10/09/2026): ver `medioDeRecepcion`, que es donde está la regla y
+    // por qué. Si no pagó quien recibe no se pregunta nada — ese dato ya está
+    // cargado y hacérselo repetir al cocinero es un paso de más en el peor
+    // momento posible.
+    const medioPago = medioDeRecepcion(pedido, modo, req.body.medioPago);
 
     // ─── "Ya estaba pago y me lo cobraron igual" ─────────────────────────────
     //
@@ -4006,6 +4203,10 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
       rowIndex: plan.fila.rowIndex,
       proveedor: pedido.proveedor,
       medioPago,
+      // La compra pudo cargarse sin monto (08/09/2026): entonces la fila que se
+      // está cerrando no tiene importe y el que vale es el que se acaba de pagar
+      // en la puerta. Si la fila ya tiene el suyo, éste se ignora.
+      monto: montoDicho,
       usuario: req.user.nombre,
       descripcionSesion: `Pedido recibido: ${pedido.proveedor}`,
     });
@@ -4161,7 +4362,9 @@ app.post('/api/pedidos/:id/recibir', authMiddleware, async (req, res) => {
       console.error(`Pedidos: no se pudieron emitir los avisos de la recepción (${e.message})`);
     }
 
-    res.json({ ok: true, data, asiento, avisados, saldos: saldosEscritos, restoPedido, restoError });
+    // `medioPago` viaja de vuelta porque ahora se pudo ELEGIR: el informe de lo
+    // que pasó tiene que decir de qué caja salió la plata, no de cuál se supone.
+    res.json({ ok: true, data, asiento, medioPago, avisados, saldos: saldosEscritos, restoPedido, restoError });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
@@ -5680,7 +5883,7 @@ app.get('*', (req, res) => {
     console.log(`Caja restaurada tras reinicio: abierta desde ${persistido.apertura} (${persistido.encargado})`);
   }
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Mercedes Dashboard corriendo en puerto ${PORT}`);
+    console.log(`${negocio.NEGOCIO_NOMBRE} — gestión corriendo en puerto ${PORT}`);
     iniciarCron();
   });
 })();

@@ -88,28 +88,87 @@ function run(t) {
     'salvo que no haya monto cargado, donde no se puede resolver sin preguntar');
 
   // ══ 3. Con qué medio se anota lo que pasó en la puerta ═══════════════════
-  const medioDeRecepcion = new Function(
+  //
+  // Reescrito el 10/09/2026. Hasta ese día el medio de la puerta era SIEMPRE
+  // Efectivo Local y no se podía cambiar; ahora Efectivo Local es el DEFAULT y
+  // se puede elegir otra caja. Lo pidió Gonzalo con el caso a la vista: "que
+  // exista la opción de cambiar de medio de pago; en este caso por ejemplo se
+  // pagó con Galicia" — la transferencia hecha desde el teléfono con el
+  // proveedor enfrente. Anotar ESA plata como salida del cajón del bar es
+  // justamente lo que descuadra el arqueo de esa noche.
+  //
+  // No reabre lo que se revirtió el 07/09/2026: aquello era el medio elegido AL
+  // COMPRAR, la previsión de alguien que no iba a estar en la puerta. Acá lo
+  // dice quien acaba de pagar, después de que la plata salió.
+  //
+  // Corre contra las listas de verdad y no contra una copia: lo que hay que
+  // proteger es que sólo se pueda escribir el nombre exacto de una caja.
+  // Se cargan frescos a propósito: `config-negocio.test.js` recarga esos dos
+  // módulos con el entorno de otra instancia, y el que queda en el caché de
+  // require es el de la última carga. Depender del orden de las suites acá
+  // sería fallar por las cajas de otro bar.
+  for (const m of ['config-negocio', 'medios-pago']) {
+    delete require.cache[require.resolve(path.join(__dirname, '..', 'src', m + '.js'))];
+  }
+  const negocioReal = require('../src/config-negocio');
+  const mediosReal = require('../src/medios-pago');
+  const medioDeRecepcion = new Function('negocio', 'normalizarMedio',
     "const CAJA_EFECTIVO = 'Efectivo Local';\n"
-    + bloque(server, 'function medioDeRecepcion(pedido, modo) {') + '\n'
-    + 'return medioDeRecepcion;')();
+    + bloque(server, 'function medioDeRecepcion(pedido, modo, elegido) {') + '\n'
+    + 'return medioDeRecepcion;')(negocioReal, mediosReal.normalizarMedio);
 
-  // SI SALIÓ PLATA EN LA PUERTA, ES EFECTIVO DEL LOCAL. Siempre, sin importar
-  // qué diga la compra: es la única caja que existe ahí. Un pago anotado contra
-  // otra caja es una caja que no se tocó y un arqueo que no cierra esa noche.
+  // EL DEFAULT NO SE MOVIÓ: sin elegir nada, la plata de la puerta sale del
+  // cajón del bar. Es el caso normal y no cuesta ningún toque.
   for (const previsto of ['al-recibir', 'a-pagar', 'pagado', '']) {
     t.eq(medioDeRecepcion({ pagoPrevisto: previsto, medioPrevisto: 'Galicia' }, 'pague'),
       'Efectivo Local', `se pagó en la puerta (compra "${previsto || 'sin dato'}") → efectivo del local`);
   }
 
+  // Y lo que se elige se respeta. El caso del pedido es el primero.
+  const puerta = elegido => medioDeRecepcion(
+    { pagoPrevisto: 'a-pagar', medioPrevisto: '' }, 'pague', elegido);
+  t.eq(puerta('Galicia'), 'Galicia', 'se pagó por transferencia → se anota contra Galicia');
+  t.eq(puerta('Mercado Pago Pablo'), 'Mercado Pago Pablo',
+    'la cuenta del recupero también se puede elegir: el formulario de compra ya la ofrecía');
+  t.eq(puerta('galicia'), 'Galicia', 'la capitalización se corrige antes de escribir');
+
+  // Lo que NO se acepta, que es la mitad que protege el saldo: cualquier cosa
+  // que no sea el nombre exacto de una caja de la lista cae al default en vez
+  // de escribirse. Un texto libre en la columna L es plata que el SUMIFS de la
+  // hoja Cajas no resta nunca, y no da ningún error a la vista. Y CAE en vez de
+  // rechazarse porque la mercadería está en la puerta: una pestaña vieja no
+  // puede ser el motivo por el que no se pueda recibir.
+  t.eq(puerta('Banco Nación'), 'Efectivo Local', 'una caja inventada no se escribe: cae al default');
+  t.eq(puerta('USD Pablo'), 'Efectivo Local', 'una caja en dólares tampoco: la puerta se paga en pesos');
+  t.eq(puerta(''), 'Efectivo Local', 'vacío es el default, no una fila sin medio');
+  for (const m of ['Galicia', 'Mercado Pago Pablo', 'Efectivo Tincho']) {
+    t.ok(negocioReal.MEDIOS_COMPRA.includes(m), `"${m}" está en la lista que ofrece la pantalla`);
+  }
+
   // Cuando NADIE pagó, el medio es el que dijo la compra: por dónde se va a
-  // pagar, o por dónde ya salió.
+  // pagar, o por dónde ya salió. Y lo elegido se IGNORA — si no salió plata, no
+  // hay ninguna caja de la que haya salido, y anotar una sería inventar un pago.
   t.eq(medioDeRecepcion({ pagoPrevisto: 'a-pagar', medioPrevisto: 'Galicia' }, 'no-pague'),
     'Galicia', 'nadie pagó → queda el medio que dijo la compra');
   t.eq(medioDeRecepcion({ pagoPrevisto: '', medioPrevisto: '' }, 'no-pague'),
     '', 'sin medio no se inventa uno: Pagos cae en la ficha del proveedor');
+  t.eq(medioDeRecepcion({ pagoPrevisto: 'a-pagar', medioPrevisto: 'Galicia' }, 'no-pague', 'Efectivo Tincho'),
+    'Galicia', 'sin pago en la puerta, lo elegido no se mira');
 
-  // Y el formulario no ofrece elegirlo en la puerta, que es de donde salía el
-  // medio raro. Las dos mitades de la misma regla.
+  // La pantalla, del otro lado: el selector aparece SÓLO cuando salió plata, y
+  // el cuerpo del request no manda ningún medio en los otros modos.
+  t.ok(/ped-r-medio-wrap'\)\.style\.display = cfg\.modo === 'pague' \? '' : 'none'/.test(index),
+    'el selector de caja sólo se muestra en la salida que paga');
+  t.ok(/medioPago: pedState\.modo === 'pague' \? document\.getElementById\('ped-r-medio'\)\.value : ''/.test(index),
+    'y en los otros modos no viaja ningún medio');
+  t.ok(/id="ped-r-medio" data-cajas="compra"/.test(index),
+    'las opciones son las mismas del formulario de compra, que son todas cajas reales');
+  t.ok(/const pedMedioDefault = \(\) => \(NEGOCIO && NEGOCIO\.cajaEfectivo\) \|\| 'Efectivo Local'/.test(index),
+    'y el default de la pantalla es el mismo que asume el server');
+
+  // Lo que se cargó AL COMPRAR sigue sin poder elegir el medio de la puerta:
+  // eso es una previsión de alguien que no va a estar ahí. Las dos mitades de
+  // la misma regla.
   t.ok(/f-medio-wrap'\)\.style\.display = v === 'al-recibir' \? 'none' : ''/.test(index),
     'Nueva compra esconde el medio en "se paga al recibir"');
   t.ok(/medioPrevisto: previsto === 'al-recibir' \? CAJA_EFECTIVO/.test(server),

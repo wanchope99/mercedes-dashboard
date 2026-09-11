@@ -40,7 +40,16 @@ const _fetch = (typeof fetch !== 'undefined')
   : (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 
 // ─── Clasificación de categorías de Fudo ───────────────────────────────────────
-const GRUPO_CATEGORIA = {
+//
+// Estos son los nombres EXACTOS de las categorías en el Fudo de Mercedes, y ahí
+// está la trampa para una segunda instancia: otra carta tiene otros nombres, y
+// como abajo hay un fallback heurístico, lo que no matchea NO da error — cae en
+// 'otros' y el split comida/bebida, los porcentajes y el CMV por grupo quedan sin
+// sentido, en silencio y sin nada que lo señale.
+//
+// `FUDO_GRUPOS` permite declararlas: "PARA PICAR=comida,Vinos Tintos=bebida".
+// El default es este mapa, así que Mercedes no cambia.
+const GRUPO_CATEGORIA_MERCEDES = {
   // Comida
   'PARA PICAR': 'comida',
   'PARA COMER': 'comida',
@@ -56,6 +65,21 @@ const GRUPO_CATEGORIA = {
   'Sin Alcohol': 'bebida',
   'Otros con Alcohol': 'bebida',
 };
+
+const GRUPO_CATEGORIA = (() => {
+  const declarado = String(process.env.FUDO_GRUPOS || '').trim();
+  if (!declarado) return GRUPO_CATEGORIA_MERCEDES;
+  const mapa = {};
+  for (const par of declarado.split(',')) {
+    const i = par.indexOf('=');
+    if (i < 0) continue;
+    const categoria = par.slice(0, i).trim();
+    const grupo = par.slice(i + 1).trim().toLowerCase();
+    if (!categoria || !['comida', 'bebida', 'otros'].includes(grupo)) continue;
+    mapa[categoria] = grupo;
+  }
+  return mapa;
+})();
 
 function grupoDeCategoria(nombre) {
   if (GRUPO_CATEGORIA[nombre]) return GRUPO_CATEGORIA[nombre];

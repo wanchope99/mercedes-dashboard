@@ -45,10 +45,17 @@ const SIN_ENTREGA = [0, 1];
 // verduras 10,5; el resto 21; algunos servicios como la luz, 27.
 const ALICUOTAS = [21, 10.5, 27];
 
-// Los medios que se ofrecen al decir "ya lo pagué". Es `MEDIOS_LIBRO`, que ya
-// está ordenado por uso real y son todos nombres exactos de caja — la condición
-// para que el SUMIFS de la hoja Cajas los vea.
-const MEDIOS = cats.MEDIOS_LIBRO;
+// Los medios que se ofrecen al decir "ya lo pagué". Es `MEDIOS_COMPRA`: el orden
+// de `MEDIOS_LIBRO` —por uso real— más `Mercado Pago Pablo` al final. Todos son
+// nombres exactos de caja, que es la condición para que el SUMIFS de la hoja
+// Cajas los vea.
+//
+// Pasó de `MEDIOS_LIBRO` a `MEDIOS_COMPRA` el 10/09/2026, pedido de Gonzalo. El
+// bot no ofrecía la cuenta del recupero y una factura pagada desde ahí no se
+// podía cargar como fue: quedaba elegir otra caja —plata que ese saldo no resta
+// nunca— o salirse del bot. Es la misma decisión que el formulario de compra ya
+// había tomado el 20/08/2026; el razonamiento completo está en config-negocio.js.
+const MEDIOS = cats.MEDIOS_COMPRA;
 
 // Cuánta diferencia de confianza tolera el total antes de preguntarlo. El total
 // es la plata que se registra: es el único campo que se repregunta por dudar.
@@ -635,7 +642,9 @@ function aplicarRespuesta(estado, { campo, valor } = {}) {
       return { estado: e };
 
     case 'medioPago': {
-      const m = cats.normalizarParaLibro ? cats.normalizarParaLibro(v) : v;
+      // Se valida contra la MISMA lista con la que se preguntó: si no, el botón
+      // que la pantalla acaba de ofrecer rebota como "no es una caja".
+      const m = cats.normalizarParaLibro ? cats.normalizarParaLibro(v, MEDIOS) : v;
       if (!MEDIOS.includes(m)) return { estado, error: 'Ese medio de pago no es una caja.' };
       e.medioPago = m;
       return { estado: e };

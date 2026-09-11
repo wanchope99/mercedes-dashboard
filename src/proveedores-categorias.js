@@ -104,11 +104,14 @@ const KEYWORDS = {
 // Pago" se resuelve a "Mercado Pago Tincho" — la cuenta operativa del bar, la
 // única con la que se le paga a proveedores.
 //
-// "Mercado Pago Pablo" NO es una opción acá a propósito: es la cuenta del ahorro
-// / recupero de la inversión. De ahí no sale plata para pagar facturas, y todo
-// su movimiento se registra en la pestaña Finanzas, no en este circuito.
-const CAJA_MP_OPERATIVA = process.env.CAJA_MP || 'Mercado Pago Tincho';
-const MEDIOS_PAGO = ['Efectivo Local', CAJA_MP_OPERATIVA, 'Galicia', 'Echeq', 'Otro'];
+// "Mercado Pago Pablo" NO es un destino de la normalización AUTOMÁTICA: es la
+// cuenta del ahorro / recupero de la inversión, y adivinarla a partir de un
+// "mercado pago" leído de una foto sería inventar de qué cuenta salió la plata.
+// Elegirla A MANO sí se puede desde el 10/09/2026 — está en MEDIOS_COMPRA, que
+// es lo que ofrecen el formulario de compra y el bot. Ver config-negocio.js.
+const negocio = require('./config-negocio');
+const CAJA_MP_OPERATIVA = negocio.CAJA_MP;
+const MEDIOS_PAGO = negocio.MEDIOS_PAGO;
 
 // ─── Lo que se puede escribir en el LIBRO (Movimientos) ─────────────────────────
 //
@@ -122,14 +125,21 @@ const MEDIOS_PAGO = ['Efectivo Local', CAJA_MP_OPERATIVA, 'Galicia', 'Echeq', 'O
 // normalizarMedio() ya los traduce. 'Otro' tampoco: no hay ninguna caja que se
 // llame así.
 //
-// El orden es por uso real en los gastos históricos (215 / 201 / 176 / 58 / 22).
-const MEDIOS_LIBRO = [
-  CAJA_MP_OPERATIVA,
-  'Galicia',
-  'Efectivo Local',
-  'Efectivo Pablo',
-  'Efectivo Tincho',
-];
+// El orden es por uso real en los gastos históricos (215 / 201 / 176 / 58 / 22),
+// y por eso el default sigue siendo esa lista LITERAL y no una derivada de las
+// cajas: derivarla reordenaría en silencio el desplegable que el encargado ve
+// todas las noches. Vive en config-negocio.js desde el 09/09/2026, con ese mismo
+// contenido como default — ver la cabecera de ese archivo.
+const MEDIOS_LIBRO = negocio.MEDIOS_LIBRO;
+
+// ─── Lo que se puede elegir al cargar una COMPRA ────────────────────────────
+//
+// MEDIOS_LIBRO más la cuenta del recupero. Son todos nombres exactos de caja,
+// así que todo lo que sale de acá se puede escribir en la columna L. Que el
+// pozo esté acá y no en MEDIOS_LIBRO es una decisión con fecha y vive
+// documentada en config-negocio.js: no se ofrece en el gasto rápido, pero una
+// compra —y una factura que entra por el bot— sí se pueden haber pagado de ahí.
+const MEDIOS_COMPRA = negocio.MEDIOS_COMPRA;
 
 // Categorías válidas para la columna J de Movimientos.
 //
@@ -233,11 +243,17 @@ function opcionesDeMedioGuardado(guardado) {
 // server.js, que es la autoridad; acá sólo se usa para armar las opciones que se
 // le muestran a la persona. El valor que finalmente se escribe pasa igual por
 // normalizarMedio.
-function normalizarParaLibro(medio) {
+//
+// `lista` existe porque hay dos preguntas y no una: el gasto rápido ofrece
+// MEDIOS_LIBRO y una compra ofrece MEDIOS_COMPRA, que suma el pozo. Devolver ''
+// para algo que la pantalla sí ofrecía es rechazar una respuesta válida; aceptar
+// cualquier texto es escribir en Movimientos un medio que ningún SUMIFS suma.
+// Por eso se valida contra la MISMA lista con la que se preguntó.
+function normalizarParaLibro(medio, lista) {
   const m = (medio || '').toString().trim();
   const low = m.toLowerCase();
   if (low === 'echeq' || low.includes('cheque')) return 'Galicia';
-  const exacto = MEDIOS_LIBRO.find(x => x.toLowerCase() === low);
+  const exacto = (lista && lista.length ? lista : MEDIOS_LIBRO).find(x => x.toLowerCase() === low);
   return exacto || '';
 }
 
@@ -431,19 +447,23 @@ function nombreCanonico(nombre) {
 // Reglas:
 //  · "Adicional 2015"  → "Thames"
 //  · vendedor "Diego Wesenack" (en cualquier factura) → proveedor "Thames"
+// Son nombres de proveedores concretos —y dos de ellos, de personas físicas— de
+// Mercedes, así que sólo aplican ahí. En otra instancia estos mapeos no serían
+// inofensivos: renombrarían un proveedor real a uno que no existe en ese negocio,
+// y el gasto quedaría atribuido a alguien que nunca le vendió nada.
 // alias por nombre: { nombreNormalizado: 'Nombre Final' }
-const ALIAS_PROVEEDOR = {
+const ALIAS_PROVEEDOR = require('./config-negocio').esMercedes() ? {
   'adicional 2015': 'Thames',
   'adicional2015': 'Thames',
   // El Ekeko: proveedor de carne más importante (figura mucho en Movimientos)
   'lisandro de la torre': 'El Ekeko',
   // El Rey del Lechon
   'federico miguel alexander': 'El Rey del Lechon',
-};
+} : {};
 // alias por vendedor (si el vendedor matchea, se fuerza ese proveedor)
-const ALIAS_POR_VENDEDOR = {
+const ALIAS_POR_VENDEDOR = require('./config-negocio').esMercedes() ? {
   'diego wesenack': 'Thames',
-};
+} : {};
 
 function normalizarProveedor(nombre, vendedor) {
   const v = norm(vendedor);
@@ -466,6 +486,6 @@ module.exports = {
   inferirPorKeywords, construirIndiceInferencia, sugerirCategoria,
   resolverItem, norm, nombreCanonico, normalizarProveedor,
   // Para el gasto que se escribe en el LIBRO (Movimientos), no en Compras.
-  MEDIOS_LIBRO, CATEGORIAS_GASTO, CATEGORIAS_GASTO_SET, CATEGORIAS_COLUMNA_J,
+  MEDIOS_LIBRO, MEDIOS_COMPRA, CATEGORIAS_GASTO, CATEGORIAS_GASTO_SET, CATEGORIAS_COLUMNA_J,
   normalizarCategoriaGasto, esMedioDeLibro, opcionesDeMedioGuardado, normalizarParaLibro,
 };

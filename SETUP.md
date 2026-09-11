@@ -58,7 +58,10 @@ nadie se enteraría hasta encontrarlas ahí.
 ### La planilla de nómina
 
 Vive **aparte** de Gestión Mercedes y se lee con `NOMINA_SHEET_ID`. Hay que
-compartirla con la cuenta de servicio (`dashboardviewer@…`, alcanza rol Lector).
+compartirla con la cuenta de servicio **con rol Editor**. Decía "alcanza Lector" y
+dejó de ser cierto el 31/08/2026, cuando la liquidación pasó a cargarse también
+desde la app (`guardarLiquidacion` y `guardarEmpleados`); con Lector esas dos
+escrituras fallan y el error aparece recién al guardar.
 
 A diferencia de `PROVEEDORES_SHEET_ID`, esta variable **no cae a
 `SPREADSHEET_ID`** si falta: son sueldos de gente real y el fallback los pondría
@@ -71,7 +74,8 @@ La app **no le escribe nada**: la planilla se sigue editando a mano.
 ### La planilla de Stocks
 
 El cierre de cocina (qué comprar, qué producir). Se lee con `STOCKS_SHEET_ID` y
-**acá la cuenta de servicio necesita rol Editor**, no Lector como en nómina: la
+**la cuenta de servicio necesita rol Editor** —igual que en nómina desde el
+31/08/2026, así que ya no es la excepción que era—: la
 app escribe el estado y los comentarios de los ítems que se marcan, y crea dos
 hojas propias de historial (`Cierre Cocina`, `Cierre Cocina Detalle`).
 
@@ -237,6 +241,130 @@ comentario en texto sirve igual: lo lee el modelo.
 
 Una nota escrita se puede archivar desde la misma pantalla ("ya no aplica")
 cuando dejó de ser cierta.
+
+## Una segunda instancia (otro negocio)
+
+Desde el 09/09/2026 este repositorio corre **más de un negocio**. No se forkea:
+se deploya el mismo repo otra vez, con otras variables. La regla que lo sostiene
+es que **cada default es el de Mercedes** — una instancia sin ninguna de las
+variables de acá abajo se comporta exactamente como la app se comportaba antes.
+
+Todo lo que define de quién es una instancia vive en `src/config-negocio.js`.
+
+### Identidad
+
+| Variable | Para qué | Default |
+|---|---|---|
+| `NEGOCIO_ID` | Elige el archivo de contexto de los agentes y los días excluidos de los informes. Y decide si se siembran los datos de arranque de Mercedes (proveedores, equipo de propinas, alias) | `mercedes` |
+| `NEGOCIO_NOMBRE` | Título de la pestaña, pantalla de login, encabezado | `Bar Mercedes` |
+| `NEGOCIO_CIUDAD` | Va al prompt de los tres agentes | `Buenos Aires` |
+| `NEGOCIO_DESCRIPCION` | La frase entera detrás de "Sos el analista de datos …" | `del bar Mercedes (Buenos Aires)` |
+| `NEGOCIO_LOGO` | Ruta dentro de `public/` | `/logo.jpg` |
+
+**`NEGOCIO_ID` es lo primero que hay que setear en una instancia nueva.** Sin él,
+la app le sirve a ese negocio el contexto operativo de Mercedes —Mercado Pago
+Pablo, Galicia y Brubank, la dotación de julio— y el modelo no tiene forma de
+saber que esos hechos no son suyos: los va a usar para explicar sus números. Cada
+instancia lleva su `src/contexto-<NEGOCIO_ID>.md`, y la que no lo tiene corre sin
+contexto, que es lo que la app hacía antes de agosto: informes más ingenuos,
+nunca ajenos.
+
+### Las cajas
+
+| Variable | Para qué | Default |
+|---|---|---|
+| `CAJAS` | Los nombres EXACTOS de la columna A de la hoja `Cajas`, separados por coma | las nueve de Mercedes |
+| `CAJA_EFECTIVO` / `CAJA_MP` | Las dos que se arquean todas las noches | se derivan de `CAJAS` |
+| `CAJA_ECHEQ` | A qué cuenta va un echeq | `Galicia` si existe; si no, no se traduce |
+| `MEDIOS_LIBRO` | Lo que se puede escribir en `Movimientos` columna L | `CAJAS` sin el pozo ni las de dólares |
+| `MEDIOS_COMPRA` | Lo que ofrece "Nueva compra" | `MEDIOS_LIBRO` + el pozo |
+| `MEDIOS_PAGO` | Lo que el bot ofrece por Telegram | `MEDIOS_LIBRO` + Echeq + Otro |
+| `CAJA_POZO` / `CAJA_POZO_USD` | La cuenta del recupero y su vault en dólares | `Mercado Pago Pablo` / `MP Pablo USD` |
+| `CAJAS_GRUPOS` | Prefijos que el filtro de Pagos ofrece juntos | `Mercado Pago` sólo en Mercedes |
+| `CUENTAS_PROPINAS` | Dónde caen las propinas digitales | `Galicia,Brubank` sólo en Mercedes |
+
+**Un medio de pago es el nombre exacto de una caja, y ahí no hay margen.** El
+`Saldo Calculado` de la hoja `Cajas` es un `SUMIFS` por texto contra la columna L
+de `Movimientos`: una letra de diferencia vuelve esa plata invisible para el
+saldo, para siempre y sin ningún error a la vista. Lo que se ponga en `CAJAS`
+tiene que estar escrito igual que en la planilla.
+
+Los desplegables del navegador se arman solos desde `GET /api/config`. Si esa
+llamada falla, el HTML queda como está escrito y la app sigue usable.
+
+### Fudo
+
+| Variable | Para qué | Default |
+|---|---|---|
+| `FUDO_GRUPOS` | Mapea las categorías de Fudo a comida/bebida: `PARA PICAR=comida,Vinos Tintos=bebida` | las categorías de Mercedes |
+
+Es la que más silenciosamente se olvida. Las categorías de otra carta **no dan
+error**: caen en `otros` por el fallback heurístico, y el split comida/bebida,
+los porcentajes y el CMV por grupo quedan sin sentido sin que nada lo señale.
+
+### Cuentas
+
+Los seis logins de Mercedes siguen escritos en el código con su propia variable
+de contraseña. Las demás instancias declaran las suyas:
+
+```
+USUARIOS=pulpo:admin:Pulpo,barra:encargado:La Barra
+USUARIO_PULPO_PASSWORD=…
+USUARIO_BARRA_PASSWORD=…
+```
+
+El formato es `clave:rol:nombre`; el nombre es opcional. Los roles son `admin` y
+`encargado` y **no hay un tercero**: un rol que no sea uno de esos no crea la
+cuenta, en vez de asumirse — asumir `admin` daría permisos que nadie pidió, y esa
+es la que no se puede deshacer. La contraseña sigue yendo en su propia variable y
+no dentro de `USUARIOS`, por lo mismo de siempre: este repositorio es público.
+
+Al arrancar, el log lista las cuentas habilitadas y cuál falta por qué variable,
+igual que antes. Y `AVISOS_DUENOS` hay que setearla: su default nombra a los
+dueños de Mercedes.
+
+### Apagar módulos
+
+```
+MODULOS_OFF=propinas,arqueo,arqueos,plan,nomina,cierre
+```
+
+Saca del menú los grupos y submenús que se nombren, **y hace que sus rutas
+contesten 404**. Las dos mitades importan: esconder un botón nunca fue un
+permiso, y este repositorio ya tiene esa regla escrita para el cierre de cocina y
+para Pagos.
+
+Devuelve 404 y no 403 a propósito: en esa instancia el módulo no existe, y un 403
+diría "existe pero no podés", que es otra afirmación y es falsa.
+
+Tres módulos **ya se apagan solos** sin entrar en esta lista: no seteando
+`NOMINA_SHEET_ID` ni `STOCKS_SHEET_ID`, Nómina y Cierre de cocina se reportan no
+configurados y nada más se rompe.
+
+Lo que el guard deliberadamente **no** tapa aunque suene del grupo Plan:
+`/api/proyecciones`, `/api/calculadora` y `/api/punto-equilibrio`. Las consume
+también Servicios, y apagarlas dejaría esa pantalla sin su objetivo por noche.
+
+### Armar las planillas
+
+La app crea 26 hojas sola al primer uso. Cinco no, y son las que no puede
+inventar: `Movimientos`, `Cajas`, `Arqueo de Cajas`, `Proveedores` y `Compras`.
+
+```bash
+node scripts/bootstrap-planillas.js            # muestra qué haría
+node scripts/bootstrap-planillas.js --aplicar  # lo hace
+```
+
+Lee el entorno de la instancia, así que hay que correrlo con **sus** variables.
+Es idempotente, no pisa una hoja que ya exista, y si encuentra una con otro
+encabezado lo reporta y no la toca — reescribir un encabezado corre el
+significado de cada columna sin mover un solo dato.
+
+Crea la hoja `Cajas` con **el `SUMIFS` en la columna F**, que es lo que hace que
+los saldos signifiquen algo, y pone la validación de las 13 categorías en
+`Movimientos!J`. Las dos cosas son las que fallan sin avisar si se hacen a mano.
+
+La cuenta de servicio necesita **Editor** en las dos planillas.
 
 ## Estructura del proyecto
 

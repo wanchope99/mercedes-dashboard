@@ -113,6 +113,12 @@ const PROV_GRUPO_SHEET = process.env.COSTOS_PROV_GRUPO_SHEET || 'Proveedor Grupo
 const provGrupo = new Map(); // norm(proveedor) -> 'Comida' | 'Bebida' | 'Insumos'
 
 // Seed inicial (se escribe la primera vez que la hoja se crea vacia).
+//
+// Son catorce proveedores REALES de Mercedes, así que se siembran sólo ahí (ver
+// el uso, más abajo). En otra instancia la hoja se crea vacía: catorce nombres
+// que nadie de ese negocio reconoce no son un punto de partida, son basura que
+// además clasifica su gasto — y como esto corre UNA sola vez, al crear la hoja,
+// después nadie sabe de dónde salieron.
 const PROV_GRUPO_SEED = [
   ['Aurea', 'Bebida'],
   ['Yerson', 'Comida'],
@@ -148,7 +154,7 @@ async function _ensureProvGrupoSheet(api) {
       spreadsheetId: SPREADSHEET_ID, range: PROV_GRUPO_SHEET + '!A1:B1', valueInputOption: 'RAW',
       requestBody: { values: [['Proveedor', 'Grupo']] },
     });
-    if (PROV_GRUPO_SEED.length) {
+    if (PROV_GRUPO_SEED.length && require('./config-negocio').esMercedes()) {
       await api.spreadsheets.values.append({
         spreadsheetId: SPREADSHEET_ID, range: PROV_GRUPO_SHEET + '!A:B', valueInputOption: 'RAW',
         requestBody: { values: PROV_GRUPO_SEED },

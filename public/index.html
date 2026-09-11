@@ -1809,9 +1809,9 @@
 <div id="login-screen" class="active">
   <div class="login-box">
     <div class="login-logo">
-      <img src="/logo.jpg" alt="Bar Mercedes" style="width:44px;height:44px;border-radius:50%;object-fit:cover;" />
+      <img src="/logo.jpg" alt="Bar Mercedes" data-negocio="logo" style="width:44px;height:44px;border-radius:50%;object-fit:cover;" />
       <div>
-        <div class="login-title">Bar Mercedes</div>
+        <div class="login-title" data-negocio="nombre">Bar Mercedes</div>
       </div>
     </div>
     <div class="login-field">
@@ -1829,8 +1829,8 @@
 
 <header>
   <div class="logo">
-    <img src="/logo.jpg" alt="Bar Mercedes" style="width:36px;height:36px;border-radius:50%;object-fit:cover;" />
-    <div><div class="logo-text">Bar Mercedes</div></div>
+    <img src="/logo.jpg" alt="Bar Mercedes" data-negocio="logo" style="width:36px;height:36px;border-radius:50%;object-fit:cover;" />
+    <div><div class="logo-text" data-negocio="nombre">Bar Mercedes</div></div>
   </div>
   <div class="header-right">
     <span id="last-updated" style="display:none"></span>
@@ -2242,10 +2242,8 @@
       </div>
       <div class="form-group full">
         <label>Cuenta preferida</label>
-        <select id="prop-persona-prefiere">
+        <select id="prop-persona-prefiere" data-cajas="propinas">
           <option value="">Sin preferencia — la que toque</option>
-          <option value="Galicia">Galicia</option>
-          <option value="Brubank">Brubank</option>
         </select>
         <span style="font-size:11px;color:var(--text-muted);line-height:1.6;margin-top:4px">
           Se le paga de esa cuenta siempre que alcance. Si no alcanza, se completa con la otra y el reparto te lo avisa.
@@ -2449,6 +2447,28 @@
         <input type="text" id="ped-r-monto" inputmode="decimal" placeholder="0"
                oninput="onPedMontoChange()" style="width:100%">
         <div id="ped-r-pago-resumen" style="font-size:11.5px;color:var(--text-muted);margin-top:6px"></div>
+      </div>
+
+      <!-- ── De dónde salió la plata ────────────────────────────────────────
+           Sólo cuando se pagó AHORA, y viene con Efectivo Local puesto: es la
+           caja que hay en la puerta y sigue siendo el caso normal, así que en
+           el caso normal no hay nada que tocar. Se agregó el 10/09/2026 a
+           pedido de Gonzalo, con el caso a la vista: "en este caso por ejemplo
+           se pagó con Galicia" — la transferencia que se hace desde el teléfono
+           con el proveedor enfrente.
+
+           NO reabre lo que se revirtió el 07/09/2026: aquello era el medio
+           CONFIGURADO al comprar, la previsión de alguien que no iba a estar en
+           la puerta. Acá lo dice quien acaba de pagar. La regla completa y el
+           porqué están en `medioDeRecepcion` (server.js).
+
+           Las opciones son las mismas del formulario de compra, que son todas
+           nombres exactos de caja: lo que se escribe en la columna L tiene que
+           ser algo que el SUMIFS de la hoja Cajas sume. -->
+      <div class="form-group full" id="ped-r-medio-wrap" style="display:none;margin-bottom:12px">
+        <label>¿De dónde salió la plata?</label>
+        <select id="ped-r-medio" data-cajas="compra"
+                data-cajas-etiquetas="Galicia=Galicia (transferencia)" style="width:100%"></select>
       </div>
 
       <!-- Por qué la plata no coincide. Es una CASILLA y no un campo siempre
@@ -3317,7 +3337,7 @@
     </div>
 
     <div style="font-size:11px;color:var(--text-muted);line-height:1.7;margin:4px 2px 8px">
-      <b>Dónde se guarda todo:</b> en la misma planilla «Gestión Mercedes», en tres hojas que la app creó sola —
+      <b>Dónde se guarda todo:</b> en la misma planilla de gestión, en tres hojas que la app creó sola —
       <b>Finanzas Movimientos</b> (el registro: fecha, tipo, destino, monto, comprobante, mes de origen y cuándo se cargó),
       <b>Finanzas Config</b> (los parámetros de acá arriba) y <b>Finanzas Aportes</b> (sólo los meses cuyo aporte fijaste a mano;
       el resto sale del recupero de cada cierre). Podés abrirlas y auditarlas directo en la planilla.
@@ -3724,13 +3744,8 @@
         <option value="proveedor">Proveedor A-Z</option>
         <option value="formapago">Forma de pago</option>
       </select>
-      <select id="pagos-filter-mp" onchange="renderPagos()">
+      <select id="pagos-filter-mp" data-cajas="filtro" onchange="renderPagos()">
         <option value="">Todas las formas de pago</option>
-        <option value="Efectivo Local">Efectivo Local</option>
-        <option value="Efectivo Pablo">Efectivo Pablo</option>
-        <option value="Efectivo Tincho">Efectivo Tincho</option>
-        <option value="Galicia">Galicia</option>
-        <option value="Mercado Pago">Mercado Pago (Tincho y Pablo)</option>
         <option value="Echeq">Echeq</option>
       </select>
       <input type="text" id="pagos-search" placeholder="Buscar proveedor..." oninput="renderPagos()" style="width:200px" />
@@ -3917,12 +3932,7 @@
       <option value="Sala">Sala</option>
     </select></div>
     <div class="arqueo-field"><label>Descripción</label><input type="text" id="hi-descripcion" /></div>
-    <div class="arqueo-field"><label>Medio de pago</label><select id="hi-medio" style="width:100%">
-      <option value="Efectivo Local">Efectivo Local</option>
-      <option value="Efectivo Tincho">Efectivo Tincho</option>
-      <option value="Efectivo Pablo">Efectivo Pablo</option>
-      <option value="Mercado Pago Tincho">Mercado Pago Tincho</option>
-      <option value="Galicia">Galicia</option>
+    <div class="arqueo-field"><label>Medio de pago</label><select id="hi-medio" data-cajas="libro" style="width:100%">
     </select></div>
     <div class="arqueo-field"><label>Estado</label><select id="hi-estado" style="width:100%">
       <option value="Pagado">Pagado</option>
@@ -4188,13 +4198,7 @@
              (08/08/2026) esa cuenta sigue siendo operativa y de ahí se pagan
              gastos del bar, así que tiene que poder elegirse al cargar la compra
              en vez de quedar como una fila a corregir después en la planilla. -->
-        <select id="f-medio">
-          <option value="Efectivo Local">Efectivo Local</option>
-          <option value="Efectivo Pablo">Efectivo Pablo</option>
-          <option value="Efectivo Tincho">Efectivo Tincho</option>
-          <option value="Galicia">Galicia (transferencia)</option>
-          <option value="Mercado Pago Tincho">Mercado Pago Tincho</option>
-          <option value="Mercado Pago Pablo">Mercado Pago Pablo</option>
+        <select id="f-medio" data-cajas="compra" data-cajas-etiquetas="Galicia=Galicia (transferencia)">
           <option value="Echeq">Echeq</option>
         </select>
       </div>
@@ -4224,7 +4228,14 @@
         <div id="f-venc-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px"></div>
       </div>
 
-      <div class="form-group"><label>Monto ARS (total)</label><input type="text" inputmode="decimal" id="f-monto" placeholder="0"></div>
+      <!-- El monto puede ir en blanco mientras la compra no esté paga: ver
+           `validarCompra` y `pintarMontoOpcional`, que es lo que escribe el
+           rótulo y la ayuda de abajo según cómo se paga. -->
+      <div class="form-group">
+        <label id="f-monto-label">Monto ARS (total)</label>
+        <input type="text" inputmode="decimal" id="f-monto" placeholder="0" oninput="pintarMontoOpcional()">
+        <div id="f-monto-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px"></div>
+      </div>
 
       <div class="form-group full">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-size:13px">
@@ -4408,6 +4419,15 @@
       <div id="pg-lista"></div>
     </div>
     <div id="pg-detalle" style="display:none;font-size:12px;color:var(--text-muted);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;line-height:1.9;margin-bottom:12px"></div>
+    <!-- Sólo para la cuenta que se cargó SIN monto (08/09/2026). Aparece con la
+         fila elegida, en selectPgRow: pedirlo siempre sería pedir de nuevo un
+         número que la fila ya tiene, y aceptar otro sin decirlo pisaría un
+         hecho ya registrado. -->
+    <div class="form-group full" id="pg-monto-wrap" style="display:none;margin-bottom:12px">
+      <label>Cuánto se pagó *</label>
+      <input type="text" inputmode="decimal" id="pg-monto" placeholder="0" style="width:100%">
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Esta cuenta se cargó sin monto. Lo que pongas queda escrito en la fila.</div>
+    </div>
     <div class="form-group full" style="margin-bottom:8px">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-size:13px">
         <input type="checkbox" id="pg-hoy" checked onchange="document.getElementById('pg-fecha-wrap').style.display = this.checked ? 'none' : ''" style="accent-color:var(--accent)">
@@ -4421,14 +4441,8 @@
     </div>
     <div class="form-group full" style="margin-bottom:14px">
       <label>Medio de pago</label>
-      <select id="pg-medio" style="width:100%">
+      <select id="pg-medio" data-cajas="compra" style="width:100%">
         <option value="">— sin cambio —</option>
-        <option value="Efectivo Local">Efectivo Local</option>
-        <option value="Efectivo Tincho">Efectivo Tincho</option>
-        <option value="Efectivo Pablo">Efectivo Pablo</option>
-        <option value="Mercado Pago Tincho">Mercado Pago Tincho</option>
-        <option value="Mercado Pago Pablo">Mercado Pago Pablo</option>
-        <option value="Galicia">Galicia</option>
         <option value="Echeq">Echeq</option>
       </select>
       <div id="pg-medio-hint" style="font-size:11px;color:var(--green);margin-top:4px"></div>
@@ -5101,6 +5115,136 @@ async function checkSavedToken() {
 // REGLA AL AGREGAR ALGO: un submenú nuevo es una línea acá + su panel `tab-<id>`
 // + su carga en cargarPanel(). Si un grupo pasa de 5 subs, es señal de que hay
 // que repensar el agrupamiento, no de agregar un sexto.
+// ─── De qué negocio es esta instancia ───────────────────────────────────────
+//
+// Este archivo no tiene build, y hasta el 09/09/2026 los desplegables de caja
+// estaban escritos a mano: cinco listas con los nombres de las cuentas de
+// Mercedes, más la marca en cuatro lugares. Ahora salen de GET /api/config.
+//
+// NEGOCIO arranca en null y ESO ES EL FALLBACK. Si la config no carga no se toca
+// nada: el HTML se dibuja tal como está escrito —que es Mercedes— en vez de
+// quedar con desplegables vacíos. Un formulario sin medios de pago no se puede
+// usar; uno con los medios de siempre, sí.
+let NEGOCIO = null;
+
+// Un módulo apagado no existe para el menú. Con la config sin cargar devuelve
+// false: ante la duda se muestra todo, porque esconder de más deja a alguien sin
+// su pantalla, y quien decide de verdad es el servidor en cada ruta.
+function moduloApagado(id) {
+  if (!NEGOCIO || !NEGOCIO.modulosOff) return false;
+  return NEGOCIO.modulosOff.indexOf(String(id || '').toLowerCase()) >= 0;
+}
+
+// Las cajas que le tocan a cada desplegable, según su data-cajas. Todas salen en
+// el ORDEN de NEGOCIO.cajas, que es uno solo para toda la app: antes cada select
+// traía el suyo y no coincidían entre sí.
+function cajasDe(modo) {
+  if (!NEGOCIO) return null;
+  var todas = NEGOCIO.cajas || [];
+  var enOrden = function (lista) {
+    var dentro = {};
+    (lista || []).forEach(function (c) { dentro[c.toLowerCase()] = true; });
+    return todas.filter(function (c) { return dentro[c.toLowerCase()]; });
+  };
+  if (modo === 'todas') return todas.slice();
+  if (modo === 'libro') return enOrden(NEGOCIO.mediosLibro);
+  if (modo === 'compra') return enOrden(NEGOCIO.mediosCompra);
+  if (modo === 'propinas') return (NEGOCIO.cuentasPropinas || []).slice();
+  if (modo === 'filtro') {
+    // El filtro de Pagos matchea por substring, así que una caja cubierta por un
+    // grupo ("Mercado Pago") no se lista aparte: sería la misma búsqueda dos
+    // veces en la misma lista.
+    var grupos = NEGOCIO.grupos || [];
+    return enOrden(NEGOCIO.mediosLibro).filter(function (c) {
+      return !grupos.some(function (g) {
+        return c.toLowerCase().indexOf(String(g.valor).toLowerCase()) === 0;
+      });
+    });
+  }
+  return null;
+}
+
+// Inserta las cajas en cada select declarado. Van DESPUÉS de la opción de valor
+// vacío —el "todas" o el "sin cambio", que quedan primeras porque son el valor
+// por defecto— y ANTES de las que no son cajas (Echeq, Otro), que siguen escritas
+// en el HTML. Así cada desplegable conserva la forma que tenía.
+function llenarSelectsDeCajas() {
+  var selects = document.querySelectorAll('select[data-cajas]');
+  for (var i = 0; i < selects.length; i++) {
+    var sel = selects[i];
+    var cajas = cajasDe(sel.getAttribute('data-cajas'));
+    if (!cajas) continue;
+    var previo = sel.value;
+
+    // Se sacan sólo las que puso este mismo código, nunca las escritas a mano:
+    // correr dos veces no puede duplicar la lista ni borrar Echeq.
+    var puestas = sel.querySelectorAll('option[data-caja]');
+    for (var j = 0; j < puestas.length; j++) puestas[j].remove();
+
+    var ref = null;
+    for (var k = 0; k < sel.options.length; k++) {
+      if (sel.options[k].value !== '') { ref = sel.options[k]; break; }
+    }
+
+    // Algunos desplegables aclaran qué es una caja en su contexto ("Galicia
+    // (transferencia)"). Se declaran en data-cajas-etiquetas como
+    // "Caja=Etiqueta", separadas por punto y coma. El valor no cambia nunca: lo
+    // que se escribe en Movimientos sigue siendo el nombre exacto de la caja.
+    var etiquetas = {};
+    (sel.getAttribute('data-cajas-etiquetas') || '').split(';').forEach(function (par) {
+      var i = par.indexOf('=');
+      if (i > 0) etiquetas[par.slice(0, i).trim()] = par.slice(i + 1).trim();
+    });
+    var nuevas = cajas.map(function (c) { return { valor: c, label: etiquetas[c] || c }; });
+    if (sel.getAttribute('data-cajas') === 'filtro') {
+      nuevas = nuevas.concat((NEGOCIO.grupos || []).map(function (g) {
+        return { valor: g.valor, label: g.label };
+      }));
+    }
+    nuevas.forEach(function (o) {
+      var op = document.createElement('option');
+      op.value = o.valor;
+      op.textContent = o.label;
+      op.setAttribute('data-caja', '1');
+      sel.insertBefore(op, ref);
+    });
+
+    // Si lo que estaba elegido sigue existiendo, se respeta.
+    if (previo) sel.value = previo;
+  }
+}
+
+function aplicarConfigNegocio() {
+  if (!NEGOCIO) return;
+  if (NEGOCIO.nombre) {
+    document.title = NEGOCIO.nombre;
+    var titulos = document.querySelectorAll('[data-negocio="nombre"]');
+    for (var i = 0; i < titulos.length; i++) titulos[i].textContent = NEGOCIO.nombre;
+  }
+  if (NEGOCIO.logo) {
+    var logos = document.querySelectorAll('[data-negocio="logo"]');
+    for (var j = 0; j < logos.length; j++) {
+      logos[j].setAttribute('src', NEGOCIO.logo);
+      logos[j].setAttribute('alt', NEGOCIO.nombre || '');
+    }
+  }
+  llenarSelectsDeCajas();
+}
+
+// Se espera a que resuelva antes de dibujar nada: el nombre y el logo se ven en
+// la pantalla de login, que es lo primero que aparece. Si falla, la app arranca
+// igual con lo que dice el HTML.
+async function cargarConfigNegocio() {
+  try {
+    const r = await fetch('/api/config');
+    const j = await r.json();
+    if (j && j.ok) NEGOCIO = j;
+  } catch (e) {
+    console.warn('No se pudo leer /api/config — se usa lo que dice el HTML', e);
+  }
+  aplicarConfigNegocio();
+}
+
 const TAB_GROUPS = {
   // Inicio no va en la barra de arriba: ahí ya están las cuatro secciones de una,
   // así que una pantalla que lleva a cuatro sería un paso de más. soloPhone la
@@ -5296,6 +5440,7 @@ const TAB_GROUPS = {
 // arriba no. Es el único lugar donde las dos difieren.
 function gruposVisibles(incluirSoloPhone) {
   return Object.entries(TAB_GROUPS)
+    .filter(([id]) => !moduloApagado(id))
     .filter(([, cfg]) => !cfg.soloAdmin || getRol() === 'admin')
     // Acá había un filtro por USUARIO, no por rol. Lo usaba sólo el Informe y se
     // fue con él el 06/09/2026: los tres logins de admin ven lo mismo. Si alguna
@@ -5472,8 +5617,11 @@ function switchGroup(group, _btn, subInicial) {
   // usaba sólo el Informe— y se fue el 06/09/2026 cuando los tres logins de
   // admin pasaron a verlo. Esconder un submenú es cosmética: quien decide de
   // verdad es `adminOnly` en el servidor, igual que con todo lo de Charly.
+  // Un submenú apagado se saca acá y no en otro lado a propósito: la elección de
+  // `abre`, unas líneas más abajo, cae sola en el primero que quedó — así que
+  // apagar justo el que el grupo abría por preferencia no lo deja en blanco.
   const subs = cfg && cfg.subs
-    ? cfg.subs.filter(s => !s.soloAdmin || getRol() === 'admin')
+    ? cfg.subs.filter(s => !s.soloAdmin || getRol() === 'admin').filter(s => !moduloApagado(s.id))
     : null;
 
   if (subs && subs.length) {
@@ -5588,7 +5736,7 @@ function renderMasGrid(masId, contId) {
   const cont = document.getElementById(contId);
   if (!cont) return;
   cont.innerHTML = Object.entries(EN_MAS)
-    .filter(([, m]) => m.mas === masId && (!m.soloAdmin || getRol() === 'admin'))
+    .filter(([tab, m]) => m.mas === masId && (!m.soloAdmin || getRol() === 'admin') && !moduloApagado(tab))
     .map(([tab, m]) =>
       `<button class="btn mas-item" onclick="abrirDesdeMas('${tab}', '${masId}')">` +
       `<span style="font-size:22px">${m.icono}</span><span>${m.label}</span></button>`)
@@ -7739,11 +7887,14 @@ function buildPagosRows(pagos, groupId) {
   if (!pagos.length) return '';
   const cls = groupId ? `grp-${groupId}` : '';
   return pagos.map(p => {
+    // Una cuenta puede haberse cargado SIN monto (08/09/2026) y ahí "—" se lee
+    // como un dato que se perdió. "Sin monto" dice que falta ponerlo, y en
+    // naranja porque es lo único de esta tabla que hay que ir a completar.
     const montoStr = p.salidaARS > 0
       ? `<span class="td-monto">${fmt(p.salidaARS)}</span>`
       : p.salidaUSD > 0
         ? `<span style="color:var(--purple);font-weight:700">USD ${p.salidaUSD.toLocaleString('es-AR')}</span>`
-        : '<span style="color:var(--text-muted)">—</span>';
+        : '<span style="color:var(--orange)">sin monto</span>';
     const vencLabel = p.vencDate ? new Date(p.vencDate + 'T12:00:00').toLocaleDateString('es-AR') : (p.vencimiento || '—');
     const desc = (p.descripcion || '').substring(0, 60) + (p.descripcion && p.descripcion.length > 60 ? '…' : '');
     const provKey = (p.proveedor || '').toLowerCase();
@@ -7784,8 +7935,12 @@ function openPagoDetalle(rowIndex) {
   const fmtFecha = iso => iso ? new Date(iso + 'T12:00:00').toLocaleDateString('es-AR') : null;
   const provKey = (p.proveedor || '').toLowerCase();
   const provSheet = state.proveedores[provKey];
+  // Sin importe se dice, y en naranja: esa cuenta se cargó sin monto y lo que
+  // falta es ponerlo, no un dato que se perdió. Más chico, porque acá el número
+  // grande es plata y esto es una frase.
   const monto = p.salidaARS > 0 ? fmt(p.salidaARS)
-    : p.salidaUSD > 0 ? 'USD ' + p.salidaUSD.toLocaleString('es-AR') : '—';
+    : p.salidaUSD > 0 ? 'USD ' + p.salidaUSD.toLocaleString('es-AR')
+    : '<span style="font-size:15px;color:var(--orange)">sin monto</span>';
 
   // Cuánto falta o hace cuánto venció, dicho en palabras. El badge de la tabla
   // dice "12d" y acá hay lugar para decirlo entero.
@@ -10849,7 +11004,9 @@ function onPgProveedorInput() {
     : `Este proveedor tiene ${items.length} pagos pendientes — elegí cuál pagar`;
   lista.innerHTML = items.map(p => {
     const venc = p.vencDate ? `vence ${new Date(p.vencDate + 'T12:00:00').toLocaleDateString('es-AR')}` : 'sin vencimiento';
-    const monto = p.salidaARS > 0 ? fmt(p.salidaARS) : (p.salidaUSD > 0 ? `USD ${p.salidaUSD}` : '—');
+    const monto = p.salidaARS > 0 ? fmt(p.salidaARS)
+      : p.salidaUSD > 0 ? `USD ${p.salidaUSD}`
+      : '<span style="color:var(--orange)">sin monto</span>';
     const desc = (p.descripcion || '').substring(0, 45);
     return `<div class="pg-item" id="pg-item-${p.rowIndex}" onclick="selectPgRow(${p.rowIndex})">
       <div>
@@ -10875,11 +11032,18 @@ function selectPgRow(idx) {
   if (!p) { det.style.display = 'none'; return; }
 
   det.style.display = 'block';
+  // Una fila sin importe no dice "—" como si el dato se hubiera perdido: dice
+  // que se cargó sin monto, que es una decisión de quien la cargó y se completa
+  // acá abajo.
+  const sinMonto = !(p.salidaARS > 0) && !(p.salidaUSD > 0);
   det.innerHTML = `
     <b>${escapeHtml(p.proveedor || '—')}</b> · ${p.categoria || '—'}<br>
     Registrado: ${p.fecha} · Vence: ${p.vencDate ? new Date(p.vencDate + 'T12:00:00').toLocaleDateString('es-AR') : '—'}<br>
-    Monto: <b>${p.salidaARS > 0 ? fmt(p.salidaARS) : (p.salidaUSD > 0 ? 'USD ' + p.salidaUSD : '—')}</b>
+    Monto: <b>${sinMonto ? 'se cargó sin monto' : (p.salidaARS > 0 ? fmt(p.salidaARS) : 'USD ' + p.salidaUSD)}</b>
     ${p.descripcion ? `<br>${escapeHtml(p.descripcion.substring(0, 80))}` : ''}`;
+
+  document.getElementById('pg-monto-wrap').style.display = sinMonto ? '' : 'none';
+  document.getElementById('pg-monto').value = '';
 
   // Medio de pago: el de la fila si tiene; si está en blanco, sugerir por proveedor
   const medioSel = document.getElementById('pg-medio');
@@ -10907,18 +11071,28 @@ async function confirmarPagar() {
   if (!p) { document.getElementById('pg-error').textContent = 'Elegí el pago pendiente a pagar.'; return; }
   const medioPago = document.getElementById('pg-medio').value;
 
+  // El monto sólo viaja cuando la fila no tiene: es la cuenta cargada sin
+  // importe. El server valida lo mismo por su cuenta y es el que manda; esto
+  // evita el viaje y, sobre todo, cerrar el modal para volver con un error.
+  const pideMonto = document.getElementById('pg-monto-wrap').style.display !== 'none';
+  const monto = pideMonto ? montoDe('pg-monto') : 0;
+  if (pideMonto && !(monto > 0)) {
+    document.getElementById('pg-error').textContent = 'Poné cuánto se pagó: esta cuenta se cargó sin monto.';
+    return;
+  }
+
   // Comportamiento estándar: cerrar ya, notificar al terminar
   closePagarModal();
   showToast('⏳ Actualizando planilla...');
   try {
-    const { proveedor, monto, medio } = await api('/api/pagos/pagar', {
+    const { proveedor, monto: montoPagado, medio } = await api('/api/pagos/pagar', {
       method: 'POST',
-      body: JSON.stringify({ rowIndex: p.rowIndex, proveedor: p.proveedor, medioPago }),
+      body: JSON.stringify({ rowIndex: p.rowIndex, proveedor: p.proveedor, medioPago, monto }),
     });
     showResultadoModal({
       ok: true,
       titulo: 'Registro pagado',
-      detalle: `<b>${escapeHtml(proveedor || p.proveedor)}</b> · ${fmt(monto || p.salidaARS)}<br>` +
+      detalle: `<b>${escapeHtml(proveedor || p.proveedor)}</b> · ${fmt(montoPagado || monto || p.salidaARS)}<br>` +
         `Estado: A pagar → <b>Pagado</b>${medio ? ` · Medio: ${escapeHtml(medio)}` : ''}<br>` +
         `<span style="font-size:11px">Fila actualizada en la hoja Movimientos ✓</span>`,
     });
@@ -11261,6 +11435,39 @@ function setPagoPrevisto(v) {
     (!conCuotas && categoriaLlevaEntrega()) ? 'Siguiente: ¿cuándo llega? →' : 'Guardar en planilla';
   state.vencManual = false;
   recalcVencimiento();
+  pintarMontoOpcional();
+}
+
+// ─── El monto en blanco se explica en el formulario, no en el error ──────────
+//
+// Un campo que a veces es obligatorio y a veces no, sin decir cuándo, se prueba
+// apretando Guardar. Acá el rótulo lo dice antes: con "ya está pago" pide el
+// monto, en los otros dos casos avisa que puede quedar vacío y —sólo cuando de
+// verdad está vacío— qué va a pasar con esa compra.
+//
+// La frase cambia según lo que pasa DESPUÉS, que es distinto en cada caso: con
+// entrega el número se pide en la puerta, en cuotas la fila madre queda sin
+// total y por eso el gasto no suma en el mes hasta que se complete.
+function pintarMontoOpcional() {
+  const lbl = document.getElementById('f-monto-label');
+  const hint = document.getElementById('f-monto-hint');
+  if (!lbl || !hint) return;
+  const conCuotas = document.getElementById('f-concuotas').checked;
+  const previsto = conCuotas ? 'a-pagar' : (state.pagoPrevisto || 'pagado');
+  const vacio = !montoDe('f-monto');
+
+  if (previsto === 'pagado') {
+    lbl.textContent = 'Monto ARS (total)';
+    hint.textContent = '';
+    return;
+  }
+  lbl.innerHTML = 'Monto ARS (total) <span style="text-transform:none;font-weight:400">— opcional</span>';
+  hint.textContent = !vacio ? ''
+    : conCuotas
+      ? 'Sin monto se anotan igual las cuotas con sus vencimientos, vacías. Ojo: hasta que cargues el total, esta compra no suma en el resultado del mes.'
+      : previsto === 'al-recibir'
+        ? 'Sin monto se anota el pedido igual; cuánto fue se pone al recibirlo.'
+        : 'Sin monto se anota la cuenta igual; cuánto fue se pone al pagarla.';
 }
 
 function onCategoriaChange() {
@@ -11541,6 +11748,9 @@ function onConCuotasChange() {
   document.getElementById('f-btn-seguir').textContent =
     (!cc && categoriaLlevaEntrega()) ? 'Siguiente: ¿cuándo llega? →' : 'Guardar en planilla';
   recalcVencimiento();
+  // Con cuotas la compra es "A pagar" por definición, así que el monto pasa a
+  // ser opcional aunque el bloque de cómo se paga esté escondido.
+  pintarMontoOpcional();
 }
 
 // Vencimiento automático = fecha del gasto + plazo del proveedor (hoja Proveedores)
@@ -11626,11 +11836,20 @@ function validarCompra(d) {
   const errores = [];
   if (!d.fecha) errores.push({ campo: 'f-fecha', msg: 'La fecha de la compra.' });
   if (!d.proveedor) errores.push({ campo: 'f-proveedor', msg: 'El proveedor.' });
-  // El monto dejó de ser opcional: la fila del libro se escribe por la misma
-  // puerta que el resto y ésa rechaza un gasto de cero. Mejor decirlo acá que
-  // hacer viajar algo que va a rebotar.
-  if (!d.salidaARS) {
-    errores.push({ campo: 'f-monto', msg: d.cuotas > 1 ? 'El monto TOTAL de la compra.' : 'El monto de la compra.' });
+  // ─── El monto sólo es obligatorio si la plata ya salió (08/09/2026) ────────
+  //
+  // Pedido de Gonzalo: *"a veces pasa que no es claro o es a definir el monto
+  // pero ya se hizo el pedido"*. La alternativa a anotarlo sin monto no era
+  // anotarlo con monto — era no anotarlo, y que la entrega llegara sin estar en
+  // ningún lado. Queda en blanco y se completa donde aparece el número: al
+  // recibir la entrega, o al pagar la cuenta.
+  //
+  // "Ya está pago" sigue exigiéndolo, y no por simetría: esa fila se escribe
+  // Pagada contra una caja, y una salida sin importe es plata que ningún saldo
+  // resta nunca. El server rechaza lo mismo (ver construirFilaGasto); acá se
+  // dice antes para no hacer viajar algo que va a rebotar.
+  if (!d.salidaARS && d.previsto === 'pagado') {
+    errores.push({ campo: 'f-monto', msg: 'El monto de la compra: figura como ya pagada y tiene que decir cuánto salió.' });
   }
   if (d.cuotas > 1 && !d.vencRaw) {
     errores.push({ campo: 'f-vencimiento', msg: 'El vencimiento de la primera cuota.' });
@@ -19463,10 +19682,15 @@ async function borrarPedido(id) {
 // cuesta dos toques —"Recibido" y la respuesta— y ni uno más.
 //
 // Lo que este modal NO pregunta, y no es un olvido: contra qué fila de
-// Movimientos va el pedido (lo resuelve `planificarAsiento` en el server), ni
-// con qué medio se pagó (lo dijo la compra, ver `medioDeRecepcion`). Quien usa
-// esta pantalla es un cocinero con el proveedor en la puerta: no sabe qué hay
-// cargado en la planilla y no tiene por qué saberlo.
+// Movimientos va el pedido (lo resuelve `planificarAsiento` en el server), y
+// con qué medio se pagó cuando NO pagó quien recibe (lo dijo la compra, ver
+// `medioDeRecepcion`). Quien usa esta pantalla es un cocinero con el proveedor
+// en la puerta: no sabe qué hay cargado en la planilla y no tiene por qué
+// saberlo.
+//
+// Lo único que se agregó desde entonces es de qué caja salió la plata, y sólo
+// cuando salió: viene con Efectivo Local puesto, así que el caso normal sigue
+// costando lo mismo. Ver `pedMedioDefault` acá abajo.
 
 // Las dos salidas, según lo que dijo la compra. `modo` es lo que viaja al
 // server: 'pague' sólo cuando salió plata de la caja ahora.
@@ -19487,6 +19711,29 @@ const PED_SALIDAS = {
 };
 
 const salidasDe = p => PED_SALIDAS[pedYaPago(p) ? 'pagado' : 'noPagado'];
+
+// La caja de la puerta. Es el default del selector y el que asume el server si
+// no le mandan nada, así que los dos dicen lo mismo.
+const pedMedioDefault = () => (NEGOCIO && NEGOCIO.cajaEfectivo) || 'Efectivo Local';
+
+// Deja el selector listo con el default puesto.
+//
+// El fallback existe porque las opciones las inserta `llenarSelectsDeCajas` con
+// lo que trajo GET /api/config: si esa llamada no volvió, el desplegable queda
+// vacío y no se podría elegir nada. Con la caja de la puerta escrita a mano, el
+// caso normal se puede recibir igual — que es lo único que no puede fallar acá.
+function pedPrepararMedio() {
+  const sel = document.getElementById('ped-r-medio');
+  if (!sel.options.length) {
+    const op = document.createElement('option');
+    op.value = op.textContent = pedMedioDefault();
+    sel.appendChild(op);
+  }
+  sel.value = pedMedioDefault();
+  // Si la caja de la puerta no estuviera en la lista, mejor la primera que
+  // ninguna: un select en blanco manda '' y el server no sabría qué se eligió.
+  if (!sel.value && sel.options.length) sel.selectedIndex = 0;
+}
 
 async function openPedRecibir(id) {
   const p = pedBuscar(id);
@@ -19519,6 +19766,8 @@ async function openPedRecibir(id) {
   document.getElementById('ped-r-resto-resumen').innerHTML = '';
   document.getElementById('ped-r-que-hace').innerHTML = '';
   document.getElementById('ped-r-pago-resumen').innerHTML = '';
+  document.getElementById('ped-r-medio-wrap').style.display = 'none';
+  pedPrepararMedio();
 
   pintarSalidasRecibir(p);
   pintarSaldoDelProveedor();
@@ -19561,6 +19810,10 @@ async function elegirSalida(clave) {
 
   document.getElementById('ped-r-detalle').style.display = '';
   document.getElementById('ped-r-confirmar').style.display = '';
+  // De qué caja salió sólo tiene sentido si salió: en "hubo un problema" o en
+  // "se paga después" no salió plata de ninguna, y preguntarlo invitaría a
+  // anotar un pago que no ocurrió.
+  document.getElementById('ped-r-medio-wrap').style.display = cfg.modo === 'pague' ? '' : 'none';
   document.getElementById('ped-r-monto-label').textContent =
     cfg.montoLabel || (cfg.modo === 'pague' ? '¿Cuánto pagaste?' : '¿Cuánto queda a pagar?');
   const campo = document.getElementById('ped-r-monto');
@@ -19867,6 +20120,10 @@ async function confirmarPedRecibir() {
   const cuerpo = {
     modo: pedState.modo,
     monto,
+    // De qué caja salió la plata. Sólo cuando salió: en los otros modos el
+    // server usa el medio que dijo la compra y esto ni se mira. Vacío también
+    // es válido — el server cae en la caja de la puerta, que es este default.
+    medioPago: pedState.modo === 'pague' ? document.getElementById('ped-r-medio').value : '',
     // El vencimiento no se pregunta más: lo dijo la compra, y si no lo dijo, es
     // el día de la entrega. Un campo menos en la puerta.
     vencimiento: '',
@@ -19890,7 +20147,7 @@ async function confirmarPedRecibir() {
 async function pedEnviarRecibir(p, cuerpo) {
   showToast('⏳ Actualizando planilla...');
   try {
-    const { asiento, avisados, saldos: saldosEscritos, restoPedido, restoError } = await api(
+    const { asiento, medioPago, avisados, saldos: saldosEscritos, restoPedido, restoError } = await api(
       '/api/pedidos/' + encodeURIComponent(p.id) + '/recibir', {
         method: 'POST',
         body: JSON.stringify(cuerpo),
@@ -19911,6 +20168,7 @@ async function pedEnviarRecibir(p, cuerpo) {
       ok: true,
       titulo: 'Pedido recibido',
       detalle: `<b>${escapeHtml(p.proveedor)}</b><br>${pedQueHizo(asiento)}`
+        + pedDeQueCaja(cuerpo, medioPago)
         + resto + pedSaldosQueHizo(saldosEscritos, p) + pedAvisos(avisados),
       ir: restoPedido ? { label: '📦 Ver ese día', hacer: () => irAlPedido(restoPedido.fecha) } : null,
     });
@@ -19921,6 +20179,20 @@ async function pedEnviarRecibir(p, cuerpo) {
       detalle: `${escapeHtml(e.message)}<br><span style="font-size:11px">El pedido quedó como estaba y no se escribió nada en la planilla.</span>`,
     });
   }
+}
+
+// De qué caja salió la plata, dicho SÓLO cuando no fue la de la puerta.
+//
+// El caso normal —efectivo del cajón— no se anuncia: un cartel que aparece
+// siempre deja de leerse y le saca lugar a los que sí avisan de algo. El que sí
+// se dice es el que cambia el arqueo de esa noche: una transferencia no descuenta
+// del esperado del turno, y quien recibió es el único que puede corregirlo si se
+// eligió mal.
+function pedDeQueCaja(cuerpo, medio) {
+  if (!cuerpo || cuerpo.modo !== 'pague') return '';
+  if (!medio || medio === pedMedioDefault()) return '';
+  return `<br><span style="font-size:11px">💳 Se anotó como salida de `
+    + `<b>${escapeHtml(medio)}</b>.</span>`;
 }
 
 // El informe de lo que REALMENTE pasó. Es la contraparte de haberle sacado la
@@ -20220,8 +20492,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if (ayuda && esPhone()) ayuda.textContent = '· tocá ⋮ en un bloque para cambiarlo de día';
 });
 
-// Arrancar: verificar token guardado o mostrar login
-checkSavedToken();
+// Arrancar: primero quién es el negocio —el login ya muestra su nombre y su
+// logo— y recién después verificar el token guardado o mostrar el login.
+cargarConfigNegocio().then(checkSavedToken);
 </script>
 </body>
 </html>

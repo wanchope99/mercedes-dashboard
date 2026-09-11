@@ -21,7 +21,11 @@
 // normal. Eso es el negocio pasando, y es justo lo que los informes tienen que
 // ver. Acá va sólo lo que no fue un servicio del bar.
 
-const DIAS_EXCLUIDOS = [
+// Fija y de Mercedes: el 25 de mayo de 2026 fue un evento puntual en ESE bar.
+// Otra instancia arranca sin días excluidos y agrega los suyos por
+// INFORMES_DIAS_EXCLUIDOS — excluir el día de otro negocio sacaría del análisis
+// una noche que para éste fue un servicio normal.
+const DIAS_EXCLUIDOS_MERCEDES = [
   {
     fecha: '2026-05-25',
     motivo: 'Turno puntual armado para el evento del 25 de mayo. Cayó lunes —el día '
@@ -29,6 +33,8 @@ const DIAS_EXCLUIDOS = [
       + 'y no vuelve a pasar: no se compara nada contra él ni se lo menciona como hallazgo.',
   },
 ];
+
+const DIAS_EXCLUIDOS = require('./config-negocio').esMercedes() ? DIAS_EXCLUIDOS_MERCEDES : [];
 
 const extraDelEntorno = () => (process.env.INFORMES_DIAS_EXCLUIDOS || '')
   .split(',')

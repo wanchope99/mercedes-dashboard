@@ -51,26 +51,44 @@
 // `Legacy` significa algo — mapearlas a una caja sería peor que dejarlas. Se
 // muestran tal cual y no se ofrecen para elegir.
 
-const CAJA_EFECTIVO = process.env.CAJA_EFECTIVO || 'Efectivo Local';
-const CAJA_MP = process.env.CAJA_MP || 'Mercado Pago Tincho';
+// ─── De dónde sale esta lista (09/09/2026) ──────────────────────────────────
+//
+// Los nueve nombres estaban escritos acá y COPIADOS en otros tres módulos
+// (`proveedores-categorias.js`, `finanzas.js`, `propinas.js`): cuatro listas
+// describiendo la misma realidad, que podían discrepar. Ahora salen de
+// `config-negocio.js`, que las lee de la variable `CAJAS` con EXACTAMENTE esta
+// lista como default — una instancia sin esa variable (Mercedes) obtiene lo
+// mismo que antes, nombre por nombre.
+//
+// Siguen yendo como figuran en la columna A de la hoja Cajas: `MP Pablo USD` se
+// llama así y no "MP USD Pablo".
+const negocio = require('./config-negocio');
 
-// Los nombres van EXACTAMENTE como figuran en la columna A de la hoja Cajas.
-// `MP Pablo USD` se llama así y no "MP USD Pablo".
-const MEDIOS_CANONICOS = [
-  'Efectivo Local', 'Efectivo Pablo', 'Efectivo Tincho',
-  'Mercado Pago Tincho', 'Mercado Pago Pablo',
-  'Galicia', 'USD Pablo', 'USD Tincho', 'MP Pablo USD',
-];
+const CAJA_EFECTIVO = negocio.CAJA_EFECTIVO;
+const CAJA_MP = negocio.CAJA_MP;
+const MEDIOS_CANONICOS = negocio.CAJAS;
 
-// Las tres cajas de efectivo, que son lo que la app ofrece elegir.
-const CAJAS_EFECTIVO = MEDIOS_CANONICOS.filter(m => m.startsWith('Efectivo'));
+// Las cajas de efectivo, que son lo que la app ofrece elegir.
+const CAJAS_EFECTIVO = MEDIOS_CANONICOS.filter(m => /^efectivo/i.test(m));
+
+// ─── El echeq va a la cuenta bancaria, y cuál es depende del negocio ────────
+//
+// Se resuelve CONTRA la lista de cajas en vez de asumir 'Galicia'. Mapear a una
+// caja que en esta instancia no existe escribiría en `Movimientos` un medio que
+// ningún SUMIFS suma — que es exactamente la falla que describe la cabecera de
+// este archivo, y la única que no da ningún error a la vista. Si no hay a dónde
+// mandarlo, el valor se deja tal cual y se muestra como legacy.
+const CAJA_ECHEQ = (() => {
+  const pedida = (process.env.CAJA_ECHEQ || 'Galicia').trim().toLowerCase();
+  return MEDIOS_CANONICOS.find(c => c.toLowerCase() === pedida) || '';
+})();
 
 function normalizarMedio(medio) {
   const m = (medio || '').toString().trim();
   if (!m) return '';                       // vacío es válido: fila madre de cuotas
   const low = m.toLowerCase();
-  // Un Echeq sale de la cuenta Galicia: en Movimientos se registra como Galicia.
-  if (low === 'echeq' || low.includes('cheque')) return 'Galicia';
+  // Un Echeq sale de la cuenta bancaria: en Movimientos se registra como esa caja.
+  if ((low === 'echeq' || low.includes('cheque')) && CAJA_ECHEQ) return CAJA_ECHEQ;
   const canonico = MEDIOS_CANONICOS.find(c => c.toLowerCase() === low);
   if (canonico) return canonico;           // corrige capitalización
   if (low === 'efectivo' || low === 'cash' || low.startsWith('contado')) return CAJA_EFECTIVO;
@@ -87,6 +105,6 @@ const esLegacy = medio => {
 };
 
 module.exports = {
-  MEDIOS_CANONICOS, CAJAS_EFECTIVO, CAJA_EFECTIVO, CAJA_MP,
+  MEDIOS_CANONICOS, CAJAS_EFECTIVO, CAJA_EFECTIVO, CAJA_MP, CAJA_ECHEQ,
   normalizarMedio, esLegacy,
 };

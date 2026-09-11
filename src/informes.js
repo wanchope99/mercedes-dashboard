@@ -120,7 +120,7 @@ const ESQUEMA = {
 };
 
 // Reglas que valen para los tres agentes. Lo propio de cada uno va en su archivo.
-const SISTEMA_COMUN = `Sos el analista de datos del bar Mercedes (Buenos Aires). Escribís para los dueños.
+const SISTEMA_COMUN = `Sos el analista de datos ${require('./config-negocio').NEGOCIO_DESCRIPCION}. Escribís para los dueños.
 
 Tu trabajo es decir qué está diciendo la información, no describirla.
 
@@ -232,7 +232,28 @@ En los tres:
 // Va en el prompt de SISTEMA y no en el payload: es contexto estable, no datos
 // de este período. Se lee en cada corrida (son diez por mes: cachearlo sólo
 // serviría para que un cambio no tenga efecto hasta el próximo deploy).
-const RUTA_CONTEXTO = require('path').join(__dirname, 'contexto-operativo.md');
+// ─── El contexto es de UN negocio, y no se hereda ────────────────────────────
+//
+// Este archivo entero se le inyecta al modelo en cada corrida. El de Mercedes
+// habla de Mercado Pago Pablo, de Galicia y Brubank, de la dotación de julio y
+// del evento del 25 de mayo. Servírselo a otro negocio no sería "un default
+// razonable": sería contarle al analista de un bar los hechos de otro, y como el
+// modelo no tiene forma de saber que no son suyos, los usaría para explicar sus
+// números.
+//
+// Por eso NO hay fallback. Cada instancia tiene su archivo —`contexto-<id>.md`,
+// con `contexto-operativo.md` como el de Mercedes por compatibilidad— y la que
+// no lo tiene corre sin contexto, que es exactamente lo que hacía la app antes
+// del 09/08/2026: informes más ingenuos, nunca ajenos.
+const RUTA_CONTEXTO = (() => {
+  const path = require('path');
+  const negocio = require('./config-negocio');
+  if (process.env.CONTEXTO_OPERATIVO_PATH) {
+    return path.resolve(__dirname, process.env.CONTEXTO_OPERATIVO_PATH);
+  }
+  if (negocio.esMercedes()) return path.join(__dirname, 'contexto-operativo.md');
+  return path.join(__dirname, `contexto-${negocio.NEGOCIO_ID}.md`);
+})();
 
 function contextoOperativo() {
   try {
@@ -245,7 +266,7 @@ function contextoOperativo() {
   } catch (e) {
     // Sin contexto el informe sale igual, sólo que más ingenuo. Nunca vale
     // perder la corrida por esto.
-    console.error(`Informes: no se pudo leer contexto-operativo.md (${e.message}) — el informe sale sin él`);
+    console.error(`Informes: no se pudo leer ${RUTA_CONTEXTO} (${e.message}) — el informe sale sin él`);
     return '';
   }
 }

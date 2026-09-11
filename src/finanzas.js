@@ -402,14 +402,14 @@ function conciliar(movimientos, recuperoPorMes) {
 // La caja se busca por NOMBRE. En la hoja Cajas las filas se mueven -el 24/07/2026
 // se insertó una y todo lo de abajo bajó un lugar- así que cualquier referencia
 // fija (Cajas!F3) tarde o temprano lee la cuenta de otro.
-const CAJA_POZO = 'Mercado Pago Pablo';
+const CAJA_POZO = require('./config-negocio').CAJA_POZO;
 
 // El vault en dólares. Se lleva EN DÓLARES (columna Moneda = USD en la hoja
 // Cajas), así que su saldo no se puede sumar al de la cuenta en pesos sin
 // convertirlo. Se valúa al blue de HOY porque es una foto del presente —"cuánto
 // vale hoy el pozo"—, no un movimiento histórico. Los movimientos históricos sí
 // se valúan al TC de su día (ver sheets.js).
-const CAJA_POZO_USD = 'MP Pablo USD';
+const CAJA_POZO_USD = require('./config-negocio').CAJA_POZO_USD;
 
 // Las salidas de esa cuenta son gastos del bar que Pablo paga desde ahí. No es
 // plata que "se perdió" del pozo: es plata del bar que salió por esa ventanilla.

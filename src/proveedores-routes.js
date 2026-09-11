@@ -393,6 +393,20 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, r
         } catch (e) { /* sin pedido no se pierde nada: los productos van a Compras igual */ }
       }
     } else {
+      // ─── Acá el total sigue siendo obligatorio (08/09/2026) ────────────────
+      //
+      // Desde hoy una compra puede anotarse sin importe, y eso vale para el
+      // formulario: alguien decide dejarlo en blanco porque el precio está a
+      // definir. Acá el número no lo deja nadie en blanco — se lee de una foto,
+      // así que un total en cero no significa "a definir", significa "no se
+      // pudo leer". Escribirlo igual convertiría un error de lectura en una
+      // fila muda, que es justo la señal que hay que no perder.
+      //
+      // Es el mismo guard que ya tiene `escribirGastoDeFactura` para el panel
+      // de pendientes, en la otra puerta del mismo circuito.
+      if (!(Number(datos.salidaARS) > 0)) {
+        return { ok: false, error: 'no hay un total confirmado para escribir el gasto' };
+      }
       out = await registrarCompra(datos);
       if (!out.ok) return { ok: false, error: out.error };
       if (out.aviso) avisos.push(out.aviso);

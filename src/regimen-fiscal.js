@@ -91,7 +91,10 @@ const PARAMETROS = {
     pctDefault: 21,
     pctReducido: 10.5,
     // Por nombre normalizado (sin acentos, minúsculas). Match exacto.
-    porProveedor: { 'el ekeko': 10.5 },
+    // 'el ekeko' es un proveedor de Mercedes: en otra instancia esa clave no
+    // matchea nada, pero tampoco tiene por qué estar. Los patrones de abajo sí
+    // son generales —describen rubros, no nombres— y quedan para todos.
+    porProveedor: require('./config-negocio').esMercedes() ? { 'el ekeko': 10.5 } : {},
     // Frutas y verduras, por cómo se escriben en la planilla. Es un patrón y no
     // una lista de nombres porque el mismo proveedor aparece escrito de varias
     // formas según quién cargó la fila.
