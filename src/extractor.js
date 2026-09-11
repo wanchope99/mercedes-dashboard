@@ -8,6 +8,7 @@
 
 const Anthropic = require('@anthropic-ai/sdk');
 const cats = require('./proveedores-categorias');
+const fechas = require('./fecha-factura');
 
 const MODEL = process.env.EXTRACTOR_MODEL || 'claude-opus-4-6';
 
@@ -35,15 +36,19 @@ function client() {
 //
 // Las dos usan el mismo modelo. Bajar de Opus para leer plata de una foto no
 // estaba sobre la mesa.
-function buildPromptCabecera() {
+function buildPromptCabecera(hoy) {
+  const dia = hoy || fechas.hoyAR();
   return `Sos un asistente que procesa facturas y remitos de un bar-restaurante en Argentina.
 Analizá la imagen y extraé SOLAMENTE los datos de CABECERA (los de toda la factura).
 NO extraigas los renglones de productos: eso se pide aparte.
+
+Hoy es ${dia}. Ninguna factura puede tener fecha posterior a hoy.
 
 Devolvé un OBJETO JSON con esta forma EXACTA, sin texto adicional:
 
 {
   "fecha": "YYYY-MM-DD",
+  "fecha_texto": "la fecha tal cual está impresa, sin reordenar",
   "proveedor": "Nombre del proveedor",
   "tipo_comprobante": "A | B | C | M | X | Remito | \\"\\"",
   "punto_venta": "",
@@ -96,7 +101,17 @@ Reglas IMPORTANTES:
 - subtotal_factura = el SUBTOTAL ANTES de IVA e impuestos.
 - iva_monto = el MONTO de IVA en pesos del pie de la factura.
 - otros_impuestos_monto = MONTO en pesos de impuestos que NO son IVA (ej "IMP INT").
-- La fecha en formato YYYY-MM-DD. Si no aparece, "" con confianza 0.
+- LA FECHA. Van los dos campos y son distintos:
+  · fecha_texto = los caracteres tal cual están impresos en el papel, sin
+    reordenar ni interpretar: "10/09/2026", "10-SEP-26", "10 de septiembre de
+    2026". Copiala, no la traduzcas.
+  · fecha = esa misma fecha en YYYY-MM-DD.
+  En Argentina las facturas se emiten en DÍA/MES/AÑO, SIEMPRE: "10/09/2026" es
+  el 10 de septiembre, NO el 9 de octubre. Nunca leas una fecha numérica como
+  MES/DÍA/AÑO, aunque el día sea menor o igual a 12.
+  Si la fecha que armaste queda después de ${dia}, la leíste mal: revisá el
+  orden antes de contestar.
+  Si no aparece, "" en los dos campos, con confianza 0.
 - "confianza" 0 a 1. NO inventes: es mejor que un humano confirme.`;
 }
 
@@ -254,12 +269,16 @@ async function pedirAlModelo({ base64, mime, prompt, maxTokens }) {
 
 // Sólo la cabecera. Es lo único que hace falta para la primera pregunta, y por
 // eso es la llamada que la persona espera. ~82 tokens de salida.
-async function extraerCabecera({ base64, mime = 'image/jpeg' }) {
+async function extraerCabecera({ base64, mime = 'image/jpeg', hoy } = {}) {
   const { parsed, raw } = await pedirAlModelo({
-    base64, mime, prompt: buildPromptCabecera(), maxTokens: 400,
+    base64, mime, prompt: buildPromptCabecera(hoy), maxTokens: 420,
   });
   const factura = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
   factura.vendedor = factura.vendedor || '';
+  // La fecha impresa viaja cruda hasta `fecha-factura.revisar`, que es quien
+  // decide. Acá no se normaliza nada: si el modelo la ordenó mal, el texto es
+  // la única prueba de lo que decía el papel, y normalizarlo la borraría.
+  factura.fecha_texto = String(factura.fecha_texto == null ? '' : factura.fecha_texto).trim();
   factura.subtotal_factura = factura.subtotal_factura ?? null;
   factura.iva_monto = factura.iva_monto ?? null;
   factura.otros_impuestos_monto = factura.otros_impuestos_monto ?? null;

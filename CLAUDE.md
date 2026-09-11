@@ -290,6 +290,24 @@ Note this strategy's nominal rate is **below** the assumed inflation, so real va
 4. `src/unidades.js` normalizes purchase units to a base unit (e.g. "Caja x6" → 6 bottles) so purchased-vs-sold quantities are comparable.
 5. Anything the pipeline can't resolve confidently (category, payment method, product match, unit factor) is queued as "pendiente" for a human to confirm via Telegram reply or the app's panel — never silently guessed.
 
+### The date read off an invoice is checked before anything uses it (2026-09-11)
+
+`10/09/2026` was read as October 9th — the US order applied to an Argentine comprobante — and a Láctea El Puente invoice entered the ledger a month into the future. Nobody caught it at confirmation, because the summary printed `9/10` and `10/9` with the same two digits. **The date was the only header field that was neither confirmed nor questioned**: the total gets a tap, the letter gets a question, the date went straight through.
+
+`src/fecha-factura.js` is pure and holds three rules, applied in order, each on the previous one's result:
+
+1. **The paper wins.** `extraerCabecera` now returns `fecha_texto` — the date *as printed*, copied not interpreted — alongside the ISO one. In Argentina a numeric date is DÍA/MES/AÑO and there is no second reading, so when the two disagree the text decides and **nothing is asked**: that is the country's format applied to what the paper says, not a guess about it. This alone fixes the reported bug, and it is the only rule that corrects silently.
+2. **Nothing is from the future.** A purchase that has not happened was not paid, was not received and gives no VAT credit this month, so a date after today is a misreading with no legitimate case. It **always asks**, proposing the swapped reading when that one lands in the past. `aplicarRespuesta` re-checks it, so the answer cannot be another future date either.
+3. **One invoice alone in another month is suspicious.** Invoices are uploaded in batches, so the *set* is evidence: `prov.fechasRecientes()` returns the dates of the last week's ingests (all states, preferring a date a person already corrected in the conversation) and a month outside `{current, previous} ∪ {the batch's}` asks, showing both readings. Loading an old backlog therefore costs one question for the first invoice and none for the rest — the first one opens the month.
+
+**Only day ≤ 12 can be swapped at all**, which is why eleven twelfths of this error are impossible and the 10th of September was not. `partes()` validates a real calendar date rather than trusting `new Date()`, which turns the 31st of February into March 3rd — the exact class of error being fixed.
+
+**It runs in the ingest route before the `Promise.all`, and that placement is load-bearing**: the date is what `facturas.buscarCompraEnLibro` matches on within `VENTANA_DIAS` (10), so a date off by a month misses the row and the purchase gets written twice. For the same reason the bot asks it as step 0a-bis, above everything that decides money — asking at the end would mean reopening ten answered questions. The known cost is stated in that comment: step 0b's search already ran with the read date, so a correction wider than ten days can leave it silent. That is the cheap error (a duplicate row, visible in Pagos) and not the expensive one (an invoice linked to the wrong purchase).
+
+**The bot's summary now writes the month in letters** (`fechaLarga`) on the invoice line, and so do the date buttons and the app panel's `<select>`. `10/9` and `9/10` read identically at a glance, which is precisely how this passed a confirmation; `10 de septiembre` does not. Delivery and vencimiento keep `fechaCorta` — those are days somebody just picked off a list, not readings of a photo. **A silent correction still says so** (`la había leído como 9 de octubre`): it is the only one of the three that never passes through a question, and a correction nobody sees is indistinguishable from an error.
+
+The prompt was also told the rule and the date: it carries `Hoy es <fecha>` and an explicit "never read a numeric date as MONTH/DAY, even when the day is ≤ 12". That is the cheap half of the fix and the unreliable one — the validation is what makes it a guarantee.
+
 ### The photo is not always the first time that purchase is recorded (2026-09-03)
 
 A purchase can already be in `Movimientos` before anyone photographs its invoice: it was loaded from "Nueva compra", or the order arrived and `POST /api/pedidos/:id/recibir` wrote its row. Until this date the bot wrote a second one — `registrarCompra` mints a fresh `idCompra` on every call, so the column-H idempotency (which exists against a double tap) could never recognise a row written by another path. The expense was duplicated and the month inflated.

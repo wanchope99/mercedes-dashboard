@@ -24,6 +24,7 @@ const provCfg = require('./proveedores-config');
 const convo = require('./compra-conversacion');
 const pedidos = require('./pedidos');
 const facturasReg = require('./facturas');
+const fechas = require('./fecha-factura');
 
 // Umbral de confianza por debajo del cual un campo se considera dudoso.
 const UMBRAL = parseFloat(process.env.PROVEEDORES_UMBRAL_CONFIANZA || '0.6');
@@ -91,9 +92,16 @@ function procesarItems(itemsCrudos, indice) {
 // Resuelve los datos a nivel FACTURA: medio de pago e IVA (con/sin) del proveedor.
 // Consulta la hoja Proveedores (config): si ya sabemos el medio/IVA del proveedor,
 // lo usamos; si no, queda como duda para preguntar UNA sola vez.
-async function procesarFactura(factura, items) {
+async function procesarFactura(factura, items, { dudaFecha = null } = {}) {
   const proveedor = (factura.proveedor || (items[0] && items[0].proveedor) || '').trim();
   const dudas = [];
+
+  // ── La fecha ──
+  // Va PRIMERA en la lista a propósito: el panel de la app dibuja las dudas en
+  // orden, y si la fecha está mal todo lo demás se está confirmando contra el
+  // mes equivocado. La duda la arma `fecha-factura.revisar`, que es quien sabe
+  // por qué duda; acá sólo se pasa.
+  if (dudaFecha) dudas.push(dudaFecha);
 
   // Config conocida del proveedor (hoja Proveedores de Gestion Mercedes)
   let cfg = null;
@@ -598,12 +606,36 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, r
       const provNombre = cats.normalizarProveedor(factura.proveedor || '', vendedor);
       factura.proveedor = provNombre;
 
+      // ─── La fecha se revisa ACÁ, antes de que se use para nada ───────────
+      //
+      // Tiene que pasar antes del `Promise.all` de abajo: la fecha es lo que
+      // decide si esta compra ya está en el libro (`buscarCompraEnLibro` mira
+      // una ventana de 10 días), así que una fecha corrida un mes no encuentra
+      // la fila y la compra se anota dos veces. El 10/09/2026 una factura de
+      // Láctea El Puente entró fechada el 9 de octubre por leer 10/09 como
+      // mes/día; ver `src/fecha-factura.js`.
+      const revision = fechas.revisar({
+        fecha: factura.fecha,
+        fechaTexto: factura.fecha_texto,
+        hoy: pedidos.hoyAR(),
+        recientes: prov.fechasRecientes(),
+      });
+      factura.fecha = revision.fecha;
+      if (revision.corregida) {
+        // Viaja hasta el resumen del chat para que la corrección se vea. Va en
+        // `factura` y no como un parámetro suelto porque `estadoInicial` recibe
+        // la factura entera y éste es un dato de la lectura, como la confianza.
+        factura.fechaCorregidaDe = revision.original;
+        console.warn(`Fecha corregida en la ingesta de ${provNombre}: `
+          + `${revision.original} → ${revision.fecha} (${revision.motivo}, papel "${factura.fecha_texto}")`);
+      }
+
       // Las preguntas de cabecera se arman SIN los renglones. La única que los
       // miraba era el cruce del total contra la suma de las líneas; con la
       // lectura partida se compara cuando llegan, y si no cierran queda anotado
       // en el pendiente para que se vea en el panel.
       const items = [];
-      const fact = await procesarFactura(factura, items);
+      const fact = await procesarFactura(factura, items, { dudaFecha: revision.duda });
 
       // El pendiente nace SIN renglones y se contesta ya. Los renglones se le
       // enganchan cuando terminan de leerse.
@@ -675,7 +707,7 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, r
 
       const conv = convo.estadoInicial({
         factura, cfg, proveedor: provNombre, pendienteId: reg.id,
-        itemsCount: 0, enLibro, yaCargada,
+        itemsCount: 0, enLibro, yaCargada, dudaFecha: revision.duda,
       });
       prov.setConversacion(reg.id, conv);
 

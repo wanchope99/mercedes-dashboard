@@ -80,7 +80,9 @@ function estadoInicial({
   //   · `enLibro`    → salida de `facturas.buscarCompraEnLibro`: filas del libro
   //                    que podrían ser esta misma compra.
   //   · `yaCargada`  → la factura YA registrada con este mismo número.
-  enLibro = null, yaCargada = null,
+  //   · `dudaFecha`  → salida de `fecha-factura.revisar().duda`: la fecha leída
+  //                    no se puede dar por buena y hay que preguntarla.
+  enLibro = null, yaCargada = null, dudaFecha = null,
 } = {}) {
   const conf = factura.confianza || {};
   const tipo = factura.tipo_comprobante || '';
@@ -106,6 +108,16 @@ function estadoInicial({
     // ─── Lo leído ───
     proveedor: proveedor || factura.proveedor || '',
     fecha,
+    // La fecha sin confirmar. `null` es "la fecha leída sirve"; con algo adentro
+    // se pregunta antes que nada, porque una fecha equivocada cambia el mes al
+    // que entra el gasto y el crédito fiscal, y la confirmación no la muestra
+    // lo bastante fuerte como para que alguien la vea de paso.
+    dudaFecha: dudaFecha || null,
+    // La fecha que el modelo había leído, cuando se la corrigió sola contra el
+    // texto impreso. No hace falta contestar nada —el papel no es una
+    // suposición— pero se dice: una corrección que nadie ve es indistinguible
+    // de un error, y es la única de todas que no pasa por una pregunta.
+    fechaLeida: (dudaFecha ? '' : factura.fechaCorregidaDe) || '',
     total: numeroONull(factura.total_factura),
     tipoComprobante: tipo,
     cuit: factura.cuit_proveedor || '',
@@ -368,6 +380,34 @@ function siguientePaso(estado) {
       ]);
   }
 
+  // ─── 0a-bis. La fecha no cierra ──────────────────────────────────────────
+  //
+  // Va acá arriba, antes de todo lo que se decide sobre la plata, por una razón
+  // que se paga cara: la fecha es el mes al que entra el gasto y el mes del
+  // crédito fiscal. Preguntarla al final sería pedirle a alguien que reabra
+  // diez respuestas que ya dio.
+  //
+  // Sólo se llega si `fecha-factura.revisar` no pudo decidir solo. Lo que él sí
+  // resuelve —el papel dice 10/09 y el modelo entendió otra cosa— ya viene
+  // corregido y este paso no aparece.
+  //
+  // Una consecuencia que conviene tener escrita: la búsqueda de la compra en el
+  // libro (paso 0b) ya corrió, con la fecha leída y su ventana de diez días. Si
+  // acá la fecha se corrige por más de eso, esa búsqueda miró la ventana
+  // equivocada y el paso 0b puede no aparecer. Se acepta: el error que deja es
+  // una fila de más en el libro, que se ve en Pagos, y no una factura enganchada
+  // a la compra que no era.
+  if (e.dudaFecha) {
+    const d = e.dudaFecha;
+    // El ✅ del sugerido lo pone el bot (`_teclado`), así que acá no va: dos
+    // marcas en la misma etiqueta se ven como un error.
+    const botones = (d.opciones || []).map(f => ({
+      id: f, label: fechaLarga(f), sugerido: f === d.sugerido,
+    }));
+    return paso('fecha', d.pregunta, botones,
+      { permiteTexto: true, ayuda: 'O escribí la fecha de la factura (dd/mm).' });
+  }
+
   // ─── 0b. Esta COMPRA ya está en el libro ─────────────────────────────────
   //
   // La plata ya se anotó por otro camino: la cargaron desde "Nueva compra" o
@@ -595,6 +635,28 @@ function aplicarRespuesta(estado, { campo, valor } = {}) {
       return { estado: e };
     }
 
+    case 'fecha': {
+      // Se acepta un botón (ISO), un "4/9" o un "4/9/2026". `fechaSuelta` toma
+      // el año de la fecha que se está discutiendo, no el de hoy: una factura de
+      // diciembre que se carga en enero no es de este año.
+      const f = pedidos.normalizarFecha(v) || fechaSuelta(v, e.fecha);
+      if (!f) return { estado, error: 'No entendí la fecha. Escribila así: 4/9' };
+      // Del futuro no se sale contestando otra fecha del futuro. Es la única
+      // validación que este archivo hace sobre una fecha, y es la que no puede
+      // faltar: un gasto que todavía no pasó no se pagó ni descuenta IVA.
+      if (f > pedidos.hoyAR()) {
+        return { estado, error: `El ${fechaLarga(f)} todavía no pasó. ¿Qué fecha tiene la factura?` };
+      }
+      e.fecha = f;
+      e.dudaFecha = null;
+      // El vencimiento y la entrega se habían propuesto contando desde la fecha
+      // vieja. Con otra fecha esas cuentas ya no son las que se mostraron, así
+      // que se vuelven a hacer en vez de quedar apuntando a un día que nadie
+      // eligió. Lo que ya se contestó a mano no se toca.
+      if ((e.propuesto || []).includes('pago')) { e.entregaFecha = null; e.vencimiento = ''; }
+      return { estado: e };
+    }
+
     case 'deducible':
       e.deducible = esSi(v);
       // Si no descuenta IVA, no hay alícuota que preguntar ni que escribir.
@@ -735,6 +797,29 @@ function fechaCorta(iso) {
   return m ? `${Number(m[3])}/${Number(m[2])}` : String(iso || '');
 }
 
+const NOMBRES_MES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+/**
+ * '2026-09-10' → '10 de septiembre' (con el año si no es el corriente).
+ *
+ * Se usa donde la fecha se está AFIRMANDO: el renglón de la factura en el
+ * resumen y los botones que la corrigen. "10/9" y "9/10" son las mismas dos
+ * cifras en distinto orden, así que una fecha dada vuelta se lee sin que nada
+ * llame la atención — que es exactamente cómo el 9 de octubre entró al libro.
+ * Escrito el mes con todas las letras, el error salta solo.
+ *
+ * El resto del resumen sigue en `fechaCorta`: la entrega y el vencimiento son
+ * días que alguien acaba de elegir de una lista, no lecturas de una foto.
+ */
+function fechaLarga(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+  if (!m) return String(iso || '');
+  const mes = NOMBRES_MES[Number(m[2]) - 1] || m[2];
+  const anio = Number(m[1]) === Number(pedidos.hoyAR().slice(0, 4)) ? '' : ` de ${m[1]}`;
+  return `${Number(m[3])} de ${mes}${anio}`;
+}
+
 /**
  * El resumen que se muestra arriba de cada pregunta y en la confirmación.
  *
@@ -744,7 +829,10 @@ function fechaCorta(iso) {
 function armarResumen(e) {
   const L = [];
   const nro = nroComprobante(e);
-  L.push(`🧾 *${e.proveedor || '¿?'}*${nro ? ` · ${nro}` : ''} · ${fechaCorta(e.fecha)}`);
+  L.push(`🧾 *${e.proveedor || '¿?'}*${nro ? ` · ${nro}` : ''} · ${fechaLarga(e.fecha)}`);
+  if (e.fechaLeida && e.fechaLeida !== e.fecha) {
+    L.push(`   ↳ _la había leído como ${fechaLarga(e.fechaLeida)}; el papel dice ${fechaCorta(e.fecha)}_`);
+  }
   L.push(e.total > 0 ? `💵 *${plata(e.total)}*` : '💵 ❓ falta el total');
 
   if (e.deducible === true) {
@@ -976,6 +1064,6 @@ module.exports = {
   // Puras, exportadas para poder ejercitarlas.
   nroComprobante, desgloseDe,
   pagoPrevistoDe, llevaEntrega, atajosDeEntrega, vencimientoSugerido,
-  fechaSuelta, mesDe, aDDMMAAAA, plata, fechaCorta,
+  fechaSuelta, mesDe, aDDMMAAAA, plata, fechaCorta, fechaLarga,
   CATEGORIAS_CON_ENTREGA, SIN_ENTREGA, ALICUOTAS, MEDIOS, CONFIANZA_MINIMA_TOTAL,
 };

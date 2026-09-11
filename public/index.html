@@ -1499,6 +1499,9 @@
     .prov-duda label { color:var(--text-muted); min-width:90px; }
     .prov-duda select, .prov-duda input { background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:6px 10px; border-radius:6px; font-size:12px; font-family:inherit; flex:1; min-width:140px; }
     .prov-duda .sug { font-size:10px; color:#c9a84c; }
+    /* El porqué de la duda de la fecha. Ocupa el renglón entero (flex-basis
+       100%) para que la pregunta se lea antes que el selector, no al lado. */
+    .prov-duda-pregunta { flex:0 0 100%; font-size:12px; color:#e0a24c; line-height:1.4; }
 
     /* Switch: checkbox con pinta de interruptor (filtros de las tablas) */
     .switch { display:inline-flex; align-items:center; gap:8px; cursor:pointer; user-select:none; vertical-align:middle; }
@@ -12781,6 +12784,7 @@ function closeProvNotif() { document.getElementById('prov-notif-overlay').classL
 // con el nombre crudo del campo ("categoriaGasto", "ivaDeducible"), que es el
 // nombre de una variable y no una pregunta.
 const DUDA_LABEL = {
+  fecha: '📅 Fecha de la factura',
   categoria: 'Categoría', medioPago: 'Medio de pago', iva: '¿Con o sin IVA?',
   producto: 'Producto', precio_unitario: 'Precio unitario',
   factor: '¿Cuántas botellas por empaque?',
@@ -12794,15 +12798,31 @@ const DUDA_LABEL = {
 };
 const IVA_OPT_LABEL = { con: 'Con IVA', sin: 'Sin IVA', si: 'Sí', no: 'No' };
 
+// Una fecha ISO escrita con el mes en letras. Una opción que dice "2026-10-09"
+// al lado de otra que dice "2026-09-10" son ocho dígitos casi iguales, y elegir
+// mal ahí es el mismo error que esta pregunta existe para atrapar.
+const MESES_LARGOS = ['enero','febrero','marzo','abril','mayo','junio',
+  'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+function fechaEnLetras(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+  if (!m) return String(iso || '');
+  return `${Number(m[3])} de ${MESES_LARGOS[Number(m[2]) - 1]} de ${m[1]}`;
+}
+
 function renderDudaControl(domId, d) {
   const lbl = DUDA_LABEL[d.campo] || d.campo;
+  const etiqueta = o => (d.campo === 'fecha' ? fechaEnLetras(o) : (IVA_OPT_LABEL[o] || o));
   if (d.opciones && d.opciones.length) {
     const opts = d.opciones.map(o => {
-      const txt = IVA_OPT_LABEL[o] || o;
+      const txt = etiqueta(o);
       return `<option value="${escAttr2(o)}" ${o===d.sugerido?'selected':''}>${escapeHtml(txt)}</option>`;
     }).join('');
-    const sug = d.sugerido ? `<span class="sug">sug: ${escapeHtml(IVA_OPT_LABEL[d.sugerido]||d.sugerido)}</span>` : '';
-    return `<div class="prov-duda"><label>${escapeHtml(lbl)}</label>
+    const sug = d.sugerido ? `<span class="sug">sug: ${escapeHtml(etiqueta(d.sugerido))}</span>` : '';
+    // La pregunta de la fecha trae su propio texto ("leí el 9 de octubre, que
+    // todavía no pasó"): sin él la etiqueta sola no dice por qué se pregunta.
+    const porQue = d.campo === 'fecha' && d.pregunta
+      ? `<div class="prov-duda-pregunta">${escapeHtml(d.pregunta.replace(/\*/g, ''))}</div>` : '';
+    return `<div class="prov-duda">${porQue}<label>${escapeHtml(lbl)}</label>
       <select id="${domId}"><option value="">— elegir —</option>${opts}</select>${sug}</div>`;
   }
   if (d.campo === 'factor') {

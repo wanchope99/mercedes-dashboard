@@ -15,6 +15,7 @@ const NodeCache = require('node-cache');
 const cats = require('./proveedores-categorias');
 const unidades = require('./unidades');
 const { parseMonto } = require('./monto');
+const fechas = require('./fecha-factura');
 let provCfg = null; try { provCfg = require('./proveedores-config'); } catch (e) {}
 
 const cache = new NodeCache({ stdTTL: 120 });
@@ -646,6 +647,31 @@ function listPendientes() {
 }
 function countPendientes() { return listPendientes().length; }
 
+// ─── La tanda: qué fechas se vienen subiendo ────────────────────────────────
+//
+// Las facturas se sacan de la carpeta y se fotografían de a muchas: las del día,
+// o el atraso de la semana. Eso convierte al conjunto en evidencia — una sola
+// factura de otro mes en medio de veinte de septiembre es sospechosa por estar
+// sola, no por su fecha. `fecha-factura.revisar` la usa para preguntar.
+//
+// Se leen TODOS los estados y no sólo los pendientes: las que ya se confirmaron
+// son justamente las de la tanda que se está cargando ahora. Y se prefiere la
+// fecha de la conversación sobre la del pendiente, porque si alguien ya corrigió
+// una fecha a mano ésa es la buena y tiene que abrirle la puerta a las que
+// siguen.
+function fechasRecientes({ max = 25, dias = 7, ahora = Date.now() } = {}) {
+  const desde = ahora - dias * 24 * 60 * 60 * 1000;
+  return [...pendientes.values()]
+    .filter(p => {
+      const t = Date.parse(p.creado);
+      return Number.isFinite(t) && t >= desde;
+    })
+    .sort((a, b) => String(b.creado).localeCompare(String(a.creado)))
+    .slice(0, max)
+    .map(p => (p.conv && p.conv.fecha) || (p.factura && p.factura.fecha) || '')
+    .filter(Boolean);
+}
+
 function aplicarResoluciones(id, resoluciones = {}) {
   const reg = pendientes.get(id);
   if (!reg) return null;
@@ -680,8 +706,25 @@ function aplicarResoluciones(id, resoluciones = {}) {
       const c = cats.normalizarCategoriaGasto(rf.categoriaGasto);
       if (c) reg.factura.categoriaGasto = c;
     }
+    // ─── La fecha ─────────────────────────────────────────────────────────
+    //
+    // Se pregunta sólo cuando la lectura no cerró (ver `src/fecha-factura.js`).
+    // Acepta el ISO que manda el selector y una fecha entera tipeada
+    // ("10/09/2026"), y rechaza lo que no sea una fecha o lo que caiga en el
+    // futuro: la duda se queda sin contestar y el panel la vuelve a pedir, que
+    // es preferible a escribir en el libro un gasto que todavía no pasó.
+    if (rf.fecha != null && rf.fecha !== '') {
+      const f = fechas.normalizarTexto(rf.fecha);
+      if (f && f <= fechas.hoyAR()) reg.factura.fecha = f;
+    }
+
+    // Lo que la duda de la fecha pedía es que alguien la MIRE, así que se
+    // considera contestada cuando se eligió una fecha válida — aunque sea la
+    // misma que se había leído: eso es alguien afirmando que está bien.
+    const fechaContestada = !!(rf.fecha && fechas.normalizarTexto(rf.fecha) === reg.factura.fecha);
 
     reg.factura.dudas = (reg.factura.dudas || []).filter(d => {
+      if (d.campo === 'fecha') return !fechaContestada;
       // El medio ahora tiene que ser el nombre exacto de una caja: si no, esa
       // plata no la resta ninguna caja del saldo. Se sigue preguntando hasta que
       // lo sea.
@@ -773,7 +816,7 @@ module.exports = {
   getCompras, getIndiceInferencia, appendCompras,
   normalizarHistoricoCategorias,
   getProductosYCategorias, getSerieProducto, nombreVisible,
-  crearPendiente, getPendiente, listPendientes, countPendientes,
+  crearPendiente, getPendiente, listPendientes, countPendientes, fechasRecientes,
   aplicarResoluciones, marcarResuelto, descartarPendiente, marcarEscritosYCerrar,
   // El estado de la conversación del bot, guardado dentro del pendiente.
   setConversacion, getConversacion,
