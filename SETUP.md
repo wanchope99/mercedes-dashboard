@@ -185,8 +185,14 @@ no se comportan igual:
   líneas entran a `Compras`, de donde salen el CMV y el análisis de precios, y
   eso no se pregunta.
 
-Sale cerca de **la mitad** que todo en Opus. `EXTRACTOR_MODEL` pisa las dos y es
-la marcha atrás sin deploy.
+**Costo medido por factura:** 3,47 centavos de dólar, contra 5,46 todo en Opus
+(**−36%**) y 1,01 todo en Haiku (−81%). Las dos llamadas cuestan casi lo mismo
+—cabecera 46%, renglones 54%—, así que bajar sólo la cabecera rinde un tercio y
+no la mitad; los 2,5 centavos de diferencia contra Haiku entero son lo que se
+paga por no ensuciar `Compras`. Una factura de un renglón sale 2,3 centavos y una
+de once, 5,8: lo que mueve el número es cuántos renglones tiene, no el modelo.
+
+`EXTRACTOR_MODEL` pisa las dos y es la marcha atrás sin deploy.
 
 Lo que hace defendible bajar de modelo no es el precio: es que la app ya está
 preparada para que el extractor dude. Todo lo que vuelve con confianza menor a

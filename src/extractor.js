@@ -30,9 +30,16 @@ const fechas = require('./fecha-factura');
 //   OTRO producto. Eso entra a `Compras`, que es de donde salen el CMV y el
 //   `precio_unitario_movido` de los informes, y nadie lo pregunta.
 //
-// Así que la cabecera va en el modelo barato y los renglones en el caro. Cuesta
-// la mitad que todo en Opus, y de paso la llamada que la persona ESPERA pasó de
-// 10,6 a 5,2 segundos, que era la razón de partirlas en dos.
+// Así que la cabecera va en el modelo barato y los renglones en el caro, y de
+// paso la llamada que la persona ESPERA pasó de 10,6 a 5,2 segundos, que era la
+// razón de partirlas en dos.
+//
+// LO QUE AHORRA, con los números en su lugar: 3,47 centavos por factura contra
+// 5,46 todo en Opus, o sea **36%**. Las dos mitades cuestan casi lo mismo (la
+// cabecera 46% del total, los renglones 54%), así que bajar sólo la cabecera a
+// una quinta parte rinde 0,46 × 80% ≈ 36% — no la mitad. Todo en Haiku serían
+// 1,01 centavos (−81%), y esa diferencia es lo que se está pagando por no
+// ensuciar `Compras`: alrededor de 2,5 centavos por factura.
 //
 // EXTRACTOR_MODEL pisa las dos: es la marcha atrás sin deploy.
 const MODELO_CABECERA = process.env.EXTRACTOR_MODEL
