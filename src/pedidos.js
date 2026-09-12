@@ -66,6 +66,9 @@
 
 const google = require('@googleapis/sheets');
 const NodeCache = require('node-cache');
+// El único lector de importes del sistema. Por qué no hay uno propio acá, en el
+// bloque que reemplazó a `_numero` más abajo.
+const { parseMonto, montoEntrante } = require('./monto');
 
 const cache = new NodeCache({ stdTTL: 300 });
 const CACHE_PEDIDOS = 'pedidos';
@@ -343,10 +346,28 @@ function normalizarFecha(v) {
   return d ? _iso(d) : '';
 }
 
-function _numero(v) {
-  const n = Number(String(v == null ? '' : v).replace(/[^0-9.,-]/g, '').replace(/\./g, '').replace(',', '.'));
-  return Number.isFinite(n) ? n : 0;
-}
+// ─── Los importes los lee `monto.js`, y NO una copia de acá ─────────────────
+//
+// Hasta el 12/09/2026 este archivo tenía su propio lector, y hacía dos cosas
+// mal que juntas multiplicaban la plata:
+//
+//   · pasaba TODO por `String()`, incluso lo que ya era un número. Un
+//     `402000.07` que llega del formulario se volvía la cadena "402000.07";
+//   · y después borraba todos los puntos, porque suponía que un punto siempre
+//     es separador de miles. "402000.07" → "40200007".
+//
+// O sea ×100 a cualquier importe con centavos, **al escribir en la hoja y al
+// leerla de vuelta**. Los importes redondos pasaban intactos, que es por qué
+// esto sobrevivió un mes sin que nadie lo viera: el pedido de $80.000 se veía
+// bien y el de $402.000,07 se veía como $40.200.007.
+//
+// `parseMonto` decide si el punto es decimal o de miles mirando la forma
+// completa del número, y devuelve los números tal como llegan. Es la misma
+// función que usan el libro, el navegador y el bot: el encabezado de `monto.js`
+// cuenta que esto ya había pasado con cinco copias y por qué hay una sola.
+//
+// `montoEntrante` es `parseMonto` + redondeo a centavos, y va en todo lo que
+// entra para ser escrito.
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Persistencia
@@ -436,13 +457,13 @@ async function _leerPedidos(api) {
       fecha,
       proveedor: _txt(r[2]),
       detalle: _txt(r[3]),
-      costoEstimado: _numero(r[4]),
+      costoEstimado: parseMonto(r[4]),
       medioPrevisto: _txt(r[5]),
       estado: normalizarEstado(r[6]),
       recibidoPor: _txt(r[7]),
       recibidoEl: _txt(r[8]),
       pago: normalizarPago(r[9]),
-      montoPagado: _numero(r[10]),
+      montoPagado: parseMonto(r[10]),
       medioPagoReal: _txt(r[11]),
       refMovimiento: _txt(r[12]),
       origen: _txt(r[13]) || 'manual',
@@ -478,7 +499,7 @@ async function _leerSemanal(api) {
     out.push({
       id: _txt(r[0]),
       dia,
-      orden: _numero(r[2]),
+      orden: parseMonto(r[2]),
       tipo: normalizarTipo(r[3]),
       proveedor: _txt(r[4]),
       nota: _txt(r[5]),
@@ -516,7 +537,7 @@ async function _leerItems(api) {
       id: _txt(r[0]),
       pedidoId: _txt(r[1]),
       producto: _txt(r[2]),
-      cantidad: _numero(r[3]) || 1,
+      cantidad: parseMonto(r[3]) || 1,
       unidad: _txt(r[4]) || 'Unidad',
       estado: normalizarEstadoItem(r[5]),
       nota: _txt(r[6]),
@@ -567,7 +588,7 @@ async function agregarItems(pedidoId, items = [], { origen = 'manual' } = {}) {
   const limpios = (Array.isArray(items) ? items : [])
     .map(x => ({
       producto: _txt(x && x.producto).slice(0, PRODUCTO_MAX),
-      cantidad: _numero(x && x.cantidad) || 1,
+      cantidad: parseMonto(x && x.cantidad) || 1,
       unidad: (_txt(x && x.unidad) || 'Unidad').slice(0, UNIDAD_MAX),
       nota: _txt(x && x.nota).slice(0, NOTAS_MAX),
     }))
@@ -933,7 +954,7 @@ async function crearPedido(datos = {}) {
     fecha,
     proveedor,
     detalle: _txt(datos.detalle).slice(0, DETALLE_MAX),
-    costoEstimado: _numero(datos.costoEstimado),
+    costoEstimado: montoEntrante(datos.costoEstimado),
     medioPrevisto: _txt(datos.medioPrevisto),
     estado: normalizarEstado(datos.estado),
     recibidoPor: '',
@@ -993,7 +1014,7 @@ async function actualizarPedido(id, cambios = {}) {
     nuevo.proveedor = p;
   }
   if (tiene('detalle')) nuevo.detalle = _txt(cambios.detalle).slice(0, DETALLE_MAX);
-  if (tiene('costoEstimado')) nuevo.costoEstimado = _numero(cambios.costoEstimado);
+  if (tiene('costoEstimado')) nuevo.costoEstimado = montoEntrante(cambios.costoEstimado);
   if (tiene('medioPrevisto')) nuevo.medioPrevisto = _txt(cambios.medioPrevisto);
   // La intencion de pago SI se puede corregir (a diferencia de J/K/L, que son
   // el hecho y solo los escribe marcarRecibido): decir "esto en realidad ya
@@ -1048,7 +1069,7 @@ async function marcarRecibido(id, { pago = 'no', monto = 0, medioPago = '', ref 
     recibidoPor: _txt(usuario) || actual.recibidoPor,
     recibidoEl: actual.recibidoEl || hoyAR(),
     pago: normalizarPago(pago),
-    montoPagado: _numero(monto) || actual.montoPagado,
+    montoPagado: montoEntrante(monto) || actual.montoPagado,
     medioPagoReal: _txt(medioPago) || actual.medioPagoReal,
     refMovimiento: _txt(ref) || actual.refMovimiento,
     actualizado: new Date().toISOString(),
@@ -1208,7 +1229,7 @@ async function actualizarSemanal(id, cambios = {}) {
 
   // Posición dentro del día de destino: la que vino, o al final.
   const destino = items.filter(s => s.dia === nuevo.dia && s.id !== nuevo.id);
-  const pos = tiene('orden') ? Math.max(0, Math.min(destino.length, Math.trunc(_numero(cambios.orden)))) : destino.length;
+  const pos = tiene('orden') ? Math.max(0, Math.min(destino.length, Math.trunc(parseMonto(cambios.orden)))) : destino.length;
   destino.splice(pos, 0, nuevo);
 
   const reenumerar = [...destino];
