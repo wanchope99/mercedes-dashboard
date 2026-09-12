@@ -139,6 +139,43 @@ function run(t) {
   t.ok(html.includes('colorDeMarca()'), 'CHART_COLORS toma el color de marca del CSS');
   t.ok(!/CHART_COLORS = \['#50251f'/.test(html), 'CHART_COLORS ya no arranca con el bordó escrito a mano');
 
+
+  // ── `hidden` tiene que esconder ───────────────────────────────────────────
+  //
+  // Esto salió a producción y se vio en la app de Mercedes: un círculo bordó
+  // vacío al lado del logo. La causa no es JavaScript —`iniciales[k].hidden =
+  // true` corría perfecto— sino CSS: el atributo `hidden` es `display:none` en
+  // la hoja del NAVEGADOR, y cualquier regla de autor que declare `display` le
+  // gana.
+  //
+  // La prueba del DOM de mentira de más abajo no podía agarrarlo, y no es un
+  // descuido: ahí no hay hoja de estilos, así que `hidden = true` "funciona".
+  // Lo único que puede fijar esto es mirar el CSS.
+  const conHidden = [...html.matchAll(/<(\w+)([^>]*\bhidden\b[^>]*)>/g)]
+    .map(m => (m[2].match(/class="([^"]*)"/) || [])[1])
+    .filter(Boolean)
+    .flatMap(c => c.split(/\s+/));
+  t.ok(conHidden.length > 0, 'hay elementos en el markup que se esconden con el atributo hidden');
+
+  // Se busca con operaciones de texto y NO con un RegExp construido desde un
+  // string: la primera versión de esta prueba hacía `new RegExp('\.' + clase +
+  // ...)`, las barras se perdieron en el camino y el regex quedó en
+  // `.logo-inicials*{`, que no matchea nada. O sea, la afirmación pasaba siempre
+  // y no probaba nada. Mismo modo de falla que el repo ya tiene anotado.
+  const declaraDisplay = clase => {
+    const i = html.indexOf('.' + clase + ' {');
+    if (i === -1) return false;
+    const fin = html.indexOf('}', i);
+    return fin > -1 && html.slice(i, fin).includes('display:');
+  };
+  const conDisplay = [...new Set(conHidden)].filter(declaraDisplay);
+  t.ok(conDisplay.length > 0,
+    `hay al menos una clase que se esconde con hidden Y declara display (${conDisplay.join(', ')}): sin eso esta prueba no probaría nada`);
+
+  const iH = html.indexOf('[hidden]');
+  const reglaGlobal = iH > -1 && html.slice(iH, html.indexOf('}', iH)).includes('display: none !important');
+  t.ok(reglaGlobal,
+    `${conDisplay.join(', ')} declaran display, así que la regla global [hidden] { display: none !important } es obligatoria`);
   // ── 5. El logo ────────────────────────────────────────────────────────────
   conEntorno({ NEGOCIO_ID: 'doc', NEGOCIO_NOMBRE: 'DOC Café', NEGOCIO_LOGO: '', NEGOCIO_COLOR: '#1b7f5a' }, cfg => {
     t.eq(cfg.NEGOCIO_LOGO, '', 'fuera de Mercedes, sin variable, NO se sirve /logo.jpg');

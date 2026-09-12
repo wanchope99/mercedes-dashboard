@@ -27,6 +27,18 @@
       --purple: #a05ce0; --radius: 12px;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    /* `hidden` tiene que esconder, siempre.
+       El atributo es `display: none` en la hoja de estilos DEL NAVEGADOR, y
+       cualquier regla de autor que declare `display` le gana — no por
+       especificidad, sino porque el autor siempre le gana al navegador. El
+       12/09/2026 eso salió a producción: `.logo-inicial` declara
+       `display: inline-flex` para centrar la letra adentro del círculo, así que
+       el <span hidden> del fallback del logo se dibujaba igual y Bar Mercedes
+       mostraba un círculo bordó vacío al lado de su logo. El JavaScript estaba
+       bien —`iniciales[k].hidden = true` corría—; lo que fallaba era el CSS.
+       Va global y con !important porque es la única forma de que la próxima
+       clase que declare `display` no reabra el mismo agujero en silencio. */
+    [hidden] { display: none !important; }
     /* Red de contención: si algo se pasa de ancho, que no arrastre la página.
        `clip` y no `hidden` porque hidden crea un contenedor de scroll y rompe el
        position:sticky del header. */
