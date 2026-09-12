@@ -11,6 +11,15 @@
     :root {
       --bg: #0f0f13; --surface: #1a1a22; --surface2: #22222e; --border: #2e2e3e;
       --text: #e8e8f0; --text-muted: #7878a0; --accent: #50251f;
+      /* Los cinco de abajo salen del color de marca y NO se escriben a mano: el
+         server los calcula en marca.js y los inyecta como un <style> al final
+         del <head>, que por ser la última regla :root le gana a ésta. Lo que
+         queda acá son los valores de Mercedes, y son el fallback real — si la
+         inyección falla, la app se ve como siempre en vez de quedar sin colores.
+         --on-accent es la tinta que va ENCIMA del accent: nunca un literal, o el
+         día que el accent sea claro hay ocho botones ilegibles. */
+      --accent-hover: #6b3530; --accent-soft: rgba(80, 37, 31, 0.18); --on-accent: #f0e6d3;
+      --accent2: #e08a5c; --on-accent2: #17171f;
       --green: #4caf82; --green-dim: rgba(76,175,130,0.15);
       --red: #e05c5c; --red-dim: rgba(224,92,92,0.15);
       --blue: #5c8fe0; --blue-dim: rgba(92,143,224,0.15);
@@ -26,14 +35,21 @@
 
     header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 32px; display: flex; align-items: center; justify-content: space-between; height: 64px; position: sticky; top: 0; z-index: 100; }
     .logo { display: flex; align-items: center; gap: 12px; }
-    .logo-mark { width: 36px; height: 36px; background: var(--accent); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; color: #0f0f13; }
+    /* Lo que se ve cuando el negocio no dio logo: su inicial sobre el color de
+       marca. Existe porque el default de NEGOCIO_LOGO ya no puede ser /logo.jpg
+       —ese archivo es el logo de Mercedes y el repo es público—, así que una
+       instancia sin logo tiene que verse como ella misma y no como otro bar. */
+    .logo-inicial { border-radius: 50%; background: var(--accent); color: var(--on-accent);
+                    display: inline-flex; align-items: center; justify-content: center;
+                    font-weight: 700; letter-spacing: .5px; flex: none; }
+    .logo-mark { width: 36px; height: 36px; background: var(--accent); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; color: var(--on-accent); }
     .logo-text { font-weight: 600; font-size: 18px; }
     .header-right { display: flex; align-items: center; gap: 16px; }
     #last-updated { font-size: 12px; color: var(--text-muted); }
     .btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-family: inherit; transition: all 0.2s; }
     .btn:hover { background: var(--border); }
-    .btn-accent { background: var(--accent); border-color: var(--accent); color: #f0e6d3; font-weight: 600; }
-    .btn-accent:hover { background: #6b3530; }
+    .btn-accent { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+    .btn-accent:hover { background: var(--accent-hover); }
 
     /* Tabs */
     /* Las dos tiras de navegación se desbordan a sí mismas, NO al documento. Sin
@@ -89,7 +105,7 @@
     input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.6); cursor: pointer; }
     input[type="text"]::placeholder { color: var(--text-muted); }
     .filter-mode-btn { padding: 6px 14px; border-radius: 6px; font-size: 12px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer; font-family: inherit; transition: all 0.2s; }
-    .filter-mode-btn.active { background: var(--accent); color: #f0e6d3; border-color: var(--accent); font-weight: 600; }
+    .filter-mode-btn.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
     /* Atajos de rango: "Hoy · 7 días · Este mes · Mes pasado".
        Más chicos que .filter-mode-btn a propósito — son un acelerador, no el
        control principal de la barra; el rango sigue siendo el par de fechas. */
@@ -97,7 +113,7 @@
     .rango-preset-btn { padding: 5px 10px; border-radius: 6px; font-size: 11px; border: 1px solid var(--border);
       background: transparent; color: var(--text-muted); cursor: pointer; font-family: inherit; transition: all 0.15s; white-space: nowrap; }
     .rango-preset-btn:hover { color: var(--text); border-color: var(--text-muted); }
-    .rango-preset-btn.active { background: var(--accent); color: #f0e6d3; border-color: var(--accent); font-weight: 600; }
+    .rango-preset-btn.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
     #range-filters { display: none; align-items: center; gap: 8px; }
     #mes-filters { display: flex; align-items: center; gap: 8px; }
     /* Switch Gráfico/Datos de Reportes: pegado a la derecha de la barra de filtros */
@@ -228,12 +244,12 @@
     .serv-grp-collapsed .group-chevron { transform: rotate(-90deg); }
     .pg-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; cursor: pointer; font-size: 13px; transition: border-color 0.15s; }
     .pg-item:hover { border-color: var(--accent); }
-    .pg-item.selected { border-color: var(--accent); background: rgba(107,53,48,0.18); }
+    .pg-item.selected { border-color: var(--accent); background: var(--accent-soft); }
     .pg-item .pg-item-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
     .pg-item .pg-item-monto { font-weight: 700; color: var(--red); white-space: nowrap; }
     .pv-toggle { display: inline-flex; margin-left: 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; vertical-align: middle; }
     .pv-btn { padding: 4px 12px; font-size: 11px; background: none; border: none; color: var(--text-muted); cursor: pointer; font-family: inherit; font-weight: 600; text-transform: none; letter-spacing: 0; }
-    .pv-btn.active { background: var(--accent); color: #f0e6d3; }
+    .pv-btn.active { background: var(--accent); color: var(--on-accent); }
     .cuota-grp-header { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--surface2); font-size: 12px; font-weight: 600; }
     .cuota-grp-header .restante { margin-left: auto; color: var(--red); font-weight: 700; }
     .cuota-grp-header .pagadas { color: var(--text-muted); font-weight: 400; }
@@ -398,8 +414,8 @@
        que un .btn común. No se toca eso acá para no cambiar pantallas viejas. */
     /* Naranja y no var(--accent): el accent es un marrón muy oscuro, ilegible
        como fondo de un botón. */
-    .btn-acento { background: var(--orange); border-color: var(--orange); color: #17171f; font-weight: 600; }
-    .btn-acento:hover { filter: brightness(1.08); background: var(--orange); }
+    .btn-acento { background: var(--accent2); border-color: var(--accent2); color: var(--on-accent2); font-weight: 600; }
+    .btn-acento:hover { filter: brightness(1.08); background: var(--accent2); }
     .btn-acento:disabled { opacity: 0.4; cursor: default; filter: none; }
     .prop-persona-row { display: grid; grid-template-columns: 26px 1fr auto auto; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); margin-bottom: 8px; cursor: pointer; }
     .prop-persona-row:hover { border-color: #5a5a7a; }
@@ -527,7 +543,7 @@
                 color: var(--orange); font-size: 12px; line-height: 1.6; margin-bottom: 12px; }
     /* Lo que se tocó y todavía no se guardó: se marca, para que la diferencia
        entre "lo dije" y "quedó escrito" nunca sea invisible. */
-    .cc-item.tocado { background: rgba(80,37,31,.18); }
+    .cc-item.tocado { background: var(--accent-soft); }
     button.cc-chip { cursor: pointer; font-family: inherit; }
     button.cc-chip:hover { filter: brightness(1.25); }
     /* ─── En qué estado está, de un vistazo ───────────────────────────────────
@@ -897,7 +913,7 @@
                         cursor: pointer; border-radius: 7px; padding: 4px 10px; font-size: 11px;
                         font-family: inherit; margin-left: 6px; }
     .ped-saldo button:hover { background: var(--border); }
-    .ped-saldo button.puesto { background: var(--accent); border-color: var(--accent); color: #f0e6d3; }
+    .ped-saldo button.puesto { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
     .ped-pegar { border: 1px dashed var(--border); border-radius: 10px; padding: 14px; text-align: center;
                  font-size: 12px; color: var(--text-muted); margin-top: 10px; }
     .ped-pegar.activo { border-color: var(--accent); background: var(--surface2); }
@@ -981,13 +997,13 @@
     .pp-btn { flex: 1 1 140px; padding: 10px 12px; font-size: 12px; font-weight: 600; font-family: inherit;
               background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted);
               border-radius: 8px; cursor: pointer; text-align: left; line-height: 1.3; }
-    .pp-btn.activo { background: var(--accent); border-color: var(--accent); color: #f0e6d3; }
+    .pp-btn.activo { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
     #f-previsto-wrap .pp-grupo { flex-direction: column; }
     #f-previsto-wrap .pp-btn { flex: none; }
     .pp-btn small { display: block; font-weight: 400; opacity: 0.75; font-size: 10px; margin-top: 2px; }
     .ped-atajos { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
     .ped-atajos .btn { padding: 6px 12px; font-size: 12px; }
-    .ped-atajos .btn.activo { background: var(--accent); border-color: var(--accent); color: #f0e6d3; }
+    .ped-atajos .btn.activo { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 
     /* ── El cuadro semanal ──────────────────────────────────────────────── */
     /* Cuántas columnas lo dice renderPedidosSemana() por --ped-cols: son cinco
@@ -1219,8 +1235,8 @@
     .login-field label { display: block; font-size: 12px; font-weight: 500; color: var(--text-muted); margin-bottom: 6px; }
     .login-field input { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 11px 14px; border-radius: 8px; font-size: 14px; font-family: inherit; outline: none; }
     .login-field input:focus { border-color: #5a5a7a; }
-    .login-btn { width: 100%; background: var(--accent); border: none; color: #f0e6d3; padding: 12px; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: inherit; cursor: pointer; margin-top: 8px; transition: background 0.2s; }
-    .login-btn:hover { background: #6b3530; }
+    .login-btn { width: 100%; background: var(--accent); border: none; color: var(--on-accent); padding: 12px; border-radius: 8px; font-size: 15px; font-weight: 600; font-family: inherit; cursor: pointer; margin-top: 8px; transition: background 0.2s; }
+    .login-btn:hover { background: var(--accent-hover); }
     .login-error { color: var(--red); font-size: 13px; margin-top: 12px; text-align: center; min-height: 20px; }
 
     /* ── Arqueo de Cajas ── */
@@ -1824,6 +1840,7 @@
   <div class="login-box">
     <div class="login-logo">
       <img src="/logo.jpg" alt="Bar Mercedes" data-negocio="logo" style="width:44px;height:44px;border-radius:50%;object-fit:cover;" />
+      <span class="logo-inicial" data-negocio="inicial" style="width:44px;height:44px;font-size:19px" hidden></span>
       <div>
         <div class="login-title" data-negocio="nombre">Bar Mercedes</div>
       </div>
@@ -1844,6 +1861,7 @@
 <header>
   <div class="logo">
     <img src="/logo.jpg" alt="Bar Mercedes" data-negocio="logo" style="width:36px;height:36px;border-radius:50%;object-fit:cover;" />
+    <span class="logo-inicial" data-negocio="inicial" style="width:36px;height:36px;font-size:16px" hidden></span>
     <div><div class="logo-text" data-negocio="nombre">Bar Mercedes</div></div>
   </div>
   <div class="header-right">
@@ -5235,11 +5253,29 @@ function aplicarConfigNegocio() {
     var titulos = document.querySelectorAll('[data-negocio="nombre"]');
     for (var i = 0; i < titulos.length; i++) titulos[i].textContent = NEGOCIO.nombre;
   }
+  // El logo se decide en las DOS direcciones, y esa es la diferencia con antes.
+  // Hasta el 12/09/2026 esto era `if (NEGOCIO.logo)`, así que un negocio sin
+  // logo se quedaba con el <img src="/logo.jpg"> escrito en el HTML — que es el
+  // logo de Mercedes. Para un cliente externo eso es lo primero que ve al
+  // entrar. Sin logo se muestra su inicial sobre su color de marca.
+  var logos = document.querySelectorAll('[data-negocio="logo"]');
+  var iniciales = document.querySelectorAll('[data-negocio="inicial"]');
+  var k;
   if (NEGOCIO.logo) {
-    var logos = document.querySelectorAll('[data-negocio="logo"]');
-    for (var j = 0; j < logos.length; j++) {
-      logos[j].setAttribute('src', NEGOCIO.logo);
-      logos[j].setAttribute('alt', NEGOCIO.nombre || '');
+    for (k = 0; k < logos.length; k++) {
+      logos[k].setAttribute('src', NEGOCIO.logo);
+      logos[k].setAttribute('alt', NEGOCIO.nombre || '');
+      logos[k].hidden = false;
+    }
+    for (k = 0; k < iniciales.length; k++) iniciales[k].hidden = true;
+  } else {
+    var letra = (NEGOCIO.nombre || '').trim().charAt(0).toUpperCase();
+    for (k = 0; k < logos.length; k++) logos[k].hidden = true;
+    for (k = 0; k < iniciales.length; k++) {
+      iniciales[k].textContent = letra;
+      // Sin nombre no hay inicial que poner, y un círculo vacío es peor que
+      // nada: se deja todo oculto.
+      iniciales[k].hidden = !letra;
     }
   }
   llenarSelectsDeCajas();
@@ -7183,7 +7219,18 @@ function renderTablaResumenSingle(m, head, body) {
 }
 
 // ─── Charts ───────────────────────────────────────────────────────────────────
-const CHART_COLORS = ['#50251f','#4caf82','#5c8fe0','#e05c5c','#e08a5c','#a05ce0','#5ce0c9','#c9a84c'];
+// El primero es el color de marca y se LEE del CSS, no se escribe: el server
+// inyecta --accent según el negocio, y un literal acá haría que los gráficos de
+// otro bar salieran en el bordó de Mercedes. Los otros siete son la paleta de
+// series y no son de marca — el verde, el rojo y el azul significan algo en esta
+// app, así que no se tocan por negocio.
+function colorDeMarca() {
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+    return v || '#50251f';
+  } catch (e) { return '#50251f'; }
+}
+const CHART_COLORS = [colorDeMarca(),'#4caf82','#5c8fe0','#e05c5c','#e08a5c','#a05ce0','#5ce0c9','#c9a84c'];
 function destroyChart(id) { if (state.charts[id]) { state.charts[id].destroy(); delete state.charts[id]; } }
 
 function renderCharts(resumen) {

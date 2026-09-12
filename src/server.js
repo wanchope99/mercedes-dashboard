@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const jwt = require('jsonwebtoken');
+const fs = require('fs');
 const google = require('@googleapis/sheets');
 const {
   getMovimientos, getResumenMensual, getActividadPorDia,
@@ -43,6 +44,7 @@ const regimenFiscal = require('./regimen-fiscal');
 const fiscalProv = require('./fiscal-proveedores');
 const { iniciarCron } = require('./cron');
 const { cargarEstadoCaja, guardarEstadoCaja } = require('./estado-caja');
+const marca = require('./marca');
 // `leerMonto()` es el único lector de importes que entran por el body. NUNCA
 // usar Number() para un importe tipeado: Number("200000,93") es NaN y
 // Number("$200000.93") también, así que los centavos entraban como cero sin que
@@ -5897,10 +5899,53 @@ app.get('/api/fudo/probe-stock-single', authMiddleware, adminOnly, async (req, r
 app.use(proveedoresRoutes({ authMiddleware, adminOnly, registrarGastoEnLibro, registrarCompra, buscarCompraParaFactura }));
 
 // ─── Static y fallback ────────────────────────────────────────────────────────
+//
+// El HTML se sirve CON LOS COLORES DEL NEGOCIO ADENTRO, y no es una optimización.
+// La config del negocio viaja por `GET /api/config`, que es un `fetch` que sale
+// después de que la página se pintó; los desplegables y el nombre pueden
+// llenarse ahí sin que se note, pero un color no: la pantalla de login es lo
+// primero que aparece, así que el dueño de otro negocio vería el bordó de
+// Mercedes medio segundo CADA VEZ que entra a su app.
+//
+// Va antes de `express.static` porque static contesta `/` con index.html por su
+// cuenta (su opción `index`), así que declarado después no se usaría nunca —
+// exactamente el mismo modo de falla que este archivo ya documenta para el
+// guard de módulos apagados y para `/api/servicios/agregado`.
+//
+// Se inyecta al final del `<head>`, después del `<style>` que trae los defaults:
+// son dos reglas `:root` con la misma especificidad, así que gana la última. Y
+// se relee sólo cuando el archivo cambió —`index.html` pesa más de un mega y no
+// tiene build—, lo que además mantiene vivo `npm run dev`, donde nodemon no
+// mira los .html y no reinicia al editarlos.
+const HTML_INDEX = path.join(__dirname, '../public/index.html');
+const BLOQUE_MARCA = `<style id="marca-negocio">${marca.bloqueCss(negocio.PALETA)}</style>\n`;
+let _htmlCache = null;
+let _htmlMtime = 0;
+
+function htmlConMarca() {
+  const mtime = fs.statSync(HTML_INDEX).mtimeMs;
+  if (_htmlCache && mtime === _htmlMtime) return _htmlCache;
+  const crudo = fs.readFileSync(HTML_INDEX, 'utf8');
+  // Sin `</head>` no se inyecta nada y se sirve el archivo tal cual: la app con
+  // los colores de la casa es infinitamente mejor que una pantalla en blanco.
+  const i = crudo.lastIndexOf('</head>');
+  _htmlCache = i === -1 ? crudo : crudo.slice(0, i) + BLOQUE_MARCA + crudo.slice(i);
+  _htmlMtime = mtime;
+  return _htmlCache;
+}
+
+function servirApp(req, res) {
+  try {
+    res.type('html').send(htmlConMarca());
+  } catch (err) {
+    console.error('No se pudo servir index.html:', err.message);
+    res.sendFile(HTML_INDEX);
+  }
+}
+
+app.get(['/', '/index.html'], servirApp);
 app.use(express.static(path.join(__dirname, '../public')));
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/index.html'));
-});
+app.get('*', servirApp);
 
 // Antes de aceptar tráfico: si el proceso anterior murió (deploy, crash) con la
 // caja abierta, restaurar esa sesión desde la planilla en vez de perderla en
@@ -5914,6 +5959,23 @@ app.get('*', (req, res) => {
   }
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`${negocio.NEGOCIO_NOMBRE} — gestión corriendo en puerto ${PORT}`);
+    // La marca, dicha en voz alta al arrancar. Mismo criterio que las cuentas y
+    // que ALLOWED_USERS en el bot: una instancia que se ve como otro negocio no
+    // da ningún error, así que si no se dice acá no se entera nadie.
+    if (!negocio.esMercedes()) {
+      if (negocio.NEGOCIO_LOGO === '/logo.jpg') {
+        console.error(
+          'NEGOCIO_LOGO apunta a /logo.jpg, que es el logo de Bar Mercedes ' +
+          'guardado en el repo. Este negocio va a mostrar el logo de otro bar. ' +
+          'Seteala con la URL del logo del cliente.'
+        );
+      } else if (!negocio.NEGOCIO_LOGO) {
+        console.log('Sin NEGOCIO_LOGO: se muestra la inicial del negocio sobre el color de marca.');
+      }
+      if (!negocio.NEGOCIO_COLOR) {
+        console.log('Sin NEGOCIO_COLOR: se usan los colores de Mercedes (bordó).');
+      }
+    }
     iniciarCron();
   });
 })();

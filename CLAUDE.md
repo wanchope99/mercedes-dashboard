@@ -111,6 +111,47 @@ like the Plan group (`/api/proyecciones`, `/api/calculadora`,
 setting `NOMINA_SHEET_ID` or `STOCKS_SHEET_ID` reports them unconfigured and
 nothing else breaks. That mechanism predates all of this and was left alone.
 
+**The brand is two colours and a logo, and neither may be a literal any more
+(2026-09-12).** The third client — DOC Café, Villa Crespo — arrived and the app
+still had one brand colour written into the CSS (`--accent: #50251f`, used 73
+times via `var()`) plus a cream ink `#f0e6d3` written by hand in **eight** places.
+`NEGOCIO_COLOR` / `NEGOCIO_COLOR_2` are what a client is asked for, normally read
+off their logo; `src/marca.js` derives the rest.
+
+**The ink is computed, never chosen, and that is the whole reason this is a
+module instead of two more env vars.** `#f0e6d3` is legible on a very dark bordó
+and illegible on anything light — this file already documented the symptom
+(`.btn-acento` uses orange with a comment saying the accent is "ilegible como
+fondo de un botón"). `tintaSobre()` picks by WCAG relative luminance and requires
+**4.5**, the minimum for normal text. When neither of the app's two inks reaches
+it — a mid green like `#1b7f5a` gives 4.01 against the cream — it falls out to
+pure white or black. `tests/marca.test.js` measures the real contrast over
+thirteen colours rather than trusting the choice.
+
+**It is injected into the HTML, not served by `GET /api/config`.** That config
+travels in a `fetch` that leaves after the page painted; a dropdown can fill in
+late and a colour cannot, because the login screen is the first thing drawn. The
+handler is declared **above `express.static`** — static answers `/` with
+index.html on its own, so below it the handler would never run and nothing would
+say so: the same silent failure this file documents for the módulos guard and for
+`/api/servicios/agregado`. The block goes last in `<head>`, so its `:root` beats
+the file's; the literals stay in the file as the fallback when injection fails.
+
+**The semantic colours are deliberately NOT brandable** — green, red, blue,
+orange mean money in, money out, info, warning. A client whose brand is red would
+otherwise make income unreadable.
+
+**`NEGOCIO_LOGO` no longer defaults to `/logo.jpg` outside Mercedes, and the repo
+being public is the reason.** That file *is* Bar Mercedes' logo, so an instance
+nobody set the variable on opened its login screen showing another bar's brand —
+no error, and the first thing the client sees. Outside Mercedes the default is
+**empty** (the `CUENTAS_PROPINAS` criterion: a foreign value does the job wrong in
+silence, an empty one is visible) and the app draws the business's initial over
+its brand colour. The value ends up in an `<img src>`, so **a full URL works and
+a client's logo never enters the repo**. `aplicarConfigNegocio` now decides in
+both directions — the old `if (NEGOCIO.logo)` left the hardcoded `/logo.jpg` in
+place — and the startup log shouts if the variable still points at it.
+
 **localStorage was deliberately NOT prefixed.** Each instance is a different
 Railway domain, so browser storage is already isolated per origin; prefixing
 would only have logged every Mercedes user out once, which is precisely what this

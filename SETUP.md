@@ -142,8 +142,15 @@ Se cargan separados por coma, y vale tanto el `@username` como el **user id
 numérico** de Telegram. Conviene el id: un username se libera y lo puede reclamar
 otra persona, y el id no cambia nunca.
 
+**La arroba da igual: `@santiago` y `santiago` son la misma entrada.** El bot la
+saca al cargar la lista. Hasta el 12/09/2026 no lo hacía, y eso importaba porque
+Telegram entrega el username SIN arroba: una lista cargada con arrobas no
+matcheaba con nadie, y desde el teléfono eso se ve idéntico a un bot caído, sin
+un error en el log que lo diga. Apareció preparando el alta de un cliente
+externo, que es justo quien no tiene a quién preguntarle.
+
 ```
-ALLOWED_USERS=gonzalo_ok,123456789,charly_bar
+ALLOWED_USERS=gonzalo_ok,123456789,@charly_bar
 ```
 
 **`FOTO_LADO_MINIMO` está en 0, y eso es un resultado medido, no un pendiente.**
@@ -332,7 +339,9 @@ Todo lo que define de quién es una instancia vive en `src/config-negocio.js`.
 | `NEGOCIO_NOMBRE` | Título de la pestaña, pantalla de login, encabezado | `Bar Mercedes` |
 | `NEGOCIO_CIUDAD` | Va al prompt de los tres agentes | `Buenos Aires` |
 | `NEGOCIO_DESCRIPCION` | La frase entera detrás de "Sos el analista de datos …" | `del bar Mercedes (Buenos Aires)` |
-| `NEGOCIO_LOGO` | Ruta dentro de `public/` | `/logo.jpg` |
+| `NEGOCIO_LOGO` | El logo del negocio. Acepta una URL entera | `/logo.jpg` **sólo en Mercedes**; vacío en cualquier otra instancia |
+| `NEGOCIO_COLOR` | El color primario de la marca, en hex (`#1b7f5a`) | el bordó de Mercedes |
+| `NEGOCIO_COLOR_2` | El secundario: el botón de acción y poco más | el naranja que ya usaba `.btn-acento` |
 
 **`NEGOCIO_ID` es lo primero que hay que setear en una instancia nueva.** Sin él,
 la app le sirve a ese negocio el contexto operativo de Mercedes —Mercado Pago
@@ -341,6 +350,66 @@ saber que esos hechos no son suyos: los va a usar para explicar sus números. Ca
 instancia lleva su `src/contexto-<NEGOCIO_ID>.md`, y la que no lo tiene corre sin
 contexto, que es lo que la app hacía antes de agosto: informes más ingenuos,
 nunca ajenos.
+
+
+### El logo NO va en el repo
+
+`public/logo.jpg` es el logo de Bar Mercedes y **este repositorio es público**.
+Hasta el 12/09/2026 ése era el default de `NEGOCIO_LOGO` para todas las
+instancias, así que un cliente al que nadie le seteaba la variable abría su app y
+veía el logo de un bar de Palermo en la pantalla de login — sin ningún error, y
+siendo lo primero que ve.
+
+Ahora **fuera de Mercedes el default es vacío**, mismo criterio que
+`CUENTAS_PROPINAS`: una lista ajena hace el trabajo mal en silencio, una vacía se
+ve. Sin logo, la app dibuja la inicial del negocio sobre su color de marca.
+
+El logo de un cliente **no se agrega a `public/`**: sería subir la marca de un
+tercero a un repo público y, peor, pedir un deploy para cambiarla. El valor
+termina en el `src` de un `<img>`, así que una URL entera sirve:
+
+```
+NEGOCIO_LOGO=https://doccafe.com.ar/logo.png
+```
+
+Al arrancar, una instancia que no es Mercedes dice en el log si le falta el logo
+o el color, y **grita** si `NEGOCIO_LOGO` quedó apuntando a `/logo.jpg`.
+
+### Los colores: se piden dos y se calculan seis
+
+Al dueño se le piden dos, y lo normal es sacarlos de su logo. El resto lo calcula
+`src/marca.js` y se inyecta como un `<style>` al final del `<head>`:
+
+| Variable CSS | De dónde sale |
+|---|---|
+| `--accent` | `NEGOCIO_COLOR`, tal cual |
+| `--accent-hover` | el mismo, más claro si es oscuro y más oscuro si es claro |
+| `--accent-soft` | el mismo al 18%, para el fondo de algo seleccionado |
+| `--on-accent` | **la tinta que va encima**, elegida por contraste |
+| `--accent2` / `--on-accent2` | lo mismo para el secundario |
+
+**La tinta no se pide: se calcula, y es lo único que hace que esto no pueda salir
+mal.** Estaba escrita a mano como `#f0e6d3` en ocho lugares, una crema elegida
+contra un bordó muy oscuro, que es ilegible sobre cualquier color claro. Se
+resuelve con la luminancia relativa de la WCAG y se exige 4,5 de contraste, que
+es el mínimo para texto normal. Si ninguna de las dos tintas de la app llega —le
+pasa a un verde medio como `#1b7f5a`, que da 4,01 contra la crema— se sale a
+blanco o negro puro. `tests/marca.test.js` lo mide sobre trece colores.
+
+**Va inyectado en el HTML y no por `GET /api/config`** porque esa config viaja en
+un `fetch` que sale después de que la página se pintó: el nombre y los
+desplegables pueden llenarse ahí sin que se note, un color no. La pantalla de
+login es lo primero que aparece, así que por `fetch` el dueño vería el bordó de
+Mercedes medio segundo cada vez que entra.
+
+**Lo que NO se puede cambiar por negocio, a propósito: el verde, el rojo, el azul
+y el naranja.** No son marca, son significado — entra plata, sale plata, aviso.
+Si el primario de alguien es rojo y los ingresos también, la pantalla deja de
+poder leerse.
+
+**Sin `NEGOCIO_COLOR` no se calcula nada** y vuelven los seis literales que
+estaban en el CSS. Misma regla que gobierna `config-negocio.js`: la derivación
+existe para la instancia nueva y no corre en la que ya está en producción.
 
 ### Las cajas
 

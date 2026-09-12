@@ -64,7 +64,18 @@ if APP_BASE_URL and not APP_BASE_URL.startswith(("http://", "https://")):
     APP_BASE_URL = "https://" + APP_BASE_URL
 # Token de servicio que la app valida en el header X-Ingest-Token.
 INGEST_TOKEN = os.environ["PROVEEDORES_INGEST_TOKEN"]
-ALLOWED_USERS = set(u.strip() for u in os.environ.get("ALLOWED_USERS", "").split(",") if u.strip())
+# `@santiago` y `santiago` son la misma persona, y acá se vuelven la misma
+# entrada. Telegram entrega `user.username` SIN arroba, así que una lista
+# cargada con arrobas no matchea con nadie: el bot queda mudo para su dueño y
+# desde el teléfono eso se ve idéntico a un bot caído, sin un error en el log
+# que lo diga. Y la arroba es justamente como una persona escribe su propio
+# usuario cuando se lo pedís por mensaje. El id numérico no la lleva nunca, así
+# que normalizar no le cambia nada al que carga ids.
+ALLOWED_USERS = set(
+    u.strip().lstrip("@")
+    for u in os.environ.get("ALLOWED_USERS", "").split(",")
+    if u.strip().lstrip("@")
+)
 
 HTTP_TIMEOUT = float(os.environ.get("BOT_HTTP_TIMEOUT", "120"))
 

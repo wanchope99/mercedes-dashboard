@@ -23,6 +23,8 @@
 // lista de cajas vacía) parece más limpio y es la forma de romper Mercedes en
 // silencio. El default correcto es el valor que el código tenía hardcodeado.
 
+const marca = require('./marca');
+
 // ─── Identidad ──────────────────────────────────────────────────────────────
 
 // `NEGOCIO_ID` no es cosmético: elige el archivo de contexto que se le inyecta a
@@ -34,7 +36,38 @@ const NEGOCIO_NOMBRE = (process.env.NEGOCIO_NOMBRE || 'Bar Mercedes').trim();
 // La ciudad viaja al prompt de los tres agentes. No es decorado: cambia cómo lee
 // el modelo un feriado, una alícuota de Ingresos Brutos o un día de lluvia.
 const NEGOCIO_CIUDAD = (process.env.NEGOCIO_CIUDAD || 'Buenos Aires').trim();
-const NEGOCIO_LOGO = (process.env.NEGOCIO_LOGO || '/logo.jpg').trim();
+// ─── El logo, y por qué su default cambia fuera de Mercedes ─────────────────
+//
+// `/logo.jpg` es un archivo que está EN EL REPO, y el repo es público: es el
+// logo de Mercedes. Como default global, una instancia nueva a la que nadie le
+// setea la variable abre su app con el logo de un bar de Palermo en la pantalla
+// de login. Para un cliente externo eso no es un detalle: es lo primero que ve.
+//
+// Así que fuera de Mercedes el default es VACÍO y no este archivo — el mismo
+// criterio que CUENTAS_PROPINAS, que fuera de Mercedes no ofrece Galicia y
+// Brubank: una lista ajena hace el trabajo mal en silencio, una vacía se ve.
+// Sin logo, la app dibuja la inicial del negocio sobre su color de marca.
+//
+// **El logo de un cliente NO se agrega a `public/`.** Sería subir la marca de un
+// tercero a un repositorio público y, peor, pedir un deploy para cambiarla.
+// `NEGOCIO_LOGO` acepta una URL entera (`https://…/doc.png`) porque el valor
+// termina en el `src` de un `<img>`: donde lo tenga alojado el cliente sirve.
+const NEGOCIO_LOGO = (process.env.NEGOCIO_LOGO || '').trim()
+  || (NEGOCIO_ID === 'mercedes' ? '/logo.jpg' : '');
+
+// ─── Los dos colores de la marca ────────────────────────────────────────────
+//
+// Lo único que se le pide al dueño, y sale de su logo. Todo lo demás —el hover,
+// el fondo suave, y sobre todo LA TINTA QUE VA ENCIMA— lo calcula `marca.js`,
+// que explica por qué no se puede pedir.
+//
+// Sin `NEGOCIO_COLOR` no se calcula nada y vuelven los seis literales que hoy
+// están en el CSS. Misma regla que gobierna este archivo entero, y la misma
+// forma que `_derivar()`: la derivación existe para la instancia nueva, y no
+// corre en la que ya está en producción.
+const NEGOCIO_COLOR = (process.env.NEGOCIO_COLOR || '').trim();
+const NEGOCIO_COLOR_2 = (process.env.NEGOCIO_COLOR_2 || '').trim();
+const PALETA = marca.paleta(NEGOCIO_COLOR, NEGOCIO_COLOR_2);
 
 const esMercedes = () => NEGOCIO_ID === 'mercedes';
 
@@ -248,6 +281,7 @@ function paraElNavegador() {
     id: NEGOCIO_ID,
     nombre: NEGOCIO_NOMBRE,
     logo: NEGOCIO_LOGO,
+    paleta: PALETA,
     cajas: CAJAS,
     cajaEfectivo: CAJA_EFECTIVO,
     cajaMP: CAJA_MP,
@@ -261,6 +295,7 @@ function paraElNavegador() {
 
 module.exports = {
   NEGOCIO_ID, NEGOCIO_NOMBRE, NEGOCIO_CIUDAD, NEGOCIO_LOGO, NEGOCIO_DESCRIPCION, esMercedes,
+  NEGOCIO_COLOR, NEGOCIO_COLOR_2, PALETA,
   CAJAS, CAJA_EFECTIVO, CAJA_MP, CUENTAS_PROPINAS, CAJA_POZO, CAJA_POZO_USD,
   CAJAS_FUERA_DEL_LIBRO, MEDIOS_LIBRO, MEDIOS_PAGO, MEDIOS_COMPRA, GRUPOS_CAJAS,
   MODULOS_OFF, moduloActivo, paraElNavegador,

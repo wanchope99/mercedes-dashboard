@@ -65,6 +65,25 @@ function run(t) {
     t.ok(isAllowed.includes('user is None'), 'is_allowed tolera un update sin usuario');
   }
 
+  // 2b. La lista se normaliza sin la arroba, y esto no es cosmética.
+  //
+  //     Telegram entrega `user.username` SIN arroba. Una lista cargada como
+  //     `@santiago` no matchea con nadie, el bot queda mudo para su dueño y
+  //     desde el teléfono eso se ve igual que un bot caído — sin un error en el
+  //     log que lo diga. Se descubrió preparando el alta de un cliente externo,
+  //     donde nadie va a poder preguntar "¿por qué no me contesta?".
+  const decl = lineas.filter(l => l.includes('ALLOWED_USERS = ')).join('\n');
+  t.ok(decl, 'ALLOWED_USERS se arma en bot.py');
+  t.ok(src.includes('lstrip("@")'),
+    'la arroba se saca al cargar: @santiago y santiago son la misma entrada');
+  // Se saca en las DOS puntas del generador: si sólo se normalizara el valor y
+  // no el filtro, una entrada que es sólo "@" entraría como cadena vacía.
+  const bloqueAllowed = src.slice(src.indexOf('ALLOWED_USERS = set('), src.indexOf('HTTP_TIMEOUT'));
+  t.eq((bloqueAllowed.match(/lstrip\("@"\)/g) || []).length, 2,
+    'la arroba se saca tanto en el valor como en el filtro (un "@" solo no entra como vacío)');
+  t.ok(!/ALLOWED_USERS = set\(u\.strip\(\) for/.test(src),
+    'no volvió la versión que guardaba la arroba tal cual');
+
   // 3. TODO handler que puede escribir chequea permisos. Es la lista completa,
   //    no una muestra: el que falte es justamente el que se olvidó.
   const handlers = ['cmd_arreglo', 'cmd_pendientes', 'handle_photo', 'on_button', 'on_text'];
