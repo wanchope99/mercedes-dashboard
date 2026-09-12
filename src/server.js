@@ -90,30 +90,35 @@ if (!JWT_SECRET) {
 // separadas y no un login compartido porque el JWT lleva el `usuario`, que es lo
 // que después permite mandarle notificaciones a cada uno por su lado.
 //
-// `charly`, `juan` y `ezequiel` son el personal: rol `encargado`. Cada uno con
-// su cuenta por la misma razón —lo que se marca en Pedidos y en Mantenimiento
-// queda firmado con el nombre de quien lo marcó, y con un login compartido eso
-// sería una firma que no dice nada.
+// `charly`, `juan`, `ezequiel` y `griselda` son el personal: rol `encargado`.
+// Cada uno con su cuenta por la misma razón —lo que se marca en Pedidos y en
+// Mantenimiento queda firmado con el nombre de quien lo marcó, y con un login
+// compartido eso sería una firma que no dice nada.
 //
 // ─── QUIÉN ES QUIÉN, y por qué el rol ya no lo dice (12/09/2026) ────────────
 //
 // El rol `encargado` se llama así porque al principio era literal: Charly, el
-// encargado. Hoy los tres que lo tienen hacen trabajos distintos:
+// encargado. Hoy lo tienen cuatro personas que hacen trabajos distintos:
 //
 //   · Charly   — encargado, y el único. Abre y cierra la caja.
-//   · Ezequiel — cocinero, y **Jefe de Cocina desde el martes 16/09/2026**.
+//   · Ezequiel — cocinero, y **Jefe de Cocina desde el 1 de octubre de 2026**.
 //                Reporta a Pablo y Tincho por Cocina.
 //   · Juan     — cocinero, reporta a Ezequiel.
+//   · Griselda — barra, y a veces cocina; en ese contexto reporta a Ezequiel.
+//                Cuenta creada el 12/09/2026.
 //
-// Y hay una persona que TODAVÍA NO tiene cuenta: **Griselda**, que hace barra y
-// a veces cocina, y en ese contexto también reporta a Ezequiel.
+// Y hay alguien en el equipo que NO tiene cuenta, a propósito hasta que haga
+// falta: **Priscila**, bachera. Está en la planilla de Nómina, así que cuenta
+// para el costo laboral y para el punto de equilibrio; lo que no tiene es nada
+// que marcar en la app.
 //
 // O sea que `encargado` pasó a significar "el que no es dueño", que es otra
-// cosa. Eso no se arregló acá a propósito: los tres siguen necesitando lo mismo
-// —pedidos, cierre de cocina, mantenimiento— y partir el rol es una decisión de
-// producto, no una consecuencia de un organigrama. Lo que sí hay que mirar el
-// día que se toque: Ezequiel y Juan tienen hoy permiso de **abrir y cerrar la
-// caja**, que es trabajo de Charly, y lo tienen porque el rol es uno solo.
+// cosa. Eso no se arregló acá a propósito: los cuatro siguen necesitando lo
+// mismo —pedidos, cierre de cocina, mantenimiento— y partir el rol es una
+// decisión de producto, no una consecuencia de un organigrama. Lo que sí hay que
+// mirar el día que se toque: Ezequiel, Juan y Griselda tienen hoy permiso de
+// **abrir y cerrar la caja**, que es trabajo de Charly, y lo tienen nada más que
+// porque el rol es uno solo.
 const negocio = require('./config-negocio');
 
 const USUARIOS = Object.create(null);
@@ -129,6 +134,7 @@ _registrarUsuario('pablo',  { password: process.env.PABLO_PASSWORD,  rol: 'admin
 _registrarUsuario('tincho', { password: process.env.TINCHO_PASSWORD, rol: 'admin',     nombre: 'Tincho' });
 _registrarUsuario('juan',   { password: process.env.JUAN_PASSWORD,   rol: 'encargado', nombre: 'Juan' });
 _registrarUsuario('ezequiel', { password: process.env.EZEQUIEL_PASSWORD, rol: 'encargado', nombre: 'Ezequiel' });
+_registrarUsuario('griselda', { password: process.env.GRISELDA_PASSWORD, rol: 'encargado', nombre: 'Griselda' });
 
 // ─── Cuentas declaradas por entorno (09/09/2026) ─────────────────────────────
 //
@@ -184,6 +190,7 @@ if (!_cuentas.length) {
   for (const [clave, envVar] of [
     ['admin', 'ADMIN_PASSWORD'], ['charly', 'CHARLY_PASSWORD'], ['pablo', 'PABLO_PASSWORD'],
     ['tincho', 'TINCHO_PASSWORD'], ['juan', 'JUAN_PASSWORD'], ['ezequiel', 'EZEQUIEL_PASSWORD'],
+    ['griselda', 'GRISELDA_PASSWORD'],
     ..._declarados,
   ]) {
     if (!USUARIOS[clave]) console.warn(`  · "${clave}" deshabilitado: falta ${envVar}`);
