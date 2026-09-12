@@ -94,6 +94,26 @@ if (!JWT_SECRET) {
 // su cuenta por la misma razón —lo que se marca en Pedidos y en Mantenimiento
 // queda firmado con el nombre de quien lo marcó, y con un login compartido eso
 // sería una firma que no dice nada.
+//
+// ─── QUIÉN ES QUIÉN, y por qué el rol ya no lo dice (12/09/2026) ────────────
+//
+// El rol `encargado` se llama así porque al principio era literal: Charly, el
+// encargado. Hoy los tres que lo tienen hacen trabajos distintos:
+//
+//   · Charly   — encargado, y el único. Abre y cierra la caja.
+//   · Ezequiel — cocinero, y **Jefe de Cocina desde el martes 16/09/2026**.
+//                Reporta a Pablo y Tincho por Cocina.
+//   · Juan     — cocinero, reporta a Ezequiel.
+//
+// Y hay una persona que TODAVÍA NO tiene cuenta: **Griselda**, que hace barra y
+// a veces cocina, y en ese contexto también reporta a Ezequiel.
+//
+// O sea que `encargado` pasó a significar "el que no es dueño", que es otra
+// cosa. Eso no se arregló acá a propósito: los tres siguen necesitando lo mismo
+// —pedidos, cierre de cocina, mantenimiento— y partir el rol es una decisión de
+// producto, no una consecuencia de un organigrama. Lo que sí hay que mirar el
+// día que se toque: Ezequiel y Juan tienen hoy permiso de **abrir y cerrar la
+// caja**, que es trabajo de Charly, y lo tienen porque el rol es uno solo.
 const negocio = require('./config-negocio');
 
 const USUARIOS = Object.create(null);

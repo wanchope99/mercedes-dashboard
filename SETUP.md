@@ -40,7 +40,7 @@ npm run dev
      ```
    - `NOMINA_SHEET_ID` = id de la planilla de nómina (`10yDUZWZZl528NgrmmkIxfxFldOaVId38X3ayve5oBcM`)
    - `STOCKS_SHEET_ID` = id de la planilla de Stocks (`1gEt0H5Rou22jmtpiNFjH79oj8-n_b5azLXKJVZ_zgSk`)
-   - `PROVEEDORES_SHEET_ID` = id de la planilla *Comparación Proveedores*
+   - `PROVEEDORES_SHEET_ID` = id de la planilla *Proveedores* (se llamaba *Comparación Proveedores* hasta el 12/09/2026)
 4. Railway detecta `railway.toml` y hace el deploy automáticamente
 
 ### La planilla de proveedores

@@ -1,6 +1,6 @@
 // ─── Módulo de Proveedores / Comparación de costos ──────────────────────────────
 //
-// Lee y escribe la hoja "Compras" de la planilla Comparacion Proveedores
+// Lee y escribe la hoja "Compras" de la planilla Proveedores (hasta el 12/09/2026, Comparacion Proveedores)
 // (PROVEEDORES_SHEET_ID), y produce las agregaciones para el tab "Proveedores":
 //   · serie temporal de precio unitario por producto (una línea por proveedor)
 //   · listado de productos y categorías

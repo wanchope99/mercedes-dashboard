@@ -1,6 +1,6 @@
 // ─── Comportamiento de Stocks: ingreso (compras) vs venta (FUDO) ────────────────
 //
-// Cruza las COMPRAS (planilla Comparacion Proveedores → hoja Compras) con las
+// Cruza las COMPRAS (planilla Proveedores → hoja Compras) con las
 // VENTAS (FUDO) para entender cuánto tarda un producto desde que ingresa hasta
 // que se vende, y detectar riesgo de out-of-stock (foco: bebidas/vinos).
 //

@@ -3,7 +3,7 @@ const _unidades = require('./unidades');
 //
 // Fuente única de verdad para las CATEGORÍAS de ingredientes (las mismas que usa
 // FUDO en su sección "Ingredientes"). Toda fila que se escriba en la hoja
-// "Compras" de la planilla Comparacion Proveedores usa estas categorías.
+// "Compras" de la planilla Proveedores (hasta el 12/09/2026, Comparacion Proveedores) usa estas categorías.
 //
 // Este módulo NO toca la red: son funciones puras para que server.js y los tests
 // las usen. La inferencia "aprende" mirando las filas ya cargadas (no hay hoja
