@@ -102,15 +102,18 @@ if (!JWT_SECRET) {
 //
 //   · Charly   — encargado, y el único. Abre y cierra la caja.
 //   · Ezequiel — cocinero, y **Jefe de Cocina desde el 1 de octubre de 2026**.
-//                Reporta a Pablo y Tincho por Cocina.
-//   · Juan     — cocinero, reporta a Ezequiel.
-//   · Griselda — barra, y a veces cocina; en ese contexto reporta a Ezequiel.
-//                Cuenta creada el 12/09/2026.
+//   · Juan     — cocinero.
+//   · Griselda — barra, y a veces cocina. Cuenta creada el 12/09/2026.
 //
 // Y hay alguien en el equipo que NO tiene cuenta, a propósito hasta que haga
 // falta: **Priscila**, bachera. Está en la planilla de Nómina, así que cuenta
 // para el costo laboral y para el punto de equilibrio; lo que no tiene es nada
 // que marcar en la app.
+//
+// El organigrama, que la app NO modela y conviene no deducir: Charly y Ezequiel
+// le reportan a Pablo y Tincho. A Charly le reporta Priscila; a Ezequiel, Juan y
+// Griselda. **Pablo y Tincho no le reportan a nadie: son los socios** — y que
+// Pablo además trabaje en la cocina no lo pone abajo de nadie.
 //
 // O sea que `encargado` pasó a significar "el que no es dueño", que es otra
 // cosa. Eso no se arregló acá a propósito: los cuatro siguen necesitando lo
