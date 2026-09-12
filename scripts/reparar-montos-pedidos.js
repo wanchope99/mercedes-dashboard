@@ -23,13 +23,29 @@
 // `monto.js`— así que está bien. La regla es una:
 //
 //     si  pedido ≈ libro × 100  →  corrompido, se corrige al valor del libro
-//     si  pedido ≈ libro        →  sano, no se toca
+//     si  pedido ≈ libro        →  hay que MIRARLO (ver abajo)
 //     si  no hay fila en el libro  →  NO SE DECIDE, se reporta
 //
 // El tercer caso no es una limitación a resolver después: es la respuesta
 // honesta. Un pedido sin fila en el libro no tiene contra qué verificarse, y
 // escribir un número adivinado en una planilla de plata es peor que dejar uno
 // visiblemente raro que una persona va a mirar.
+//
+// ─── Y el segundo caso tampoco significa "sano" ─────────────────────────────
+//
+// Al recibir, el modal PRE-LLENA el monto con el `costoEstimado` del pedido, y
+// en la salida simple —"llegó todo", "se paga después"— nadie tipea nada: el
+// importe que viaja al servidor es ése. Si el pedido ya estaba inflado, **la
+// fila del libro se escribió inflada también**.
+//
+// Cuando los dos coinciden, entonces, puede ser que los dos estén bien o que
+// los dos estén mal, y NO hay forma de distinguirlo desde acá: un importe
+// corrompido es un entero y uno sano también. Lo que sí se puede hacer es
+// ponerlos a la vista ordenados de mayor a menor, porque en un bar un pedido de
+// ocho millones se reconoce de un vistazo y uno de ochenta mil también.
+//
+// Por eso esta lista NO se corrige sola, ni siquiera con --aplicar: arreglarla
+// significa tocar `Movimientos`, que es el libro, y eso lo decide una persona.
 //
 // ─── Uso ────────────────────────────────────────────────────────────────────
 //
@@ -141,7 +157,22 @@ async function main() {
     console.log('No hay importes corrompidos que el libro confirme. 🎉\n');
   }
 
-  if (sanos.length) console.log(`${sanos.length} importe(s) ya coinciden con el libro: no se tocan.\n`);
+  if (sanos.length) {
+    // Ordenados de mayor a menor: es lo único que hace falta para que un
+    // importe absurdo salte a la vista sin inventar ningún umbral.
+    const orden = sanos.slice().sort((a, b) => b.valor - a.valor);
+    const TOPE = 15;
+    console.log(`─── ${sanos.length} donde el pedido y el libro COINCIDEN ───`);
+    console.log('   Eso no prueba que estén bien: el modal de recibir pre-llena el monto con el');
+    console.log('   del pedido, así que si estaba inflado, la fila del libro se escribió inflada');
+    console.log('   también. Mirá los de arriba — si alguno es absurdo, están mal LOS DOS y la');
+    console.log('   fila de Movimientos hay que corregirla a mano.\n');
+    for (const c of orden.slice(0, TOPE)) {
+      console.log(`  fila ${String(c.fila).padStart(3)} · ${LETRA[c.campo]} · ${c.fecha} ${c.proveedor.padEnd(24)} ${plata(c.valor).padStart(16)}`);
+    }
+    if (orden.length > TOPE) console.log(`  … y ${orden.length - TOPE} más, todos por debajo de ${plata(orden[TOPE].valor)}.`);
+    console.log('');
+  }
 
   if (sinLibro.length) {
     console.log(`─── ${sinLibro.length} que NO se pueden decidir acá ───`);
