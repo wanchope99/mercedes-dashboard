@@ -26,7 +26,7 @@
 // que Ingresos/Gastos/Resultado USD), para que el histórico no se corra si después
 // se ajusta el TC. Ver roi.js para la agregación de recupero.
 
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const { parseMonto } = require('./monto');
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;

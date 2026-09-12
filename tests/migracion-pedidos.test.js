@@ -66,14 +66,17 @@ function planillaFalsa(libros, { demoraAppend = 0 } = {}) {
 // El stub NO se puede restaurar al terminar de cargar: `_sheets()` arma el
 // cliente en cada llamada, no al importar, así que tiene que seguir en pie
 // mientras corre la migración. Lo restaura `run` al final, en su `finally`.
-const googleapis = require('googleapis');
+// El paquete que se pisa es el MISMO que importa `pedidos.js`. Desde el
+// 12/09/2026 es `@googleapis/sheets` —sólo Sheets en vez de las 294 APIs— y su
+// `sheets()` cuelga de la raíz del módulo, no de un `google` adentro.
+const gsheets = require('@googleapis/sheets');
 const { envFalso } = require('./_harness');
 
 function cargarPedidos({ nueva, vieja, api }) {
   delete require.cache[require.resolve('../src/pedidos.js')];
   process.env.PROVEEDORES_SHEET_ID = nueva;
   process.env.SPREADSHEET_ID = vieja;
-  googleapis.google.sheets = () => api;
+  gsheets.sheets = () => api;
   return require('../src/pedidos.js');
 }
 
@@ -83,12 +86,12 @@ const fila = (id, prov) => [id, '2026-09-08', prov, '', '', '', 'pendiente', '',
 function run(t) {
   envFalso();
   const entorno = { ...process.env };
-  const sheetsOriginal = googleapis.google.sheets;
+  const sheetsOriginal = gsheets.sheets;
   // Todo lo de acá abajo devuelve una promesa encadenada; el harness la espera.
   // La restauración va en el `finally` del final, no antes: el cliente falso
   // tiene que seguir en pie mientras corre la migración.
   return correr(t).finally(() => {
-    googleapis.google.sheets = sheetsOriginal;
+    gsheets.sheets = sheetsOriginal;
     delete require.cache[require.resolve('../src/pedidos.js')];
     for (const k of Object.keys(process.env)) if (!(k in entorno)) delete process.env[k];
     Object.assign(process.env, entorno);

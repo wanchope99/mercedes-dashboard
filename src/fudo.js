@@ -22,7 +22,7 @@
 //   clearFudoCache()
 
 const NodeCache = require('node-cache');
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 
 const AUTH_URL = process.env.FUDO_AUTH_URL || 'https://auth.fu.do/api';
 const API_BASE = process.env.FUDO_API_BASE || 'https://api.fu.do/v1alpha1';

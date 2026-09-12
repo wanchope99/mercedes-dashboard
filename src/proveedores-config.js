@@ -8,7 +8,7 @@
 // IVA del proveedor: "con" (le pagamos con IVA / nos discrimina IVA) o "sin".
 // Se usa para decidir qué precio compara el gráfico a lo largo del tiempo.
 
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const NodeCache = require('node-cache');
 
 const cache = new NodeCache({ stdTTL: 120 });

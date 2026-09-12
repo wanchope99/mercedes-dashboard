@@ -41,7 +41,7 @@
 // Es un panel dentro de la app. Y no inventa datos: todo sale de módulos que ya
 // existen, así que una fuente caída se salta y las demás siguen.
 
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const NodeCache = require('node-cache');
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;

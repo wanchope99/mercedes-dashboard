@@ -1,4 +1,4 @@
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const NodeCache = require('node-cache');
 const { normalizarMedio } = require('./medios-pago');
 const { parseMonto } = require('./monto');

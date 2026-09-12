@@ -22,7 +22,7 @@
 //       - Comida  = el resto de categorías de ingrediente (carnes, pescados, etc.).
 
 const cats = require('./proveedores-categorias');
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 
 // ─── Persistencia de overrides de categoría en hoja Sheets ──────────────────────
 // Datos de COSTOS/STOCKS viven en la planilla de Comparación Proveedores

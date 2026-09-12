@@ -45,7 +45,7 @@
 // La columna `Produ (un)` son fórmulas y varias están rotas con #REF!. Se leen
 // como vacío y no se tocan jamás.
 
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const NodeCache = require('node-cache');
 
 // Sin fallback a SPREADSHEET_ID, igual que NOMINA_SHEET_ID: con fallback, la app

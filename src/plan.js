@@ -37,7 +37,7 @@
 //
 // Cache: 5 min en memoria. Se invalida tras cada write.
 
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const NodeCache = require('node-cache');
 const { ORDEN_MESES } = require('./proyecciones');
 

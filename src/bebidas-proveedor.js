@@ -31,7 +31,7 @@
 // leer la hoja a ojo.
 
 const NodeCache = require('node-cache');
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const provConfig = require('./proveedores-config');
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;

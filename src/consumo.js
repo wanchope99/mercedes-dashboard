@@ -8,7 +8,7 @@
 // Persistencia: hoja "Consumo Insumos" del spreadsheet de GESTIÓN (SPREADSHEET_ID).
 // Columnas: A Producto · B Cantidad · C Periodo (dia|semana) · D Actualizado
 
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 
 // Datos de stock/insumos viven en la planilla de Comparación Proveedores.
 const SPREADSHEET_ID = process.env.PROVEEDORES_SHEET_ID || process.env.SPREADSHEET_ID;

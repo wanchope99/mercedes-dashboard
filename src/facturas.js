@@ -57,7 +57,7 @@
 // desincroniza el día que alguien edita la planilla a mano, y entonces hay dos
 // respuestas para la misma pregunta. El crédito del mes es la suma de J.
 
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const NodeCache = require('node-cache');
 const { parseMonto, centavos } = require('./monto');
 

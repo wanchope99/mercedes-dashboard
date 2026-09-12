@@ -24,7 +24,7 @@ const CATEGORIAS_DIRECTAS = new Set(['Bebidas y Alcohol']);
 // Overrides manuales de match: { productoCanonNorm: Set(nombreFudoNorm, ...) }.
 // Un insumo puede mapear a VARIOS productos/platos de FUDO (ej. Matambre entra en
 // varios platos). Se persiste en la hoja "Stock Match" del Google Sheets.
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 // Stock Match vive en la planilla de Comparación Proveedores (junto a Compras).
 const SPREADSHEET_ID = process.env.PROVEEDORES_SHEET_ID || process.env.SPREADSHEET_ID;
 const STOCK_MATCH_SHEET = process.env.STOCK_MATCH_SHEET || 'Stock Match';

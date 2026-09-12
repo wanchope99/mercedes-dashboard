@@ -34,7 +34,7 @@
 // un solo dato, que es la forma más cara de romper esto.
 
 require('dotenv').config();
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const negocio = require('../src/config-negocio');
 const cats = require('../src/proveedores-categorias');
 

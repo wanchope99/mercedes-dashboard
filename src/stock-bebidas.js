@@ -9,7 +9,7 @@
 // las tiles "Costo (Fudo)" / "Ingreso bebida" que ya existen en el Costos tab.
 
 const NodeCache = require('node-cache');
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const fudo = require('./fudo');
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;

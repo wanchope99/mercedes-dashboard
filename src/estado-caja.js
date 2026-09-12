@@ -5,7 +5,7 @@
 // el próximo GET /api/arqueo/estado muestra "cerrada" aunque el mozo nunca cerró,
 // y esa noche queda sin arquear. Este módulo espeja ese mismo objeto en una hoja
 // oculta ("Estado Caja") para poder restaurarlo al arrancar.
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const SHEET_NAME = 'Estado Caja';

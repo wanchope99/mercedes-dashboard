@@ -56,7 +56,7 @@
 // las condiciones reales (TNA vigente) hay que verificarlas en la app de Mercado
 // Pago al momento de colocar — la TNA de la cuenta remunerada cambia seguido.
 
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const NodeCache = require('node-cache');
 const { parseMonto, centavos } = require('./monto');
 

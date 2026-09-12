@@ -19,7 +19,7 @@
 // Persistencia: hoja "Informes" en SPREADSHEET_ID, creada al primer uso.
 // Todos los analistas son de SÓLO LECTURA: ningún informe escribe en el libro.
 
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const Anthropic = require('@anthropic-ai/sdk');
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;

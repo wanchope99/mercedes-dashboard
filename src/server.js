@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const jwt = require('jsonwebtoken');
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const {
   getMovimientos, getResumenMensual, getActividadPorDia,
   getActividadPorDiaSemana, getCajas, getMovimientosCambio,

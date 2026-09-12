@@ -10,7 +10,7 @@
 // donde algún dato (categoría, medio de pago, producto, precio) no quedó claro y
 // requiere que un humano confirme antes de escribirse en la planilla.
 
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const NodeCache = require('node-cache');
 const cats = require('./proveedores-categorias');
 const unidades = require('./unidades');

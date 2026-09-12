@@ -127,7 +127,13 @@ it looks like a bar that never moved any money.
 
 ### Data sources — everything is Google Sheets + Fudo, no database
 
-There is no database. All persistent state lives in Google Sheets, read/written directly via the `googleapis` package, and cached in-process with `node-cache` (`clearCache()` / `clearFudoCache()` invalidate on writes). Two spreadsheets are in play:
+There is no database. All persistent state lives in Google Sheets, read/written directly via the `@googleapis/sheets` package, and cached in-process with `node-cache` (`clearCache()` / `clearFudoCache()` invalidate on writes). Two spreadsheets are in play:
+
+**It is `@googleapis/sheets` and not `googleapis`, and that is load-bearing (2026-09-12).** The monolithic package ships the clients for **294 APIs** — YouTube, BigQuery, Compute Engine, Gmail — of which this repo calls exactly two things: `google.sheets` (47 uses) and `google.auth` (29). Inside its 112 MB, the Sheets folder is **281 KB**. Measured on the dev machine, the swap is 461 ms → **59 ms** to load, +91 MB → **+19 MB** of RSS, and `node_modules` 132 MB → **30 MB**.
+
+The change was one line per file in 29 files — `const { google } = require('googleapis')` → `const google = require('@googleapis/sheets')` — and **nothing else**, because the scoped package exports `auth` and `sheets` at its root, so `google.auth.GoogleAuth` and `google.sheets({version:'v4', auth})` keep working verbatim. `tests/dependencias.test.js` fails if `googleapis` comes back: a single stray `require` silently re-adds 100 MB, and nothing about the app's behaviour would look different.
+
+The dollars are not the point and Railway makes that explicit — it bills by consumption (~$10/GB/month), and the Hobby plan's included credit absorbs this. What it buys is **headroom as clients multiply** and a cold start a tenth of what it was, which is the precondition for turning the app off while the bar is closed.
 
 - `SPREADSHEET_ID` — "Gestión Mercedes": the core ledger. Key sheets: `Movimientos` (every income/expense row, columns A–P — see the `buildFilasCierreServicio` comment block in `server.js` for the exact column layout), `Cajas`, `Arqueo de Cajas`, `Proveedores`, `Cierres`, `Proyeccion Variables`, `Costos Proveedores`, `Consumo Insumos`, `Stock Bebidas`, `Bebidas Proveedor`.
 - `PROVEEDORES_SHEET_ID` ("Comparación Proveedores") — everything about the other side of the counter: the `Compras` sheet (ingredient-level purchase history used for cost analysis), `Facturas`, `Proveedores Saldos`, its own config sheets, and since 2026-09-07 the three Pedidos sheets. It **defaults to `SPREADSHEET_ID` if unset in `src/proveedores.js`, and deliberately does not in `src/saldos.js` or `src/pedidos.js`** — with the fallback, a server missing the variable would recreate those sheets in Gestión, which is exactly where they were moved away from, and nobody would notice until they found them there.

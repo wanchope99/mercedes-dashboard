@@ -26,7 +26,7 @@
 // cuando eso pase, el agente tiene que mostrar la contradicción en vez de elegir
 // una en silencio.
 
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const HOJA = process.env.INFORMES_NOTAS_SHEET || 'Informes Notas';

@@ -26,7 +26,7 @@
 // T es la primera columna realmente libre — verificado celda por celda el
 // 12/08/2026. Antes de mover esta columna, volver a verificar.
 
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const { getBlueDeFecha } = require('./tc');
 
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;

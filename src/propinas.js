@@ -40,7 +40,7 @@
 //
 // Cache: 5 min en memoria. Se invalida tras cada write.
 
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const NodeCache = require('node-cache');
 
 const cache = new NodeCache({ stdTTL: 300 });

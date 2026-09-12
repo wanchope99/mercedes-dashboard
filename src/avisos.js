@@ -51,7 +51,7 @@
 // contra la marca de "visto hasta" para saber si es nuevo, y esa marca se
 // guarda con toISOString(). `Para` son usuarios separados por `|`.
 
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const NodeCache = require('node-cache');
 // El aviso se anota acá y, si es grave, sale por Telegram. Ver src/telegram.js
 // para por qué sólo los graves y por qué el emisor no puede tirar.

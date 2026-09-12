@@ -123,7 +123,7 @@ async function leerPadron() {
 // Las columnas nuevas todavía no las lee `leerConfig`, así que se leen aparte
 // por nombre de header. Una sola llamada, y tolera que ninguna exista todavía.
 async function _filasCrudas() {
-  const { google } = require('googleapis');
+  const google = require('@googleapis/sheets');
   const ID = process.env.SPREADSHEET_ID;
   const HOJA = process.env.PROVEEDORES_HOJA_CONFIG || 'Proveedores';
   if (!ID) return {};

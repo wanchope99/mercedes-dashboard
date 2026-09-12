@@ -127,7 +127,7 @@
 // alta el 11/08— con el divisor corregido a los servicios reales del mes. Ver
 // `serviciosDelMes` y `sueldoDelMes`.
 
-const { google } = require('googleapis');
+const google = require('@googleapis/sheets');
 const NodeCache = require('node-cache');
 const { parseMonto } = require('./monto');
 const { diasDeServicioEntre, feriadosDelMes, feriadosDeServicioDelMes } = require('./calendario');
