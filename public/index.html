@@ -1495,6 +1495,17 @@
     .prov-pend-item { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:8px; }
     .prov-pend-item.ok { opacity:.6; }
     .prov-pend-prod { font-weight:600; font-size:14px; margin-bottom:6px; }
+    /* La conversación adentro del panel (11/09/2026). Es el mismo paso que
+       dibuja el bot, así que se parece a un chat a propósito: el resumen de lo
+       ya contestado arriba, la pregunta, y las respuestas como botones. */
+    .pend-resumen { font-size:12px; line-height:1.55; color:var(--text-muted); background:var(--surface2);
+                    border-radius:8px; padding:10px 12px; margin-bottom:10px; }
+    .pend-resumen strong { color:var(--text); }
+    .pend-pregunta { font-weight:600; font-size:14px; margin-bottom:8px; line-height:1.4; }
+    .pend-ops { display:flex; flex-wrap:wrap; gap:6px; }
+    /* Los botones de respuesta no ocupan el ancho entero: son varios y cortos.
+       En teléfono se envuelven solos en vez de apilarse de a uno. */
+    .pend-ops .pend-op { flex:0 1 auto; font-size:12px; padding:7px 12px; }
     .prov-duda { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:6px 0; font-size:12px; }
     .prov-duda label { color:var(--text-muted); min-width:90px; }
     .prov-duda select, .prov-duda input { background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:6px 10px; border-radius:6px; font-size:12px; font-family:inherit; flex:1; min-width:140px; }
@@ -12768,15 +12779,50 @@ async function refreshProvBadge() {
   } catch (e) { /* no bloqueante */ }
 }
 
+// Los pendientes que está mostrando el panel, por id. El renderizado de una
+// tarjeta necesita sus renglones, y contestar un paso no tiene por qué volver a
+// bajar la lista entera.
+const _pendReg = new Map();
+let _pendVerTodos = false;
+
 async function openProvNotif() {
   document.getElementById('prov-notif-overlay').classList.add('open');
+  await cargarPendientes();
+}
+
+async function cargarPendientes() {
   const list = document.getElementById('prov-notif-list');
   list.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
   try {
-    const { data } = await api('/api/proveedores/pendientes');
-    if (!data.length) { list.innerHTML = '<div class="prov-empty">No hay facturas pendientes. 🎉</div>'; return; }
-    list.innerHTML = data.map(renderPendCard).join('');
+    const r = await api('/api/proveedores/pendientes' + (_pendVerTodos ? '?todos=1' : ''));
+    const data = r.data || [];
+    _pendReg.clear();
+    data.forEach(reg => _pendReg.set(reg.id, reg));
+    // El pie explica por qué la lista puede estar vacía teniendo facturas en
+    // curso. Sin esto, "no hay pendientes" mientras alguien está sacando fotos
+    // se lee como que el bot no anduvo.
+    const pie = `<div class="prov-empty" style="text-align:left;font-size:12px;padding:10px 4px 0">
+      ${_pendVerTodos
+        ? 'Mostrando también las conversaciones en curso. '
+        : `Las que se están contestando por Telegram no aparecen acá hasta que pasen ${r.minutosTrabado || 30} minutos sin moverse. `}
+      <a href="#" onclick="togglePendTodos();return false">${_pendVerTodos ? 'Ver sólo las trabadas' : 'Ver todas igual'}</a>
+    </div>`;
+    list.innerHTML = (data.length
+      ? data.map(renderPendCard).join('')
+      : '<div class="prov-empty">No hay facturas esperando. 🎉</div>') + pie;
   } catch (e) { list.innerHTML = `<div class="prov-empty">Error: ${escapeHtml(e.message)}</div>`; }
+}
+
+function togglePendTodos() { _pendVerTodos = !_pendVerTodos; cargarPendientes(); }
+
+// El resumen viene armado para Telegram, que usa *negrita* y _cursiva_. Se
+// escapa PRIMERO y se marca después, para que una razón social con un `<` no
+// pueda inyectar nada.
+function textoBot(s) {
+  return escapeHtml(String(s || ''))
+    .replace(/\*([^*\n]+)\*/g, '<strong>$1</strong>')
+    .replace(/_([^_\n]+)_/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>');
 }
 function closeProvNotif() { document.getElementById('prov-notif-overlay').classList.remove('open'); }
 
@@ -12836,18 +12882,81 @@ function renderDudaControl(domId, d) {
     <input id="${domId}" value="${escAttr2(d.sugerido||'')}" placeholder="valor correcto" /></div>`;
 }
 
+// ─── La cabecera de la factura la dibuja la CONVERSACIÓN ────────────────────
+//
+// Hasta el 11/09/2026 acá se dibujaba `factura.dudas`: una lista que el servidor
+// congelaba en el ingest y que nadie volvía a tocar. Las respuestas que la
+// persona daba por Telegram se guardaban al lado, en `reg.conv`, y este panel no
+// las miraba — así que mostraba preguntas de un cuestionario que el bot ya no
+// hace, sobre datos que acababan de contestarse.
+//
+// Ahora el paso lo arma `compra-conversacion.js`, el mismo módulo que le
+// contesta al bot, y llega ya resuelto desde el servidor. La pantalla sólo
+// dibuja: pregunta, botones, y el resumen de lo que ya está contestado.
+function renderPendConversacion(reg) {
+  const c = reg.conversacion;
+  // Sin conversación: un pendiente viejo, de antes de este cambio. Cae al
+  // formulario de siempre en vez de quedar sin forma de contestarse.
+  if (!c) {
+    const fact = reg.factura || {};
+    const dudas = (fact.dudas || []).map(d => renderDudaControl(`resf-${reg.id}-${d.campo}`, d)).join('');
+    if (!dudas) return '';
+    return `<div class="prov-pend-item" style="border-color:var(--blue)">
+      <div class="prov-pend-prod">📋 Datos de la factura <span style="font-weight:400;color:var(--text-muted)">· ${escapeHtml(fact.proveedor||'?')}</span></div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Factura vieja, cargada antes del 11/09. Se completa con este formulario.</div>
+      ${dudas}
+      <div style="display:flex;justify-content:flex-end;margin-top:8px">
+        <button class="btn btn-accent" onclick="resolverPend('${reg.id}')">✅ Confirmar y cargar</button>
+      </div>
+    </div>`;
+  }
+
+  const p = c.paso || {};
+  const resumen = c.resumen ? `<div class="pend-resumen">${textoBot(c.resumen)}</div>` : '';
+
+  if (p.tipo === 'listo') {
+    return `<div class="prov-pend-item" style="border-color:var(--blue)">${resumen}
+      <div style="font-size:12px;color:var(--text-muted)">Ya está confirmada. Lo que falta son los renglones.</div></div>`;
+  }
+
+  const botones = (p.botones || []).map((b, i) =>
+    `<button class="btn ${b.sugerido ? 'btn-accent' : ''} pend-op" onclick="pasoPend('${reg.id}',${i})">${escapeHtml(b.label)}</button>`
+  ).join('');
+
+  // `permiteTexto` es el mismo permiso que en Telegram: hay pasos —el total, una
+  // fecha, la alícuota— donde la respuesta puede no estar entre los botones.
+  const libre = p.permiteTexto ? `<div style="display:flex;gap:6px;margin-top:8px">
+      <input type="text" class="form-input" id="pend-txt-${reg.id}" placeholder="…o escribilo acá"
+             onkeydown="if(event.key==='Enter'){pasoPendTexto('${reg.id}');return false}">
+      <button class="btn" onclick="pasoPendTexto('${reg.id}')">Enviar</button>
+    </div>` : '';
+
+  const ayuda = p.ayuda ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px">${textoBot(p.ayuda)}</div>` : '';
+  const err = p.__error ? `<div style="font-size:12px;color:var(--red);margin-bottom:6px">${escapeHtml(p.__error)}</div>` : '';
+
+  return `<div class="prov-pend-item" style="border-color:var(--blue)" id="pend-conv-${reg.id}">
+    ${resumen}
+    ${err}
+    <div class="pend-pregunta">${textoBot(p.texto || '')}</div>
+    <div class="pend-ops">${botones}</div>
+    ${libre}
+    ${ayuda}
+  </div>`;
+}
+
 function renderPendCard(reg) {
   const fecha = fechaHoraAR(reg.creado);
   const origen = reg.origen && reg.origen.usuario ? `de ${escapeHtml(reg.origen.usuario)}` : '';
 
-  // Dudas a nivel FACTURA (medio de pago, IVA): se confirman una vez.
-  const fact = reg.factura || {};
-  const factDudas = (fact.dudas || []).map(d =>
-    renderDudaControl(`resf-${reg.id}-${d.campo}`, d)).join('');
-  const factBlock = factDudas ? `<div class="prov-pend-item" style="border-color:var(--blue)">
-      <div class="prov-pend-prod">📋 Datos de la factura <span style="font-weight:400;color:var(--text-muted)">· ${escapeHtml(fact.proveedor||'?')}</span></div>
-      ${factDudas}
-    </div>` : '';
+  // En qué estado llegó al panel. Es lo que separa "alguien la está
+  // contestando" de "esto quedó tirado", que antes se veían igual.
+  const estado = reg.derivadoApp
+    ? '<span style="color:var(--blue)">📲 la dejaron para la app</span>'
+    : reg.trabado
+      ? `<span style="color:var(--orange)">⏸ sin moverse hace ${minutosLargo(reg.minutosQuieto)}</span>`
+      : `<span style="color:var(--text-muted)">💬 contestándose en Telegram</span>`;
+
+  const factBlock = renderPendConversacion(reg);
 
   const items = reg.items.map(it => {
     const ok = !it.dudas || it.dudas.length === 0;
@@ -12859,15 +12968,118 @@ function renderPendCard(reg) {
       ${dudasHtml}
     </div>`;
   }).join('');
+
+  // ─── Confirmar y cargar sólo aparece cuando hay algo que confirmar acá ────
+  //
+  // Con la conversación adentro, la carga la dispara el último botón de la
+  // charla —el mismo "✅ Confirmar así" que ve el bot—, no un botón del pie.
+  // Dejar los dos era ofrecer dos formas de escribir la misma compra, y la de
+  // abajo escribía sin haber terminado de preguntar.
+  //
+  // Lo que sí queda es guardar los renglones: eso NO escribe nada, corrige el
+  // pendiente para que la confirmación escriba los valores buenos.
+  const hayDudasItem = (reg.items || []).some(it => (it.dudas || []).length > 0);
+  const guardarItems = hayDudasItem
+    ? `<button class="btn" onclick="guardarRenglones('${reg.id}')">💾 Guardar renglones</button>`
+    : '';
+
   return `<div class="prov-pend-card" id="pend-${reg.id}">
     <div class="prov-pend-head"><span>🧾 ${escapeHtml(reg.imagenInfo?.nombre||'factura')} ${origen}</span><span>${fecha}</span></div>
+    <div style="font-size:11px;margin:-4px 0 8px">${estado}</div>
     ${factBlock}
     ${items}
     <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
       <button class="btn" onclick="descartarPend('${reg.id}')">Descartar</button>
-      <button class="btn btn-accent" onclick="resolverPend('${reg.id}')">✅ Confirmar y cargar</button>
+      ${guardarItems}
     </div>
   </div>`;
+}
+
+function minutosLargo(m) {
+  if (!Number.isFinite(m)) return 'un rato';
+  if (m < 60) return `${m} min`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} h`;
+  const d = Math.round(h / 24);
+  return d === 1 ? 'un día' : `${d} días`;
+}
+
+// ─── Contestar un paso desde la app ─────────────────────────────────────────
+//
+// Va a `/paso-app`, que corre EXACTAMENTE la misma función que el bot: lo que
+// se contesta acá queda contestado allá y al revés. La respuesta trae el paso
+// siguiente ya armado, así que la tarjeta se redibuja sin volver a bajar la
+// lista.
+async function pasoPend(id, indiceBoton, textoLibre) {
+  const reg = _pendReg.get(id);
+  if (!reg || !reg.conversacion) return;
+  const p = reg.conversacion.paso || {};
+  const campo = p.campo || '';
+  const valor = textoLibre != null ? textoLibre : ((p.botones || [])[indiceBoton] || {}).id;
+  if (valor == null) return;
+
+  const cont = document.getElementById('pend-conv-' + id);
+  if (cont) cont.style.opacity = '0.5';
+  try {
+    const r = await api('/api/proveedores/pendientes/' + id + '/paso-app', {
+      method: 'POST', body: JSON.stringify({ campo, valor }),
+    });
+    if (r.status === 'escrito') {
+      showToast('✅ Cargada.');
+      document.getElementById('pend-' + id)?.remove();
+      _pendReg.delete(id);
+      refreshProvBadge();
+      return;
+    }
+    if (r.status === 'cancelado') {
+      showToast('Listo, no cargué nada.');
+      document.getElementById('pend-' + id)?.remove();
+      _pendReg.delete(id);
+      refreshProvBadge();
+      return;
+    }
+    // Sigue la conversación. Un error de validación viaja en `r.error` y se
+    // muestra arriba de la MISMA pregunta, igual que en el bot.
+    reg.conversacion = { paso: { ...(r.paso || {}), __error: r.error || '' }, resumen: r.resumen };
+    const card = document.getElementById('pend-' + id);
+    if (card) card.outerHTML = renderPendCard(reg);
+  } catch (e) {
+    showToast('Error: ' + e.message);
+    if (cont) cont.style.opacity = '1';
+  }
+}
+
+function pasoPendTexto(id) {
+  const el = document.getElementById('pend-txt-' + id);
+  const v = el && el.value.trim();
+  if (!v) return;
+  pasoPend(id, -1, v);
+}
+
+// Guarda las correcciones de los renglones. No escribe en ninguna planilla:
+// deja el pendiente corregido para que la confirmación de la conversación
+// escriba los valores buenos.
+async function guardarRenglones(id) {
+  const reg = _pendReg.get(id);
+  if (!reg) return;
+  const resoluciones = {};
+  for (const it of (reg.items || [])) {
+    for (const d of (it.dudas || [])) {
+      const el = document.getElementById(`res-${id}-${it.idx}-${d.campo}`);
+      if (!el || !el.value) continue;
+      const key = d.campo === 'precio_unitario' ? 'precioUnit' : d.campo;
+      resoluciones[it.idx] = resoluciones[it.idx] || {};
+      resoluciones[it.idx][key] = el.value;
+    }
+  }
+  if (!Object.keys(resoluciones).length) { showToast('No hay nada que guardar.'); return; }
+  try {
+    const r = await api('/api/proveedores/pendientes/' + id + '/items', {
+      method: 'POST', body: JSON.stringify({ resoluciones }),
+    });
+    showToast(`✅ ${r.message}`);
+    cargarPendientes();
+  } catch (e) { showToast('Error: ' + e.message); }
 }
 
 async function resolverPend(id) {

@@ -169,6 +169,7 @@ cambia — y si cambia, subir el número es una variable, no un deploy.
 | `EXTRACTOR_MODEL_ITEMS` | app | `claude-opus-4-6` |
 | `EXTRACTOR_MODEL` | app | — pisa las dos anteriores |
 | `PROVEEDORES_UMBRAL_CONFIANZA` | app | `0.6` |
+| `PENDIENTES_MINUTOS_TRABADO` | app | `30` — cuándo una factura sin terminar pasa al panel |
 
 Leer facturas es cerca del 60% del costo de una instancia y la única línea que
 crece con el uso. El extractor hace **dos llamadas** —cabecera y renglones, en
@@ -205,6 +206,15 @@ mal leído **con confianza alta**, que es el que se escribe solo y nadie mira.
 combinaciones sobre facturas reales y aplica ese criterio. Fue lo que encontró
 que el prompt del proveedor no tenía la regla que sí tenía el del CUIT, y que por
 eso Haiku leía el domicilio del comprador como proveedor, con confianza 0,9.
+
+**`PENDIENTES_MINUTOS_TRABADO` decide cuándo una factura sin terminar aparece en
+el panel de la app** (Compras › Pagos › 🔔 Pendientes). Todo ingest crea un
+pendiente en el acto —es el registro de la foto— pero mientras alguien la está
+contestando por Telegram no tiene por qué molestar en la app. Pasado ese rato sin
+moverse, aparece; y el botón `📲 Dejarlo para la app` del bot la manda ahí en el
+momento, sin esperar el reloj. La campanita cuenta exactamente lo que el panel
+muestra. Con `?todos=1` en la llamada —o el enlace al pie del panel— se ven
+también las que están en curso.
 
 ### Avisos por Telegram (los graves)
 

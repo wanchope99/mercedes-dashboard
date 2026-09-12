@@ -548,11 +548,26 @@ function crearPendiente({ origen = {}, imagenInfo = {}, items, factura = {} }) {
       ivaPct: factura.ivaPct != null ? factura.ivaPct : null,
       ivaPctSugerido: factura.ivaPctSugerido != null ? factura.ivaPctSugerido : null,
       subtotalFact: factura.subtotalFact || null,
+      ivaDesglose: Array.isArray(factura.ivaDesglose) ? factura.ivaDesglose : [],
       ivaMonto: factura.ivaMonto || null,
       otrosImpuestos: factura.otrosImpuestos || 0,
     },
     items: items.map((it, i) => ({ idx: i, ...it })),
     estado: 'pendiente',
+    // ─── Cuándo se movió por última vez, y si alguien la mandó a la app ─────
+    //
+    // Todo ingest crea un pendiente en el segundo cero, antes de que nadie
+    // decida nada: es el registro de la foto, no una solicitud de ayuda. Hasta
+    // el 11/09/2026 el panel de la app mostraba TODOS, así que una factura que
+    // se estaba contestando por Telegram en ese mismo momento aparecía ahí
+    // pidiendo confirmación — y una abandonada a las 5 de la mañana se veía
+    // exactamente igual.
+    //
+    // Estas dos marcas son las que separan los tres casos: en curso (alguien
+    // está contestando), trabada (nadie la tocó más) y derivada (alguien pidió
+    // explícitamente terminarla en la app).
+    ultimaActividad: new Date().toISOString(),
+    derivadoApp: false,
   };
   pendientes.set(id, reg);
   _persistPendiente(reg);   // best-effort, no bloquea
@@ -632,20 +647,71 @@ function setConversacion(id, conv) {
   const reg = pendientes.get(id);
   if (!reg) return null;
   reg.conv = conv;
+  // Cada respuesta corre el reloj: mientras alguien contesta, la factura no
+  // está trabada y no tiene por qué molestar en el panel de la app.
+  reg.ultimaActividad = new Date().toISOString();
   _persistPendiente(reg);
   return reg;
+}
+
+// Alguien pidió, desde el bot, terminar esta factura en la app. Hasta el
+// 11/09/2026 ese botón no existía: la única salida de la conversación era
+// terminarla o abandonarla, y abandonarla dejaba el pendiente en el panel sin
+// que nadie lo hubiera decidido. Derivar la muestra YA, sin esperar el reloj.
+function derivarApp(id) {
+  const reg = pendientes.get(id);
+  if (!reg) return null;
+  reg.derivadoApp = true;
+  reg.ultimaActividad = new Date().toISOString();
+  _persistPendiente(reg);
+  return reg;
+}
+
+// Cuántos minutos hace que nadie la toca. Un pendiente viejo sin la marca
+// —creado antes de este cambio— se lee por su fecha de creación, que es lo
+// más cercano a la verdad que hay: nadie lo tocó nunca.
+function minutosQuieto(reg, ahora = Date.now()) {
+  const t = Date.parse(reg.ultimaActividad || reg.creado || '');
+  if (!Number.isFinite(t)) return Infinity;
+  return Math.max(0, Math.round((ahora - t) / 60000));
+}
+
+// Una factura llega al panel de la app cuando la conversación dejó de avanzar,
+// o cuando alguien la mandó a mano. El umbral es generoso a propósito: el costo
+// de mostrarla tarde es que alguien la cargue diez minutos después, y el de
+// mostrarla temprano es que el panel y la campanita griten por algo que se está
+// resolviendo en el teléfono en ese mismo instante — que es lo que pasaba.
+const MINUTOS_TRABADO = Number(process.env.PENDIENTES_MINUTOS_TRABADO || 30);
+
+function estaTrabado(reg, ahora = Date.now()) {
+  if (reg.derivadoApp) return true;
+  // Una factura cuya conversación ya terminó pero que conserva renglones con
+  // dudas no está "trabada": está esperando a una persona desde el principio,
+  // y el bot no pregunta por renglones. Esas van al panel siempre.
+  if (!reg.conv) return true;
+  return minutosQuieto(reg, ahora) >= MINUTOS_TRABADO;
 }
 
 function getConversacion(id) {
   const reg = pendientes.get(id);
   return (reg && reg.conv) || null;
 }
-function listPendientes() {
+// `soloTrabados` es lo que ve el panel de la app; sin el filtro se ven todas,
+// que es lo que necesita un "mostrame igual las que están en curso".
+// Cada registro sale anotado con su estado de reloj para que la pantalla pueda
+// decirlo en vez de que haya que deducirlo.
+function listPendientes({ soloTrabados = false } = {}) {
+  const ahora = Date.now();
   return [...pendientes.values()]
     .filter(p => p.estado === 'pendiente')
+    .map(p => ({ ...p, trabado: estaTrabado(p, ahora), minutosQuieto: minutosQuieto(p, ahora) }))
+    .filter(p => !soloTrabados || p.trabado)
     .sort((a, b) => b.creado.localeCompare(a.creado));
 }
-function countPendientes() { return listPendientes().length; }
+
+// La campanita cuenta lo MISMO que el panel muestra. Contar todas mientras el
+// panel filtra es la forma más rápida de que el badge diga 3 y adentro haya 1.
+function countPendientes() { return listPendientes({ soloTrabados: true }).length; }
 
 // ─── La tanda: qué fechas se vienen subiendo ────────────────────────────────
 //
@@ -818,8 +884,11 @@ module.exports = {
   getProductosYCategorias, getSerieProducto, nombreVisible,
   crearPendiente, getPendiente, listPendientes, countPendientes, fechasRecientes,
   aplicarResoluciones, marcarResuelto, descartarPendiente, marcarEscritosYCerrar,
-  // El estado de la conversación del bot, guardado dentro del pendiente.
+  // El estado de la conversación, guardado dentro del pendiente. La usan las
+  // dos puertas: el bot y el panel de la app.
   setConversacion, getConversacion,
+  // Cuándo una factura sin terminar le toca al panel de la app.
+  derivarApp, estaTrabado, minutosQuieto, MINUTOS_TRABADO,
   // Los renglones llegan después que la cabecera (lectura partida en dos).
   adjuntarItems, esperarItems,
   cargarPendientesPersistidos,

@@ -290,6 +290,72 @@ Note this strategy's nominal rate is **below** the assumed inflation, so real va
 4. `src/unidades.js` normalizes purchase units to a base unit (e.g. "Caja x6" → 6 bottles) so purchased-vs-sold quantities are comparable.
 5. Anything the pipeline can't resolve confidently (category, payment method, product match, unit factor) is queued as "pendiente" for a human to confirm via Telegram reply or the app's panel — never silently guessed.
 
+### The app's panel and the bot ask the same questions, because they run the same module (2026-09-11)
+
+The owner sent a screenshot of "Facturas pendientes de confirmar" asking *"¿Con o
+sin IVA?"* and *"¿El descuento ya está incluido?"* — **questions the current
+conversation does not ask** — about invoices nobody had sent to the app. Two
+separate bugs with one symptom.
+
+**There were two question models on the same pendiente, and they never spoke.**
+`procesarFactura` built a `dudas[]` array at ingest time and `crearPendiente`
+froze it into `reg.factura.dudas`; that is what the panel drew. The
+conversation's answers accumulated in `reg.conv`, in the same record, beside it.
+Answering five questions on Telegram changed nothing about what the panel showed.
+It is the same failure this repo already fixed on 2026-09-02, when the question
+logic was split between the server and `bot.py` and the two drifted — and the
+fix is the same one: **one module decides, everything else draws.**
+`GET /api/proveedores/pendientes` now returns each invoice with its **step**,
+resolved server-side by `compra-conversacion.js`, plus the summary of what is
+already answered. `POST /pendientes/:id/paso-app` runs the *same* `avanzarPaso`
+function as the bot's `/paso`; the only difference is the auth (`authMiddleware`
++ `soloAdmin` vs `ingestAuth`) and that the app does not get offered the button
+below. Two near-identical handlers would drift exactly like the two question
+models did.
+
+**The old form survives only for pendientes that have no conversation** — ones
+created before this date. It is behind `if (!c)` in `renderPendConversacion`, and
+a test pins that `factura.dudas` is read nowhere else.
+
+**"Confirmar y cargar" left the card's footer.** With the conversation inside,
+the write is fired by the conversation's own last button — the same *"✅ Confirmar
+así"* the bot shows. Keeping both meant two ways to write the same purchase, and
+the footer one wrote **before the questions were finished**. What is left there is
+*Guardar renglones*, which writes to no spreadsheet: line-level doubts (product
+name, unit price, bottles per case) are **not part of the conversation** — the bot
+never asks about line items, it only knows how many there are — so they are
+corrected in the pendiente via `POST /pendientes/:id/items` and picked up when
+`appendCompras` finally runs. That route deletes any `factura` key it receives:
+letting header data in through it would reopen the second source of truth.
+
+**Every ingest creates a pendiente in second zero, and that is not a request for
+help** — it is the record of the photo. Until this date the panel showed all of
+them, so an invoice being answered on Telegram *at that moment* sat in the app
+asking to be confirmed, and one abandoned at 5am looked identical. `ultimaActividad`
+(moved by every answer) and `derivadoApp` separate the three cases:
+**in progress** (hidden), **stalled** (`PENDIENTES_MINUTOS_TRABADO`, 30 min —
+shown), **handed over** (shown immediately). `countPendientes()` counts exactly
+what the panel shows: a badge saying 3 over a list of 1 is how a badge stops
+being read. `?todos=1` shows the in-progress ones too, and the panel says so
+rather than looking empty.
+
+**The third exit from the conversation did not exist, which is why it was being
+taken by abandonment.** There was *confirm* and *cancel*, and nothing for "not
+now, I'll finish it on the computer" — so people just stopped answering, and the
+pendiente reached the panel anyway without anyone deciding it. `📲 Dejarlo para la
+app` is that decision: it answers nothing, cancels nothing, and moves the invoice
+to the panel with everything answered so far intact.
+
+**The button is added by the route, not by `siguientePaso`.** That function
+describes the conversation, and its `botones` are the possible *answers* to the
+question; putting a non-answer among them forces every consumer to know that one
+of them does not count. The first attempt did exactly that and
+`tests/fecha-factura.test.js` — which requires **every** button to spell the month
+in letters — caught it immediately. `pasoPara(conv, paraApp)` in the route appends
+it for the bot only. `bot.py` needs no change for the button itself (it sends the
+**index** of the button it drew), but it does need the `derivado` branch: that
+response carries no `paso`, and without it the bot falls through to `dibujar`.
+
 ### The date read off an invoice is checked before anything uses it (2026-09-11)
 
 `10/09/2026` was read as October 9th — the US order applied to an Argentine comprobante — and a Láctea El Puente invoice entered the ledger a month into the future. Nobody caught it at confirmation, because the summary printed `9/10` and `10/9` with the same two digits. **The date was the only header field that was neither confirmed nor questioned**: the total gets a tap, the letter gets a question, the date went straight through.
@@ -333,6 +399,18 @@ A purchase can already be in `Movimientos` before anyone photographs its invoice
 **Invoices that give no credit are registered anyway**, and that is the half that makes the number believable. They are the only thing that can say what share of the month's spend has already been looked at. `cobertura()` crosses the registry against `Movimientos` by `ID Movimiento` and returns `sinFactura` — the month's expenses with no comprobante yet, biggest first. That list is not context, it is the work queue: the same reasoning that orders the fiscal padrón by money.
 
 **There is no "Crédito Fiscal" column.** It would be exactly column J when M says S. A stored total next to what produces it drifts apart the day someone edits the sheet by hand, and then one question has two answers. The month's credit is the sum of J.
+
+**One invoice can carry two VAT rates, and the whole circuit assumed it could not (2026-09-11).** In Argentina meat, fruit, vegetables, wheat flour, bread and milk are taxed at 10.5% and everything else at 21%, so **every food distributor's invoice mixes them** — this is not an edge case. The Blancaluna invoice of 08/09 has ten lines, two marked `**`, and a footer with **two rows**: $247,634.39 at 21% and $44,794.42 at 10.5%.
+
+Everything assumed a single rate: the prompt asked for one `subtotal_factura` and one `iva_monto` without saying what to do with a two-row footer; the conversation asked *"¿De cuánto es el IVA?"* — a question that has **no answer** here; `desglosar` derived the rate from neto/IVA and got **19.4%**, a rate that exists in no law; and `ivaParaCompras` stamped that single rate onto all ten lines. Measured, the credit came out right **by luck**: the model summed both blocks on its own and the 1% tolerance absorbed 91 pesos it misread off the neto. Had it picked one block instead, the row would not have reconciled, `desglosar` would have fallen through to `calculado` at the tapped rate, and the credit would have been **$60,593.76 against a real $56,706.65 — $3,887 over-claimed against ARCA**, silently.
+
+**The footer is a table and is now read as one.** `iva_desglose: [{alicuota, neto, iva}]`, one entry per footer row. It is the most trustworthy thing on the paper because it is the only field with **internal redundancy**: each row states its base, its rate and its tax, so `neto × rate` can be checked against that row's `iva` *before* believing it — which the loose neto/IVA pair cannot offer. `facturas.desgloseValido` requires both that every row closes on itself **and** that the set closes against the total; failing either, the whole table is discarded and the old path runs. Half a truth here is invented tax credit. Asking for the table also removed the 91-peso error: the model read the rows instead of adding them up in its head.
+
+**Column S `Desglose IVA` was appended — at the end, never in the middle**, since inserting shifts the meaning of every column to its right in rows that already exist. It holds `21:247634.39:52003.23|10.5:44794.42:4703.42` as plain text rather than JSON because an accountant reads this cell in Google Sheets. It is written **whenever there is a footer table, single-rate included**: a column only filled in the rare case is a column nobody can tell is empty by rule or by failure. With several rates **column I is left blank** — `null` beside the breakdown tells the truth, 19.4% does not — and `acumuladoDelMes` splits the invoice across the real buckets instead of inventing a phantom one. The month's credit never depended on this (it is the sum of J); what was wrong was the per-rate table, which is exactly what the accountant cross-checks against the form.
+
+**The conversation stops asking what the paper already answered twice.** With a valid footer table the `ivaPct` step is skipped and the summary lists both rates with their bases. Without one, the question comes back unchanged.
+
+**Which rate a line gets is decided by ARITHMETIC against the footer, not by reading the line.** Measured: the model correctly caught the two `**` flour lines *and* also flagged the sunflower oil, which is at 21% — nine out of ten, and the sum did not close (133,268.82 against the declared 44,794.42). So `asignarTasasALineas` first checks whether the model's assignment reconciles with the footer's bases; if it does not, and the footer has two rates, it **searches for the subset of lines summing to the smaller base**. Here exactly one subset gives 44,794.42 to the cent — the two flours — and a unique exact subset is not a coincidence, it is the answer. Zero or several matches and it returns null rather than guessing. Capped at 20 lines. Same division of labour as the reports: **the code computes, the model interprets.**
 
 **The credit is the VAT already *inside* the total, and this was reported as a bug — read before "fixing" it.** On 2026-09-04 the owner reported that the credit was being computed "on the neto and not on the total", asking for the rate to be applied to the final amount. It must not be: on a `neto 100,000 + IVA 10.5% 10,500 = total 110,500` invoice the credit is **10,500** — the discriminated figure — while `10.5% × 110,500` is **11,602.50**, a number that appears on no line of that paper. The supplier assessed the tax on the neto, so `credit = rate × neto = total − neto`; solving it back out of the total (`neto = total / (1 + p/100)`) is just the arithmetic that reaches the same figure when the invoice does *not* discriminate — when it does, the read amount is used and nothing is solved.
 

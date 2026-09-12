@@ -12,6 +12,8 @@ vive en la app.
   3. La app responde:
        · status="escrito"    → listo, confirma cuántos productos cargó.
        · status="sin_datos"  → no pudo leer la imagen.
+       · status="derivado"   → se tocó "Dejarlo para la app": la charla termina
+                               y la factura sigue en el panel, desde donde quedó.
        · status="pendiente"  → algún dato (categoría, medio de pago, producto,
                                precio) no quedó claro. El bot pregunta por chat,
                                junta las respuestas y llama a
@@ -388,6 +390,13 @@ async def avanzar(context, chat_id, pendiente_id, campo, valor):
         return
     if status == "cancelado":
         await _mostrar(context, chat_id, f"🚫 {resp.get('message', 'No cargué nada.')}", None, mid)
+        context.chat_data.pop("pend", None)
+        return
+    # "Dejarlo para la app": ni se carga ni se cancela. La factura pasa al panel
+    # con todo lo contestado hasta acá, y la charla termina acá. Sin esta rama se
+    # caería en `dibujar`, que espera un "paso" que esta respuesta no trae.
+    if status == "derivado":
+        await _mostrar(context, chat_id, f"📲 {resp.get('message', 'La dejo en la app.')}", None, mid)
         context.chat_data.pop("pend", None)
         return
 

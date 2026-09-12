@@ -139,6 +139,13 @@ function estadoInicial({
     subtotalLeido: numeroONull(factura.subtotal_factura),
     ivaMontoLeido: numeroONull(factura.iva_monto),
     otrosImpuestos: numeroONull(factura.otros_impuestos_monto) || 0,
+    // ─── El cuadro de IVA del pie, fila por tasa ──────────────────────────
+    //
+    // Una factura de alimentos mezcla 21% y 10,5% —carnes, frutas, verduras,
+    // harina, pan y leche van a la reducida—, y ahí "¿de cuánto es el IVA?" no
+    // tiene una respuesta: tiene dos, y las dos están impresas en el pie.
+    // Cuando el cuadro está y cierra, esa pregunta no se hace.
+    ivaDesglose: Array.isArray(factura.iva_desglose) ? factura.iva_desglose : [],
 
     // ─── Lo que hay que definir ───
     deducible,
@@ -359,6 +366,26 @@ function capitalizar(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
  * cómo se escribe la compra (IVA, total, categoría) y al final lo que decide
  * cuándo sale la plata, que es lo que depende de la categoría.
  */
+// ─── La salida de emergencia: terminarla en la app ──────────────────────────
+//
+// Hasta el 11/09/2026 la conversación tenía dos finales, confirmar o cancelar, y
+// ninguno servía para "ahora no puedo, lo termino en la compu". El que quería
+// eso simplemente dejaba de contestar — y como todo ingest crea un pendiente,
+// la factura terminaba igual en el panel de la app, pero por abandono y sin que
+// nadie lo hubiera decidido. Esto lo vuelve una decisión.
+//
+// El BOTÓN no se agrega acá, y eso es deliberado: `siguientePaso` describe la
+// conversación, y sus botones son las respuestas posibles a la pregunta. Meter
+// entre ellos uno que no contesta nada obliga a cada consumidor de `botones` a
+// saber que hay uno que no cuenta — la suite de la fecha, que pide que TODOS
+// los botones escriban el mes con letras, lo cazó al primer intento. Lo agrega
+// la ruta del bot al serializar, que es donde vive esa puerta.
+//
+// El VALOR sí se entiende acá: qué significa lo que se tocó es vocabulario de
+// la conversación, y `aplicarRespuesta` es quien lo traduce.
+const BOTON_APP = { id: '__app', label: '📲 Dejarlo para la app' };
+const VALOR_APP = '__app';
+
 function siguientePaso(estado) {
   const e = estado;
 
@@ -464,8 +491,15 @@ function siguientePaso(estado) {
     ]);
   }
 
-  // 2. La alícuota.
-  if (e.deducible === true && e.ivaPct == null) {
+  // 2. La alícuota — salvo que el pie de la factura ya la haya contestado.
+  //
+  // Con el cuadro de IVA impreso no hay nada que preguntar, y en una factura de
+  // dos tasas la pregunta directamente NO TIENE respuesta: la de Blancaluna del
+  // 08/09/2026 lleva $52.003,23 al 21% y $4.703,42 al 10,5%, y cualquier botón
+  // que se toque es mentira para la mitad de los renglones. Ver
+  // `facturas.desgloseValido`, que exige que cada fila cierre consigo misma y
+  // que el conjunto cierre contra el total antes de creerle.
+  if (e.deducible === true && e.ivaPct == null && !desgloseDelPie(e)) {
     return paso('ivaPct', '¿De cuánto es el IVA?',
       ALICUOTAS.map(a => ({ id: String(a), label: `${String(a).replace('.', ',')}%` })),
       { permiteTexto: true, ayuda: 'Carnes y verduras suelen ser 10,5; el resto 21; la luz, 27.' });
@@ -605,6 +639,12 @@ function paso(campo, pregunta, botones, extra = {}) {
 function aplicarRespuesta(estado, { campo, valor } = {}) {
   const e = { ...estado };
   const v = valor == null ? '' : String(valor).trim();
+
+  // "Dejarlo para la app" puede tocarse en CUALQUIER paso, así que se atiende
+  // antes del switch y no dentro de cada caso. No toca el estado: lo contestado
+  // hasta acá queda como está, que es justamente el punto — la app sigue desde
+  // donde quedó el teléfono en vez de volver a preguntar todo.
+  if (v === VALOR_APP) return { estado, derivarApp: true };
 
   switch (campo) {
     case 'yaCargada':
@@ -837,7 +877,20 @@ function armarResumen(e) {
 
   if (e.deducible === true) {
     const como = e.ivaIncluido === true ? 'incluido' : e.ivaIncluido === false ? 'discriminado' : '❓';
-    L.push(`🅰️ Descuenta IVA · ${e.ivaPct != null ? `${String(e.ivaPct).replace('.', ',')}%` : '❓'} ${como}`);
+    // ─── Con varias tasas se muestran las dos, no un promedio ─────────────
+    //
+    // Decir "19,4%" —que es lo que da el ponderado— sobre una factura de 21% y
+    // 10,5% es informar una tasa que no existe, y encima sobre la línea que la
+    // persona mira para confirmar el crédito fiscal de un toque. Se listan.
+    const pie = desgloseDelPie(e);
+    if (pie && pie.filas.length > 1) {
+      L.push(`🅰️ Descuenta IVA · ${pie.filas.length} tasas ${como}`);
+      for (const f of pie.filas) {
+        L.push(`   ↳ ${String(f.alicuota).replace('.', ',')}% sobre ${plata(f.neto)} = ${plata(f.iva)}`);
+      }
+    } else {
+      L.push(`🅰️ Descuenta IVA · ${e.ivaPct != null ? `${String(e.ivaPct).replace('.', ',')}%` : '❓'} ${como}`);
+    }
     // ─── Cuánto crédito fiscal deja esta factura ──────────────────────────
     //
     // Se dice ACÁ y no sólo en la pantalla: quien sacó la foto tiene que poder
@@ -979,7 +1032,16 @@ function desgloseDe(e) {
     alicuota: e.ivaPct,
     netoLeido: e.subtotalLeido,
     ivaLeido: e.ivaMontoLeido,
+    desgloseIva: e.ivaDesglose,
   });
+}
+
+// El cuadro del pie, sólo si se le puede creer: cada fila cerrando consigo misma
+// y el conjunto cerrando contra el total. Devuelve null cuando no está o no
+// verifica, y ahí la alícuota se pregunta como siempre.
+function desgloseDelPie(e) {
+  if (!(e.total > 0)) return null;
+  return facturas.desgloseValido(e.ivaDesglose, e.total, e.otrosImpuestos || 0);
 }
 
 /**
@@ -1008,6 +1070,10 @@ function aRegistroDeFactura(estado, { usuario = '', origen = 'bot', idMovimiento
     alicuota: e.ivaPct,
     neto: e.subtotalLeido,
     iva: e.ivaMontoLeido,
+    // El cuadro del pie. Va entero y sin tocar: `construirFila` lo valida y,
+    // si cierra, gana sobre `neto`/`iva`/`alicuota` — que en una factura de dos
+    // tasas son la suma, el total y una tasa que no aplica a todo.
+    desgloseIva: e.ivaDesglose,
     otrosImpuestos: e.otrosImpuestos,
     idMovimiento: idMovimiento || (e.movimiento && e.movimiento.idMovimiento) || '',
     origen, usuario,
@@ -1053,17 +1119,55 @@ function fiscalDe(estado) {
 /** Lo que se le pone a cada renglón de la hoja Compras. */
 function ivaParaCompras(estado) {
   // No deducible → las columnas de IVA van VACÍAS. Ver `appendCompras`.
-  if (estado.deducible !== true) return { ivaPct: null, ivaIncluido: null };
-  return { ivaPct: estado.ivaPct, ivaIncluido: !!estado.ivaIncluido };
+  if (estado.deducible !== true) return { ivaPct: null, ivaIncluido: null, tasas: [], porDefecto: null };
+  const pie = desgloseDelPie(estado);
+  const tasas = pie ? pie.filas.map(f => f.alicuota) : [];
+  // La tasa de más peso: con una sola es esa; con varias, la que aporta más
+  // impuesto — que es la que le toca a la mayoría de los renglones.
+  const porDefecto = pie
+    ? pie.filas.slice().sort((a, b) => b.iva - a.iva)[0].alicuota
+    : (estado.ivaPct != null ? estado.ivaPct : null);
+  return {
+    ivaPct: estado.ivaPct != null ? estado.ivaPct : porDefecto,
+    ivaIncluido: !!estado.ivaIncluido,
+    tasas, porDefecto,
+  };
+}
+
+// ─── Qué IVA le toca a UN renglón ───────────────────────────────────────────
+//
+// Hasta el 11/09/2026 todos los renglones se estampaban con una sola tasa, la
+// de cabecera, pisando el `iva_porcentaje` que el extractor ya lee por línea. En
+// una factura de alimentos eso es falso para la mitad: la harina va al 10,5% y
+// el aceite al 21%, y la propia factura los marca con "**".
+//
+// La regla es una y es conservadora: **se respeta lo leído en la línea SÓLO si
+// esa tasa es una de las que el pie declara.** El pie es la lista cerrada de
+// tasas que esta factura tiene; un 15% leído en un renglón no es una tasa que la
+// factura use, es una lectura mala, y se reemplaza por la de más peso.
+//
+// Sin cuadro en el pie no hay lista contra la cual validar, y entonces se
+// comporta exactamente como antes: la de cabecera para todos.
+function ivaDeLinea(iva, leidoEnLaLinea) {
+  if (!iva || iva.ivaPct == null) return null;
+  const leido = Number(leidoEnLaLinea);
+  if (iva.tasas.length && Number.isFinite(leido)
+      && iva.tasas.some(t => Math.abs(t - leido) < 0.01)) {
+    return leido;
+  }
+  return iva.porDefecto != null ? iva.porDefecto : iva.ivaPct;
 }
 
 module.exports = {
   estadoInicial, siguientePaso, aplicarRespuesta,
   armarResumen, aDatosDeCompra, aprendizajeDe, fiscalDe, ivaParaCompras,
-  aRegistroDeFactura,
+  aRegistroDeFactura, ivaDeLinea, desgloseDelPie,
   // Puras, exportadas para poder ejercitarlas.
   nroComprobante, desgloseDe,
   pagoPrevistoDe, llevaEntrega, atajosDeEntrega, vencimientoSugerido,
   fechaSuelta, mesDe, aDDMMAAAA, plata, fechaCorta, fechaLarga,
   CATEGORIAS_CON_ENTREGA, SIN_ENTREGA, ALICUOTAS, MEDIOS, CONFIANZA_MINIMA_TOTAL,
+  // La salida a la app: el botón que se agrega a cada paso y el valor que
+  // devuelve. Exportados para que la ruta los reconozca sin repetir la cadena.
+  BOTON_APP, VALOR_APP,
 };

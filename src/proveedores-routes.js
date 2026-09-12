@@ -276,6 +276,10 @@ async function procesarFactura(factura, items, { dudaFecha = null } = {}) {
   const otrosImpuestos = Number(factura.otros_impuestos_monto) || 0;
   return { proveedor, medioPago, iva, ivaDeducible, descuentoIncluido, ivaIncluido,
     ivaPctSugerido, otrosImpuestos, subtotalFact, ivaMonto, dudas,
+    // El cuadro de IVA del pie, fila por tasa. Viaja hasta el pendiente para
+    // que el panel de la app —que no pasa por la conversación— también pueda
+    // registrar una factura de dos alícuotas sin promediarlas.
+    ivaDesglose: Array.isArray(factura.iva_desglose) ? factura.iva_desglose : [],
     // Para el gasto del libro
     totalGasto: totalSugerido, sumaLineas: redondear(sumaLineas), totalLeido: redondear(totalLeido),
     categoriaGasto, estadoGasto: '', diasCredito, fecha: factura.fecha || '',
@@ -461,10 +465,29 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, r
       const medio = datos
         ? datos.medioPago
         : ((conv.movimiento && conv.movimiento.medioPago) || '');
-      for (const it of items) {
+      // ─── Las tasas se deciden contra el PIE, no renglón por renglón ────
+      //
+      // Una factura de alimentos mezcla 21% y 10,5%, así que estampar la de
+      // cabecera en todos es falso para la mitad. Pero leer la tasa de cada
+      // renglón tampoco alcanza: medido sobre la de Blancaluna, el modelo marcó
+      // bien las dos harinas y de yapa el aceite de girasol, que va al 21%.
+      // `asignarTasasALineas` verifica contra las bases del pie y, cuando no
+      // cierran, resuelve qué renglones forman la base de la tasa chica. Si no
+      // puede decidir devuelve null y se cae al comportamiento de antes.
+      const pieIva = convo.desgloseDelPie(conItems);
+      const asignadas = (iva.ivaPct != null && pieIva)
+        ? facturasReg.asignarTasasALineas(
+          items.map(it => ({ total: it.total_linea ?? it.totalLinea, tasa: it.ivaPct })),
+          pieIva.filas)
+        : null;
+      items.forEach((it, i) => {
         it.formaPago = medio || it.formaPago || '';
-        it.ivaPct = iva.ivaPct;
+        it.ivaPct = asignadas ? asignadas.tasas[i] : convo.ivaDeLinea(iva, it.ivaPct);
         it.ivaIncluido = iva.ivaIncluido;
+      });
+      if (asignadas && asignadas.fuente === 'resuelto') {
+        console.log(`IVA por renglón resuelto contra el pie en ${conItems.proveedor}: `
+          + asignadas.tasas.map(t => `${t}%`).join(' '));
       }
       try {
         escritas = await prov.appendCompras(items);
@@ -717,7 +740,7 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, r
         itemsEnCurso: true,
         factura: reg.factura, items: [],
         resumen: convo.armarResumen(conv),
-        paso: convo.siguientePaso(conv),
+        paso: pasoPara(conv, false),
         message: 'Leí la factura.',
       });
     } catch (err) {
@@ -733,41 +756,94 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, r
   // `compra-conversacion.js`, que es puro y se prueba sin Telegram.
   //
   // Cuando no falta nada y se confirma, acá se orquesta la escritura.
+  // El paso tal como lo va a dibujar cada puerta.
+  //
+  // La conversación devuelve las respuestas posibles y nada más. Al bot se le
+  // agrega acá "📲 Dejarlo para la app", que no contesta ninguna pregunta: es la
+  // tercera salida de la charla, y sin ella la única forma de posponer una
+  // factura era dejar de contestar. En la app no se ofrece porque ya estás ahí.
+  //
+  // `bot.py` manda el ÍNDICE del botón que se tocó y busca el id en la lista que
+  // guardó, así que un botón agregado del lado del servidor le llega sin tocar
+  // una línea de Python.
+  function pasoPara(conv, paraApp) {
+    const p = convo.siguientePaso(conv);
+    if (paraApp || p.tipo === 'listo') return p;
+    return { ...p, botones: [...(p.botones || []), convo.BOTON_APP] };
+  }
+
+  // Un paso, sin importar por qué puerta entró. El bot y el panel de la app
+  // corren EXACTAMENTE esta función: si se bifurcaran, el panel volvería a
+  // preguntar cosas que el teléfono ya contestó, que es el bug que esto arregla.
+  // Lo único que cambia es `paraApp`, que saca el botón de derivar (ya estás
+  // en la app) — y con eso alcanza.
+  async function avanzarPaso(req, { paraApp = false } = {}) {
+    await prov.cargarPendientesPersistidos();
+    const id = req.params.id;
+    let conv = prov.getConversacion(id);
+    if (!conv) return { http: 404, body: { ok: false, error: 'Esa factura ya no está en curso. Mandá la foto de nuevo.' } };
+
+    const { campo, valor } = req.body || {};
+    const r = convo.aplicarRespuesta(conv, { campo, valor });
+
+    if (r.cancelar) {
+      prov.descartarPendiente(id);
+      return { body: { ok: true, status: 'cancelado', message: 'Listo, no cargué nada.' } };
+    }
+    // "Dejarlo para la app": no se contesta nada y no se descarta nada. La
+    // factura pasa al panel YA, sin esperar los 30 minutos del reloj, con todo
+    // lo contestado hasta acá intacto.
+    if (r.derivarApp) {
+      prov.derivarApp(id);
+      return { body: {
+        ok: true, status: 'derivado',
+        message: 'Listo, la dejo en la app. Entrá a Compras › Pagos › 🔔 Pendientes y seguí desde donde quedaste.',
+      } };
+    }
+    if (r.error) {
+      // El valor no se guarda: se repregunta el mismo paso con el error arriba.
+      return { body: {
+        ok: true, status: 'pregunta', error: r.error,
+        resumen: convo.armarResumen(conv), paso: pasoPara(conv, paraApp),
+      } };
+    }
+
+    conv = r.estado;
+    prov.setConversacion(id, conv);
+
+    const paso = pasoPara(conv, paraApp);
+    if (paso.tipo !== 'listo') {
+      return { body: { ok: true, status: 'pregunta', resumen: convo.armarResumen(conv), paso } };
+    }
+
+    // Confirmado: se escribe.
+    return { body: await confirmarCompra(id, conv, req) };
+  }
+
   router.post('/api/proveedores/pendientes/:id/paso', ingestAuth, async (req, res) => {
     try {
-      await prov.cargarPendientesPersistidos();
-      const id = req.params.id;
-      let conv = prov.getConversacion(id);
-      if (!conv) return res.status(404).json({ ok: false, error: 'Esa factura ya no está en curso. Mandá la foto de nuevo.' });
-
-      const { campo, valor } = req.body || {};
-      const r = convo.aplicarRespuesta(conv, { campo, valor });
-
-      if (r.cancelar) {
-        prov.descartarPendiente(id);
-        return res.json({ ok: true, status: 'cancelado', message: 'Listo, no cargué nada.' });
-      }
-      if (r.error) {
-        // El valor no se guarda: se repregunta el mismo paso con el error arriba.
-        return res.json({
-          ok: true, status: 'pregunta', error: r.error,
-          resumen: convo.armarResumen(conv), paso: convo.siguientePaso(conv),
-        });
-      }
-
-      conv = r.estado;
-      prov.setConversacion(id, conv);
-
-      const paso = convo.siguientePaso(conv);
-      if (paso.tipo !== 'listo') {
-        return res.json({ ok: true, status: 'pregunta', resumen: convo.armarResumen(conv), paso });
-      }
-
-      // Confirmado: se escribe.
-      const out = await confirmarCompra(id, conv, req);
-      return res.json(out);
+      const out = await avanzarPaso(req, { paraApp: false });
+      return res.status(out.http || 200).json(out.body);
     } catch (err) {
       console.error('Error /api/proveedores/pendientes/:id/paso:', err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // La misma conversación, contestada desde el panel de la app.
+  //
+  // Es otra ruta y no la de arriba con dos autenticaciones porque las dos
+  // puertas no son la misma: el bot entra con el token de servicio compartido
+  // (`ingestAuth`) y la app con el JWT de una persona que además tiene que ser
+  // admin. Colgar las dos del mismo path obligaría a un middleware que acepte
+  // cualquiera de las dos, y eso es exactamente cómo un endpoint termina
+  // abierto por accidente.
+  router.post('/api/proveedores/pendientes/:id/paso-app', authMiddleware, soloAdmin, async (req, res) => {
+    try {
+      const out = await avanzarPaso(req, { paraApp: true });
+      return res.status(out.http || 200).json(out.body);
+    } catch (err) {
+      console.error('Error /api/proveedores/pendientes/:id/paso-app:', err.message);
       res.status(500).json({ ok: false, error: err.message });
     }
   });
@@ -794,9 +870,66 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, r
 
   // ─── Listado de pendientes (panel de notificaciones) ──────────────────────────
   // Antes de listar, rehidratamos desde la hoja (sobreviven a los redeploys).
+  // ─── Qué ve el panel, y por qué no es todo ───────────────────────────────
+  //
+  // Cada factura sale con SU PASO de la conversación ya resuelto, que es lo que
+  // hace que el panel y el bot pregunten lo mismo: los dos leen
+  // `compra-conversacion.js`. Hasta el 11/09/2026 el panel dibujaba
+  // `factura.dudas` —una lista congelada en el ingest por `procesarFactura`—
+  // mientras las respuestas se acumulaban en `reg.conv`, al lado, sin que una
+  // mirara a la otra. El resultado eran preguntas de un cuestionario que el bot
+  // ya no hace, sobre cosas que la persona acababa de contestar.
+  //
+  // `?todos=1` muestra también las que están en curso. El default las esconde
+  // porque una conversación que alguien está contestando en el teléfono en este
+  // momento no es un pedido de ayuda para la app.
+  //
+  // `conv` NO viaja: es estado interno. Lo que viaja es la pregunta que toca y
+  // el resumen de lo ya contestado, que es lo único que la pantalla necesita.
   router.get('/api/proveedores/pendientes', authMiddleware, soloAdmin, async (req, res) => {
     try { await prov.cargarPendientesPersistidos(); } catch (e) {}
-    res.json({ ok: true, data: prov.listPendientes() });
+    const todos = String((req.query || {}).todos || '') === '1';
+    const data = prov.listPendientes({ soloTrabados: !todos }).map(reg => {
+      const { conv, ...resto } = reg;
+      if (!conv) return { ...resto, conversacion: null };
+      return {
+        ...resto,
+        conversacion: {
+          paso: convo.siguientePaso(conv),
+          resumen: convo.armarResumen(conv),
+        },
+      };
+    });
+    res.json({ ok: true, data, minutosTrabado: prov.MINUTOS_TRABADO });
+  });
+
+  // ─── Las dudas de RENGLÓN, que no son parte de la conversación ───────────
+  //
+  // El bot nunca pregunta por renglones: la conversación decide la cabecera —la
+  // plata, el IVA, la categoría, el vencimiento— y de los productos sólo sabe
+  // cuántos hay. Lo que queda dudoso en un renglón (el nombre, el precio, las
+  // botellas por caja) se contesta acá, y NO escribe nada: corrige el pendiente
+  // para que cuando la conversación se confirme, `appendCompras` escriba los
+  // valores buenos en vez de los que leyó el modelo.
+  //
+  // Es otra ruta que `/resolver` justamente porque ésa sí escribe. Mezclarlas
+  // haría que corregir el nombre de un producto dispare la carga de la compra.
+  router.post('/api/proveedores/pendientes/:id/items', authMiddleware, soloAdmin, async (req, res) => {
+    try {
+      await prov.cargarPendientesPersistidos();
+      const resoluciones = (req.body && req.body.resoluciones) || {};
+      // Sólo renglones: lo de cabecera lo decide la conversación y dejar entrar
+      // un `factura` por acá sería reabrir la segunda fuente de verdad.
+      delete resoluciones.factura;
+      delete resoluciones.__factura__;
+      const out = prov.aplicarResoluciones(req.params.id, resoluciones);
+      if (!out) return res.status(404).json({ ok: false, error: 'No encontré esa factura.' });
+      const faltan = out.faltan.length;
+      res.json({ ok: true, faltan, message: faltan ? `Quedan ${faltan} renglón(es) con dudas.` : 'Renglones listos.' });
+    } catch (err) {
+      console.error('Error /api/proveedores/pendientes/:id/items:', err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
   });
   router.get('/api/proveedores/pendientes/count', authMiddleware, soloAdmin, async (req, res) => {
     try { await prov.cargarPendientesPersistidos(); } catch (e) {}
@@ -937,6 +1070,10 @@ module.exports = function ({ authMiddleware, adminOnly, registrarGastoEnLibro, r
         alicuota: fk.ivaPct != null ? fk.ivaPct : fk.ivaPctSugerido,
         neto: fk.subtotalFact,
         iva: fk.ivaMonto,
+        // El cuadro del pie. `construirFila` lo valida y, si cierra, gana sobre
+        // los tres campos de arriba — que en una factura de dos alícuotas son
+        // la suma, el total, y una tasa que no le corresponde a la mitad.
+        desgloseIva: fk.ivaDesglose,
         otrosImpuestos: fk.otrosImpuestos,
         // Es el mismo id que `escribirGastoDeFactura` pone en la columna H.
         idMovimiento: reg.id,

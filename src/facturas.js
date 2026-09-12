@@ -47,7 +47,10 @@
 //   A Fecha | B Mes | C Proveedor | D CUIT | E Comprobante | F Punto Venta |
 //   G Numero | H Neto Gravado | I Alicuota | J IVA | K Otros Impuestos |
 //   L Total | M Computable | N Fuente Importes | O ID Movimiento |
-//   P Origen | Q Usuario | R Cargado
+//   P Origen | Q Usuario | R Cargado | S Desglose IVA
+//
+// S se AGREGÓ el 11/09/2026, al final y nunca en el medio: insertar una columna
+// corre el significado de todas las de la derecha en las filas que ya existen.
 //
 // NO hay columna "Crédito Fiscal", y es a propósito: sería exactamente la
 // columna J cuando M dice S. Un total guardado al lado de lo que lo produce se
@@ -76,8 +79,9 @@ const SHEET_ID = process.env.PROVEEDORES_SHEET_ID || null;
 const HOJA = process.env.FACTURAS_SHEET || 'Facturas';
 const HEADER = ['Fecha', 'Mes', 'Proveedor', 'CUIT', 'Comprobante', 'Punto Venta',
   'Numero', 'Neto Gravado', 'Alicuota', 'IVA', 'Otros Impuestos', 'Total',
-  'Computable', 'Fuente Importes', 'ID Movimiento', 'Origen', 'Usuario', 'Cargado'];
-const ULTIMA_COL = 'R';
+  'Computable', 'Fuente Importes', 'ID Movimiento', 'Origen', 'Usuario', 'Cargado',
+  'Desglose IVA'];
+const ULTIMA_COL = 'S';
 const TZ = 'America/Argentina/Buenos_Aires';
 
 // Las letras que dan crédito fiscal. `M` es la factura A emitida a un sujeto no
@@ -205,6 +209,157 @@ function claveDe(f = {}) {
  * da 14,7% no es ninguna y se devuelve tal cual: inventar un 21 ahí sería
  * escribir en la planilla un número que la factura no dice.
  */
+// ¿Se le puede creer al cuadro del pie?
+//
+// Dos condiciones, y las dos tienen que darse:
+//   1. CADA fila cierra consigo misma: `neto × alícuota / 100` da su `iva`. Es
+//      lo que distingue un cuadro leído de tres números sueltos.
+//   2. La suma de todas las filas más los otros impuestos da el TOTAL, que es
+//      el único número que una persona confirmó con un toque.
+//
+// Devuelve null si falla cualquiera de las dos: se sigue por el camino viejo,
+// que puede terminar en "falta alícuota" y una fila marcada para completar.
+// Eso es preferible a registrar crédito a partir de un cuadro mal leído.
+function _desgloseValido(filas, total, otros) {
+  if (!Array.isArray(filas) || !filas.length) return null;
+
+  let neto = 0, iva = 0;
+  for (const f of filas) {
+    const pct = _num(f && f.alicuota), n = _num(f && f.neto), i = _num(f && f.iva);
+    if (!(pct > 0) || !(n > 0) || !(i >= 0)) return null;
+    // Tolerancia por fila: la misma idea que la del total, sobre el impuesto de
+    // esa fila. Un peso de redondeo pasa; un dígito mal, no.
+    const esperado = n * pct / 100;
+    if (Math.abs(esperado - i) > Math.max(TOLERANCIA_MIN, i * TOLERANCIA_PCT)) return null;
+    neto += n; iva += i;
+  }
+
+  const tolerancia = Math.max(TOLERANCIA_MIN, total * TOLERANCIA_PCT);
+  if (Math.abs(neto + iva + otros - total) > tolerancia) return null;
+
+  return {
+    neto: centavos(neto),
+    iva: centavos(iva),
+    filas: filas.map(f => ({
+      alicuota: acercarAlicuota(_num(f.alicuota)),
+      neto: centavos(_num(f.neto)),
+      iva: centavos(_num(f.iva)),
+    })),
+  };
+}
+
+// ─── El cuadro del pie, guardado en una celda ───────────────────────────────
+//
+// `21:247634.39:52003.23|10.5:44794.42:4703.42` — tasa, base, impuesto; una
+// entrada por alícuota. Texto plano y no JSON porque esta celda la va a mirar
+// un contador en Google Sheets, y `[{"alicuota":21,...}]` en una columna es
+// ilegible; esto se lee de un vistazo y sigue siendo parseable.
+//
+// Se escribe SIEMPRE que haya cuadro, incluso con una sola tasa. Una columna
+// que sólo se llena en el caso raro es una columna que nadie sabe si está vacía
+// porque no corresponde o porque falló.
+function formatearDesglose(filas) {
+  if (!Array.isArray(filas) || !filas.length) return '';
+  return filas
+    .map(f => `${f.alicuota}:${centavos(f.neto)}:${centavos(f.iva)}`)
+    .join('|');
+}
+
+function parsearDesglose(v) {
+  const s = _txt(v);
+  if (!s) return [];
+  const out = [];
+  for (const parte of s.split('|')) {
+    const [a, n, i] = parte.split(':');
+    const alicuota = _num(a), neto = _num(n), iva = _num(i);
+    if (alicuota == null || neto == null || iva == null) continue;
+    out.push({ alicuota, neto, iva });
+  }
+  return out;
+}
+
+// ─── Qué tasa le toca a cada renglón ────────────────────────────────────────
+//
+// Medido el 11/09/2026 sobre la factura de Blancaluna: el modelo leyó bien los
+// dos renglones marcados con "**" (las harinas, al 10,5%) y ADEMÁS marcó el
+// aceite de girasol, que no lo está — razonando, se ve, que un aceite es un
+// alimento. Nueve de diez bien y la suma sin cerrar: 133.268,82 contra los
+// 44.794,42 que declara el pie.
+//
+// Por eso lo que decide no es la lectura del renglón sino la ARITMÉTICA contra
+// el pie, que es la misma división de trabajo del resto del repo: el código
+// calcula, el modelo interpreta.
+//
+//   1. Si lo que leyó el modelo YA cierra contra las bases del pie, se respeta.
+//   2. Si no cierra y el pie tiene dos tasas, se BUSCA el subconjunto de
+//      renglones que suma exacto la base de la tasa chica. En esta factura hay
+//      exactamente uno —25.850,75 + 18.943,67— y son las dos harinas. Un único
+//      subconjunto que da al centavo no es una coincidencia: es la respuesta.
+//   3. Si hay cero o varios subconjuntos, no se inventa nada y decide el caller.
+//
+// Devuelve `{ tasas, fuente }` o null. `fuente` viaja para que la planilla diga
+// de dónde salió cada tasa, igual que `Fuente Importes`.
+const MAX_LINEAS_A_RESOLVER = 20;   // 2^20 ≈ 1M combinaciones, milisegundos
+
+function asignarTasasALineas(lineas, filasPie) {
+  if (!Array.isArray(lineas) || !lineas.length) return null;
+  if (!Array.isArray(filasPie) || !filasPie.length) return null;
+
+  const totales = lineas.map(l => _num(l && l.total));
+  if (totales.some(t => t == null || t <= 0)) return null;
+
+  // Los renglones tienen que sumar el neto del pie. Si no, falta un renglón o
+  // se leyó mal un importe, y cualquier reparto sería sobre una base falsa.
+  const netoPie = filasPie.reduce((s, f) => s + (_num(f.neto) || 0), 0);
+  const sumaLineas = totales.reduce((s, t) => s + t, 0);
+  const tol = Math.max(TOLERANCIA_MIN, netoPie * TOLERANCIA_PCT);
+  if (Math.abs(sumaLineas - netoPie) > tol) return null;
+
+  // Una sola tasa: no hay nada que repartir.
+  if (filasPie.length === 1) {
+    const a = acercarAlicuota(_num(filasPie[0].alicuota));
+    return { tasas: totales.map(() => a), fuente: 'unica' };
+  }
+
+  // 1. ¿Lo que leyó el modelo ya cierra?
+  const propuestas = lineas.map(l => _num(l && l.tasa));
+  if (propuestas.every(p => p != null)) {
+    const porTasa = new Map();
+    propuestas.forEach((p, i) => porTasa.set(p, (porTasa.get(p) || 0) + totales[i]));
+    const cierra = filasPie.every(f => {
+      const base = _num(f.neto) || 0;
+      const leido = porTasa.get(_num(f.alicuota)) || 0;
+      return Math.abs(leido - base) <= Math.max(TOLERANCIA_MIN, base * TOLERANCIA_PCT);
+    }) && porTasa.size === filasPie.length;
+    if (cierra) return { tasas: propuestas.map(acercarAlicuota), fuente: 'lineas' };
+  }
+
+  // 2. Dos tasas: resolver el subconjunto de la más chica.
+  if (filasPie.length !== 2 || totales.length > MAX_LINEAS_A_RESOLVER) return null;
+  const chica = filasPie.slice().sort((a, b) => (_num(a.neto) || 0) - (_num(b.neto) || 0))[0];
+  const grande = filasPie.find(f => f !== chica);
+  // En centavos: sumar flotantes y comparar con tolerancia es cómo dos
+  // subconjuntos distintos empiezan a parecer el mismo.
+  const cent = totales.map(t => Math.round(t * 100));
+  const objetivo = Math.round((_num(chica.neto) || 0) * 100);
+
+  let encontrado = null, cuantos = 0;
+  const n = cent.length;
+  for (let m = 1; m < (1 << n) && cuantos < 2; m++) {
+    let s = 0;
+    for (let i = 0; i < n; i++) if (m & (1 << i)) s += cent[i];
+    if (Math.abs(s - objetivo) <= 1) { cuantos++; encontrado = m; }
+  }
+  if (cuantos !== 1) return null;   // ninguno o ambiguo: que decida el caller
+
+  const aChica = acercarAlicuota(_num(chica.alicuota));
+  const aGrande = acercarAlicuota(_num(grande.alicuota));
+  return {
+    tasas: totales.map((_, i) => ((encontrado & (1 << i)) ? aChica : aGrande)),
+    fuente: 'resuelto',
+  };
+}
+
 function acercarAlicuota(pct) {
   if (!Number.isFinite(pct) || pct <= 0) return null;
   const cerca = ALICUOTAS_CONOCIDAS.find(a => Math.abs(a - pct) <= 0.6);
@@ -262,7 +417,7 @@ function acercarAlicuota(pct) {
  */
 function desglosar({
   total, otrosImpuestos = 0, computable, alicuota,
-  netoLeido = null, ivaLeido = null,
+  netoLeido = null, ivaLeido = null, desgloseIva = null,
 } = {}) {
   const tot = centavos(_num(total) || 0);
   const otros = centavos(Math.max(0, _num(otrosImpuestos) || 0));
@@ -274,6 +429,36 @@ function desglosar({
   // No computable: las columnas del impuesto quedan VACÍAS, no en cero.
   if (!computable) {
     return { neto: null, alicuota: null, iva: null, otros, total: tot, fuente: 'no-computable' };
+  }
+
+  // ─── El cuadro del pie gana sobre todo lo demás ─────────────────────────
+  //
+  // Una factura de alimentos mezcla 21% y 10,5% —carnes, frutas, verduras,
+  // harina, pan y leche van a la reducida— y el pie trae UNA FILA POR TASA.
+  // Eso es la respuesta impresa, no una lectura que haya que interpretar.
+  //
+  // Tiene además redundancia interna que ningún otro campo tiene: cada fila
+  // dice su base, su tasa y su impuesto, así que se puede verificar que
+  // `neto × tasa` dé el `iva` de ESA fila antes de creerle. Un cuadro que se
+  // verifica a sí mismo Y cierra contra el total es lo más confiable que hay
+  // acá, incluso más que el par neto/IVA suelto, que sólo tiene lo segundo.
+  //
+  // Si no se verifica, se descarta entero y se sigue por el camino de siempre.
+  // Media verdad acá es crédito fiscal inventado.
+  const desg = _desgloseValido(desgloseIva, tot, otros);
+  if (desg) {
+    return {
+      neto: desg.neto,
+      // Con una sola tasa es esa tasa, y la fila se lee como cualquier otra.
+      // Con varias no hay UNA alícuota: `null` con el desglose al lado dice la
+      // verdad, y 19,4% —el promedio ponderado, que es lo que salía antes— es
+      // una tasa que no existe en ninguna ley.
+      alicuota: desg.filas.length === 1 ? acercarAlicuota(desg.filas[0].alicuota) : null,
+      iva: desg.iva,
+      otros, total: tot,
+      desglose: desg.filas,
+      fuente: desg.filas.length === 1 ? 'leido' : 'leido-varias-tasas',
+    };
   }
 
   const neto0 = _num(netoLeido);
@@ -331,6 +516,7 @@ function construirFila(f = {}) {
     alicuota: f.alicuota,
     netoLeido: f.neto,
     ivaLeido: f.iva,
+    desgloseIva: f.desgloseIva,
   });
   if (d.fuente === 'sin-total') {
     return { ok: false, error: 'El total de la factura tiene que ser un número mayor que cero.' };
@@ -358,6 +544,7 @@ function construirFila(f = {}) {
     _txt(f.origen) || 'app',                // P Origen
     _txt(f.usuario),                        // Q Usuario
     new Date().toISOString(),               // R Cargado
+    formatearDesglose(d.desglose),          // S Desglose IVA
   ];
 
   return { ok: true, row, desglose: d, computable, clave: claveDe({ ...f, comprobante: f.comprobante }) };
@@ -391,6 +578,9 @@ function parsearFila(f = [], i = 0) {
     origen: _txt(f[15]),
     usuario: _txt(f[16]),
     cargado: _txt(f[17]),
+    // El cuadro del pie, para que el informe pueda repartir una factura de
+    // varias tasas entre sus alícuotas en vez de meterla entera en un bucket.
+    desglose: parsearDesglose(f[18]),
     rowIndex: i + 1,
   };
 }
@@ -429,12 +619,30 @@ function acumuladoDelMes(facturas, mes) {
         credito += f.iva;
         netoGravado += f.neto || 0;
         p.credito += f.iva;
-        const a = f.alicuota == null ? 'sin alícuota' : String(f.alicuota);
-        const acc = porAlicuota.get(a) || { alicuota: f.alicuota, neto: 0, iva: 0, facturas: 0 };
-        acc.neto += f.neto || 0;
-        acc.iva += f.iva;
-        acc.facturas += 1;
-        porAlicuota.set(a, acc);
+        // ─── Una factura puede aportar a MÁS DE UN bucket ────────────────
+        //
+        // Las de alimentos mezclan 21% y 10,5%. Antes se metía entera en el
+        // bucket de su alícuota, y para una mixta esa alícuota era el promedio
+        // ponderado —19,4% en el caso que lo destapó—, o sea una tasa que no
+        // existe. El crédito del mes siempre estuvo bien (es la suma de J, y no
+        // depende de esto); lo que estaba mal era el cuadro por tasa, que es
+        // justo lo que el contador cruza contra el formulario.
+        //
+        // Con desglose se reparte fila por fila; sin él, se comporta como antes.
+        const partes = (f.desglose && f.desglose.length)
+          ? f.desglose
+          : [{ alicuota: f.alicuota, neto: f.neto || 0, iva: f.iva }];
+        for (const parte of partes) {
+          const a = parte.alicuota == null ? 'sin alícuota' : String(parte.alicuota);
+          const acc = porAlicuota.get(a) || { alicuota: parte.alicuota, neto: 0, iva: 0, facturas: 0 };
+          acc.neto += parte.neto || 0;
+          acc.iva += parte.iva || 0;
+          // La factura se cuenta una vez en cada tasa a la que aporta: el cuadro
+          // contesta "cuántos comprobantes tocan el 10,5%", y para eso ésta es
+          // uno de ellos aunque también toque el 21%.
+          acc.facturas += 1;
+          porAlicuota.set(a, acc);
+        }
       } else {
         // Computable pero sin IVA cargado: es crédito que existe y todavía no se
         // sabe cuánto. Se cuenta aparte en vez de sumar cero, que lo escondería.
@@ -670,6 +878,47 @@ async function _ensureHoja(api) {
     });
   } catch (e) {
     if (!String(e.message || '').toLowerCase().includes('already exists')) throw e;
+    // ─── La hoja ya existe y puede tener el encabezado corto ──────────────
+    //
+    // El encabezado sólo se escribía al CREAR la hoja, así que el día que se
+    // agrega una columna al final —`Desglose IVA`, el 11/09/2026— las hojas que
+    // ya existen empiezan a recibir filas de 19 celdas contra un encabezado de
+    // 18: la columna queda con datos y sin título arriba, que es la mitad de un
+    // cambio y no se ve hasta que alguien abre la planilla y no sabe qué es esa
+    // columna.
+    //
+    // Se completan SÓLO las celdas de título que estén VACÍAS al final, y sólo
+    // si todo lo anterior coincide. Reescribir un encabezado que dice otra cosa
+    // correría el significado de cada columna sobre los datos que ya están
+    // cargados — es la misma regla que `bootstrap-planillas.js` aplica y el
+    // motivo por el que ahí también se reporta en vez de tocar.
+    try {
+      const r = await api.spreadsheets.values.get({
+        spreadsheetId: SHEET_ID, range: `${HOJA}!A1:${ULTIMA_COL}1`,
+      });
+      const actual = (r.data.values && r.data.values[0]) || [];
+      if (!actual.length) return;   // hoja vacía: la escribe el alta normal
+      const coinciden = HEADER.slice(0, actual.length)
+        .every((h, i) => _txt(actual[i]) === '' || _txt(actual[i]) === h);
+      if (!coinciden) {
+        console.warn(`Facturas: el encabezado de la hoja no coincide con el esperado; no se toca.`);
+        return;
+      }
+      const faltan = HEADER.slice(actual.length);
+      if (!faltan.length) return;
+      const desde = String.fromCharCode('A'.charCodeAt(0) + actual.length);
+      await api.spreadsheets.values.update({
+        spreadsheetId: SHEET_ID,
+        range: `${HOJA}!${desde}1:${ULTIMA_COL}1`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [faltan] },
+      });
+      console.log(`Facturas: se completó el encabezado con ${faltan.join(', ')}.`);
+    } catch (e2) {
+      // Que no se pueda completar el título no puede impedir registrar una
+      // factura: la columna queda sin encabezado y se arregla a mano.
+      console.warn('Facturas: no se pudo completar el encabezado:', e2.message);
+    }
   }
 }
 
@@ -769,5 +1018,11 @@ module.exports = {
   buscarCompraEnLibro,
   esComputable, normalizarComprobante, formatearNumero, claveDe,
   acercarAlicuota, mesDeISO, rangoDelMes, norm, VENTANA_DIAS,
+  // El cuadro de IVA del pie: cómo se guarda en la celda, cómo se vuelve a leer,
+  // y si se le puede creer. Lo último lo consulta la conversación para no
+  // preguntar una alícuota que el papel ya contestó dos veces.
+  formatearDesglose, parsearDesglose, desgloseValido: _desgloseValido,
+  // Qué tasa le toca a cada renglón, decidido contra el pie y no por la lectura.
+  asignarTasasALineas,
   COMPROBANTES, COMPROBANTES_CON_CREDITO, ALICUOTAS_CONOCIDAS, HOJA, HEADER,
 };

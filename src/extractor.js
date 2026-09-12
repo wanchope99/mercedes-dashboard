@@ -101,6 +101,7 @@ Devolvé un OBJETO JSON con esta forma EXACTA, sin texto adicional:
   "dias_credito": 0,
   "subtotal_factura": 0,
   "iva_monto": 0,
+  "iva_desglose": [],
   "iva_discriminado": true,
   "otros_impuestos_monto": 0,
   "total_factura": 0,
@@ -157,8 +158,29 @@ Reglas IMPORTANTES:
 - total_factura = el TOTAL final de la factura, con impuestos. Es el dato MÁS
   importante de todos: es la plata que se va a registrar como gasto. Si no lo
   podés leer con seguridad, poné tu mejor lectura con confianza baja.
-- subtotal_factura = el SUBTOTAL ANTES de IVA e impuestos.
-- iva_monto = el MONTO de IVA en pesos del pie de la factura.
+- iva_desglose = EL CUADRO DE IVA DEL PIE, fila por fila. Es lo más importante de
+  todo este bloque, porque una factura puede tener MÁS DE UNA ALÍCUOTA y casi
+  todas las de alimentos la tienen: en Argentina las carnes, frutas, verduras,
+  harina de trigo, pan y leche van al 10,5% y el resto al 21%, así que un pedido
+  a un distribuidor mezcla las dos.
+  El pie trae un cuadro con una FILA POR TASA, con columnas del estilo
+  "Subtotal | IVA Inscripto | %". Devolvé una entrada por cada fila:
+    [{ "alicuota": 21, "neto": 247634.39, "iva": 52003.23 },
+     { "alicuota": 10.5, "neto": 44794.42, "iva": 4703.42 }]
+  · Con UNA sola tasa, va una sola entrada. Es lo normal y también se llena.
+  · Si no hay cuadro o no se puede leer, devolvé [] — NO inventes las filas ni
+    las deduzcas de los productos.
+  · Copiá los importes de ese cuadro, no los calcules: para eso están impresos.
+  · Los renglones marcados con "**", "(*)" o similar suelen ser los de la tasa
+    reducida; el pie lo aclara al final ("Productos con tasa de IVA al 10,5%").
+    Eso sirve para poner bien el iva_porcentaje DE CADA RENGLÓN, que se pide en
+    la otra llamada — acá sólo interesa el cuadro del pie.
+- subtotal_factura = el SUBTOTAL ANTES de IVA e impuestos. Si el pie tiene VARIAS
+  tasas, es la SUMA de todos los subtotales, no el de una sola fila.
+- iva_monto = el MONTO de IVA en pesos del pie. Con varias tasas, la SUMA de
+  todas. Quedarse con una sola fila deja afuera crédito fiscal que existe, o
+  hace que el sistema calcule el IVA del total entero a una tasa que no le
+  corresponde a la mitad de la factura.
 - otros_impuestos_monto = MONTO en pesos de impuestos que NO son IVA (ej "IMP INT").
 - LA FECHA. Van los dos campos y son distintos:
   · fecha_texto = los caracteres tal cual están impresos en el papel, sin
@@ -207,8 +229,18 @@ Categorías válidas (usá EXACTAMENTE estos nombres):
 ${cats.CATEGORIAS.map(c => `  · ${c}`).join('\n')}
 
 Reglas IMPORTANTES:
-- iva_porcentaje: la alícuota de IVA de esa línea (21, 10.5, 0). Si la factura la
-  discrimina por línea, usá la de cada línea; si es general, repetí la misma.
+- iva_porcentaje: la alícuota de IVA de esa línea (21, 10.5, 0).
+  · Si la factura tiene una columna de IVA por línea, usá la de cada línea.
+  · MUY COMÚN Y FÁCIL DE PASAR POR ALTO: muchas facturas de alimentos NO tienen
+    esa columna y en cambio MARCAN los renglones de la tasa reducida con un
+    símbolo —"**", "(*)", una letra— y lo aclaran en una nota al pie del estilo
+    "(**) Productos con tasa de IVA al 10,5 %". Buscá esa nota SIEMPRE: si
+    existe, los renglones marcados llevan la tasa que dice la nota y los NO
+    marcados la otra. En Argentina van al 10,5% las carnes, frutas, verduras,
+    legumbres, granos, harina de trigo, pan y leche; el resto al 21%.
+  · Si no discrimina nada y hay una sola tasa, repetí la misma en todas.
+  · Si no podés determinarla para una línea, dejala en null con confianza 0. Un
+    humano la confirma, y es mejor que una tasa inventada.
 - precio_unitario = precio por unidad (P.U.) ANTES de descuento, NO el total de la línea.
 - descuento_porcentaje = el % de descuento de esa línea si la factura tiene una
   columna "% Dto", "Dcto", "Descuento" o similar (ej. 50 = 50%). Si no hay, 0.
@@ -277,8 +309,18 @@ Reglas IMPORTANTES:
     el medio (ej. "Efectivo", "Transferencia", "Mercado Pago", "Tarjeta").
 - forma_de_pago y dias_credito van en "factura" (son de toda la factura, NO por
   producto).
-- iva_porcentaje: la alícuota de IVA de esa línea (21, 10.5, 0). Si la factura la
-  discrimina por línea, usá la de cada línea; si es general, repetí la misma.
+- iva_porcentaje: la alícuota de IVA de esa línea (21, 10.5, 0).
+  · Si la factura tiene una columna de IVA por línea, usá la de cada línea.
+  · MUY COMÚN Y FÁCIL DE PASAR POR ALTO: muchas facturas de alimentos NO tienen
+    esa columna y en cambio MARCAN los renglones de la tasa reducida con un
+    símbolo —"**", "(*)", una letra— y lo aclaran en una nota al pie del estilo
+    "(**) Productos con tasa de IVA al 10,5 %". Buscá esa nota SIEMPRE: si
+    existe, los renglones marcados llevan la tasa que dice la nota y los NO
+    marcados la otra. En Argentina van al 10,5% las carnes, frutas, verduras,
+    legumbres, granos, harina de trigo, pan y leche; el resto al 21%.
+  · Si no discrimina nada y hay una sola tasa, repetí la misma en todas.
+  · Si no podés determinarla para una línea, dejala en null con confianza 0. Un
+    humano la confirma, y es mejor que una tasa inventada.
 - precio_unitario = precio por unidad (P.U.) ANTES de descuento, NO el total de la línea.
 - descuento_porcentaje = el % de descuento de esa línea si la factura tiene una
   columna "% Dto", "Dcto", "Descuento" o similar (ej. 50 = 50%). Si no hay, 0.
@@ -343,6 +385,10 @@ async function extraerCabecera({ base64, mime = 'image/jpeg', hoy } = {}) {
   factura.fecha_texto = String(factura.fecha_texto == null ? '' : factura.fecha_texto).trim();
   factura.subtotal_factura = factura.subtotal_factura ?? null;
   factura.iva_monto = factura.iva_monto ?? null;
+  // El cuadro de IVA del pie. Acá sólo se le dan tipos; si cierra o no contra el
+  // total lo decide `facturas.desglosar`, que es donde vive la regla de cuándo
+  // gana lo leído sobre lo calculado y con qué tolerancia.
+  factura.iva_desglose = normalizarDesgloseIva(factura.iva_desglose);
   factura.otros_impuestos_monto = factura.otros_impuestos_monto ?? null;
   factura.tipo_comprobante = normalizarComprobante(factura.tipo_comprobante);
   factura.cuit_proveedor = normalizarCuit(factura.cuit_proveedor);
@@ -377,6 +423,28 @@ function partirNumero(pv, nro) {
   }
   b = b.replace(/\D/g, '');
   return { puntoVenta: a, numero: b };
+}
+
+// El cuadro de IVA del pie, con tipos. Una entrada por alícuota.
+//
+// Se descarta la fila a la que le falte cualquiera de los tres números o que
+// traiga una alícuota imposible: una entrada a medias no es "casi el cuadro",
+// es un cuadro que no cierra, y más abajo se usa justamente para decidir si se
+// puede confiar en lo leído. Mejor ninguna entrada que una inventada.
+//
+// Se ordena por alícuota descendente para que la fila grande —casi siempre la
+// del 21%— quede primera en todo lo que se muestre.
+function normalizarDesgloseIva(v) {
+  if (!Array.isArray(v)) return [];
+  const n = x => {
+    const y = Number(x);
+    return Number.isFinite(y) ? y : null;
+  };
+  return v
+    .map(e => ({ alicuota: n(e && e.alicuota), neto: n(e && e.neto), iva: n(e && e.iva) }))
+    .filter(e => e.alicuota != null && e.alicuota > 0 && e.alicuota <= 30
+      && e.neto != null && e.neto > 0 && e.iva != null && e.iva >= 0)
+    .sort((a, b) => b.alicuota - a.alicuota);
 }
 
 // La letra del comprobante, normalizada a los valores que entiende
@@ -548,5 +616,5 @@ module.exports = {
   // El remito de un pedido: qué y cuánto llega, sin precios. Ver su comentario.
   extraerItemsRemito, buildPromptRemito,
   // Exportados para poder probarlos sin llamar al modelo.
-  normalizarComprobante, normalizarCuit,
+  normalizarComprobante, normalizarCuit, normalizarDesgloseIva,
 };
